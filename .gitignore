@@ -1,0 +1,43 @@
+# Xcode
+DerivedData/
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# CocoaPods (not used, but just in case)
+Pods/
+
+# Carthage (not used, but just in case)
+Carthage/Build/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Worktrees
+.worktrees/
+
+# Claude
+.claude/settings.local.json
