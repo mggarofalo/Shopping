@@ -11,6 +11,7 @@ enum NeedServiceError: Error, Equatable {
     case householdNotFound
     case listNotFound
     case itemNotFound
+    case itemArchived
     case needNotFound
     case storeNotFound
     case categoryNotFound
@@ -131,22 +132,45 @@ final class NeedService {
     }
 
     @discardableResult
-    func createItem(name: String, householdID: UUID, anyStore: Bool = true) throws -> UUID {
-        try write { context in
+    func createItem(
+        name: String,
+        notes: String = "",
+        categoryID: UUID? = nil,
+        storeIDs: Set<UUID> = [],
+        householdID: UUID,
+        anyStore: Bool = true
+    ) throws -> UUID {
+        let name = try validatedName(name)
+        return try write { context in
             guard let household = try self.household(id: householdID, in: context) else {
                 throw NeedServiceError.householdNotFound
             }
+            let stores = try self.validatedStores(
+                ids: storeIDs,
+                household: household,
+                requiringActiveStoreUnless: anyStore,
+                in: context
+            )
+            let category = try self.validatedCategory(id: categoryID, household: household, in: context)
             let item: Item = self.insert("Item", in: context)
             item.id = UUID()
             item.name = name
+            item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
             item.anyStore = anyStore
+            item.isArchived = false
             self.route(item, with: household, in: context)
             item.household = household
+            item.category = category
+            item.stores = stores
             return item.id
         }
     }
 
     func setStoreTags(itemID: UUID, storeIDs: Set<UUID>) throws {
+        try setPurchaseRules(itemID: itemID, anyStore: nil, storeIDs: storeIDs)
+    }
+
+    func setPurchaseRules(itemID: UUID, anyStore: Bool?, storeIDs: Set<UUID>) throws {
         try write { context in
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
@@ -154,17 +178,116 @@ final class NeedService {
             guard let itemHousehold = item.household else {
                 throw NeedServiceError.scopeChanged
             }
-            let request = Store.fetchRequest()
-            request.predicate = NSPredicate(format: "id IN %@", Array(storeIDs))
-            let stores = try context.fetch(request)
-            guard stores.count == storeIDs.count,
-                  stores.allSatisfy({
-                      $0.household == itemHousehold &&
-                      $0.objectID.persistentStore == item.objectID.persistentStore
-                  }) else {
+            let resolvedAnyStore = anyStore ?? item.anyStore
+            let stores = try self.validatedStores(
+                ids: storeIDs,
+                household: itemHousehold,
+                requiringActiveStoreUnless: resolvedAnyStore,
+                in: context
+            )
+            item.anyStore = resolvedAnyStore
+            item.stores = stores
+        }
+    }
+
+    func updateItemMetadata(
+        itemID: UUID,
+        householdID: UUID,
+        name: String,
+        notes: String,
+        categoryID: UUID?,
+        isArchived: Bool
+    ) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            guard let household = item.household, household.id == householdID else {
                 throw NeedServiceError.scopeChanged
             }
-            item.stores = Set(stores)
+            item.name = name
+            item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.category = try self.validatedCategory(id: categoryID, household: household, in: context)
+            item.isArchived = isArchived
+        }
+    }
+
+    func catalogSuggestionNames(householdID: UUID) throws -> [String] {
+        try readOnWriter { context in
+            guard try self.household(id: householdID, in: context) != nil else {
+                throw NeedServiceError.householdNotFound
+            }
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "household.id == %@", householdID as CVarArg)
+            return CatalogProjection.suggestionNames(
+                from: try context.fetch(request).map { ($0.name, $0.isArchived) }
+            )
+        }
+    }
+
+    func allCatalogItemIDs(householdID: UUID) throws -> Set<UUID> {
+        try readOnWriter { context in
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "household.id == %@ AND isArchived == NO",
+                householdID as CVarArg
+            )
+            return Set(try context.fetch(request).map(\.id))
+        }
+    }
+
+    func allActiveNeedIDs(householdID: UUID) throws -> Set<UUID> {
+        try readOnWriter { context in
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "list.household.id == %@ AND archived == NO",
+                householdID as CVarArg
+            )
+            return Set(try context.fetch(request).map(\.id))
+        }
+    }
+
+    func filteredCatalogItemIDs(householdID: UUID, filter: CatalogItemFilter) throws -> [UUID] {
+        try readOnWriter { context in
+            let activeStores = try self.activeStoreIDs(householdID: householdID, in: context)
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "household.id == %@ AND isArchived == NO",
+                householdID as CVarArg
+            )
+            return try context.fetch(request).filter { item in
+                let value = PurchaseRuleValue(
+                    explicitStoreIDs: Set(item.stores?.map(\.id) ?? []),
+                    anyStore: item.anyStore
+                )
+                return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
+                    CatalogProjection.textMatches(item.name, query: filter.text) &&
+                    (filter.categoryID == nil || item.category?.id == filter.categoryID)
+            }.map(\.id).sorted { $0.uuidString < $1.uuidString }
+        }
+    }
+
+    func filteredActiveNeedIDs(householdID: UUID, filter: GroceryNeedFilter) throws -> [UUID] {
+        try readOnWriter { context in
+            let activeStores = try self.activeStoreIDs(householdID: householdID, in: context)
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(
+                format: "list.household.id == %@ AND archived == NO",
+                householdID as CVarArg
+            )
+            return try context.fetch(request).filter { need in
+                let item = need.item
+                let value = PurchaseRuleValue(
+                    explicitStoreIDs: Set(item?.stores?.map(\.id) ?? []),
+                    anyStore: item?.anyStore ?? false
+                )
+                return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
+                    CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text) &&
+                    (filter.categoryID == nil || item?.category?.id == filter.categoryID) &&
+                    (filter.carted == nil || need.carted == filter.carted) &&
+                    (filter.urgency == nil || need.urgency == filter.urgency)
+            }.map(\.id).sorted { $0.uuidString < $1.uuidString }
         }
     }
 
@@ -216,6 +339,9 @@ final class NeedService {
             if let existing = try context.fetch(request).first {
                 existing.revision += 1
                 return existing.id
+            }
+            guard !item.isArchived else {
+                throw NeedServiceError.itemArchived
             }
             let need = self.makeNeed(title: item.name, list: list, context: context)
             need.item = item
@@ -392,6 +518,51 @@ final class NeedService {
 
     private func category(id: UUID, in context: NSManagedObjectContext) throws -> Category? {
         try fetch(id: id, request: Category.fetchRequest(), in: context)
+    }
+
+    private func validatedCategory(
+        id: UUID?,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> Category? {
+        guard let id else { return nil }
+        guard let category = try category(id: id, in: context) else {
+            throw NeedServiceError.categoryNotFound
+        }
+        guard category.household == household,
+              category.objectID.persistentStore == household.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+        return category
+    }
+
+    private func validatedStores(
+        ids: Set<UUID>,
+        household: Household,
+        requiringActiveStoreUnless anyStore: Bool,
+        in context: NSManagedObjectContext
+    ) throws -> Set<Store> {
+        let request = Store.fetchRequest()
+        request.predicate = NSPredicate(format: "id IN %@", Array(ids))
+        let stores = try context.fetch(request)
+        guard stores.count == ids.count,
+              stores.allSatisfy({
+                  $0.household == household &&
+                  $0.objectID.persistentStore == household.objectID.persistentStore
+              }) else { throw NeedServiceError.scopeChanged }
+        guard anyStore || stores.contains(where: { !$0.isArchived }) else {
+            throw NeedServiceError.scopeChanged
+        }
+        return Set(stores)
+    }
+
+    private func activeStoreIDs(householdID: UUID, in context: NSManagedObjectContext) throws -> Set<UUID> {
+        let request = Store.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "household.id == %@ AND isArchived == NO",
+            householdID as CVarArg
+        )
+        return Set(try context.fetch(request).map(\.id))
     }
 
     private func validatedName(_ value: String) throws -> String {

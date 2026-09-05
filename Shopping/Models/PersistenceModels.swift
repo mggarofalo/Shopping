@@ -25,7 +25,9 @@ final class Store: NSManagedObject {
 final class Item: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var name: String
+    @NSManaged var notes: String
     @NSManaged var anyStore: Bool
+    @NSManaged var isArchived: Bool
     @NSManaged var household: Household?
     @NSManaged var category: Category?
     @NSManaged var stores: Set<Store>?

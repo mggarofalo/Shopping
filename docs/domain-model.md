@@ -12,6 +12,29 @@ Archiving a store preserves its catalog memberships and every grocery occurrence
 
 Removing a category uncategorizes its catalog items. It does not remove the items, their store tags, or their grocery needs. No category setup is required, and there are no cascading deletes from metadata into groceries.
 
+## Catalog and purchase filters — SHOPPING-22
+
+A catalog item retains its name, general notes, optional category, explicit store memberships and Any store setting between purchases. Names are trimmed and must not be blank. Case and whitespace normalization can suggest existing names; it does not merge distinct brands/sizes or impose distributed uniqueness. Current grocery urgency belongs to a need, not the catalog.
+
+Catalog archival removes an item from the reusable catalog and suggestions, while its existing active grocery demand keeps its identity and retained buying rules. Archiving a catalog entry must not make an existing grocery disappear from a store where it is otherwise eligible. A tag edit changes the same need's filtered presentation; it must not change quantity, carted state, or create a store-specific copy.
+
+For an active selected store S and the explicit active store-tag set T:
+
+| Rule | Match |
+|---|---|
+| Available at S | Any store, or S is in T. |
+| Must buy here | Not Any store, and T contains only S. |
+| Flexible here | Available, but not Must buy here. |
+| Needs store | Not Any store, and T is empty. Remains visible in All. |
+| Tagged with I | I is empty, or at least one included tag is in T. |
+| Not tagged with E | None of the excluded tags is in T. |
+
+Apply selected-store eligibility first. Tagged, Not tagged, text, category and other optional filters combine with AND and can only narrow the result. Exclusion wins if the same tag is included and excluded. Any store establishes availability without inventing explicit memberships: an untagged Any-store item can match Not tagged Costco while still being available at Costco. Archived store memberships remain stored but are excluded from T, and an archived selected store is not a shopping destination.
+
+Both catalog rows and one-time grocery rows use the same purchase-rule inputs. A missing catalog reference never means Any store. All catalog contains non-archived reusable items; All groceries contains active needs, including one-time and Needs store rows. Suggestions only use reusable catalog data.
+
+New catalog entry commands require at least one active store or Any store. Needs store remains a supported recovery state after a store is archived or relationships arrive incompletely. Restoring an archived store revives the same saved tag; it does not create new buying preferences.
+
 ## Next model layers
 
-SHOPPING-22 adds complete catalog editing, suggestions, and shared purchase-rule predicates for Available, Must buy here, Tagged and Not tagged. SHOPPING-21 completes quantities, urgency, one-time purchase details, and re-add/recovery semantics. SHOPPING-20 establishes the versioned application schema, migrations, persistent history consumption and production store setup. The current programmatic schema remains experimental until that work; model version identifiers alone are not a migration strategy.
+SHOPPING-21 completes quantities, urgency, one-time purchase details, and re-add/recovery semantics, using these purchase predicates. SHOPPING-20 establishes the versioned application schema, migrations, persistent history consumption and production store setup. The current programmatic schema remains experimental until that work; model version identifiers alone are not a migration strategy.

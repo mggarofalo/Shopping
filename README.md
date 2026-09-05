@@ -18,7 +18,7 @@ There is no per-store trip, Finish/Reopen flow, event feature, recurring templat
 
 The intended MVP baseline is SwiftUI with Core Data and `NSPersistentCloudKitContainer`, using managed private and shared CloudKit stores for household sharing. SwiftData private-device synchronization does not by itself establish this sharing model.
 
-The local architecture decision and experimental persistence harness are recorded in [ADR 0001](docs/architecture/0001-managed-household-persistence.md). The [domain model](docs/domain-model.md) records the household, store and category contracts. The app still displays the initial SwiftUI shell; persistence commands run through tests. Live two-phone proof remains required in SHOPPING-30. Sharing is mandatory for release, but it is not yet proven. Enrollment work in SHOPPING-10 remains a gate for live CloudKit validation; local model, UI, and simulated-replica work can proceed before it.
+The local architecture decision and experimental persistence harness are recorded in [ADR 0001](docs/architecture/0001-managed-household-persistence.md). The [domain model](docs/domain-model.md) records household metadata, catalog and purchase-filter contracts. The app still displays the initial SwiftUI shell; persistence commands run through tests. Live two-phone proof remains required in SHOPPING-30. Sharing is mandatory for release, but it is not yet proven. Enrollment work in SHOPPING-10 remains a gate for live CloudKit validation; local model, UI, and simulated-replica work can proceed before it.
 
 The available development environment has Xcode 26.6 (17F113) and an iOS 26.5 iPhone 17 Pro runtime. The app targets iOS 17. Local validation uses:
 

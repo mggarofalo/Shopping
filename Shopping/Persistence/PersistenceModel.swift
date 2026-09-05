@@ -26,7 +26,9 @@ enum PersistenceModel {
         let item = entity("Item", Item.self, [
             attribute("id", .UUIDAttributeType, unsetID),
             attribute("name", .stringAttributeType, ""),
-            attribute("anyStore", .booleanAttributeType, true)
+            attribute("notes", .stringAttributeType, ""),
+            attribute("anyStore", .booleanAttributeType, true),
+            attribute("isArchived", .booleanAttributeType, false)
         ])
         let list = entity("GroceryList", GroceryList.self, [
             attribute("id", .UUIDAttributeType, unsetID)

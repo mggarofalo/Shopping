@@ -47,21 +47,27 @@ final class PersistenceHarnessTests: XCTestCase {
         let ids = try service.createHousehold()
         let storeA = try service.createStore(name: "Aldi", householdID: ids.householdID)
         let storeB = try service.createStore(name: "Costco", householdID: ids.householdID)
-        let itemID = try service.createItem(name: "Rice", householdID: ids.householdID, anyStore: false)
+        let storeC = try service.createStore(name: "Publix", householdID: ids.householdID)
+        let itemID = try service.createItem(
+            name: "Rice",
+            storeIDs: [storeA],
+            householdID: ids.householdID,
+            anyStore: false
+        )
         let first = persistence.simulationContext()
         let second = persistence.simulationContext()
         try loadItem(itemID, in: first)
         try loadItem(itemID, in: second)
         try stageItem(itemID, in: first) { item, context in
-            item.stores = [try self.fetchStore(storeA, in: context)]
+            item.mutableSetValue(forKey: "stores").add(try self.fetchStore(storeB, in: context))
         }
         try stageItem(itemID, in: second) { item, context in
-            item.stores = [try self.fetchStore(storeB, in: context)]
+            item.mutableSetValue(forKey: "stores").add(try self.fetchStore(storeC, in: context))
         }
         try save(first)
         try save(second)
         let state = try itemState(itemID, in: persistence.simulationContext())
-        XCTAssertEqual(state.storeIDs, [storeA, storeB])
+        XCTAssertEqual(state.storeIDs, [storeA, storeB, storeC])
         XCTAssertFalse(state.anyStore)
     }
 
@@ -197,8 +203,12 @@ final class PersistenceHarnessTests: XCTestCase {
             let ids = try service.createHousehold()
             householdID = ids.householdID
             storeID = try service.createStore(name: " Costco ", householdID: householdID)
-            itemID = try service.createItem(name: "Olive oil", householdID: householdID, anyStore: false)
-            try service.setStoreTags(itemID: itemID, storeIDs: [storeID])
+            itemID = try service.createItem(
+                name: "Olive oil",
+                storeIDs: [storeID],
+                householdID: householdID,
+                anyStore: false
+            )
             needID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
             try service.setQuantity(3, needID: needID)
             try service.setCarted(true, needID: needID)
