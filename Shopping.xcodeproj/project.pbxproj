@@ -19,6 +19,16 @@
 		A0000000000000000000002A /* CatalogFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001C /* CatalogFilter.swift */; };
 		A0000000000000000000002B /* CatalogFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001D /* CatalogFilterTests.swift */; };
 		A0000000000000000000002C /* GroceryNeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001E /* GroceryNeedTests.swift */; };
+		B00000000000000000000200 /* PersistenceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000100 /* PersistenceConfiguration.swift */; };
+		B00000000000000000000201 /* PersistencePermissionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000101 /* PersistencePermissionPolicy.swift */; };
+		B00000000000000000000202 /* PersistentHistoryConsumer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000102 /* PersistentHistoryConsumer.swift */; };
+		B00000000000000000000203 /* ManagedShareAssociation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000103 /* ManagedShareAssociation.swift */; };
+		B00000000000000000000204 /* PersistenceBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000104 /* PersistenceBootstrap.swift */; };
+		B00000000000000000000205 /* PersistenceRecoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000105 /* PersistenceRecoveryView.swift */; };
+		B00000000000000000000206 /* PersistenceContainerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000106 /* PersistenceContainerTests.swift */; };
+		B00000000000000000000207 /* SchemaVersionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000107 /* SchemaVersionTests.swift */; };
+		B00000000000000000000302 /* Shopping.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000300 /* Shopping.xcdatamodeld */; };
+		B00000000000000000000304 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000303 /* Fixtures */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +52,16 @@
 		A0000000000000000000001C /* CatalogFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogFilter.swift; sourceTree = "<group>"; };
 		A0000000000000000000001D /* CatalogFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogFilterTests.swift; sourceTree = "<group>"; };
 		A0000000000000000000001E /* GroceryNeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroceryNeedTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000100 /* PersistenceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceConfiguration.swift; sourceTree = "<group>"; };
+		B00000000000000000000101 /* PersistencePermissionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistencePermissionPolicy.swift; sourceTree = "<group>"; };
+		B00000000000000000000102 /* PersistentHistoryConsumer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentHistoryConsumer.swift; sourceTree = "<group>"; };
+		B00000000000000000000103 /* ManagedShareAssociation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedShareAssociation.swift; sourceTree = "<group>"; };
+		B00000000000000000000104 /* PersistenceBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceBootstrap.swift; sourceTree = "<group>"; };
+		B00000000000000000000105 /* PersistenceRecoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRecoveryView.swift; sourceTree = "<group>"; };
+		B00000000000000000000106 /* PersistenceContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceContainerTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000107 /* SchemaVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersionTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000301 /* ShoppingV1.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ShoppingV1.xcdatamodel; sourceTree = "<group>"; };
+		B00000000000000000000303 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fixtures; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,12 +73,12 @@
 /* Begin PBXGroup section */
 		A00000000000000000000050 = {isa = PBXGroup; children = (A00000000000000000000051 /* Shopping */, A00000000000000000000057 /* ShoppingTests */, A00000000000000000000058 /* Frameworks */, A00000000000000000000059 /* Products */,); sourceTree = "<group>"; };
 		A00000000000000000000051 /* Shopping */ = {isa = PBXGroup; children = (A00000000000000000000052 /* App */, A00000000000000000000053 /* Models */, A00000000000000000000054 /* Views */, A00000000000000000000055 /* Persistence */, A00000000000000000000056 /* CloudKit */,); path = Shopping; sourceTree = "<group>"; };
-		A00000000000000000000052 /* App */ = {isa = PBXGroup; children = (A00000000000000000000010 /* ShoppingApp.swift */,); path = App; sourceTree = "<group>"; };
-		A00000000000000000000053 /* Models */ = {isa = PBXGroup; children = (A00000000000000000000017 /* PersistenceModels.swift */,); path = Models; sourceTree = "<group>"; };
-		A00000000000000000000054 /* Views */ = {isa = PBXGroup; children = (A00000000000000000000011 /* ContentView.swift */,); path = Views; sourceTree = "<group>"; };
-		A00000000000000000000055 /* Persistence */ = {isa = PBXGroup; children = (A00000000000000000000018 /* PersistenceModel.swift */, A00000000000000000000019 /* PersistenceController.swift */, A0000000000000000000001A /* NeedService.swift */, A0000000000000000000001C /* CatalogFilter.swift */,); path = Persistence; sourceTree = "<group>"; };
+		A00000000000000000000052 /* App */ = {isa = PBXGroup; children = (A00000000000000000000010 /* ShoppingApp.swift */,B00000000000000000000104 /* PersistenceBootstrap.swift */,); path = App; sourceTree = "<group>"; };
+		A00000000000000000000053 /* Models */ = {isa = PBXGroup; children = (A00000000000000000000017 /* PersistenceModels.swift */,B00000000000000000000300 /* Shopping.xcdatamodeld */,); path = Models; sourceTree = "<group>"; };
+		A00000000000000000000054 /* Views */ = {isa = PBXGroup; children = (A00000000000000000000011 /* ContentView.swift */,B00000000000000000000105 /* PersistenceRecoveryView.swift */,); path = Views; sourceTree = "<group>"; };
+		A00000000000000000000055 /* Persistence */ = {isa = PBXGroup; children = (A00000000000000000000018 /* PersistenceModel.swift */, A00000000000000000000019 /* PersistenceController.swift */, A0000000000000000000001A /* NeedService.swift */, A0000000000000000000001C /* CatalogFilter.swift */,B00000000000000000000100 /* PersistenceConfiguration.swift */,B00000000000000000000101 /* PersistencePermissionPolicy.swift */,B00000000000000000000102 /* PersistentHistoryConsumer.swift */,B00000000000000000000103 /* ManagedShareAssociation.swift */,); path = Persistence; sourceTree = "<group>"; };
 		A00000000000000000000056 /* CloudKit */ = {isa = PBXGroup; children = (); path = CloudKit; sourceTree = "<group>"; };
-		A00000000000000000000057 /* ShoppingTests */ = {isa = PBXGroup; children = (A00000000000000000000012 /* ShoppingLaunchTests.swift */, A0000000000000000000001B /* PersistenceHarnessTests.swift */, A0000000000000000000001D /* CatalogFilterTests.swift */, A0000000000000000000001E /* GroceryNeedTests.swift */,); path = ShoppingTests; sourceTree = "<group>"; };
+		A00000000000000000000057 /* ShoppingTests */ = {isa = PBXGroup; children = (A00000000000000000000012 /* ShoppingLaunchTests.swift */, A0000000000000000000001B /* PersistenceHarnessTests.swift */, A0000000000000000000001D /* CatalogFilterTests.swift */, A0000000000000000000001E /* GroceryNeedTests.swift */,B00000000000000000000106 /* PersistenceContainerTests.swift */,B00000000000000000000107 /* SchemaVersionTests.swift */,B00000000000000000000303 /* Fixtures */,); path = ShoppingTests; sourceTree = "<group>"; };
 		A00000000000000000000058 /* Frameworks */ = {isa = PBXGroup; children = (A00000000000000000000013 /* XCTest.framework */,); name = Frameworks; sourceTree = "<group>"; };
 		A00000000000000000000059 /* Products */ = {isa = PBXGroup; children = (A00000000000000000000014 /* Shopping.app */, A00000000000000000000015 /* ShoppingTests.xctest */, A00000000000000000000016 /* ShoppingPersistenceTests.xctest */,); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
@@ -76,19 +96,23 @@
 /* Begin PBXResourcesBuildPhase section */
 		A00000000000000000000062 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000063 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A00000000000000000000065 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000065 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B00000000000000000000304 /* Fixtures in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A00000000000000000000060 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000020 /* ShoppingApp.swift in Sources */, A00000000000000000000021 /* ContentView.swift in Sources */, A00000000000000000000024 /* PersistenceModels.swift in Sources */, A00000000000000000000025 /* PersistenceModel.swift in Sources */, A00000000000000000000026 /* PersistenceController.swift in Sources */, A00000000000000000000027 /* NeedService.swift in Sources */, A0000000000000000000002A /* CatalogFilter.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000060 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000020 /* ShoppingApp.swift in Sources */, A00000000000000000000021 /* ContentView.swift in Sources */, A00000000000000000000024 /* PersistenceModels.swift in Sources */, A00000000000000000000025 /* PersistenceModel.swift in Sources */, A00000000000000000000026 /* PersistenceController.swift in Sources */, A00000000000000000000027 /* NeedService.swift in Sources */, A0000000000000000000002A /* CatalogFilter.swift in Sources */,B00000000000000000000200 /* PersistenceConfiguration.swift in Sources */,B00000000000000000000201 /* PersistencePermissionPolicy.swift in Sources */,B00000000000000000000202 /* PersistentHistoryConsumer.swift in Sources */,B00000000000000000000203 /* ManagedShareAssociation.swift in Sources */,B00000000000000000000204 /* PersistenceBootstrap.swift in Sources */,B00000000000000000000205 /* PersistenceRecoveryView.swift in Sources */,B00000000000000000000302 /* Shopping.xcdatamodeld in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 		A00000000000000000000061 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000022 /* ShoppingLaunchTests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
-		A00000000000000000000064 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000028 /* PersistenceHarnessTests.swift in Sources */, A0000000000000000000002B /* CatalogFilterTests.swift in Sources */, A0000000000000000000002C /* GroceryNeedTests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000064 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000028 /* PersistenceHarnessTests.swift in Sources */, A0000000000000000000002B /* CatalogFilterTests.swift in Sources */, A0000000000000000000002C /* GroceryNeedTests.swift in Sources */,B00000000000000000000206 /* PersistenceContainerTests.swift in Sources */,B00000000000000000000207 /* SchemaVersionTests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
 		A00000000000000000000031 = {isa = PBXTargetDependency; target = A00000000000000000000002 /* Shopping */; targetProxy = A00000000000000000000030; };
 		A00000000000000000000033 = {isa = PBXTargetDependency; target = A00000000000000000000002 /* Shopping */; targetProxy = A00000000000000000000032; };
 /* End PBXTargetDependency section */
+
+/* Begin XCVersionGroup section */
+		B00000000000000000000300 /* Shopping.xcdatamodeld */ = {isa = XCVersionGroup; children = (B00000000000000000000301 /* ShoppingV1.xcdatamodel */,); currentVersion = B00000000000000000000301 /* ShoppingV1.xcdatamodel */; path = Shopping.xcdatamodeld; sourceTree = "<group>"; versionGroupType = wrapper.xcdatamodel; };
+/* End XCVersionGroup section */
 
 /* Begin XCBuildConfiguration section */
 		A00000000000000000000080 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; CLANG_WARN_BOOL_CONVERSION = YES; CLANG_WARN_CONSTANT_CONVERSION = YES; CLANG_WARN_DOCUMENTATION_COMMENTS = YES; CLANG_WARN_EMPTY_BODY = YES; CLANG_WARN_ENUM_CONVERSION = YES; CLANG_WARN_INFINITE_RECURSION = YES; CLANG_WARN_INT_CONVERSION = YES; CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES; CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES; CLANG_WARN_OBJC_LITERAL_CONVERSION = YES; CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES; CLANG_WARN_RANGE_LOOP_ANALYSIS = YES; CLANG_WARN_STRICT_PROTOTYPES = YES; CLANG_WARN_SUSPICIOUS_MOVE = YES; CLANG_WARN_UNREACHABLE_CODE = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_OPTIMIZATION_LEVEL = 0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)",); IPHONEOS_DEPLOYMENT_TARGET = 17.0; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; }; name = Debug; };

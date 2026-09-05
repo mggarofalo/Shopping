@@ -46,6 +46,9 @@ enum NeedServiceError: Error, Equatable {
     case activeRememberedNeedConflict(UUID)
     case activeRememberedNeedDuplicates(RememberedDuplicateGroup)
     case invalidOccurrenceIdentity
+    case invalidCatalogIdentity
+    case invalidStoreIdentity
+    case incompleteRecoveryData
 }
 
 enum StoreEligibility: Equatable {
@@ -55,6 +58,7 @@ enum StoreEligibility: Equatable {
 }
 
 final class NeedService {
+    private static let unsetImportedID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     private let persistence: PersistenceController
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -63,12 +67,41 @@ final class NeedService {
         self.persistence = persistence
     }
 
+    func firstHouseholdSelection() throws -> (householdID: UUID, listID: UUID)? {
+        try readOnWriter { context in
+            let request = Household.fetchRequest()
+            request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
+            for household in try context.fetch(request) {
+                guard household.id != Self.unsetImportedID,
+                      let list = household.groceryList,
+                      list.id != Self.unsetImportedID,
+                      household.objectID.persistentStore == list.objectID.persistentStore else { continue }
+                return (household.id, list.id)
+            }
+            return nil
+        }
+    }
+
+    func isPersistentStoreEmpty() throws -> Bool {
+        try readOnWriter { context in
+            for entityName in ["Household", "Store", "Category", "Item", "GroceryList", "Need", "ClearOperation"] {
+                let request = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
+                request.fetchLimit = 1
+                if try context.count(for: request) > 0 { return false }
+            }
+            return true
+        }
+    }
+
     @discardableResult
     func createHousehold(name: String = "Household") throws -> (householdID: UUID, listID: UUID) {
         return try write { context in
             let household: Household = self.insert("Household", in: context)
             household.id = UUID()
             household.name = name
+            if let store = self.persistence.primaryStore {
+                context.assign(household, to: store)
+            }
             let list: GroceryList = self.insert("GroceryList", in: context)
             list.id = UUID()
             self.route(list, with: household, in: context)
@@ -248,8 +281,9 @@ final class NeedService {
             }
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(format: "household.id == %@", householdID as CVarArg)
+            let items = try self.validCatalogItems(try context.fetch(request))
             return CatalogProjection.suggestionNames(
-                from: try context.fetch(request).map { ($0.name, $0.isArchived) }
+                from: items.map { ($0.name, $0.isArchived) }
             )
         }
     }
@@ -258,10 +292,10 @@ final class NeedService {
         try readOnWriter { context in
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(
-                format: "household.id == %@ AND isArchived == NO",
+                format: "household.id == %@",
                 householdID as CVarArg
             )
-            return Set(try context.fetch(request).map(\.id))
+            return Set(try self.validCatalogItems(try context.fetch(request)).filter { !$0.isArchived }.map(\.id))
         }
     }
 
@@ -283,10 +317,12 @@ final class NeedService {
             let activeStores = try self.activeStoreIDs(householdID: householdID, in: context)
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(
-                format: "household.id == %@ AND isArchived == NO",
+                format: "household.id == %@",
                 householdID as CVarArg
             )
-            return try context.fetch(request).filter { item in
+            let items = try self.validCatalogItems(try context.fetch(request))
+            return items.filter { item in
+                guard !item.isArchived else { return false }
                 let value = PurchaseRuleValue(
                     explicitStoreIDs: Set(item.stores?.map(\.id) ?? []),
                     anyStore: item.anyStore
@@ -332,7 +368,9 @@ final class NeedService {
             }
             guard item.household != nil else { return .needsStore }
             if item.anyStore { return .anyStore }
-            let active = (item.stores ?? []).filter { !$0.isArchived }.sorted(by: Self.storeDisplayOrder)
+            let active = try self.validActiveStores(
+                Array(item.stores ?? [])
+            ).filter { !$0.isArchived }.sorted(by: Self.storeDisplayOrder)
             return active.isEmpty ? .needsStore : .activeStores(active.map(\.id))
         }
     }
@@ -694,7 +732,8 @@ final class NeedService {
             operationRequest.fetchLimit = 1
             operationRequest.predicate = NSPredicate(format: "id == %@", operationID as CVarArg)
             guard let operation = try context.fetch(operationRequest).first else { return 0 }
-            let token = try self.decoder.decode(ClearCartedToken.self, from: operation.snapshot)
+            guard let snapshot = operation.snapshot else { throw NeedServiceError.incompleteRecoveryData }
+            let token = try self.decoder.decode(ClearCartedToken.self, from: snapshot)
             guard operation.household?.id == token.householdID,
                   operation.list?.id == token.listID else {
                 throw NeedServiceError.scopeChanged
@@ -765,11 +804,11 @@ final class NeedService {
     }
 
     private func item(id: UUID, in context: NSManagedObjectContext) throws -> Item? {
-        try fetch(id: id, request: Item.fetchRequest(), in: context)
+        try fetch(id: id, request: Item.fetchRequest(), in: context, identityError: .invalidCatalogIdentity)
     }
 
     private func store(id: UUID, in context: NSManagedObjectContext) throws -> Store? {
-        try fetch(id: id, request: Store.fetchRequest(), in: context)
+        try fetch(id: id, request: Store.fetchRequest(), in: context, identityError: .invalidStoreIdentity)
     }
 
     private func category(id: UUID, in context: NSManagedObjectContext) throws -> Category? {
@@ -815,10 +854,28 @@ final class NeedService {
     private func activeStoreIDs(householdID: UUID, in context: NSManagedObjectContext) throws -> Set<UUID> {
         let request = Store.fetchRequest()
         request.predicate = NSPredicate(
-            format: "household.id == %@ AND isArchived == NO",
+            format: "household.id == %@",
             householdID as CVarArg
         )
-        return Set(try context.fetch(request).map(\.id))
+        return Set(try validActiveStores(try context.fetch(request)).filter { !$0.isArchived }.map(\.id))
+    }
+
+    private func validCatalogItems(_ items: [Item]) throws -> [Item] {
+        var seen: Set<UUID> = []
+        return try items.compactMap { item in
+            guard item.id != PersistenceModel.unsetID else { return nil }
+            guard seen.insert(item.id).inserted else { throw NeedServiceError.invalidCatalogIdentity }
+            return item
+        }
+    }
+
+    private func validActiveStores(_ stores: [Store]) throws -> [Store] {
+        var seen: Set<UUID> = []
+        return try stores.compactMap { store in
+            guard store.id != PersistenceModel.unsetID else { return nil }
+            guard seen.insert(store.id).inserted else { throw NeedServiceError.invalidStoreIdentity }
+            return store
+        }
     }
 
     private func validatedName(_ value: String) throws -> String {
@@ -840,11 +897,15 @@ final class NeedService {
     private func fetch<T: NSManagedObject>(
         id: UUID,
         request: NSFetchRequest<T>,
-        in context: NSManagedObjectContext
+        in context: NSManagedObjectContext,
+        identityError: NeedServiceError = .scopeChanged
     ) throws -> T? {
-        request.fetchLimit = 1
+        guard id != PersistenceModel.unsetID else { throw identityError }
+        request.fetchLimit = 2
         request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-        return try context.fetch(request).first
+        let matches = try context.fetch(request)
+        guard matches.count < 2 else { throw identityError }
+        return matches.first
     }
 
     private func hasActiveRememberedNeed(
@@ -930,7 +991,14 @@ final class NeedService {
                 do {
                     let value = try body(self.persistence.writer)
                     if self.persistence.writer.hasChanges {
+                        try self.persistence.prepareForSave(self.persistence.writer)
                         try self.persistence.writer.save()
+                        if self.persistence.shareAssociationJournal != nil {
+                            NotificationCenter.default.post(
+                                name: PersistenceController.pendingShareAssociation,
+                                object: self.persistence
+                            )
+                        }
                     }
                     return value
                 } catch {

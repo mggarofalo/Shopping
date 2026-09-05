@@ -7,6 +7,8 @@ final class ShoppingLaunchTests: XCTestCase {
 
     func testLaunchShowsGroceryListShell() {
         let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite").path
         app.launch()
 
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))

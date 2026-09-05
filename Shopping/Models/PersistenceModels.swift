@@ -1,8 +1,22 @@
 import CoreData
 
+class IdentifiedManagedObject: NSManagedObject {
+    @objc dynamic var id: UUID {
+        get {
+            willAccessValue(forKey: "id")
+            defer { didAccessValue(forKey: "id") }
+            return primitiveValue(forKey: "id") as? UUID ?? PersistenceModel.unsetID
+        }
+        set {
+            willChangeValue(forKey: "id")
+            setPrimitiveValue(newValue, forKey: "id")
+            didChangeValue(forKey: "id")
+        }
+    }
+}
+
 @objc(Household)
-final class Household: NSManagedObject {
-    @NSManaged var id: UUID
+final class Household: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var groceryList: GroceryList?
     @NSManaged var stores: Set<Store>?
@@ -12,8 +26,7 @@ final class Household: NSManagedObject {
 }
 
 @objc(Store)
-final class Store: NSManagedObject {
-    @NSManaged var id: UUID
+final class Store: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var displayOrder: Int64
     @NSManaged var isArchived: Bool
@@ -23,8 +36,7 @@ final class Store: NSManagedObject {
 }
 
 @objc(Item)
-final class Item: NSManagedObject {
-    @NSManaged var id: UUID
+final class Item: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var notes: String
     @NSManaged var anyStore: Bool
@@ -36,8 +48,7 @@ final class Item: NSManagedObject {
 }
 
 @objc(Category)
-final class Category: NSManagedObject {
-    @NSManaged var id: UUID
+final class Category: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var displayOrder: Int64
     @NSManaged var household: Household?
@@ -46,16 +57,14 @@ final class Category: NSManagedObject {
 }
 
 @objc(GroceryList)
-final class GroceryList: NSManagedObject {
-    @NSManaged var id: UUID
+final class GroceryList: IdentifiedManagedObject {
     @NSManaged var household: Household?
     @NSManaged var needs: Set<Need>?
     @NSManaged var clearOperations: Set<ClearOperation>?
 }
 
 @objc(Need)
-final class Need: NSManagedObject {
-    @NSManaged var id: UUID
+final class Need: IdentifiedManagedObject {
     @NSManaged var kind: String
     @NSManaged var title: String
     @NSManaged var notes: String
@@ -73,10 +82,9 @@ final class Need: NSManagedObject {
 }
 
 @objc(ClearOperation)
-final class ClearOperation: NSManagedObject {
-    @NSManaged var id: UUID
+final class ClearOperation: IdentifiedManagedObject {
     @NSManaged var createdAt: Date
-    @NSManaged var snapshot: Data
+    @NSManaged var snapshot: Data?
     @NSManaged var household: Household?
     @NSManaged var list: GroceryList?
 }

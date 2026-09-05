@@ -1,6 +1,6 @@
 # Grocery domain model
 
-This document describes the local model as it grows toward the shared MVP. The [architecture decision](architecture/0001-managed-household-persistence.md) defines the managed CloudKit direction and separates local evidence from the required live two-account proof. The application currently displays the shell; these commands run through tests until persistence and views are connected.
+This document describes the local model as it grows toward the shared MVP. The [architecture decision](architecture/0001-managed-household-persistence.md) defines the managed CloudKit direction and separates local evidence from the required live two-account proof. The application loads a disk-backed local store and displays the shell while the shopping views are developed. Commands also run through isolated SQLite tests.
 
 ## Household metadata — SHOPPING-23
 
@@ -47,6 +47,6 @@ A clear capture may be restricted to the visible view’s occurrence IDs. That r
 
 Concurrent imported remembered needs are grouped by household/list and catalog UUID, never by name. A normal serialized add creates or reuses one active occurrence. If several active candidates already exist, the command exposes their IDs, revisions and current values without mutating any candidate. Quantities are not summed and divergent edits remain intact. Candidate snapshots include purchase notes so differing instructions are visible as well as retained. Zero or duplicated occurrence identities cause a typed validation error instead of a usable row ID or a write to an arbitrary occurrence. Cross-account canonicalization and a recoverable resolution workflow remain required sharing integration work; local detection is not proof of distributed uniqueness.
 
-## Next persistence layer
+## Persistence — SHOPPING-20
 
-SHOPPING-20 establishes the versioned application schema, migrations, persistent history consumption and production store setup. The current programmatic schema remains experimental until that work; model version identifiers alone are not a migration strategy.
+The [persistence guide](persistence.md) describes the initial versioned application schema, saved-data fixture, persistent history consumption, store routing and recovery. V1 is the first production schema; a later version must prove migration from the retained fixture. A clear operation’s binary snapshot is optional in storage for incomplete imports, but undo requires the payload and makes no changes while it is missing.

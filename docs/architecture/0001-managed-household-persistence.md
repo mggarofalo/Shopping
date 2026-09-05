@@ -16,9 +16,9 @@ One household owns stores, reusable catalog items, and one logical grocery list.
 
 Each object has an immutable application UUID assigned when inserted. Names are display values, not identity. An `NSManagedObjectID` identifies a local stored object; it is not a portable replica ID or a CloudKit record ID. Core Data owns its mirrored record identifiers.
 
-Catalog purchase tags mean where this household chooses to buy. The production model will retain reusable category, tags, and general notes on the catalog, with quantity, carted state and Normal/Urgent on the current need. Re-add does not remember urgency. One-time data must never enter hints or learned defaults without explicit Remember. Events are out of scope.
+Catalog purchase tags mean where this household chooses to buy. The model retains reusable category, tags, and general notes on the catalog, with quantity, carted state and Normal/Urgent on the current need. Re-add does not remember urgency. One-time data must never enter hints or learned defaults without explicit Remember. Events are out of scope.
 
-The prototype uses a programmatic model to keep the experiment small. Attributes have defaults or are optional; relationships are optional, unordered, and have inverses. There are no uniqueness constraints or Deny delete rules. Commands enforce local invariants, while imported incomplete graphs must be handled as incomplete rather than force-unwrapped. These choices follow [Apple's CloudKit model restrictions](https://developer.apple.com/documentation/coredata/creating-a-core-data-model-for-cloudkit); actual mirroring validation remains a separate gate.
+The original spike used a programmatic model to keep the experiment small. SHOPPING-20 freezes the initial application schema as a bundled V1 model and a saved SQLite fixture; see the [persistence guide](../persistence.md). Attributes have defaults or are optional; relationships are optional, unordered, and have inverses. There are no uniqueness constraints or Deny delete rules. Commands enforce local invariants, while imported incomplete graphs must be handled as incomplete rather than force-unwrapped. These choices follow [Apple's CloudKit model restrictions](https://developer.apple.com/documentation/coredata/creating-a-core-data-model-for-cloudkit); actual mirroring validation remains a separate gate.
 
 ## Private and shared store routing
 
@@ -32,7 +32,7 @@ Sharing permissions must gate writes. A revoked or read-only share is not writab
 
 ## Local commands and UI updates
 
-All production mutations will pass through one serialized local command boundary. Views submit application IDs and intended edits instead of saving arbitrary managed objects. A command resolves current rows inside its context queue, validates household/store membership, applies the edit, and saves atomically or rolls back. The prototype exposes raw second contexts only to exercise competing saves.
+All production mutations pass through one serialized local command boundary. Views submit application IDs and intended edits instead of saving arbitrary managed objects. A command resolves current rows inside its context queue, validates household/store membership, applies the edit, and saves atomically or rolls back. The prototype exposes raw second contexts only to exercise competing saves.
 
 Enable persistent history and remote-change notifications on each SQLite store. The read context merges completed local writes. The live implementation will serialize history consumption on launch, foreground entry and remote-change notifications; fetch transactions after a token scoped to that store; merge object-ID notifications into the view context on its queue; and persist the token only after successful consumption. A missing or expired token triggers a safe refetch/replay, never deletion of grocery data. Share metadata changes need a separate refresh because they need not produce object-history transactions.
 
@@ -58,15 +58,15 @@ For independently created active needs with the same reconciliation key, the pro
 
 ## Schema and migration policy
 
-The harness uses a disposable experimental schema and isolated temporary SQLite stores. It is not installed as the app's production database and must not accumulate real grocery data. Before model work ships, capture the initial model as a versioned production schema and preserve every released model version needed for migration.
+The initial harness used a disposable experimental schema and isolated temporary SQLite stores. SHOPPING-20 installs the first versioned application model, V1, in the local app and retains a saved V1 fixture. Preserve every released model version needed for future migration; do not recreate the original experimental schema as an invented production release.
 
 Use explicit migration tests against saved store fixtures. Compatible additive changes may use inferred lightweight migration; incompatible changes require a planned mapping or staged migration. A load or migration failure must surface an actionable error and preserve the original store, never fall back to deleting/recreating it.
 
 Live development schema initialization is an explicit developer/test action after model changes, not a normal launch path. Inspect the generated schema and deploy it before TestFlight. Production CloudKit evolution is additive: retain old fields/types and support older clients deliberately. No reset or promotion is part of SHOPPING-27. [Apple's schema guidance](https://developer.apple.com/documentation/coredata/creating-a-core-data-model-for-cloudkit) describes these constraints.
 
-## Evidence and remaining gate
+## Initial spike evidence and remaining live gate
 
-The shared `Shopping` scheme includes `ShoppingPersistenceTests` alongside the existing UI launch test. `PersistenceController` uses `NSPersistentContainer` with cloud options absent for this experiment; the live container substitution and both database scopes are not enabled. Each command uses a private writer context with `NSErrorMergePolicy`, resets its cache before reading, saves once, and rolls back on error. A save conflict fails the command rather than overriding the revision check. There is no automatic command retry.
+The shared `Shopping` scheme includes `ShoppingPersistenceTests` alongside the existing UI launch test. The initial experiment used `NSPersistentContainer` with cloud options absent. SHOPPING-20 adds explicit managed private/shared configuration while the normal pre-enrollment launch remains local; available configuration is not live sharing evidence. Each command uses a private writer context with `NSErrorMergePolicy`, resets its cache before reading, saves once, and rolls back on error. A save conflict fails the command rather than overriding the revision check. There is no automatic command retry.
 
 `NeedService` returns IDs/value tokens across the context boundary. Its clear token contains household ID, list ID, an operation UUID, and the captured need revisions. `ClearOperation` persists the encoded token; repeating its ID is a no-op. Undo restores the previous carted occurrence only when archive ownership and revision still match. Editing an archived row is rejected; re-adding a remembered item creates a new occurrence if the previous one is archived. Explicit same-value edits advance the local revision. These counters are local guards, not distributed clocks.
 
