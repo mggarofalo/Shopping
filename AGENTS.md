@@ -1,226 +1,49 @@
 # AGENTS.md
 
-This file provides guidance to AI agents working with code in this repository.
+## Source of truth
 
-## Prerequisites
+Use [PLANE.md](PLANE.md) for issue tracking. New work belongs in Plane project `SHOPPING` (`b25c0cea-908f-4021-948f-434274ce2998`) in workspace `dev`; do not create new Linear issues. [LINEAR.md](LINEAR.md) preserves old links only.
 
-- **Xcode 16+** — build, test, and run the app (macOS only)
-- **iOS 17+ deployment target** — required for SwiftData
-- **Swift 5.9+** — included with Xcode 16
-- **Apple Developer Account** ($99/yr) — required for CloudKit and TestFlight (Phase 4+)
+Before implementation, read the full Plane issue, its dependencies, and its acceptance criteria. Work only an issue that is ready under the rules in `PLANE.md`, then update its state through Plane. Keep the issue identifier in the branch and commit provenance.
 
-## Development Workflow
+## Repository and branch workflow
 
-When working on tasks that are expected to result in code changes, follow this standard process:
+- The repository root at `Source/Shopping` always remains checked out on `main`.
+- All branch work uses a worktree under `.worktrees/` at the repository root. This includes milestone, epic, and issue branches.
+- Create issue branches using an appropriate conventional prefix, such as `feat/`, `fix/`, `docs/`, or `chore/`, followed by `shopping-<number>-<short-description>`. Plane has no `gitBranchName` requirement.
+- A milestone branch (`milestone/phase-N`) is the integration target for all work in that phase. An optional epic branch within a milestone is based on, and merges back into, that milestone branch; it does not independently target `main`.
+- Squash-merge each completed issue into its milestone or epic worktree, using a Conventional Commit message that includes the Plane issue, then remove the issue worktree and branch when safe.
+- At phase completion, open one PR from the milestone branch to `main`. CI and the required PR approval must pass before merge. Do not merge or force-push without the authorization required by the active workflow.
 
-1. **Linear Issue Management**
-   - Check if a Linear issue exists for the work
-   - If no issue exists, create one with:
-     - Clear title describing the work
-     - Description with acceptance criteria
-     - Appropriate labels (see LINEAR.md)
-     - Team assignment to "Mggarofalo"
-   - Link the issue ID to your work
-   - **See [LINEAR.md](LINEAR.md)** for full workspace structure, milestone phases, priority semantics, and how to determine "what's next"
+Example:
 
-   **Linear MCP Access:**
-   - Linear is available via MCP server - you can directly create/update issues
-   - Team is "Mggarofalo" (team ID: `a4aff05d-41e6-45dc-b670-cdb485fef765`)
-   - **Do not check for teams** - the team information is stable and documented here
-   - Use the team name "Mggarofalo" directly when creating issues
-   - All issues should be assigned to project "Shopping" and an appropriate milestone
-
-2. **Branch Strategy (Two-Tier)**
-
-   This project uses a hierarchical branching model: **milestone branches** for CI/PR gating, optional **parent branches** for epics, and **issue branches** for individual work items.
-
-   **Milestone branches** (one per phase):
-   - Created when work on a milestone begins, named `milestone/phase-N` (e.g., `milestone/phase-0`)
-   - All issue work within that phase merges locally into the milestone branch
-   - When the milestone is complete, open a **PR from the milestone branch to `main`**
-   - The PR triggers CI — this is the safety net that catches issues the agent may have missed
-   - After PR merge, delete the milestone branch
-
-   **Parent branches** (for epics with multiple children):
-   - When an epic has multiple child issues, create a parent branch using the epic's `gitBranchName`
-   - Parent branch is created off `main` (or the milestone branch if one exists)
-   - Child issue branches are created off the parent branch and squash-merge back into it
-   - When all children are complete, the parent branch gets a PR to `main`
-   - This keeps related changes grouped and avoids polluting `main` with intermediate work
-
-   **Issue branches** (one per Linear issue):
-   - Branch off the parent branch (if epic) or milestone branch, NOT `main`
-   - Use the `gitBranchName` from the Linear issue
-   - Merge locally into the parent/milestone branch via squash merge (no PR needed)
-   - Delete the issue branch after merge
-
-   ```
-   main
-     ├── milestone/phase-1                              (PR → main)
-     │     ├── mggarofalo/mgg-135-create-xcode-...     (squash-merge into milestone)
-     │     └── mggarofalo/mgg-136-swiftdata-models-... (squash-merge into milestone)
-     │
-     └── mggarofalo/mgg-144-item-catalog-view-...      (epic parent, PR → main)
-           ├── mggarofalo/mgg-145-list-builder-...      (squash-merge into parent)
-           └── mggarofalo/mgg-146-shopping-checklist... (squash-merge into parent)
-   ```
-
-   **Worktrees (mandatory for all branch work):**
-   - **ALWAYS** use worktrees for issue and milestone branches — do NOT checkout branches in the main repo
-   - The main repo at `Source/Shopping` must **always stay on `main`** and never be switched to another branch
-   - Use `/worktree <issue-id>` to create an isolated working directory in `.worktrees/`
-   - **ALWAYS** create worktrees in `.worktrees/` at the repo root — NEVER as sibling directories
-   - This gives agents full filesystem control in their worktree without affecting the main repo
-
-3. **Merging Issue Work into Parent/Milestone Branch**
-   - All merges happen inside worktrees — never checkout branches in the main repo
-   - Remove the issue worktree, then merge from the parent (or milestone) worktree:
-     ```bash
-     git worktree remove .worktrees/mggarofalo-mgg-135-create-xcode
-     cd .worktrees/milestone-phase-1
-     git merge --squash mggarofalo/mgg-135-create-xcode-project-structure
-     git commit -m "chore: create Xcode project structure (MGG-135)"
-     git branch -D mggarofalo/mgg-135-create-xcode-project-structure
-     ```
-   - If no parent/milestone worktree exists yet, create one:
-     ```bash
-     git branch milestone/phase-1 main
-     git worktree add .worktrees/milestone-phase-1 milestone/phase-1
-     ```
-
-4. **PR: Parent/Milestone → Main**
-   - When all issues are complete, push the branch and open a PR:
-     ```bash
-     cd .worktrees/milestone-phase-1
-     git push -u origin milestone/phase-1
-     gh pr create --title "Phase 1: Project Scaffold & Models" --body "..."
-     ```
-   - The PR triggers CI (build + test) — this is the checkpoint that surfaces issues
-   - After CI passes and the PR is approved, merge into `main`
-   - Clean up worktree and branches:
-     ```bash
-     cd <repo-root>
-     git worktree remove .worktrees/milestone-phase-1
-     git branch -d milestone/phase-1
-     git push origin --delete milestone/phase-1
-     git pull   # update main with the merged PR
-     ```
-
-5. **Direct Commits to Main**
-   - Only use for non-Linear work like:
-     - Trivial typo fixes
-     - Documentation updates
-     - Tooling/build configuration
-   - **NEVER** commit Linear-based work directly to main
-   - When in doubt, create a branch
-
-## Build and Test Commands
-
-```bash
-# Build (requires Xcode on macOS)
-xcodebuild build -scheme Shopping -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
-
-# Run all tests
-xcodebuild test -scheme Shopping -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
-
-# Clean build
-xcodebuild clean -scheme Shopping
-
-# Build from Xcode
-# Cmd+B (build), Cmd+R (run), Cmd+U (test), Cmd+Shift+K (clean)
+```text
+main
+  └── milestone/phase-1  (PR → main after approval)
+        ├── chore/shopping-24-app-shell
+        └── docs/shopping-28-plane-guidance
 ```
 
-## Architecture
+## Product constraints
 
-This is a SwiftUI + SwiftData iOS app with CloudKit sync and sharing.
+The MVP has one shared household grocery-demand list, projected through store filters. It does not create per-store trip lists or use a Finish/Reopen workflow.
 
-### Tech Stack
+Catalog store tags are saved purchase constraints, not retailer inventory. A store view first applies `Any store OR tagged for the selected store`; text, category, urgency, and advanced tag filters can only narrow that eligible set. Urgent never makes an ineligible item available at a store.
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| UI | SwiftUI | Declarative, modern iOS UI framework |
-| Persistence | SwiftData | Apple's native ORM for Swift types |
-| Sync & Sharing | CloudKit (via SwiftData) | Built-in sync and multi-user sharing |
-| Distribution | TestFlight | Internal beta distribution |
+Reusable catalog items retain their tags when re-added. A normal flow maintains one active remembered need per catalog item. One-time needs have independent identities, stay available for sync and recovery, and never seed catalog suggestions or templates without explicit user action. Current-need urgency is `Normal` or `Urgent` and is never remembered on the catalog item.
 
-### Project Structure
+Clear-carted behavior must be scoped, confirmed, and recoverable after relaunch. It must use the captured occurrences and revisions rather than rerunning a broad query, and must preserve catalog data and newer changes.
 
-```
-Shopping/
-  App/
-    ShoppingApp.swift              # @main, SwiftData container setup
-  Models/
-    Store.swift                    # Store entity
-    Category.swift                 # Category entity (managed list)
-    Item.swift                     # Item entity (core catalog)
-    ShoppingList.swift             # Shopping list (trip to a store)
-    ShoppingListItem.swift         # Item on a list (quantity + checked)
-  Views/
-    ContentView.swift              # TabView root
-    StoreListView.swift            # Store management
-    CategoryListView.swift         # Category management
-    ItemCatalogView.swift          # Browse/edit master item list
-    ItemDetailView.swift           # Edit single item
-    ShoppingListsTab.swift         # All shopping lists
-    ListBuilderView.swift          # Build a list for a store trip
-    ShoppingChecklistView.swift    # In-store checklist
-  CloudKit/
-    SharingController.swift        # CloudKit share invitation UI
-  Preview Content/
-    PreviewSampleData.swift        # In-memory sample data for previews
-```
+## Sharing architecture and validation
 
-### Key Patterns
+Use SwiftUI with Core Data and `NSPersistentCloudKitContainer` as the intended baseline for managed private/shared CloudKit sharing. Do not describe household sharing as implemented or proven until SHOPPING-30 demonstrates it on both iPhones. SwiftData private-device sync is not evidence of household sharing.
 
-- **SwiftData `@Model`** — persistence via class annotations (like EF Core entities)
-- **`@Query`** — live database queries that drive UI updates (like reactive DbSet)
-- **`@Bindable`** — two-way binding to model properties (like Blazor `@bind`)
-- **`@Environment(\.modelContext)`** — dependency injection for data access
-- **View modifiers** — SwiftUI's composition pattern (`.searchable()`, `.sheet()`, etc.)
+SHOPPING-10 enrollment blocks real sharing proof, not local architecture, models, UI, or simulated two-replica tests. The observed environment is Xcode 26.6 (17F113) with an iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Run local validation with `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. Do not carry forward the old acquire-a-Mac or code-without-building assumptions.
 
-### Data Model
+## Code conventions
 
-- **Store** — where you shop (Costco, Aldi, Publix, etc.)
-- **Category** — managed list of groupings (Produce, Dairy, Canned Goods)
-- **Item** — master catalog entry, tagged with stores + category + anyStore flag
-- **ShoppingList** — a trip to a specific store on a date
-- **ShoppingListItem** — an item on a list with quantity and checked state
-
-Key relationship: Item ↔ Store is many-to-many. ShoppingListItem references the master catalog Item (not a copy).
-
-## Swift Coding Standards
-
-- Use `let` over `var` unless mutation is needed
-- Use 4-space indentation (Apple convention)
-- Use `final class` for `@Model` types
-- Prefer `String` over `String?` unless nil is semantically meaningful
-- Use trailing closure syntax for the last closure parameter
-- Use `guard` for early returns instead of nested `if`
-- Use Swift naming conventions: `camelCase` for properties/methods, `PascalCase` for types
-- Add `#Preview` blocks to all views for Xcode previews
-
-## Commit Message Convention
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) format:
-
-```
-<type>(<scope>): <description>
-
-[optional body]
-```
-
-**Types:**
-- `feat` - New feature
-- `fix` - Bug fix
-- `docs` - Documentation only
-- `refactor` - Code change that neither fixes a bug nor adds a feature
-- `test` - Adding or updating tests
-- `chore` - Maintenance tasks, dependencies, build config
-
-**Scopes** (optional): `models`, `views`, `cloudkit`, `ui`
-
-**Examples:**
-- `feat(models): add SwiftData models for Store and Category`
-- `feat(views): implement shopping checklist with check-off animations`
-- `chore: configure CloudKit container and entitlements`
-- `docs: update agent guidance documentation`
+- Use SwiftUI and the architecture selected by SHOPPING-27.
+- Use 4-space indentation, `let` where possible, `guard` for early exits, and Swift naming conventions.
+- Add focused tests for behavior with persistence, recovery, filtering, or sharing consequences.
+- Add `#Preview` blocks to SwiftUI views.
+- Use Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`, with an optional scope.
