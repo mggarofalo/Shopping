@@ -38,15 +38,11 @@ final class ShoppingLaunchTests: XCTestCase {
 
     func testOneTimeAddSavesWithoutStoreSetupAndDoesNotPolluteCatalog() {
         let app = launchApp()
-        XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
-        app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["This grocery won’t be remembered in Catalog."].exists)
-        let name = app.textFields["Grocery name"]
-        XCTAssertTrue(name.exists)
-        name.tap()
-        name.typeText("Fresh basil")
-        app.buttons["Add"].tap()
+        openOneTimeAdd(in: app, groceryName: "Fresh basil")
+        let anyStore = app.switches["Any store"]
+        for _ in 0..<8 where !anyStore.exists || !anyStore.isHittable { app.swipeUp() }
+        setSwitch(named: "Any store", on: true, in: app)
+        app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(app.staticTexts["Fresh basil"].waitForExistence(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
@@ -91,13 +87,15 @@ final class ShoppingLaunchTests: XCTestCase {
     func testCancelingInlineStoreAndParentAddCreatesNeitherStoreNorNeed() {
         let app = launchApp()
         openOneTimeAdd(in: app, groceryName: "Canceled grocery")
-        app.buttons["shopping.tags.addStore"].tap()
+        let addStore = app.buttons["shopping.tags.addStore"]
+        for _ in 0..<8 where !addStore.exists || !addStore.isHittable { app.swipeUp() }
+        addStore.tap()
         XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
         let storeName = app.textFields["shopping.tags.storeName"]
         storeName.tap()
         storeName.typeText("Canceled store")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled store"].exists)
         app.buttons["Cancel"].tap()
 
@@ -109,14 +107,16 @@ final class ShoppingLaunchTests: XCTestCase {
     func testSavingInlineStoreSelectsItButParentCancelCreatesNoNeed() {
         let app = launchApp()
         openOneTimeAdd(in: app, groceryName: "Canceled tagged grocery")
-        app.buttons["shopping.tags.addStore"].tap()
+        let addStore = app.buttons["shopping.tags.addStore"]
+        for _ in 0..<8 where !addStore.exists || !addStore.isHittable { app.swipeUp() }
+        addStore.tap()
         XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
         let storeName = app.textFields["shopping.tags.storeName"]
         storeName.tap()
         storeName.typeText("Corner Shop")
         app.buttons["Save store"].tap()
 
-        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
         let selectedStore = app.switches["Corner Shop"]
         XCTAssertTrue(selectedStore.waitForExistence(timeout: 2))
         XCTAssertEqual(selectedStore.value as? String, "1")
@@ -425,8 +425,9 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
-        let name = app.textFields["Grocery name"]
+        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        setSwitch(named: "shopping.grocery.remembered", on: false, in: app)
+        let name = app.textFields["shopping.grocery.name"]
         name.tap()
         name.typeText(groceryName)
     }

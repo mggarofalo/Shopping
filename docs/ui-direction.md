@@ -64,3 +64,11 @@ All changes only the store selection. Reset filters clears the store, search, ur
 Within Must buy here/Flexible here (or All), urgency comes first, followed by the household's category order and then Uncategorized. Category management supports staged rename, exact reorder and confirmed removal. Removing a category keeps its groceries and catalog items, with their category becoming Uncategorized; it is not grocery deletion.
 
 Rows show One-time and Urgent in words, and describe only valid active purchase choices. Any-store rows also show their explicit active tags, so literal tag filters remain understandable. Missing, archived-only or ambiguous store choices show Needs store in All. Imported ambiguous category identities group under Uncategorized consistently with the category filter.
+
+## Add, edit and recover a grocery
+
+Add starts as Remember this item and Normal. Matching names appear beside the new draft: an active grocery opens its current details without mutation, and an explicit Need again renews a carted or previously cleared remembered item with its own saved purchase rules. New drafts in a store view start with that store; opening a saved grocery always uses that grocery's own rules, including an empty literal-tag set for Any store.
+
+New remembered Save commits catalog knowledge and current demand together. Existing edits stage catalog and current-purchase fields until Save; edits follow the agreed last-update-wins behavior. One-time Save writes only the current grocery. Switching identity is a creation choice; promotion of an existing one-time grocery remains a separate explicit action. Name collision discovery uses normalized names, and a distinct-item choice applies only to that save attempt.
+
+Remove is a separate confirmed action with Undo. Its confirmation captures the occurrence, revision and household before acting; a changed grocery is not removed by a stale confirmation. Recovery is persisted and does not create reusable knowledge for one-time groceries. Carted remembered rows offer Need again; carted one-time rows move the same occurrence back without creating a template. A saved or renewed grocery hidden by the current filters receives a Show all action after the local view observes the saved change.

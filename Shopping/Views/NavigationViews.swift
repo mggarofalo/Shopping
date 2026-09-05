@@ -60,7 +60,11 @@ struct GroceriesView: View {
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
     @State private var showingStorePicker = false
-    @State private var addScope: GroceryAddScope?
+    @State private var editor: GroceryEditorTarget?
+    @State private var removedOperationID: UUID?
+    @State private var removedScope: GroceryAddScope?
+    @State private var savedWhileFiltered = false
+    @State private var pendingSavedNeed: (id: UUID, scope: GroceryAddScope, expectsUncarted: Bool)?
     @State private var error: Error?
 
     private var activeStores: [Store] {
@@ -144,7 +148,7 @@ struct GroceriesView: View {
             }
             .navigationDestination(for: GroceryDestination.self) { destination in
                 switch destination {
-                case .carted: CartedGroceriesView()
+                case .carted: CartedGroceriesView(onEdit: focus, onNeedAgain: needAgain)
                 case .recentlyCleared: RecentlyClearedView()
                 }
             }
@@ -165,15 +169,44 @@ struct GroceriesView: View {
                     Button(store.name) { navigation.selectStore(store.id) }
                 }
             }
-            .sheet(item: $addScope) { scope in
-                OneTimeGrocerySheet(scope: scope) {
-                    addScope = nil
-                    refreshProjection()
-                }
+            .sheet(item: $editor, onDismiss: completeSaveFeedback) { target in
+                GroceryEditorView(target: target, onSaved: saved, onFocusNeed: focus, onRemoved: removed)
+                    .id(target.id)
             }
             .alert("Couldn’t load groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(error?.localizedDescription ?? "Unknown error") }
+
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    if savedWhileFiltered {
+                        HStack {
+                            Text("Saved to groceries. Current filters hide this item.")
+                                .font(.subheadline)
+                            Spacer()
+                            Button("Show all") { resetView(); savedWhileFiltered = false }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("shopping.grocery.showAll")
+                        }
+                        .padding()
+                        .background(.bar)
+                    }
+                    if let removedOperationID {
+                        HStack {
+                            Text("Grocery removed")
+                            Spacer()
+                            Button("Undo") { undo(removedOperationID) }
+                                .frame(minHeight: 44)
+                                .disabled(removedScope?.householdID != selection.householdID ||
+                                    removedScope?.listID != selection.listID || canonicalList == nil)
+                                .accessibilityIdentifier("shopping.grocery.undoRemove")
+                        }
+                        .padding()
+                        .background(.bar)
+                    }
+                }
+            }
+            .onAppear(perform: completeSaveFeedback)
             .task(id: "\(selection.householdID?.uuidString ?? "nil")-\(selection.listID?.uuidString ?? "nil")") {
                 configureAndRefresh()
             }
@@ -187,7 +220,10 @@ struct GroceriesView: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
                 object: viewContext
-            )) { _ in configureAndRefresh() }
+            )) { _ in
+                configureAndRefresh()
+                completeSaveFeedback()
+            }
         }
     }
 
@@ -309,19 +345,97 @@ struct GroceriesView: View {
 
     private var emptyDescription: String {
         !hasActiveUncartedNeeds
-            ? "Add a one-time grocery to get started."
+            ? "Add a grocery to get started."
             : "Try All, another store, search, or filters. Your shared grocery list is unchanged."
     }
 
     private func presentAdd() {
         guard let canonicalList, let householdID = canonicalList.household?.id else { return }
         let selectedStore = activeStores.first { $0.id == navigation.selectedStoreID }
-        addScope = GroceryAddScope(
+        editor = GroceryEditorTarget(scope: GroceryAddScope(
             householdID: householdID,
             listID: canonicalList.id,
             selectedStoreID: selectedStore?.id,
             selectedStoreName: selectedStore?.name
-        )
+        ), need: nil)
+    }
+
+    private func focus(_ need: Need) {
+        guard let canonicalList,
+              GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need),
+              !need.archived else { return }
+        editor = GroceryEditorTarget(scope: GroceryAddScope(
+            householdID: canonicalList.household?.id, listID: canonicalList.id,
+            selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
+        ), need: need)
+    }
+
+    private func saved(_ id: UUID) {
+        if let scope = editor?.scope {
+            pendingSavedNeed = (id, scope, editor?.need?.carted != true)
+        }
+        editor = nil
+        refreshProjection()
+    }
+
+    private func completeSaveFeedback() {
+        guard let pending = pendingSavedNeed else { return }
+        guard editor == nil else { return }
+        guard selection.householdID == pending.scope.householdID,
+              selection.listID == pending.scope.listID, canonicalList != nil else {
+            pendingSavedNeed = nil
+            savedWhileFiltered = false
+            return
+        }
+        guard let need = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+            .first(where: { $0.id == pending.id && !$0.archived }) else { return }
+        // A writer save can precede its queued main-context merge. Retain the acknowledgement
+        // until the renewed occurrence is actually visible to this context.
+        guard !pending.expectsUncarted || !need.carted else { return }
+        pendingSavedNeed = nil
+        refreshProjection()
+        savedWhileFiltered = !need.carted && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
+    }
+
+    private func needAgain(_ need: Need) {
+        guard let service, let canonicalList, let householdID = canonicalList.household?.id,
+              GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need),
+              !need.archived else { return }
+        do {
+            let id: UUID
+            if let item = need.item {
+                id = try service.addRememberedNeed(itemID: item.id, listID: canonicalList.id,
+                    householdID: householdID)
+            } else if need.kind == NeedKind.oneTime.rawValue {
+                try service.uncartNeed(needID: need.id, householdID: householdID, listID: canonicalList.id)
+                id = need.id
+            } else { return }
+            pendingSavedNeed = (id, GroceryAddScope(householdID: householdID, listID: canonicalList.id,
+                selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName), true)
+            refreshProjection()
+            completeSaveFeedback()
+        } catch { self.error = error }
+    }
+
+    private func removed(_ operationID: UUID, scope: GroceryAddScope) {
+        editor = nil
+        removedOperationID = operationID
+        removedScope = scope
+        savedWhileFiltered = false
+        refreshProjection()
+    }
+
+    private func undo(_ operationID: UUID) {
+        guard let service, let scope = removedScope, let householdID = scope.householdID,
+              let listID = scope.listID, selection.householdID == householdID,
+              selection.listID == listID, canonicalList != nil else { return }
+        do {
+            _ = try service.undoClear(operationID: operationID,
+                expectedHouseholdID: householdID, expectedListID: listID)
+            removedOperationID = nil
+            removedScope = nil
+            refreshProjection()
+        } catch { self.error = error }
     }
 
     private func configureAndRefresh() {
@@ -387,7 +501,7 @@ struct GroceriesView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(category.needs, id: \.objectID) { need in
-                    GroceryNeedRow(need: need, activeStores: activeStores)
+                    GroceryNeedRow(need: need, activeStores: activeStores, onEdit: focus)
                 }
             }
         }
@@ -440,6 +554,16 @@ enum GroceryRowScope {
               let persistentStore = household.objectID.persistentStore else { return [] }
         let counts = Dictionary(grouping: categories, by: \.id).mapValues(\.count)
         return categories.filter {
+            $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&
+                $0.household == household && $0.objectID.persistentStore == persistentStore
+        }
+    }
+
+    static func validItems(_ items: [Item], canonicalList: GroceryList?) -> [Item] {
+        guard let household = canonicalList?.household,
+              let persistentStore = household.objectID.persistentStore else { return [] }
+        let counts = Dictionary(grouping: items, by: \.id).mapValues(\.count)
+        return items.filter {
             $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&
                 $0.household == household && $0.objectID.persistentStore == persistentStore
         }
@@ -524,10 +648,25 @@ enum GroceryPurchaseRuleLabel {
 private struct GroceryNeedRow: View {
     @ObservedObject var need: Need
     let activeStores: [Store]
+    var onEdit: ((Need) -> Void)? = nil
 
     private var needsStore: Bool { GroceryRowScope.needsStore(need, activeStores: activeStores) }
 
     var body: some View {
+        Group {
+            if let onEdit {
+                Button { onEdit(need) } label: { row }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit \(need.item?.name ?? need.title)")
+            } else {
+                row
+            }
+        }
+        .frame(minHeight: 44)
+        .accessibilityIdentifier("shopping.grocery.row.\(need.id.uuidString)")
+    }
+
+    private var row: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(need.item?.name ?? need.title).font(.body)
@@ -550,6 +689,8 @@ private struct GroceryNeedRow: View {
             Spacer()
             Text("\(need.quantity)").foregroundStyle(.secondary).accessibilityLabel("Quantity \(need.quantity)")
         }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -700,6 +841,9 @@ struct CartedGroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    var onEdit: ((Need) -> Void)? = nil
+    var onNeedAgain: ((Need) -> Void)? = nil
+
     var body: some View {
         let canonicalList = GroceryRowScope.canonicalList(
             Array(lists), households: Array(households), selection: selection
@@ -708,7 +852,24 @@ struct CartedGroceriesView: View {
             .filter { $0.carted && !$0.archived }
         let activeStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
             .filter { !$0.isArchived }
-        List(carted, id: \.objectID) { GroceryNeedRow(need: $0, activeStores: activeStores) }
+        List(carted, id: \.objectID) { need in
+            VStack(alignment: .leading, spacing: 8) {
+                GroceryNeedRow(need: need, activeStores: activeStores, onEdit: onEdit)
+                if let onNeedAgain {
+                    if let item = need.item {
+                        Button("Need again \(item.name)") { onNeedAgain(need) }
+                            .buttonStyle(.borderless)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
+                    } else if need.kind == NeedKind.oneTime.rawValue {
+                        Button("Move back \(need.title)") { onNeedAgain(need) }
+                            .buttonStyle(.borderless)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.uncart.\(need.id.uuidString)")
+                    }
+                }
+            }
+        }
             .overlay { if carted.isEmpty { ContentUnavailableView("Nothing carted", systemImage: "cart") } }
             .navigationTitle("Carted")
     }

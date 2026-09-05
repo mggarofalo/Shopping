@@ -66,6 +66,17 @@ struct CatalogItemValues: Equatable {
     var storeIDs: Set<UUID>
 }
 
+struct RememberedNeedValues: Equatable {
+    var quantity: Int64 = 1
+    var purchaseNotes: String = ""
+    var urgency: NeedUrgency = .normal
+}
+
+struct CreatedRememberedGrocery: Equatable {
+    let itemID: UUID
+    let needID: UUID
+}
+
 private struct ValidatedCatalogItemValues {
     let name: String
     let notes: String
@@ -411,6 +422,179 @@ final class NeedService {
         }
     }
 
+    func createRememberedGrocery(
+        householdID: UUID,
+        listID: UUID,
+        catalog: CatalogItemValues,
+        need: RememberedNeedValues = RememberedNeedValues(),
+        allowingCatalogNameCollision: Bool = false
+    ) throws -> CreatedRememberedGrocery {
+        try validate(needValues: need)
+        return try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            guard let list = try self.list(id: listID, in: context) else {
+                throw NeedServiceError.listNotFound
+            }
+            try self.validate(list: list, belongsTo: household)
+            let validatedCatalog = try self.validatedCatalogValues(catalog, household: household, in: context)
+            let collisions = try self.catalogNameCollisions(
+                name: validatedCatalog.name, household: household, excluding: nil, in: context
+            )
+            if !allowingCatalogNameCollision && !collisions.isEmpty {
+                throw NeedServiceError.catalogNameCollision(collisions)
+            }
+            let item = self.insertCatalogItem(validatedCatalog, household: household, in: context)
+            let newNeed = self.insertRememberedNeed(item: item, list: list, values: need, in: context)
+            return CreatedRememberedGrocery(itemID: item.id, needID: newNeed.id)
+        }
+    }
+
+    func saveRememberedGrocery(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        catalog: CatalogItemValues,
+        need values: RememberedNeedValues,
+        allowingCatalogNameCollision: Bool = false
+    ) throws {
+        try validate(needValues: values)
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context
+            )
+            guard resolved.need.kind == NeedKind.remembered.rawValue,
+                  let item = resolved.need.item else { throw NeedServiceError.scopeChanged }
+            guard item.id != PersistenceModel.unsetID,
+                  let canonicalItem = try self.item(id: item.id, in: context),
+                  canonicalItem === item else {
+                throw NeedServiceError.invalidCatalogIdentity
+            }
+            try self.validate(item: item, belongsTo: resolved.household)
+            let active = try self.activeRememberedNeeds(itemID: item.id, listID: listID, in: context)
+            guard active.count == 1, active[0] === resolved.need else {
+                if active.count > 1 {
+                    throw NeedServiceError.activeRememberedNeedDuplicates(
+                        try self.duplicateGroup(itemID: item.id, needs: active)
+                    )
+                }
+                throw NeedServiceError.scopeChanged
+            }
+            let validatedCatalog = try self.validatedCatalogValues(
+                catalog, household: resolved.household, in: context
+            )
+            let normalizedNameChanged = CatalogProjection.normalizedName(item.name) !=
+                CatalogProjection.normalizedName(validatedCatalog.name)
+            if normalizedNameChanged {
+                let collisions = try self.catalogNameCollisions(
+                    name: validatedCatalog.name,
+                    household: resolved.household,
+                    excluding: item.id,
+                    in: context
+                )
+                if !allowingCatalogNameCollision && !collisions.isEmpty {
+                    throw NeedServiceError.catalogNameCollision(collisions)
+                }
+            }
+            item.name = validatedCatalog.name
+            item.notes = validatedCatalog.notes
+            item.category = validatedCatalog.category
+            item.anyStore = validatedCatalog.anyStore
+            item.stores = validatedCatalog.stores
+            resolved.need.title = validatedCatalog.name
+            try self.apply(values, to: resolved.need)
+        }
+    }
+
+    func saveOneTimeGrocery(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        title: String,
+        categoryID: UUID?,
+        storeIDs: Set<UUID>,
+        anyStore: Bool,
+        need values: RememberedNeedValues
+    ) throws {
+        let title = try validatedName(title)
+        try validate(needValues: values)
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context
+            )
+            guard resolved.need.kind == NeedKind.oneTime.rawValue,
+                  resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
+            let stores = try self.validatedStores(
+                ids: storeIDs,
+                household: resolved.household,
+                requiringActiveStoreUnless: anyStore,
+                in: context
+            )
+            let category = try self.validatedCategory(
+                id: categoryID, household: resolved.household, in: context
+            )
+            resolved.need.title = title
+            resolved.need.oneTimeCategory = category
+            resolved.need.oneTimeStores = stores
+            resolved.need.oneTimeAnyStore = anyStore
+            try self.apply(values, to: resolved.need)
+        }
+    }
+
+    func removeNeed(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        expectedRevision: Int64
+    ) throws -> UUID {
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context
+            )
+            guard resolved.need.revision == expectedRevision else { throw NeedServiceError.scopeChanged }
+            let (archivedRevision, archiveOverflow) = expectedRevision.addingReportingOverflow(1)
+            let (_, restoreOverflow) = archivedRevision.addingReportingOverflow(1)
+            guard !archiveOverflow, !restoreOverflow else { throw NeedServiceError.scopeChanged }
+            let operationID = UUID()
+            let token = ClearCartedToken(
+                id: operationID,
+                householdID: householdID,
+                listID: listID,
+                revisionsByNeedID: [needID: expectedRevision]
+            )
+            let operation: ClearOperation = self.insert("ClearOperation", in: context)
+            operation.id = operationID
+            operation.createdAt = Date()
+            operation.snapshot = try self.encoder.encode(token)
+            self.route(operation, with: resolved.household, in: context)
+            operation.household = resolved.household
+            operation.list = resolved.list
+            resolved.need.archived = true
+            resolved.need.clearOperationID = operationID
+            resolved.need.revision = archivedRevision
+            return operationID
+        }
+    }
+
+    func uncartNeed(needID: UUID, householdID: UUID, listID: UUID) throws {
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context
+            )
+            guard resolved.need.kind == NeedKind.oneTime.rawValue,
+                  resolved.need.item == nil,
+                  resolved.need.carted else {
+                throw NeedServiceError.scopeChanged
+            }
+            let (nextRevision, overflow) = resolved.need.revision.addingReportingOverflow(1)
+            guard !overflow else { throw NeedServiceError.scopeChanged }
+            resolved.need.carted = false
+            resolved.need.clearOperationID = nil
+            resolved.need.revision = nextRevision
+        }
+    }
+
     func setStoreTags(itemID: UUID, storeIDs: Set<UUID>) throws {
         try setPurchaseRules(itemID: itemID, anyStore: nil, storeIDs: storeIDs)
     }
@@ -601,6 +785,7 @@ final class NeedService {
     func addRememberedNeed(
         itemID: UUID,
         listID: UUID,
+        householdID: UUID? = nil,
         quantity: Int64? = nil,
         notes: String? = nil,
         urgency: NeedUrgency = .normal
@@ -613,6 +798,13 @@ final class NeedService {
             guard let list = try self.list(id: listID, in: context) else {
                 throw NeedServiceError.listNotFound
             }
+            if let householdID {
+                guard let expectedHousehold = try self.household(id: householdID, in: context),
+                      list.household == expectedHousehold,
+                      item.household == expectedHousehold else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
             guard let household = item.household,
                   list.household == household,
                   item.objectID.persistentStore == list.objectID.persistentStore else {
@@ -623,12 +815,14 @@ final class NeedService {
                 guard active.count == 1 else {
                     throw NeedServiceError.activeRememberedNeedDuplicates(try self.duplicateGroup(itemID: itemID, needs: active))
                 }
+                let (nextRevision, overflow) = existing.revision.addingReportingOverflow(1)
+                guard !overflow else { throw NeedServiceError.scopeChanged }
                 if let quantity { existing.quantity = quantity }
                 if let notes { existing.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines) }
                 existing.carted = false
                 existing.urgency = urgency.rawValue
                 existing.clearOperationID = nil
-                existing.revision += 1
+                existing.revision = nextRevision
                 return existing.id
             }
             guard !item.isArchived else {
@@ -653,6 +847,7 @@ final class NeedService {
         anyStore: Bool = true,
         quantity: Int64 = 1,
         urgency: NeedUrgency = .normal,
+        householdID: UUID? = nil,
         listID: UUID
     ) throws -> UUID {
         let title = try validatedName(title)
@@ -663,6 +858,10 @@ final class NeedService {
             }
             guard let household = list.household else {
                 throw NeedServiceError.scopeChanged
+            }
+            if let householdID {
+                guard let expectedHousehold = try self.household(id: householdID, in: context),
+                      household == expectedHousehold else { throw NeedServiceError.scopeChanged }
             }
             let stores = try self.validatedStores(
                 ids: storeIDs,
@@ -955,10 +1154,13 @@ final class NeedService {
 
             var count = 0
             for (needID, capturedRevision) in token.revisionsByNeedID {
+                let (archivedRevision, archiveOverflow) = capturedRevision.addingReportingOverflow(1)
+                let (restoredRevision, restoreOverflow) = archivedRevision.addingReportingOverflow(1)
+                guard !archiveOverflow, !restoreOverflow else { continue }
                 guard let need = try self.need(id: needID, in: context),
                       need.archived,
                       need.clearOperationID == operationID,
-                      need.revision == capturedRevision + 1,
+                      need.revision == archivedRevision,
                       need.list?.id == token.listID,
                       need.list?.household?.id == token.householdID else {
                     continue
@@ -969,7 +1171,7 @@ final class NeedService {
                 }
                 need.archived = false
                 need.clearOperationID = nil
-                need.revision += 1
+                need.revision = restoredRevision
                 count += 1
             }
             return count
@@ -1111,6 +1313,68 @@ final class NeedService {
         item.category = values.category
         item.stores = values.stores
         return item
+    }
+
+    private func insertRememberedNeed(
+        item: Item,
+        list: GroceryList,
+        values: RememberedNeedValues,
+        in context: NSManagedObjectContext
+    ) -> Need {
+        let need = makeNeed(title: item.name, list: list, context: context)
+        need.kind = NeedKind.remembered.rawValue
+        need.item = item
+        need.quantity = values.quantity
+        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.urgency = values.urgency.rawValue
+        return need
+    }
+
+    private func validate(needValues: RememberedNeedValues) throws {
+        guard (1...99).contains(needValues.quantity) else {
+            throw NeedServiceError.invalidQuantity
+        }
+    }
+
+    private func validate(list: GroceryList, belongsTo household: Household) throws {
+        guard list.household == household,
+              list.objectID.persistentStore == household.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+    }
+
+    private func validatedActiveNeed(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        in context: NSManagedObjectContext
+    ) throws -> (need: Need, list: GroceryList, household: Household) {
+        guard let household = try self.household(id: householdID, in: context) else {
+            throw NeedServiceError.householdNotFound
+        }
+        guard let list = try self.list(id: listID, in: context) else {
+            throw NeedServiceError.listNotFound
+        }
+        try validate(list: list, belongsTo: household)
+        guard let need = try self.need(id: needID, in: context) else {
+            throw NeedServiceError.needNotFound
+        }
+        guard !need.archived,
+              need.list == list,
+              need.objectID.persistentStore == list.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+        return (need, list, household)
+    }
+
+    private func apply(_ values: RememberedNeedValues, to need: Need) throws {
+        let (nextRevision, overflow) = need.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        need.quantity = values.quantity
+        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.urgency = values.urgency.rawValue
+        need.clearOperationID = nil
+        need.revision = nextRevision
     }
 
     private func catalogNameCollisions(
