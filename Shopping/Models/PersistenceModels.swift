@@ -19,6 +19,7 @@ final class Store: NSManagedObject {
     @NSManaged var isArchived: Bool
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?
+    @NSManaged var oneTimeNeeds: Set<Need>?
 }
 
 @objc(Item)
@@ -41,6 +42,7 @@ final class Category: NSManagedObject {
     @NSManaged var displayOrder: Int64
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?
+    @NSManaged var oneTimeNeeds: Set<Need>?
 }
 
 @objc(GroceryList)
@@ -54,15 +56,20 @@ final class GroceryList: NSManagedObject {
 @objc(Need)
 final class Need: NSManagedObject {
     @NSManaged var id: UUID
+    @NSManaged var kind: String
     @NSManaged var title: String
+    @NSManaged var notes: String
     @NSManaged var quantity: Int64
     @NSManaged var carted: Bool
     @NSManaged var urgency: String
     @NSManaged var revision: Int64
     @NSManaged var archived: Bool
     @NSManaged var clearOperationID: UUID?
+    @NSManaged var oneTimeAnyStore: Bool
     @NSManaged var list: GroceryList?
     @NSManaged var item: Item?
+    @NSManaged var oneTimeCategory: Category?
+    @NSManaged var oneTimeStores: Set<Store>?
 }
 
 @objc(ClearOperation)

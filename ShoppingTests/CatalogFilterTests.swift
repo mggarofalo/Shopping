@@ -161,7 +161,7 @@ final class CatalogFilterTests: XCTestCase {
                 householdID: ids.householdID,
                 filter: GroceryNeedFilter(purchase: PurchaseFilter(selectedStoreID: storeID))
             ),
-            [rememberedNeed]
+            [rememberedNeed, oneTimeNeed].sorted { $0.uuidString < $1.uuidString }
         )
     }
 

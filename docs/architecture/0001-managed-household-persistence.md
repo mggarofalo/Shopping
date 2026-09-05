@@ -52,9 +52,9 @@ A local revision check cannot observe a second phone's unsynced edit or act as a
 
 ## Duplicates and incomplete imports
 
-The normal local add command reuses an existing active need for a catalog item. Independent offline adds can still create duplicate rows because CloudKit does not provide the model's uniqueness constraint. The production reconciliation key is household/list plus catalog item ID, never title; one-time needs remain independent even when their titles match.
+The normal local add command reuses an existing active need for a catalog item, explicitly returning carted demand to needed and resetting urgency to Normal unless requested. Read-only focus does not change its values. Independent offline adds can still create duplicate rows because CloudKit does not provide the model's uniqueness constraint. The production reconciliation key is household/list plus catalog item ID, never title; one-time needs remain independent even when their titles match.
 
-For independently created active needs with the same reconciliation key, the proposed canonical row is the one with the lexicographically smallest UUID. Preserve other occurrences and their values for recovery/reconciliation; never silently sum quantities. A live import handler must apply this choice consistently and respect write permission. This prototype only prevents duplicates in serialized ordinary adds and prevents undo from creating a second active remembered need; it does not implement an import deduplicator. Do not merge catalog items or stores merely because their display names match. Cross-account import reconciliation, interrupted relationships and account/share changes remain required live integration work; local uniqueness must not be advertised as distributed uniqueness.
+For independently created active needs with the same reconciliation key, the proposed canonical row is the one with the lexicographically smallest UUID. Preserve other occurrences and their values for recovery/reconciliation; never silently sum quantities. A live import handler must apply this choice consistently and respect write permission. SHOPPING-21 prevents duplicates in serialized ordinary adds, prevents undo from creating a second active remembered need, and exposes already imported duplicate candidates with their IDs, revisions and values. A command encountering several active candidates rejects the ambiguous add without mutating them. It does not implement an import deduplicator or silently apply the proposed canonical choice. A future resolver must preserve divergent source values for recovery and pass the live gate before automatically retiring any candidate. Do not merge catalog items or stores merely because their display names match. Cross-account import reconciliation, interrupted relationships and account/share changes remain required live integration work; local uniqueness must not be advertised as distributed uniqueness.
 
 ## Schema and migration policy
 
@@ -83,7 +83,7 @@ The SQLite simulations stage both contexts' edits before either saves, disable a
 | SQLite close/reopen and undo | Restores one-time data without catalog creation. |
 | Re-add after clear, then undo | Keeps the replacement active and declines to restore a duplicate. |
 | Normal remembered add | Reuses the active occurrence; one-time adds do not seed the catalog. |
-| Invalid command scope / quantity | Rejects cross-household links and nonpositive quantity. |
+| Invalid command scope / quantity | Rejects cross-household links; SHOPPING-21 completes the quantity range of 1–99. |
 
 Local validation on 2026-09-05 passed all 9 persistence tests and the existing UI launch test on Xcode 26.6 / iOS 26.5. The test log confirmed Core Data multithreading assertions were enabled. The same shared scheme runs in CI on the pinned Xcode 16.4 / iOS 18.5 configuration.
 

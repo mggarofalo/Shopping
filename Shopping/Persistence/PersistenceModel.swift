@@ -3,7 +3,7 @@ import CoreData
 enum PersistenceModel {
     // Experimental local schema; SHOPPING-20 will freeze the versioned production model and fixtures.
     static let name = "Shopping"
-    private static let unsetID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+    static let unsetID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
     static func make() -> NSManagedObjectModel {
         let model = NSManagedObjectModel()
@@ -35,13 +35,16 @@ enum PersistenceModel {
         ])
         let need = entity("Need", Need.self, [
             attribute("id", .UUIDAttributeType, unsetID),
+            attribute("kind", .stringAttributeType, ""),
             attribute("title", .stringAttributeType, ""),
+            attribute("notes", .stringAttributeType, ""),
             attribute("quantity", .integer64AttributeType, 1),
             attribute("carted", .booleanAttributeType, false),
             attribute("urgency", .stringAttributeType, "normal"),
             attribute("revision", .integer64AttributeType, 0),
             attribute("archived", .booleanAttributeType, false),
-            attribute("clearOperationID", .UUIDAttributeType, nil, optional: true)
+            attribute("clearOperationID", .UUIDAttributeType, nil, optional: true),
+            attribute("oneTimeAnyStore", .booleanAttributeType, false)
         ])
         let clearOperation = entity("ClearOperation", ClearOperation.self, [
             attribute("id", .UUIDAttributeType, unsetID),
@@ -57,6 +60,8 @@ enum PersistenceModel {
         relate(item, "stores", store, "items", toManyDestination: true, toManySource: true)
         relate(list, "needs", need, "list", toManyDestination: true, toManySource: false)
         relate(item, "needs", need, "item", toManyDestination: true, toManySource: false)
+        relate(category, "oneTimeNeeds", need, "oneTimeCategory", toManyDestination: true, toManySource: false)
+        relate(store, "oneTimeNeeds", need, "oneTimeStores", toManyDestination: true, toManySource: true)
         relate(household, "clearOperations", clearOperation, "household", toManyDestination: true, toManySource: false)
         relate(list, "clearOperations", clearOperation, "list", toManyDestination: true, toManySource: false)
 

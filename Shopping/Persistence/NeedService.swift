@@ -7,6 +7,30 @@ struct ClearCartedToken: Codable, Equatable {
     let revisionsByNeedID: [UUID: Int64]
 }
 
+enum NeedUrgency: String, Codable, CaseIterable {
+    case normal
+    case urgent
+}
+
+enum NeedKind: String, Codable {
+    case remembered
+    case oneTime
+}
+
+struct RememberedDuplicateGroup: Equatable {
+    let itemID: UUID
+    let candidates: [RememberedDuplicateCandidate]
+}
+
+struct RememberedDuplicateCandidate: Equatable {
+    let needID: UUID
+    let quantity: Int64
+    let carted: Bool
+    let urgency: NeedUrgency
+    let notes: String
+    let revision: Int64
+}
+
 enum NeedServiceError: Error, Equatable {
     case householdNotFound
     case listNotFound
@@ -18,6 +42,10 @@ enum NeedServiceError: Error, Equatable {
     case scopeChanged
     case invalidQuantity
     case invalidName
+    case catalogNameCollision([UUID])
+    case activeRememberedNeedConflict(UUID)
+    case activeRememberedNeedDuplicates(RememberedDuplicateGroup)
+    case invalidOccurrenceIdentity
 }
 
 enum StoreEligibility: Equatable {
@@ -244,7 +272,9 @@ final class NeedService {
                 format: "list.household.id == %@ AND archived == NO",
                 householdID as CVarArg
             )
-            return Set(try context.fetch(request).map(\.id))
+            let needs = try context.fetch(request)
+            try self.validateOccurrenceIdentities(needs)
+            return Set(needs.map(\.id))
         }
     }
 
@@ -276,15 +306,19 @@ final class NeedService {
                 format: "list.household.id == %@ AND archived == NO",
                 householdID as CVarArg
             )
-            return try context.fetch(request).filter { need in
+            let activeNeeds = try context.fetch(request)
+            try self.validateOccurrenceIdentities(activeNeeds)
+            return activeNeeds.filter { need in
                 let item = need.item
+                let isOneTime = need.kind == NeedKind.oneTime.rawValue
                 let value = PurchaseRuleValue(
-                    explicitStoreIDs: Set(item?.stores?.map(\.id) ?? []),
-                    anyStore: item?.anyStore ?? false
+                    explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
+                        ?? (isOneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
+                    anyStore: item?.anyStore ?? (isOneTime && need.oneTimeAnyStore)
                 )
                 return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text) &&
-                    (filter.categoryID == nil || item?.category?.id == filter.categoryID) &&
+                    (filter.categoryID == nil || (item?.category ?? (isOneTime ? need.oneTimeCategory : nil))?.id == filter.categoryID) &&
                     (filter.carted == nil || need.carted == filter.carted) &&
                     (filter.urgency == nil || need.urgency == filter.urgency)
             }.map(\.id).sorted { $0.uuidString < $1.uuidString }
@@ -316,8 +350,28 @@ final class NeedService {
     }
 
     @discardableResult
-    func addRememberedNeed(itemID: UUID, listID: UUID) throws -> UUID {
-        try write { context in
+    func activeRememberedNeedID(itemID: UUID, listID: UUID) throws -> UUID? {
+        try readOnWriter { context in
+            guard let item = try self.item(id: itemID, in: context) else { throw NeedServiceError.itemNotFound }
+            guard let list = try self.list(id: listID, in: context) else { throw NeedServiceError.listNotFound }
+            guard item.household == list.household else { throw NeedServiceError.scopeChanged }
+            let active = try self.activeRememberedNeeds(itemID: itemID, listID: listID, in: context)
+            guard active.count < 2 else {
+                throw NeedServiceError.activeRememberedNeedDuplicates(try self.duplicateGroup(itemID: itemID, needs: active))
+            }
+            return active.first?.id
+        }
+    }
+
+    func addRememberedNeed(
+        itemID: UUID,
+        listID: UUID,
+        quantity: Int64? = nil,
+        notes: String? = nil,
+        urgency: NeedUrgency = .normal
+    ) throws -> UUID {
+        if let quantity, !(1...99).contains(quantity) { throw NeedServiceError.invalidQuantity }
+        return try write { context in
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }
@@ -329,14 +383,16 @@ final class NeedService {
                   item.objectID.persistentStore == list.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
             }
-            let request = Need.fetchRequest()
-            request.fetchLimit = 1
-            request.predicate = NSPredicate(
-                format: "item.id == %@ AND list.id == %@ AND archived == NO",
-                itemID as CVarArg,
-                listID as CVarArg
-            )
-            if let existing = try context.fetch(request).first {
+            let active = try self.activeRememberedNeeds(itemID: itemID, listID: listID, in: context)
+            if let existing = active.first {
+                guard active.count == 1 else {
+                    throw NeedServiceError.activeRememberedNeedDuplicates(try self.duplicateGroup(itemID: itemID, needs: active))
+                }
+                if let quantity { existing.quantity = quantity }
+                if let notes { existing.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+                existing.carted = false
+                existing.urgency = urgency.rawValue
+                existing.clearOperationID = nil
                 existing.revision += 1
                 return existing.id
             }
@@ -344,21 +400,72 @@ final class NeedService {
                 throw NeedServiceError.itemArchived
             }
             let need = self.makeNeed(title: item.name, list: list, context: context)
+            need.kind = NeedKind.remembered.rawValue
             need.item = item
+            need.quantity = quantity ?? 1
+            need.notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            need.urgency = urgency.rawValue
             return need.id
         }
     }
 
     @discardableResult
-    func addOneTimeNeed(title: String, listID: UUID) throws -> UUID {
-        try write { context in
+    func addOneTimeNeed(
+        title: String,
+        notes: String = "",
+        categoryID: UUID? = nil,
+        storeIDs: Set<UUID> = [],
+        anyStore: Bool = true,
+        quantity: Int64 = 1,
+        urgency: NeedUrgency = .normal,
+        listID: UUID
+    ) throws -> UUID {
+        let title = try validatedName(title)
+        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+        return try write { context in
             guard let list = try self.list(id: listID, in: context) else {
                 throw NeedServiceError.listNotFound
             }
-            guard list.household != nil else {
+            guard let household = list.household else {
                 throw NeedServiceError.scopeChanged
             }
-            return self.makeNeed(title: title, list: list, context: context).id
+            let stores = try self.validatedStores(
+                ids: storeIDs,
+                household: household,
+                requiringActiveStoreUnless: anyStore,
+                in: context
+            )
+            let category = try self.validatedCategory(id: categoryID, household: household, in: context)
+            let need = self.makeNeed(title: title, list: list, context: context)
+            need.kind = NeedKind.oneTime.rawValue
+            need.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            need.quantity = quantity
+            need.urgency = urgency.rawValue
+            need.oneTimeAnyStore = anyStore
+            need.oneTimeCategory = category
+            need.oneTimeStores = stores
+            return need.id
+        }
+    }
+
+    @discardableResult
+    func copyCatalogItemAsOneTimeNeed(itemID: UUID, listID: UUID) throws -> UUID {
+        try write { context in
+            guard let item = try self.item(id: itemID, in: context) else { throw NeedServiceError.itemNotFound }
+            guard !item.isArchived else { throw NeedServiceError.itemArchived }
+            guard let list = try self.list(id: listID, in: context),
+                  let household = list.household,
+                  item.household == household,
+                  item.objectID.persistentStore == list.objectID.persistentStore else {
+                throw NeedServiceError.scopeChanged
+            }
+            let need = self.makeNeed(title: item.name, list: list, context: context)
+            need.kind = NeedKind.oneTime.rawValue
+            need.notes = item.notes
+            need.oneTimeAnyStore = item.anyStore
+            need.oneTimeCategory = item.category
+            need.oneTimeStores = item.stores
+            return need.id
         }
     }
 
@@ -367,13 +474,152 @@ final class NeedService {
     }
 
     func setQuantity(_ quantity: Int64, needID: UUID) throws {
-        guard quantity > 0 else {
+        guard (1...99).contains(quantity) else {
             throw NeedServiceError.invalidQuantity
         }
         try editNeed(id: needID) { $0.quantity = quantity }
     }
 
-    func captureCarted(householdID: UUID, listID: UUID) throws -> ClearCartedToken {
+    func setUrgency(_ urgency: NeedUrgency, needID: UUID) throws {
+        try editNeed(id: needID) { $0.urgency = urgency.rawValue }
+    }
+
+    func setPurchaseNote(_ notes: String, needID: UUID) throws {
+        try editNeed(id: needID) { $0.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    func updateOneTimeNeed(
+        needID: UUID,
+        title: String,
+        notes: String,
+        categoryID: UUID?,
+        storeIDs: Set<UUID>,
+        anyStore: Bool
+    ) throws {
+        let title = try validatedName(title)
+        try write { context in
+            guard let need = try self.need(id: needID, in: context) else { throw NeedServiceError.needNotFound }
+            guard !need.archived, need.kind == NeedKind.oneTime.rawValue, need.item == nil,
+                  let household = need.list?.household else { throw NeedServiceError.scopeChanged }
+            let stores = try self.validatedStores(
+                ids: storeIDs, household: household, requiringActiveStoreUnless: anyStore, in: context
+            )
+            let category = try self.validatedCategory(id: categoryID, household: household, in: context)
+            need.title = title
+            need.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            need.oneTimeCategory = category
+            need.oneTimeStores = stores
+            need.oneTimeAnyStore = anyStore
+            need.revision += 1
+        }
+    }
+
+    func rememberOneTimeNeed(needID: UUID, existingItemID: UUID) throws -> UUID {
+        try write { context in
+            guard let need = try self.need(id: needID, in: context) else { throw NeedServiceError.needNotFound }
+            guard !need.archived, need.kind == NeedKind.oneTime.rawValue, need.item == nil,
+                  let list = need.list, let household = list.household else {
+                throw NeedServiceError.scopeChanged
+            }
+            guard let item = try self.item(id: existingItemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            guard !item.isArchived else { throw NeedServiceError.itemArchived }
+            guard item.household == household,
+                  item.objectID.persistentStore == need.objectID.persistentStore else {
+                throw NeedServiceError.scopeChanged
+            }
+            let conflicts = try self.activeRememberedNeeds(
+                itemID: existingItemID,
+                listID: list.id,
+                in: context
+            )
+            if let conflict = conflicts.first {
+                guard conflicts.count == 1 else {
+                    throw NeedServiceError.activeRememberedNeedDuplicates(
+                        try self.duplicateGroup(itemID: existingItemID, needs: conflicts)
+                    )
+                }
+                throw NeedServiceError.activeRememberedNeedConflict(conflict.id)
+            }
+            need.item = item
+            need.kind = NeedKind.remembered.rawValue
+            need.title = item.name
+            need.oneTimeCategory = nil
+            need.oneTimeStores = []
+            need.oneTimeAnyStore = false
+            need.revision += 1
+            return item.id
+        }
+    }
+
+    func rememberOneTimeNeedCreatingItem(needID: UUID, itemNotes: String = "") throws -> UUID {
+        try write { context in
+            guard let need = try self.need(id: needID, in: context) else { throw NeedServiceError.needNotFound }
+            guard !need.archived, need.kind == NeedKind.oneTime.rawValue, need.item == nil,
+                  let list = need.list, let household = list.household else {
+                throw NeedServiceError.scopeChanged
+            }
+            let name = try self.validatedName(need.title)
+            let normalized = CatalogProjection.normalizedName(name)
+            let itemRequest = Item.fetchRequest()
+            itemRequest.predicate = NSPredicate(format: "household.id == %@", household.id as CVarArg)
+            let collisions = try context.fetch(itemRequest)
+                .filter { CatalogProjection.normalizedName($0.name) == normalized }
+                .map(\.id)
+                .sorted { $0.uuidString < $1.uuidString }
+            guard collisions.isEmpty else { throw NeedServiceError.catalogNameCollision(collisions) }
+            let stores = try self.validatedStores(
+                ids: Set(need.oneTimeStores?.map(\.id) ?? []),
+                household: household,
+                requiringActiveStoreUnless: need.oneTimeAnyStore,
+                in: context
+            )
+            let category = try self.validatedCategory(id: need.oneTimeCategory?.id, household: household, in: context)
+
+            let item: Item = self.insert("Item", in: context)
+            item.id = UUID()
+            item.name = name
+            item.notes = itemNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.anyStore = need.oneTimeAnyStore
+            item.isArchived = false
+            self.route(item, with: household, in: context)
+            item.household = household
+            item.category = category
+            item.stores = stores
+            need.item = item
+            need.kind = NeedKind.remembered.rawValue
+            need.oneTimeCategory = nil
+            need.oneTimeStores = []
+            need.oneTimeAnyStore = false
+            need.revision += 1
+            return item.id
+        }
+    }
+
+    func rememberedDuplicateGroups(householdID: UUID, listID: UUID) throws -> [RememberedDuplicateGroup] {
+        try readOnWriter { context in
+            guard let list = try self.list(id: listID, in: context), list.household?.id == householdID else {
+                throw NeedServiceError.scopeChanged
+            }
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(format: "list.id == %@ AND archived == NO AND item != nil", listID as CVarArg)
+            let needs = try context.fetch(request)
+            try self.validateOccurrenceIdentities(needs)
+            let grouped = Dictionary(grouping: needs, by: { $0.item!.id })
+            return try grouped.compactMap { itemID, needs in
+                guard needs.count > 1 else { return nil }
+                return try self.duplicateGroup(itemID: itemID, needs: needs)
+            }.sorted { $0.itemID.uuidString < $1.itemID.uuidString }
+        }
+    }
+
+    func captureCarted(
+        householdID: UUID,
+        listID: UUID,
+        // A pre-confirmation allowlist captured by the caller (for example, visible or selected rows).
+        restrictedToNeedIDs: Set<UUID>? = nil
+    ) throws -> ClearCartedToken {
         try readOnWriter { context in
             guard let list = try self.list(id: listID, in: context),
                   list.household?.id == householdID else {
@@ -384,7 +630,14 @@ final class NeedService {
                 format: "list.id == %@ AND carted == YES AND archived == NO",
                 listID as CVarArg
             )
-            let snapshot = Dictionary(uniqueKeysWithValues: try context.fetch(request).map { ($0.id, $0.revision) })
+            let captured = try context.fetch(request).filter { restrictedToNeedIDs?.contains($0.id) ?? true }
+            var snapshot: [UUID: Int64] = [:]
+            for need in captured {
+                guard need.id != PersistenceModel.unsetID, snapshot[need.id] == nil else {
+                    throw NeedServiceError.invalidOccurrenceIdentity
+                }
+                snapshot[need.id] = need.revision
+            }
             return ClearCartedToken(
                 id: UUID(),
                 householdID: householdID,
@@ -487,12 +740,15 @@ final class NeedService {
     private func makeNeed(title: String, list: GroceryList, context: NSManagedObjectContext) -> Need {
         let need: Need = insert("Need", in: context)
         need.id = UUID()
+        need.kind = ""
         need.title = title
+        need.notes = ""
         need.quantity = 1
         need.carted = false
         need.urgency = "normal"
         need.revision = 0
         need.archived = false
+        need.oneTimeAnyStore = false
         if let store = list.objectID.persistentStore {
             context.assign(need, to: store)
         }
@@ -572,7 +828,13 @@ final class NeedService {
     }
 
     private func need(id: UUID, in context: NSManagedObjectContext) throws -> Need? {
-        try fetch(id: id, request: Need.fetchRequest(), in: context)
+        guard id != PersistenceModel.unsetID else { throw NeedServiceError.invalidOccurrenceIdentity }
+        let request = Need.fetchRequest()
+        request.fetchLimit = 2
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        let matches = try context.fetch(request)
+        guard matches.count < 2 else { throw NeedServiceError.invalidOccurrenceIdentity }
+        return matches.first
     }
 
     private func fetch<T: NSManagedObject>(
@@ -600,6 +862,46 @@ final class NeedService {
             needID as CVarArg
         )
         return try !context.fetch(request).isEmpty
+    }
+
+    private func activeRememberedNeeds(
+        itemID: UUID,
+        listID: UUID,
+        in context: NSManagedObjectContext
+    ) throws -> [Need] {
+        let request = Need.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "item.id == %@ AND list.id == %@ AND archived == NO",
+            itemID as CVarArg,
+            listID as CVarArg
+        )
+        let needs = try context.fetch(request)
+        try validateOccurrenceIdentities(needs)
+        return needs.sorted { $0.id.uuidString < $1.id.uuidString }
+    }
+
+    private func duplicateGroup(itemID: UUID, needs: [Need]) throws -> RememberedDuplicateGroup {
+        try validateOccurrenceIdentities(needs)
+        let candidates = needs.map {
+            RememberedDuplicateCandidate(
+                needID: $0.id,
+                quantity: $0.quantity,
+                carted: $0.carted,
+                urgency: NeedUrgency(rawValue: $0.urgency) ?? .normal,
+                notes: $0.notes,
+                revision: $0.revision
+            )
+        }.sorted { $0.needID.uuidString < $1.needID.uuidString }
+        return RememberedDuplicateGroup(itemID: itemID, candidates: candidates)
+    }
+
+    private func validateOccurrenceIdentities(_ needs: [Need]) throws {
+        var seen: Set<UUID> = []
+        for need in needs {
+            guard need.id != PersistenceModel.unsetID, seen.insert(need.id).inserted else {
+                throw NeedServiceError.invalidOccurrenceIdentity
+            }
+        }
     }
 
     private func insert<T: NSManagedObject>(_ entityName: String, in context: NSManagedObjectContext) -> T {
