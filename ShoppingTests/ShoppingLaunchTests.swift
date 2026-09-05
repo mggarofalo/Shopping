@@ -127,6 +127,56 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Corner Shop"].waitForExistence(timeout: 2))
     }
 
+    func testCategoryAndUrgentFilterChipsNarrowThenBroadenTheExistingGroceries() {
+        let app = launchApp(fixture: "populated")
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        revealGrocery(named: "Chipotles in adobo", in: app)
+
+        app.buttons["shopping.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 2))
+        setSwitch(named: "Urgent only", on: true, in: app)
+        let pantry = app.buttons["Pantry"]
+        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
+        pantry.tap()
+        dismissGroceryFilters(in: app)
+
+        XCTAssertTrue(app.buttons["Remove Urgent filter"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Remove Pantry filter"].exists)
+        attachScreenshot(named: "Pantry Urgent Filter Chips", app: app)
+        revealGrocery(named: "Granola", in: app)
+        assertNoGrocery(named: "Chipotles in adobo", in: app)
+
+        app.buttons["Remove Urgent filter"].tap()
+        revealGrocery(named: "Chipotles in adobo", in: app)
+        XCTAssertTrue(app.buttons["Remove Pantry filter"].exists)
+        revealGrocery(named: "Granola", in: app)
+
+        app.buttons["Remove Pantry filter"].tap()
+        revealGrocery(named: "Bananas", in: app)
+        revealGrocery(named: "Granola", in: app)
+    }
+
+    func testIncludedAndExcludedLiteralTagChipsGiveExclusionPrecedence() {
+        let app = launchApp(fixture: "populated")
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+
+        app.buttons["shopping.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 2))
+        setStoreTag(named: "Costco", in: .include, on: true, app: app)
+        setStoreTag(named: "Costco", in: .exclude, on: true, app: app)
+        dismissGroceryFilters(in: app)
+
+        XCTAssertTrue(app.buttons["Remove Tagged Costco filter"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Remove Not tagged Costco filter"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No matching groceries"].exists)
+
+        app.buttons["Remove Not tagged Costco filter"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Remove Tagged Costco filter"].exists)
+    }
+
     func testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries() {
         let app = launchApp()
         openCatalog(in: app)
@@ -272,6 +322,73 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openCatalog(in app: XCUIApplication) {
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+    }
+
+    private enum StoreTagSection: Int {
+        case include = 0
+        case exclude = 1
+
+        var header: String {
+            switch self {
+            case .include: "Include a store tag"
+            case .exclude: "Exclude a store tag"
+            }
+        }
+    }
+
+    private func dismissGroceryFilters(in app: XCUIApplication) {
+        XCTAssertTrue(app.navigationBars["Filters"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertFalse(app.navigationBars["Filters"].waitForExistence(timeout: 2))
+    }
+
+    private func setSwitch(named name: String, on: Bool, in app: XCUIApplication) {
+        let toggle = app.switches[name]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 2))
+        if (toggle.value as? String == "1") != on {
+            let control = toggle.switches.firstMatch
+            (control.exists ? control : toggle).tap()
+        }
+        XCTAssertEqual(toggle.value as? String, on ? "1" : "0")
+    }
+
+    private func setStoreTag(
+        named name: String,
+        in section: StoreTagSection,
+        on: Bool,
+        app: XCUIApplication
+    ) {
+        XCTAssertTrue(app.navigationBars["Filters"].exists)
+        let header = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", section.header)).firstMatch
+        XCTAssertTrue(header.exists)
+        let tags = app.switches.matching(NSPredicate(format: "label == %@", name))
+        let toggle = tags.element(boundBy: section.rawValue)
+        for _ in 0..<6 where !toggle.exists || !toggle.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertGreaterThanOrEqual(tags.count, section.rawValue + 1)
+        XCTAssertTrue(toggle.isHittable)
+        if (toggle.value as? String == "1") != on {
+            let control = toggle.switches.firstMatch
+            (control.exists ? control : toggle).tap()
+        }
+        XCTAssertEqual(toggle.value as? String, on ? "1" : "0")
+    }
+
+    private func revealGrocery(named name: String, in app: XCUIApplication) {
+        let grocery = staticText(named: name, in: app)
+        for _ in 0..<6 where !grocery.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(grocery.waitForExistence(timeout: 2), "Expected grocery \(name) to be visible")
+    }
+
+    private func assertNoGrocery(named name: String, in app: XCUIApplication) {
+        let grocery = staticText(named: name, in: app)
+        for _ in 0..<6 where !grocery.exists {
+            app.swipeUp()
+        }
+        XCTAssertFalse(grocery.exists, "Did not expect grocery \(name) after filtering")
     }
 
     private func enableArchivedItems(in app: XCUIApplication) {

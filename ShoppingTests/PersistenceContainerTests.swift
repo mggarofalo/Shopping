@@ -382,8 +382,14 @@ final class PersistenceContainerTests: XCTestCase {
 
             let needs = try context.fetch(Need.fetchRequest())
             let selection = PersistenceSelection(householdID: first.householdID, listID: first.listID)
-            let visible = needs.filter { GroceryRowScope.matches($0, selection: selection) && $0.carted }
-            XCTAssertEqual(visible.map(\.id), [firstNeedID])
+            let canonicalList = GroceryRowScope.canonicalList(
+                try context.fetch(GroceryList.fetchRequest()),
+                households: try context.fetch(Household.fetchRequest()),
+                selection: selection
+            )
+            XCTAssertNil(canonicalList, "A globally duplicated list identity cannot select a writable graph")
+            let visible = needs.filter { GroceryRowScope.matches($0, canonicalList: canonicalList) && $0.carted }
+            XCTAssertTrue(visible.isEmpty)
         }
     }
 

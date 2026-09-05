@@ -56,3 +56,11 @@ Catalog stores general item knowledge independently of current demand. Create/ed
 Search shows existing matches before creation. Introducing a normalized same-name item through creation or rename requires an explicit distinct-item choice; editing an already intentional same-name variant does not require reconfirming its identity. Match selection opens that existing item's staged editor and does not add a grocery.
 
 Available at store first limits eligibility. Tagged (any selected), Not tagged (none selected), text, and optional category then narrow the result. Filter chips expose literal membership and can be removed individually. Reset filters changes no stored data. Archived items have their own filter, and archive/restore never changes current grocery demand. Discarding a dirty draft during archive or restore requires confirmation.
+
+## Grocery filters and category grouping
+
+All changes only the store selection. Reset filters clears the store, search, urgency, category and literal tag filters; neither action changes groceries. Removable chips make each additional filter visible. Include and exclude selections remain independent, so selecting the same literal tag in both produces no matches until one is removed. Any store never implies a literal store tag.
+
+Within Must buy here/Flexible here (or All), urgency comes first, followed by the household's category order and then Uncategorized. Category management supports staged rename, exact reorder and confirmed removal. Removing a category keeps its groceries and catalog items, with their category becoming Uncategorized; it is not grocery deletion.
+
+Rows show One-time and Urgent in words, and describe only valid active purchase choices. Any-store rows also show their explicit active tags, so literal tag filters remain understandable. Missing, archived-only or ambiguous store choices show Needs store in All. Imported ambiguous category identities group under Uncategorized consistently with the category filter.

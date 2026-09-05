@@ -9,12 +9,14 @@ final class GroceryNavigationState: ObservableObject {
     @Published var includedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var excludedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var urgentOnly: Bool { didSet { persist() } }
+    @Published var categoryID: UUID? { didSet { persist() } }
 
     private struct SavedFilter: Codable, Equatable {
         var selectedStoreID: UUID?
         var includedStoreIDs: Set<UUID>
         var excludedStoreIDs: Set<UUID>
         var urgentOnly: Bool
+        var categoryID: UUID?
     }
 
     private let defaults: UserDefaults
@@ -29,15 +31,20 @@ final class GroceryNavigationState: ObservableObject {
         includedStoreIDs = []
         excludedStoreIDs = []
         urgentOnly = false
+        categoryID = nil
     }
 
     var activeFilterCount: Int {
-        includedStoreIDs.count + excludedStoreIDs.count + (urgentOnly ? 1 : 0)
+        includedStoreIDs.count + excludedStoreIDs.count + (urgentOnly ? 1 : 0) + (categoryID == nil ? 0 : 1)
     }
 
-    func configure(householdID: UUID?, activeStoreIDs: Set<UUID>) {
+    func configure(
+        householdID: UUID?,
+        activeStoreIDs: Set<UUID>,
+        activeCategoryIDs: Set<UUID> = []
+    ) {
         guard self.householdID != householdID else {
-            sanitize(activeStoreIDs: activeStoreIDs)
+            sanitize(activeStoreIDs: activeStoreIDs, activeCategoryIDs: activeCategoryIDs)
             return
         }
         isRestoring = true
@@ -49,14 +56,16 @@ final class GroceryNavigationState: ObservableObject {
             includedStoreIDs = saved.includedStoreIDs
             excludedStoreIDs = saved.excludedStoreIDs
             urgentOnly = saved.urgentOnly
+            categoryID = saved.categoryID
         } else {
             selectedStoreID = nil
             includedStoreIDs = []
             excludedStoreIDs = []
             urgentOnly = false
+            categoryID = nil
         }
         isRestoring = false
-        sanitize(activeStoreIDs: activeStoreIDs)
+        sanitize(activeStoreIDs: activeStoreIDs, activeCategoryIDs: activeCategoryIDs)
     }
 
     func selectAll() { selectedStoreID = nil }
@@ -66,7 +75,6 @@ final class GroceryNavigationState: ObservableObject {
     func setIncluded(_ included: Bool, storeID: UUID) {
         if included {
             includedStoreIDs.insert(storeID)
-            excludedStoreIDs.remove(storeID)
         } else {
             includedStoreIDs.remove(storeID)
         }
@@ -75,7 +83,6 @@ final class GroceryNavigationState: ObservableObject {
     func setExcluded(_ excluded: Bool, storeID: UUID) {
         if excluded {
             excludedStoreIDs.insert(storeID)
-            includedStoreIDs.remove(storeID)
         } else {
             excludedStoreIDs.remove(storeID)
         }
@@ -85,15 +92,19 @@ final class GroceryNavigationState: ObservableObject {
         includedStoreIDs = []
         excludedStoreIDs = []
         urgentOnly = false
+        categoryID = nil
     }
 
-    func sanitize(activeStoreIDs: Set<UUID>) {
+    func sanitize(activeStoreIDs: Set<UUID>, activeCategoryIDs: Set<UUID> = []) {
         isRestoring = true
         if let selectedStoreID, !activeStoreIDs.contains(selectedStoreID) {
             self.selectedStoreID = nil
         }
         includedStoreIDs.formIntersection(activeStoreIDs)
         excludedStoreIDs.formIntersection(activeStoreIDs)
+        if let categoryID, !activeCategoryIDs.contains(categoryID) {
+            self.categoryID = nil
+        }
         isRestoring = false
         persist()
     }
@@ -104,7 +115,8 @@ final class GroceryNavigationState: ObservableObject {
             selectedStoreID: selectedStoreID,
             includedStoreIDs: includedStoreIDs,
             excludedStoreIDs: excludedStoreIDs,
-            urgentOnly: urgentOnly
+            urgentOnly: urgentOnly,
+            categoryID: categoryID
         )
         if let data = try? JSONEncoder().encode(saved) {
             defaults.set(data, forKey: key(for: householdID))
