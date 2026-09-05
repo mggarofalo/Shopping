@@ -44,6 +44,7 @@ struct GroceriesView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @ObservedObject var navigation: GroceryNavigationState
     @State private var searchText = ""
     @State private var visibleNeedIDs: Set<UUID> = []
@@ -103,18 +104,14 @@ struct GroceriesView: View {
                     List {
                         if let selectedStoreID = navigation.selectedStoreID {
                             Section("Must buy here") {
-                                ForEach(storePartition(.mustBuyHere, selectedStoreID: selectedStoreID), id: \.objectID) { need in
-                                    GroceryNeedRow(need: need)
-                                }
+                                groupedRows(storePartition(.mustBuyHere, selectedStoreID: selectedStoreID))
                             }
                             Section("Flexible here") {
-                                ForEach(storePartition(.flexibleHere, selectedStoreID: selectedStoreID), id: \.objectID) { need in
-                                    GroceryNeedRow(need: need)
-                                }
+                                groupedRows(storePartition(.flexibleHere, selectedStoreID: selectedStoreID))
                             }
                         } else {
                             Section("Needed") {
-                                ForEach(sorted(visibleNeeds), id: \.objectID) { need in GroceryNeedRow(need: need) }
+                                groupedRows(visibleNeeds)
                             }
                         }
                     }
@@ -301,6 +298,26 @@ struct GroceriesView: View {
         values.sorted {
             if $0.urgency != $1.urgency { return $0.urgency == NeedUrgency.urgent.rawValue }
             return ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title) == .orderedAscending
+        }
+    }
+
+    @ViewBuilder
+    private func groupedRows(_ values: [Need]) -> some View {
+        let groups = CategoryGrouping.groups(
+            needs: values,
+            categories: Array(categories),
+            household: values.first?.list?.household
+        )
+        ForEach(groups) { priority in
+            ForEach(priority.categories) { category in
+                Text("\(priority.title) · \(category.title)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(category.needs, id: \.objectID) { need in
+                    GroceryNeedRow(need: need)
+                }
+            }
         }
     }
 

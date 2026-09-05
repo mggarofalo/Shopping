@@ -162,6 +162,52 @@ final class NeedService {
         }
     }
 
+    func renameCategory(name: String, categoryID: UUID, householdID: UUID) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            guard let category = try self.category(id: categoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard category.household == household,
+                  category.objectID.persistentStore == household.objectID.persistentStore else {
+                throw NeedServiceError.scopeChanged
+            }
+            category.name = name
+        }
+    }
+
+    func reorderCategories(_ orderedCategoryIDs: [UUID], householdID: UUID) throws {
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            let request = Category.fetchRequest()
+            let owned = try context.fetch(request).filter {
+                $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore
+            }
+            let ownedIDs = owned.map(\.id)
+            guard !ownedIDs.contains(PersistenceModel.unsetID),
+                  Set(ownedIDs).count == owned.count,
+                  Set(orderedCategoryIDs).count == orderedCategoryIDs.count,
+                  Set(ownedIDs) == Set(orderedCategoryIDs) else {
+                throw NeedServiceError.scopeChanged
+            }
+            for category in owned {
+                guard let canonical = try self.category(id: category.id, in: context), canonical === category else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
+            let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
+            for (index, id) in orderedCategoryIDs.enumerated() {
+                byID[id]?.displayOrder = Int64(index)
+            }
+        }
+    }
+
     func setStoreArchived(_ archived: Bool, storeID: UUID, householdID: UUID) throws {
         try write { context in
             guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
@@ -234,11 +280,23 @@ final class NeedService {
 
     func removeCategory(categoryID: UUID, householdID: UUID) throws {
         try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
             guard let category = try self.category(id: categoryID, in: context) else {
                 throw NeedServiceError.categoryNotFound
             }
-            guard category.household?.id == householdID else {
+            guard category.household == household,
+                  category.objectID.persistentStore == household.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
+            }
+            for item in category.items ?? [] { item.category = nil }
+            for need in category.oneTimeNeeds ?? [] {
+                need.oneTimeCategory = nil
+                if !need.archived {
+                    need.revision += 1
+                    need.clearOperationID = nil
+                }
             }
             context.delete(category)
         }

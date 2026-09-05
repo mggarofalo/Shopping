@@ -2,17 +2,11 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.persistenceSelection) private var selection
-    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     var body: some View {
         NavigationStack {
             List {
                 NavigationLink("Stores", destination: StoreManagementView())
-                Section("Categories") {
-                    ForEach(categories.filter { $0.household?.id == selection.householdID && $0.id != PersistenceModel.unsetID }, id: \.objectID) { category in
-                        Text(category.name)
-                    }
-                }
+                NavigationLink("Categories", destination: CategoryManagementView())
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
                     Text("Groceries are available in this app’s current local household store.")

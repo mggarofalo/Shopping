@@ -245,7 +245,9 @@ final class ShoppingLaunchTests: XCTestCase {
 
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Bananas"].exists)
+        let bananas = app.staticTexts["Bananas"]
+        for _ in 0..<6 where !bananas.exists { app.swipeUp() }
+        XCTAssertTrue(bananas.waitForExistence(timeout: 2))
     }
 
     private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false) -> XCUIApplication {
