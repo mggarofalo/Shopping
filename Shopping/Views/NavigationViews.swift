@@ -522,43 +522,7 @@ struct RecentlyClearedView: View {
     }
 }
 
-struct CatalogView: View {
-    @Environment(\.persistenceSelection) private var selection
-    @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
-    @State private var searchText = ""
-    private var catalogItems: [Item] {
-        let candidates = items.filter {
-            $0.household?.id == selection.householdID && !$0.isArchived && $0.id != PersistenceModel.unsetID
-        }
-        let counts = Dictionary(grouping: candidates, by: \.id).mapValues(\.count)
-        return candidates.filter {
-            counts[$0.id] == 1 && (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText))
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List(catalogItems, id: \.objectID) { item in
-                VStack(alignment: .leading) {
-                    Text(item.name)
-                    Text(purchaseSummary(item)).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .overlay { if items.allSatisfy({ $0.household?.id != selection.householdID || $0.isArchived }) { ContentUnavailableView("No remembered groceries", systemImage: "books.vertical", description: Text("Reusable groceries will appear here.")) } }
-            .navigationTitle("Catalog")
-            .searchable(text: $searchText, prompt: "Search catalog")
-        }
-    }
-
-    private func purchaseSummary(_ item: Item) -> String {
-        if item.anyStore { return "Any store" }
-        let names = (item.stores ?? []).filter { !$0.isArchived }.map(\.name).sorted()
-        return names.isEmpty ? "Needs store" : names.joined(separator: ", ")
-    }
-}
-
 #Preview("Groceries") { ShoppingPreviewHost(.populated) { GroceriesView(navigation: GroceryNavigationState()) } }
-#Preview("Catalog") { ShoppingPreviewHost(.populated) { CatalogView() } }
 #Preview("Settings") { ShoppingPreviewHost(.archivedStore) { SettingsView() } }
 
 

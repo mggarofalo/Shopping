@@ -48,3 +48,11 @@ Settings supports explicit store creation, staged rename, exact-set ordering, an
 The purchase-rule picker keeps Any store separate from literal tags. Existing archived tags may remain alongside an active tag or Any store; unavailable identities can be explicitly removed. Choices and inline existing-store suggestions use the selected list's household object and persistent store, and exclude ambiguous store IDs.
 
 Add store opens within the tagging form. Cancel leaves the grocery draft intact. Save store explicitly adds household metadata and selects its tag; the grocery remains staged until Add. Canceling the parent after Save store retains that explicitly saved store but creates no grocery or catalog entry.
+
+## Reusable catalog
+
+Catalog stores general item knowledge independently of current demand. Create/edit stages the name, general notes, optional category, Any store flag, and literal store tags; Save submits them in one atomic command. Cancel makes no catalog or grocery change. A new item starts with the current catalog availability-store filter as its explicit tag, or asks for a store/Any store when viewing all stores. Existing items always start with their own saved rules.
+
+Search shows existing matches before creation. Introducing a normalized same-name item through creation or rename requires an explicit distinct-item choice; editing an already intentional same-name variant does not require reconfirming its identity. Match selection opens that existing item's staged editor and does not add a grocery.
+
+Available at store first limits eligibility. Tagged (any selected), Not tagged (none selected), text, and optional category then narrow the result. Filter chips expose literal membership and can be removed individually. Reset filters changes no stored data. Archived items have their own filter, and archive/restore never changes current grocery demand. Discarding a dirty draft during archive or restore requires confirmation.

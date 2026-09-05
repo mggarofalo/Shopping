@@ -58,6 +58,22 @@ enum StoreEligibility: Equatable {
     case needsStore
 }
 
+struct CatalogItemValues: Equatable {
+    var name: String
+    var notes: String
+    var categoryID: UUID?
+    var anyStore: Bool
+    var storeIDs: Set<UUID>
+}
+
+private struct ValidatedCatalogItemValues {
+    let name: String
+    let notes: String
+    let category: Category?
+    let stores: Set<Store>
+    let anyStore: Bool
+}
+
 final class NeedService {
     private static let unsetImportedID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     private let persistence: PersistenceController
@@ -263,6 +279,80 @@ final class NeedService {
         }
     }
 
+    @discardableResult
+    func createCatalogItem(
+        values: CatalogItemValues,
+        householdID: UUID,
+        allowingNameCollision: Bool = false
+    ) throws -> UUID {
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            let validated = try self.validatedCatalogValues(values, household: household, in: context)
+            let collisions = try self.catalogNameCollisions(
+                name: validated.name,
+                household: household,
+                excluding: nil,
+                in: context
+            )
+            if !allowingNameCollision {
+                guard collisions.isEmpty else { throw NeedServiceError.catalogNameCollision(collisions) }
+            }
+            let item = self.insertCatalogItem(validated, household: household, in: context)
+            return item.id
+        }
+    }
+
+    func saveCatalogItem(
+        itemID: UUID,
+        householdID: UUID,
+        values: CatalogItemValues,
+        allowingNameCollision: Bool = false
+    ) throws {
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            try self.validate(item: item, belongsTo: household)
+            let validated = try self.validatedCatalogValues(values, household: household, in: context)
+            let normalizedNameChanged = CatalogProjection.normalizedName(item.name) !=
+                CatalogProjection.normalizedName(validated.name)
+            if normalizedNameChanged {
+                let collisions = try self.catalogNameCollisions(
+                    name: validated.name,
+                    household: household,
+                    excluding: item.id,
+                    in: context
+                )
+                if !allowingNameCollision && !collisions.isEmpty {
+                    throw NeedServiceError.catalogNameCollision(collisions)
+                }
+            }
+            item.name = validated.name
+            item.notes = validated.notes
+            item.category = validated.category
+            item.anyStore = values.anyStore
+            item.stores = validated.stores
+        }
+    }
+
+    func setCatalogItemArchived(itemID: UUID, householdID: UUID, archived: Bool) throws {
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            try self.validate(item: item, belongsTo: household)
+            item.isArchived = archived
+        }
+    }
+
     func setStoreTags(itemID: UUID, storeIDs: Set<UUID>) throws {
         try setPurchaseRules(itemID: itemID, anyStore: nil, storeIDs: storeIDs)
     }
@@ -348,17 +438,27 @@ final class NeedService {
         }
     }
 
-    func filteredCatalogItemIDs(householdID: UUID, filter: CatalogItemFilter) throws -> [UUID] {
+    func filteredCatalogItemIDs(
+        householdID: UUID,
+        filter: CatalogItemFilter,
+        includeArchived: Bool = false
+    ) throws -> [UUID] {
         try readOnWriter { context in
-            let activeStores = try self.activeStoreIDs(householdID: householdID, in: context)
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            let activeStores = try self.activeStoreIDs(household: household, in: context)
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(
                 format: "household.id == %@",
                 householdID as CVarArg
             )
-            let items = try self.validCatalogItems(try context.fetch(request))
+            let items = try self.validCatalogItems(try context.fetch(request)).filter {
+                $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore
+            }
             return items.filter { item in
-                guard !item.isArchived else { return false }
+                guard includeArchived || !item.isArchived else { return false }
                 let value = PurchaseRuleValue(
                     explicitStoreIDs: Set(item.stores?.map(\.id) ?? []),
                     anyStore: item.anyStore
@@ -907,6 +1007,83 @@ final class NeedService {
         return Set(stores)
     }
 
+    private func validatedCatalogValues(
+        _ values: CatalogItemValues,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> ValidatedCatalogItemValues {
+        let name = try validatedName(values.name)
+        let category = try validatedCategory(id: values.categoryID, household: household, in: context)
+        var stores: Set<Store> = []
+        for id in values.storeIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let store = try store(id: id, in: context) else {
+                throw NeedServiceError.storeNotFound
+            }
+            guard store.household == household,
+                  store.objectID.persistentStore == household.objectID.persistentStore else {
+                throw NeedServiceError.scopeChanged
+            }
+            stores.insert(store)
+        }
+        guard values.anyStore || stores.contains(where: { !$0.isArchived }) else {
+            throw NeedServiceError.scopeChanged
+        }
+        return ValidatedCatalogItemValues(
+            name: name,
+            notes: values.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            category: category,
+            stores: stores,
+            anyStore: values.anyStore
+        )
+    }
+
+    private func insertCatalogItem(
+        _ values: ValidatedCatalogItemValues,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) -> Item {
+        let item: Item = insert("Item", in: context)
+        item.id = UUID()
+        item.name = values.name
+        item.notes = values.notes
+        item.anyStore = values.anyStore
+        item.isArchived = false
+        route(item, with: household, in: context)
+        item.household = household
+        item.category = values.category
+        item.stores = values.stores
+        return item
+    }
+
+    private func catalogNameCollisions(
+        name: String,
+        household: Household,
+        excluding itemID: UUID?,
+        in context: NSManagedObjectContext
+    ) throws -> [UUID] {
+        let request = Item.fetchRequest()
+        request.predicate = NSPredicate(format: "household.id == %@", household.id as CVarArg)
+        let normalized = CatalogProjection.normalizedName(name)
+        let items = try context.fetch(request)
+        try validateCatalogIdentities(items)
+        return items
+            .filter {
+                $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore &&
+                    $0.id != itemID &&
+                    CatalogProjection.normalizedName($0.name) == normalized
+            }
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+    }
+
+    private func validate(item: Item, belongsTo household: Household) throws {
+        guard item.household == household,
+              item.objectID.persistentStore == household.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+    }
+
     private func activeStoreIDs(householdID: UUID, in context: NSManagedObjectContext) throws -> Set<UUID> {
         let request = Store.fetchRequest()
         request.predicate = NSPredicate(
@@ -916,12 +1093,31 @@ final class NeedService {
         return Set(try validActiveStores(try context.fetch(request)).filter { !$0.isArchived }.map(\.id))
     }
 
+    private func activeStoreIDs(household: Household, in context: NSManagedObjectContext) throws -> Set<UUID> {
+        let request = Store.fetchRequest()
+        request.predicate = NSPredicate(format: "household.id == %@", household.id as CVarArg)
+        let stores = try validActiveStores(try context.fetch(request)).filter {
+            $0.household == household &&
+                $0.objectID.persistentStore == household.objectID.persistentStore
+        }
+        return Set(stores.filter { !$0.isArchived }.map(\.id))
+    }
+
     private func validCatalogItems(_ items: [Item]) throws -> [Item] {
         var seen: Set<UUID> = []
         return try items.compactMap { item in
             guard item.id != PersistenceModel.unsetID else { return nil }
             guard seen.insert(item.id).inserted else { throw NeedServiceError.invalidCatalogIdentity }
             return item
+        }
+    }
+
+    private func validateCatalogIdentities(_ items: [Item]) throws {
+        var seen: Set<UUID> = []
+        for item in items {
+            guard item.id != PersistenceModel.unsetID, seen.insert(item.id).inserted else {
+                throw NeedServiceError.invalidCatalogIdentity
+            }
         }
     }
 

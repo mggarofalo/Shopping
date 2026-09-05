@@ -127,6 +127,127 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Corner Shop"].waitForExistence(timeout: 2))
     }
 
+    func testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries() {
+        let app = launchApp()
+        openCatalog(in: app)
+
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.catalog.name"], with: "Canceled catalog item")
+        app.buttons["Cancel"].tap()
+        XCTAssertFalse(app.staticTexts["Canceled catalog item"].waitForExistence(timeout: 2))
+
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.catalog.name"], with: "Reusable coffee")
+        replaceText(in: app.textFields["shopping.catalog.notes"], with: "Whole bean")
+        let anyStore = app.switches["Any store"]
+        XCTAssertTrue(anyStore.waitForExistence(timeout: 2))
+        let anyStoreControl = anyStore.switches.firstMatch
+        (anyStoreControl.exists ? anyStoreControl : anyStore).tap()
+        XCTAssertEqual(anyStore.value as? String, "1")
+        let save = app.buttons["shopping.catalog.save"]
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Reusable coffee"].waitForExistence(timeout: 2))
+
+        app.staticTexts["Reusable coffee"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.catalog.name"], with: "Canceled coffee edit")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Reusable coffee"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Canceled coffee edit"].exists)
+
+        app.staticTexts["Reusable coffee"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.catalog.name"], with: "Saved coffee edit")
+        app.buttons["shopping.catalog.save"].tap()
+        XCTAssertTrue(app.staticTexts["Saved coffee edit"].waitForExistence(timeout: 2))
+
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Saved coffee edit"].exists)
+    }
+
+    func testCatalogArchiveFilterAndRestorePreservesActiveGrocery() {
+        let app = launchApp(fixture: "populated")
+        openCatalog(in: app)
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        app.staticTexts["Granola"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        app.buttons["shopping.catalog.archive"].tap()
+        tapArchiveStateConfirmation(in: "Archive this catalog item?", app: app)
+        XCTAssertFalse(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+
+        app.buttons["shopping.catalog.filters"].tap()
+        enableArchivedItems(in: app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+
+        app.staticTexts["Granola"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        app.buttons["shopping.catalog.archive"].tap()
+        XCTAssertFalse(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+
+        app.buttons["shopping.catalog.filters"].tap()
+        resetCatalogFilters(in: app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+    }
+
+    func testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft() {
+        let app = launchApp(fixture: "populated")
+        openCatalog(in: app)
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        app.staticTexts["Granola"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        app.buttons["shopping.catalog.archive"].tap()
+        tapArchiveStateConfirmation(in: "Archive this catalog item?", app: app)
+
+        app.buttons["shopping.catalog.filters"].tap()
+        enableArchivedItems(in: app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+        app.staticTexts["Granola"].tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.catalog.name"], with: "Draft granola")
+        replaceText(in: app.textFields["shopping.catalog.notes"], with: "Draft note")
+        let draftName = app.textFields["shopping.catalog.name"].value as? String
+        let draftNotes = app.textFields["shopping.catalog.notes"].value as? String
+        XCTAssertNotEqual(draftName, "Granola")
+        XCTAssertFalse(draftNotes?.isEmpty ?? true)
+        app.buttons["shopping.catalog.archive"].tap()
+        XCTAssertTrue(app.staticTexts["Restore this catalog item?"].waitForExistence(timeout: 2))
+
+        let restoreAlert = app.alerts["Restore this catalog item?"]
+        XCTAssertTrue(restoreAlert.waitForExistence(timeout: 2))
+        let keepEditing = restoreAlert.buttons["Keep editing"].firstMatch
+        XCTAssertTrue(keepEditing.waitForExistence(timeout: 2))
+        keepEditing.tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, draftName)
+        XCTAssertEqual(app.textFields["shopping.catalog.notes"].value as? String, draftNotes)
+    }
+
+    func testCatalogFilterResetAtAccessibilitySizeDoesNotChangeGroceries() {
+        let app = launchApp(fixture: "populated", accessibilitySize: true)
+        openCatalog(in: app)
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        app.buttons["shopping.catalog.filters"].tap()
+        enableArchivedItems(in: app)
+        resetCatalogFilters(in: app)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+        attachScreenshot(named: "Populated Catalog Accessibility Large", app: app)
+
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Bananas"].exists)
+    }
+
     private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
@@ -146,6 +267,42 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
     }
 
+    private func openCatalog(in app: XCUIApplication) {
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+    }
+
+    private func enableArchivedItems(in app: XCUIApplication) {
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
+        let archived = app.switches["Archived items"]
+        for _ in 0..<3 where !archived.exists || !archived.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(archived.waitForExistence(timeout: 2))
+        XCTAssertTrue(archived.isHittable)
+        let archivedControl = archived.switches.firstMatch
+        (archivedControl.exists ? archivedControl : archived).tap()
+        XCTAssertEqual(archived.value as? String, "1")
+    }
+
+    private func tapArchiveStateConfirmation(in title: String, app: XCUIApplication) {
+        let confirmation = app.alerts[title]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
+        let action = confirmation.buttons["shopping.catalog.confirmArchiveState"].firstMatch
+        XCTAssertTrue(action.waitForExistence(timeout: 2))
+        action.tap()
+        XCTAssertFalse(confirmation.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.navigationBars["Edit catalog item"].exists)
+    }
+
+    private func resetCatalogFilters(in app: XCUIApplication) {
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
+        let reset = app.buttons["shopping.catalog.reset"].firstMatch
+        XCTAssertTrue(reset.waitForExistence(timeout: 2))
+        reset.tap()
+    }
+
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
@@ -159,6 +316,11 @@ final class ShoppingLaunchTests: XCTestCase {
         field.tap()
         field.typeKey("a", modifierFlags: .command)
         field.typeKey(.delete, modifierFlags: [])
+        if let remainingText = field.value as? String {
+            for _ in remainingText {
+                field.typeKey(.delete, modifierFlags: [])
+            }
+        }
         field.typeText(text)
     }
 
