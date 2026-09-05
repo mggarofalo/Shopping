@@ -14,6 +14,21 @@ struct ContentView: View {
     }
 }
 
-#Preview {
-    ContentView()
+#Preview("Populated grocery environment") {
+    ShoppingPreviewHost(.populated) {
+        ContentView()
+    }
+}
+
+#Preview("Empty grocery environment") {
+    ShoppingPreviewHost(.empty) {
+        ContentView()
+    }
+}
+
+#Preview("Large text · Accessibility") {
+    ShoppingPreviewHost(.largeText) {
+        ContentView()
+            .environment(\.dynamicTypeSize, .accessibility3)
+    }
 }
