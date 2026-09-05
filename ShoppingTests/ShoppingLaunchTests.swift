@@ -29,8 +29,8 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(app.staticTexts["Must buy here"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Flexible here"].exists)
+        XCTAssertTrue(staticText(named: "Must buy here", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(staticText(named: "Flexible here", in: app).exists)
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Carted")).firstMatch.exists)
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
@@ -71,5 +71,9 @@ final class ShoppingLaunchTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func staticText(named label: String, in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", label)).firstMatch
     }
 }
