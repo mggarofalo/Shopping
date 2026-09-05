@@ -54,6 +54,79 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Fresh basil"].exists)
     }
 
+    func testStoreManagementStagesRenameAndSupportsArchiveRestore() {
+        let app = launchApp()
+        openStoreManagement(in: app)
+
+        let createName = app.textFields["shopping.stores.createName"]
+        XCTAssertTrue(createName.waitForExistence(timeout: 2))
+        createName.tap()
+        createName.typeText("Neighborhood Market")
+        app.buttons["Save store"].tap()
+        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+
+        app.buttons["Rename"].tap()
+        XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.stores.renameName"], with: "Canceled Market")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
+
+        app.buttons["Rename"].tap()
+        XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
+        replaceText(in: app.textFields["shopping.stores.renameName"], with: "Local Market")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
+
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Restore"].exists)
+        attachScreenshot(named: "Store Management Archived", app: app)
+        app.buttons["Restore"].tap()
+        XCTAssertFalse(app.staticTexts["Archived"].exists)
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 2))
+    }
+
+    func testCancelingInlineStoreAndParentAddCreatesNeitherStoreNorNeed() {
+        let app = launchApp()
+        openOneTimeAdd(in: app, groceryName: "Canceled grocery")
+        app.buttons["shopping.tags.addStore"].tap()
+        XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
+        let storeName = app.textFields["shopping.tags.storeName"]
+        storeName.tap()
+        storeName.typeText("Canceled store")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Canceled store"].exists)
+        app.buttons["Cancel"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        openStoreManagement(in: app)
+        XCTAssertFalse(app.staticTexts["Canceled store"].exists)
+    }
+
+    func testSavingInlineStoreSelectsItButParentCancelCreatesNoNeed() {
+        let app = launchApp()
+        openOneTimeAdd(in: app, groceryName: "Canceled tagged grocery")
+        app.buttons["shopping.tags.addStore"].tap()
+        XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
+        let storeName = app.textFields["shopping.tags.storeName"]
+        storeName.tap()
+        storeName.typeText("Corner Shop")
+        app.buttons["Save store"].tap()
+
+        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
+        let selectedStore = app.switches["Corner Shop"]
+        XCTAssertTrue(selectedStore.waitForExistence(timeout: 2))
+        XCTAssertEqual(selectedStore.value as? String, "1")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+
+        openStoreManagement(in: app)
+        XCTAssertTrue(app.staticTexts["Corner Shop"].waitForExistence(timeout: 2))
+    }
+
     private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
@@ -64,6 +137,29 @@ final class ShoppingLaunchTests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func openStoreManagement(in app: XCUIApplication) {
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
+        app.buttons["Stores"].tap()
+        XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
+    }
+
+    private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
+        XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
+        app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add one-time grocery"].waitForExistence(timeout: 2))
+        let name = app.textFields["Grocery name"]
+        name.tap()
+        name.typeText(groceryName)
+    }
+
+    private func replaceText(in field: XCUIElement, with text: String) {
+        field.tap()
+        field.typeKey("a", modifierFlags: .command)
+        field.typeKey(.delete, modifierFlags: [])
+        field.typeText(text)
     }
 
     private func attachScreenshot(named name: String, app: XCUIApplication) {

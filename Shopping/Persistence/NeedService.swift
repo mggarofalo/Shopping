@@ -148,13 +148,48 @@ final class NeedService {
 
     func setStoreArchived(_ archived: Bool, storeID: UUID, householdID: UUID) throws {
         try write { context in
+            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
             guard let store = try self.store(id: storeID, in: context) else {
                 throw NeedServiceError.storeNotFound
             }
-            guard store.household?.id == householdID else {
+            guard store.household == household,
+                  store.objectID.persistentStore == household.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
             }
             store.isArchived = archived
+        }
+    }
+
+    func renameStore(name: String, storeID: UUID, householdID: UUID) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
+            guard let store = try self.store(id: storeID, in: context) else { throw NeedServiceError.storeNotFound }
+            guard store.household == household,
+                  store.objectID.persistentStore == household.objectID.persistentStore else { throw NeedServiceError.scopeChanged }
+            store.name = name
+        }
+    }
+
+    func reorderStores(_ orderedStoreIDs: [UUID], householdID: UUID) throws {
+        try write { context in
+            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
+            let request = Store.fetchRequest()
+            let owned = try context.fetch(request).filter {
+                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+            }
+            let ownedIDs = owned.map(\.id)
+            guard !ownedIDs.contains(PersistenceModel.unsetID),
+                  Set(ownedIDs).count == owned.count,
+                  Set(orderedStoreIDs).count == orderedStoreIDs.count,
+                  Set(owned.map(\.id)) == Set(orderedStoreIDs) else { throw NeedServiceError.scopeChanged }
+            for store in owned {
+                guard let canonical = try self.store(id: store.id, in: context), canonical === store else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
+            let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
+            for (index, id) in orderedStoreIDs.enumerated() { byID[id]?.displayOrder = Int64(index) }
         }
     }
 
@@ -371,7 +406,10 @@ final class NeedService {
             if item.anyStore { return .anyStore }
             let active = try self.validActiveStores(
                 Array(item.stores ?? [])
-            ).filter { !$0.isArchived }.sorted(by: Self.storeDisplayOrder)
+            ).filter {
+                !$0.isArchived && $0.household != nil && $0.household == item.household &&
+                    $0.objectID.persistentStore == item.objectID.persistentStore
+            }.sorted(by: Self.storeDisplayOrder)
             return active.isEmpty ? .needsStore : .activeStores(active.map(\.id))
         }
     }

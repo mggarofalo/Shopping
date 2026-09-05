@@ -40,3 +40,11 @@ Empty household: Add groceries is the primary action. Empty filtered result: exp
 This is a native utility, so avoid a marketing hero, decorative cards, gradients, custom animation or artificial branding. The useful distinction is the buying rule: Only buy at Costco vs Buy at Costco/Walmart vs Any store. No retailer-stock claims, trips, events, reminders or price engine. Native text scaling, VoiceOver labels, reduced motion and clear item state have priority over ornamental novelty.
 
 Implementation follows Plane issue dependencies. Navigation destinations may be scaffolded first; usable add/edit and safe clear are completed by their dedicated issues before any MVP claim.
+
+## Store management and purchase tags
+
+Settings supports explicit store creation, staged rename, exact-set ordering, and archive/restore. Archive preserves catalog memberships and groceries. Archived tags remain known; they do not make a grocery eligible at a current store. All and Catalog expose Needs store when no active purchase option remains.
+
+The purchase-rule picker keeps Any store separate from literal tags. Existing archived tags may remain alongside an active tag or Any store; unavailable identities can be explicitly removed. Choices and inline existing-store suggestions use the selected list's household object and persistent store, and exclude ambiguous store IDs.
+
+Add store opens within the tagging form. Cancel leaves the grocery draft intact. Save store explicitly adds household metadata and selects its tag; the grocery remains staged until Add. Canceling the parent after Save store retains that explicitly saved store but creates no grocery or catalog entry.

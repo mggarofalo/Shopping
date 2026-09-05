@@ -3,6 +3,28 @@ import XCTest
 @testable import Shopping
 
 final class PersistenceHarnessTests: XCTestCase {
+    func testStoreManagementRenamesReordersAndRejectsIncompleteOrForeignOrder() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold()
+        let second = try service.createHousehold()
+        let aldi = try service.createStore(name: " Aldi ", householdID: first.householdID)
+        let costco = try service.createStore(name: "Costco", householdID: first.householdID)
+        let foreign = try service.createStore(name: "Foreign", householdID: second.householdID)
+        try service.renameStore(name: " Aldi Market ", storeID: aldi, householdID: first.householdID)
+        try service.reorderStores([costco, aldi], householdID: first.householdID)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let stores = try context.fetch(Store.fetchRequest()).filter { $0.household?.id == first.householdID }
+            XCTAssertEqual(stores.sorted(by: NeedService.storeDisplayOrder).map(\.id), [costco, aldi])
+            XCTAssertEqual(stores.first { $0.id == aldi }?.name, "Aldi Market")
+        }
+        XCTAssertThrowsError(try service.reorderStores([aldi], householdID: first.householdID))
+        XCTAssertThrowsError(try service.reorderStores([aldi, foreign], householdID: first.householdID))
+        let verified = try context.performAndWait { try context.fetch(Store.fetchRequest()).filter { $0.household?.id == first.householdID }.sorted(by: NeedService.storeDisplayOrder).map(\.id) }
+        XCTAssertEqual(verified, [costco, aldi], "A rejected batch leaves the prior order intact")
+    }
+
     func testExplicitSameValueEditAdvancesRevision() throws {
         let persistence = try sqlitePersistence()
         let service = NeedService(persistence: persistence)

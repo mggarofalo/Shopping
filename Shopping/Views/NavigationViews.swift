@@ -4,7 +4,9 @@ import UIKit
 
 enum NavigationFetchRequests {
     static func stores() -> NSFetchRequest<Store> {
-        configured(Store.fetchRequest(), sortKey: "displayOrder")
+        let request = configured(Store.fetchRequest(), sortKey: "displayOrder")
+        request.sortDescriptors?.append(NSSortDescriptor(key: "id", ascending: true))
+        return request
     }
 
     static func needs() -> NSFetchRequest<Need> {
@@ -20,7 +22,9 @@ enum NavigationFetchRequests {
     }
 
     static func categories() -> NSFetchRequest<Category> {
-        configured(Category.fetchRequest(), sortKey: "displayOrder")
+        let request = configured(Category.fetchRequest(), sortKey: "displayOrder")
+        request.sortDescriptors?.append(NSSortDescriptor(key: "id", ascending: true))
+        return request
     }
 
     private static func configured<Result: NSFetchRequestResult>(
@@ -315,6 +319,25 @@ struct GroceriesView: View {
 }
 
 enum GroceryRowScope {
+    static func needsStore(_ need: Need) -> Bool {
+        guard let household = need.list?.household else { return true }
+        let tags: Set<Store>
+        let anyStore: Bool
+        if let item = need.item {
+            tags = item.stores ?? []
+            anyStore = item.anyStore
+        } else if need.kind == NeedKind.oneTime.rawValue {
+            tags = need.oneTimeStores ?? []
+            anyStore = need.oneTimeAnyStore
+        } else {
+            return true
+        }
+        return !anyStore && !tags.contains {
+            !$0.isArchived && $0.id != PersistenceModel.unsetID &&
+                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+        }
+    }
+
     static func matches(_ need: Need, selection: PersistenceSelection) -> Bool {
         guard let householdID = selection.householdID, let listID = selection.listID else { return false }
         return need.list?.id == listID && need.list?.household?.id == householdID
@@ -326,6 +349,8 @@ private enum GroceryDestination: Hashable { case carted, recentlyCleared }
 private struct GroceryNeedRow: View {
     @ObservedObject var need: Need
 
+    private var needsStore: Bool { GroceryRowScope.needsStore(need) }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
@@ -334,6 +359,7 @@ private struct GroceryNeedRow: View {
                     Label("Urgent", systemImage: "exclamationmark.circle.fill")
                         .font(.caption).foregroundStyle(Color(red: 0.71, green: 0.29, blue: 0.12))
                 }
+                if needsStore { Label("Needs store", systemImage: "storefront").font(.caption).foregroundStyle(.secondary) }
                 if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(.secondary) }
             }
             Spacer()
@@ -381,7 +407,8 @@ struct OneTimeGrocerySheet: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var currentSelection
     @State private var name = ""
-    @State private var usesSelectedStore: Bool
+    @State private var selectedStoreIDs: Set<UUID>
+    @State private var anyStore: Bool
     @State private var error: Error?
     let scope: GroceryAddScope
     let onSaved: () -> Void
@@ -389,12 +416,14 @@ struct OneTimeGrocerySheet: View {
     init(scope: GroceryAddScope, onSaved: @escaping () -> Void) {
         self.scope = scope
         self.onSaved = onSaved
-        _usesSelectedStore = State(initialValue: scope.selectedStoreID != nil)
+        _selectedStoreIDs = State(initialValue: scope.selectedStoreID.map { [$0] } ?? [])
+        _anyStore = State(initialValue: scope.selectedStoreID == nil)
     }
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             service != nil && scope.listID != nil && scope.householdID != nil &&
+            (anyStore || !selectedStoreIDs.isEmpty) &&
             currentSelection == PersistenceSelection(householdID: scope.householdID, listID: scope.listID)
     }
 
@@ -406,15 +435,10 @@ struct OneTimeGrocerySheet: View {
                     Text("This grocery won’t be remembered in Catalog.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Where to buy") {
-                    if let selectedStoreName = scope.selectedStoreName {
-                        Toggle("Only at \(selectedStoreName)", isOn: $usesSelectedStore)
-                        Text(usesSelectedStore ? "Tagged for \(selectedStoreName)" : "Any store")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        LabeledContent("Purchase rule", value: "Any store")
-                    }
-                }
+                PurchaseRulesPicker(
+                    storeIDs: $selectedStoreIDs, anyStore: $anyStore,
+                    householdID: scope.householdID, listID: scope.listID
+                )
                 if service == nil || scope.listID == nil || scope.householdID == nil {
                     Text("This household is still loading. Your draft will remain here.")
                         .foregroundStyle(.secondary)
@@ -438,7 +462,8 @@ struct OneTimeGrocerySheet: View {
         do {
             _ = try scope.addOneTime(
                 title: name,
-                usesSelectedStore: usesSelectedStore,
+                selectedStoreIDs: selectedStoreIDs,
+                anyStore: anyStore,
                 currentSelection: currentSelection,
                 service: service
             )
@@ -446,6 +471,7 @@ struct OneTimeGrocerySheet: View {
             dismiss()
         } catch { self.error = error }
     }
+
 }
 
 struct CartedGroceriesView: View {
@@ -528,32 +554,6 @@ struct CatalogView: View {
         if item.anyStore { return "Any store" }
         let names = (item.stores ?? []).filter { !$0.isArchived }.map(\.name).sorted()
         return names.isEmpty ? "Needs store" : names.joined(separator: ", ")
-    }
-}
-
-struct SettingsView: View {
-    @Environment(\.persistenceSelection) private var selection
-    @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
-    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Stores") {
-                    ForEach(stores.filter { $0.household?.id == selection.householdID }, id: \.objectID) { store in
-                        HStack { Text(store.name); Spacer(); if store.isArchived { Text("Archived").foregroundStyle(.secondary) } }
-                    }
-                }
-                Section("Categories") {
-                    ForEach(categories.filter { $0.household?.id == selection.householdID }, id: \.objectID) { Text($0.name) }
-                }
-                Section("Household") {
-                    LabeledContent("Sharing status", value: "Not connected")
-                    Text("Groceries are available in this app’s current local household store.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Settings")
-        }
     }
 }
 

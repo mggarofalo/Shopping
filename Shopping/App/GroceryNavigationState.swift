@@ -129,6 +129,22 @@ struct GroceryAddScope: Identifiable, Equatable {
         currentSelection: PersistenceSelection,
         service: NeedService?
     ) throws -> UUID {
+        try addOneTime(
+            title: title,
+            selectedStoreIDs: usesSelectedStore ? Set(selectedStoreID.map { [$0] } ?? []) : [],
+            anyStore: !usesSelectedStore,
+            currentSelection: currentSelection,
+            service: service
+        )
+    }
+
+    func addOneTime(
+        title: String,
+        selectedStoreIDs: Set<UUID>,
+        anyStore: Bool,
+        currentSelection: PersistenceSelection,
+        service: NeedService?
+    ) throws -> UUID {
         guard currentSelection.householdID == householdID,
               currentSelection.listID == listID else {
             throw GroceryAddError.selectionChanged
@@ -136,16 +152,11 @@ struct GroceryAddScope: Identifiable, Equatable {
         guard let service, householdID != nil, let listID else {
             throw GroceryAddError.householdUnavailable
         }
-        if usesSelectedStore, let selectedStoreID {
-            return try service.addOneTimeNeed(
-                title: title,
-                storeIDs: [selectedStoreID],
-                anyStore: false,
-                listID: listID
-            )
-        }
-        return try service.addOneTimeNeed(title: title, anyStore: true, listID: listID)
+        return try service.addOneTimeNeed(
+            title: title, storeIDs: selectedStoreIDs, anyStore: anyStore, listID: listID
+        )
     }
+
 }
 
 enum GroceryAddError: LocalizedError, Equatable {
