@@ -8,12 +8,22 @@
          <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000003" BuildableName="ShoppingTests.xctest" BlueprintName="ShoppingTests" ReferencedContainer="container:Shopping.xcodeproj"/>
          </BuildActionEntry>
+         <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000004" BuildableName="ShoppingPersistenceTests.xctest" BlueprintName="ShoppingPersistenceTests" ReferencedContainer="container:Shopping.xcodeproj"/>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
+   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="NO">
+      <CommandLineArguments>
+         <CommandLineArgument argument="-com.apple.CoreData.ConcurrencyDebug" isEnabled="YES"/>
+         <CommandLineArgument argument="1" isEnabled="YES"/>
+      </CommandLineArguments>
       <Testables>
          <TestableReference skipped="NO">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000003" BuildableName="ShoppingTests.xctest" BlueprintName="ShoppingTests" ReferencedContainer="container:Shopping.xcodeproj"/>
+         </TestableReference>
+         <TestableReference skipped="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000004" BuildableName="ShoppingPersistenceTests.xctest" BlueprintName="ShoppingPersistenceTests" ReferencedContainer="container:Shopping.xcodeproj"/>
          </TestableReference>
       </Testables>
    </TestAction>

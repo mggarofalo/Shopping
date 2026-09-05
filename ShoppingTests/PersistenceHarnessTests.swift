@@ -1,0 +1,268 @@
+import CoreData
+import XCTest
+@testable import Shopping
+
+final class PersistenceHarnessTests: XCTestCase {
+    func testExplicitSameValueEditAdvancesRevision() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let needID = try service.addOneTimeNeed(title: "Milk", listID: ids.listID)
+        try service.setCarted(false, needID: needID)
+        try service.setCarted(false, needID: needID)
+        let state = try needState(needID, in: persistence.simulationContext())
+        XCTAssertEqual(state.revision, 2, "Each explicit edit records fresh user intent")
+        XCTAssertFalse(state.carted)
+    }
+
+    func testTwoSQLiteContextsPreserveDisjointEditsInBothSaveOrders() throws {
+        for cartSavesFirst in [true, false] {
+            let persistence = try sqlitePersistence()
+            let service = NeedService(persistence: persistence)
+            let ids = try service.createHousehold()
+            let needID = try service.addOneTimeNeed(title: "Apples", listID: ids.listID)
+            let cartContext = persistence.simulationContext()
+            let quantityContext = persistence.simulationContext()
+            try loadNeed(needID, in: cartContext)
+            try loadNeed(needID, in: quantityContext)
+
+            try stageNeed(needID, in: cartContext) { $0.carted = true }
+            try stageNeed(needID, in: quantityContext) { $0.quantity = 4 }
+            if cartSavesFirst {
+                try save(cartContext)
+                try save(quantityContext)
+            } else {
+                try save(quantityContext)
+                try save(cartContext)
+            }
+            let merged = try needState(needID, in: persistence.simulationContext())
+            XCTAssertTrue(merged.carted)
+            XCTAssertEqual(merged.quantity, 4)
+        }
+    }
+
+    func testCompetingSQLiteTagAdditionsMergeAsAUnion() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let storeA = try service.createStore(name: "Aldi", householdID: ids.householdID)
+        let storeB = try service.createStore(name: "Costco", householdID: ids.householdID)
+        let itemID = try service.createItem(name: "Rice", householdID: ids.householdID, anyStore: false)
+        let first = persistence.simulationContext()
+        let second = persistence.simulationContext()
+        try loadItem(itemID, in: first)
+        try loadItem(itemID, in: second)
+        try stageItem(itemID, in: first) { item, context in
+            item.stores = [try self.fetchStore(storeA, in: context)]
+        }
+        try stageItem(itemID, in: second) { item, context in
+            item.stores = [try self.fetchStore(storeB, in: context)]
+        }
+        try save(first)
+        try save(second)
+        let state = try itemState(itemID, in: persistence.simulationContext())
+        XCTAssertEqual(state.storeIDs, [storeA, storeB])
+        XCTAssertFalse(state.anyStore)
+    }
+
+    func testCompetingSamePropertySQLiteEditsUseLastLocalSave() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let needID = try service.addOneTimeNeed(title: "Oranges", listID: ids.listID)
+        let first = persistence.simulationContext()
+        let second = persistence.simulationContext()
+        try loadNeed(needID, in: first)
+        try loadNeed(needID, in: second)
+        try stageNeed(needID, in: first) { $0.quantity = 2 }
+        try stageNeed(needID, in: second) { $0.quantity = 5 }
+        try save(first)
+        try save(second)
+        XCTAssertEqual(try needState(needID, in: persistence.simulationContext()).quantity, 5)
+    }
+
+    func testClearSkipsExternalRevisionChangeAndNewlyCartedNeed() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let changedID = try service.addOneTimeNeed(title: "Changed", listID: ids.listID)
+        let stableID = try service.addOneTimeNeed(title: "Stable", listID: ids.listID)
+        let newlyCartedID = try service.addOneTimeNeed(title: "Later", listID: ids.listID)
+        try service.setCarted(true, needID: changedID)
+        try service.setCarted(true, needID: stableID)
+        let token = try service.captureCarted(householdID: ids.householdID, listID: ids.listID)
+
+        let external = persistence.simulationContext()
+        try mutateNeed(changedID, in: external) {
+            $0.quantity = 2
+            $0.revision += 1
+        }
+        try mutateNeed(newlyCartedID, in: external) {
+            $0.carted = true
+            $0.revision += 1
+        }
+        XCTAssertEqual(try service.clearCarted(using: token), 1)
+        XCTAssertEqual(try service.clearCarted(using: token), 0, "Replaying a token is idempotent")
+        XCTAssertFalse(try needState(changedID, in: persistence.simulationContext()).archived)
+        XCTAssertTrue(try needState(stableID, in: persistence.simulationContext()).archived)
+        XCTAssertFalse(try needState(newlyCartedID, in: persistence.simulationContext()).archived)
+    }
+
+    func testOneTimeClearUndoSurvivesSQLiteRelaunch() throws {
+        let storeURL = temporaryStoreURL()
+        var operationID: UUID!
+        var needID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: persistence)
+            let ids = try service.createHousehold()
+            needID = try service.addOneTimeNeed(title: "Party ice", listID: ids.listID)
+            try service.setCarted(true, needID: needID)
+            let token = try service.captureCarted(householdID: ids.householdID, listID: ids.listID)
+            operationID = token.id
+            XCTAssertEqual(try service.clearCarted(using: token), 1)
+        }
+        do {
+            let relaunched = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: relaunched)
+            XCTAssertEqual(try service.undoClear(operationID: operationID), 1)
+            let restored = try needState(needID, in: relaunched.simulationContext())
+            XCTAssertFalse(restored.archived)
+            XCTAssertTrue(restored.carted)
+        }
+    }
+
+    func testRelaunchUndoRefusesDuplicateActiveRememberedNeed() throws {
+        let storeURL = temporaryStoreURL()
+        var operationID: UUID!
+        var originalID: UUID!
+        var replacementID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: persistence)
+            let ids = try service.createHousehold()
+            let itemID = try service.createItem(name: "Bread", householdID: ids.householdID)
+            originalID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+            try service.setCarted(true, needID: originalID)
+            let token = try service.captureCarted(householdID: ids.householdID, listID: ids.listID)
+            operationID = token.id
+            XCTAssertEqual(try service.clearCarted(using: token), 1)
+            replacementID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+        }
+        do {
+            let relaunched = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: relaunched)
+            XCTAssertEqual(try service.undoClear(operationID: operationID), 0)
+            XCTAssertTrue(try needState(originalID, in: relaunched.simulationContext()).archived)
+            XCTAssertFalse(try needState(replacementID, in: relaunched.simulationContext()).archived)
+        }
+    }
+
+    func testRememberedDuplicateIsReusedAndOneTimeNeedDoesNotSeedCatalog() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let itemID = try service.createItem(name: "Bread", householdID: ids.householdID)
+        let firstID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+        let secondID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+        let oneTimeID = try service.addOneTimeNeed(title: "Party ice", listID: ids.listID)
+        XCTAssertEqual(firstID, secondID)
+        XCTAssertEqual(try needState(firstID, in: persistence.simulationContext()).revision, 1)
+        XCTAssertNil(try needState(oneTimeID, in: persistence.simulationContext()).itemID)
+        XCTAssertEqual(try count(Item.fetchRequest(), in: persistence.simulationContext()), 1)
+    }
+
+    func testCommandsRejectCrossHouseholdRelationshipsAndInvalidQuantity() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold(name: "First")
+        let second = try service.createHousehold(name: "Second")
+        let itemID = try service.createItem(name: "Milk", householdID: first.householdID)
+        let foreignStoreID = try service.createStore(name: "Foreign", householdID: second.householdID)
+        XCTAssertThrowsError(try service.addRememberedNeed(itemID: itemID, listID: second.listID))
+        XCTAssertThrowsError(try service.setStoreTags(itemID: itemID, storeIDs: [foreignStoreID]))
+        let needID = try service.addOneTimeNeed(title: "Milk", listID: first.listID)
+        XCTAssertThrowsError(try service.setQuantity(0, needID: needID))
+    }
+
+    private typealias NeedState = (revision: Int64, carted: Bool, quantity: Int64, archived: Bool, itemID: UUID?)
+    private typealias ItemState = (storeIDs: Set<UUID>, anyStore: Bool)
+
+    private func sqlitePersistence() throws -> PersistenceController {
+        try PersistenceController(storeURL: temporaryStoreURL())
+    }
+
+    private func loadNeed(_ id: UUID, in context: NSManagedObjectContext) throws {
+        try context.performAndWait { _ = try fetchNeed(id, in: context) }
+    }
+
+    private func loadItem(_ id: UUID, in context: NSManagedObjectContext) throws {
+        try context.performAndWait { _ = try fetchItem(id, in: context) }
+    }
+
+    private func mutateNeed(_ id: UUID, in context: NSManagedObjectContext, change: @escaping (Need) -> Void) throws {
+        try context.performAndWait {
+            change(try fetchNeed(id, in: context))
+            try context.save()
+        }
+    }
+
+    private func stageNeed(_ id: UUID, in context: NSManagedObjectContext, change: @escaping (Need) -> Void) throws {
+        try context.performAndWait { change(try fetchNeed(id, in: context)) }
+    }
+
+    private func stageItem(_ id: UUID, in context: NSManagedObjectContext, change: @escaping (Item, NSManagedObjectContext) throws -> Void) throws {
+        try context.performAndWait {
+            try change(fetchItem(id, in: context), context)
+        }
+    }
+
+    private func save(_ context: NSManagedObjectContext) throws {
+        try context.performAndWait { try context.save() }
+    }
+
+    private func needState(_ id: UUID, in context: NSManagedObjectContext) throws -> NeedState {
+        try context.performAndWait {
+            let need = try fetchNeed(id, in: context)
+            return (need.revision, need.carted, need.quantity, need.archived, need.item?.id)
+        }
+    }
+
+    private func itemState(_ id: UUID, in context: NSManagedObjectContext) throws -> ItemState {
+        try context.performAndWait {
+            let item = try fetchItem(id, in: context)
+            return (Set(item.stores?.map(\.id) ?? []), item.anyStore)
+        }
+    }
+
+    private func count<T>(_ request: NSFetchRequest<T>, in context: NSManagedObjectContext) throws -> Int {
+        try context.performAndWait { try context.count(for: request) }
+    }
+
+    private func fetchNeed(_ id: UUID, in context: NSManagedObjectContext) throws -> Need {
+        let request = Need.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        return try XCTUnwrap(context.fetch(request).first)
+    }
+
+    private func fetchItem(_ id: UUID, in context: NSManagedObjectContext) throws -> Item {
+        let request = Item.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        return try XCTUnwrap(context.fetch(request).first)
+    }
+
+    private func fetchStore(_ id: UUID, in context: NSManagedObjectContext) throws -> Store {
+        let request = Store.fetchRequest()
+        request.fetchLimit = 1
+        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        return try XCTUnwrap(context.fetch(request).first)
+    }
+
+    private func temporaryStoreURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingTests-\(UUID().uuidString)")
+            .appendingPathExtension("sqlite")
+    }
+}
