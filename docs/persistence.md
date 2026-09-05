@@ -18,6 +18,8 @@ Owner-side share association uses the supported existing-share API. Pending asso
 
 ## Changes, history and recovery
 
+SwiftUI views use fully configured, entity-name fetch requests so each request resolves against its supplied context. Avoid class-global entity inference: simultaneous preview models or a retried container can make the managed class ambiguous. Apple documents the [configured FetchRequest initializer](https://developer.apple.com/documentation/swiftui/fetchrequest).
+
 Local command saves merge into the view context. The persistent-history consumer handles launch, foreground and remote-change triggers, consuming transactions separately for each persistent store. It merges on the view context's queue before advancing the stored checkpoint. Failed processing retains a replayable checkpoint; missing or invalid checkpoints lead to replay or refetch, never grocery deletion. History is not purged merely because the UI has consumed it.
 
 Share metadata is separate from object history and needs its own permission/share refresh. A history token is a local checkpoint, not a server synchronization acknowledgement. There is no pull-to-refresh control or promise to force CloudKit scheduling.

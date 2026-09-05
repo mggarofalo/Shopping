@@ -60,3 +60,5 @@ The observed developer environment is Xcode 26.6 (17F113) with the iOS 26.5 iPho
 Keep the root checkout on `main` and create every issue, epic, and milestone checkout inside `.worktrees/` at the repository root. Use Plane-derived branches with an appropriate conventional prefix, such as `docs/shopping-28-plane-guidance`; Plane does not supply or require a Linear `gitBranchName`.
 
 The phase milestone branch is the integration target. Optional epic branches within a phase target the milestone branch, then completed issue branches are squash-merged locally into their parent or milestone. At phase completion, open the milestone-to-`main` PR; CI and required approval are mandatory before merging.
+
+Phase 2 local UI work is currently stacked on `milestone/phase-1` at `82669cd`. This carries the validated local persistence and fixtures while Phase 1 enrollment/live sharing proof remains open. Keep both milestones distinct; reconcile the phase-2 base after the approved phase-1 merge. A stacked branch is not evidence that the sharing gate is complete.

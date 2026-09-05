@@ -287,6 +287,152 @@ final class PersistenceContainerTests: XCTestCase {
         }
     }
 
+
+
+
+    func testClearRetryRejectsSingleOtherScopeOrDifferentPayloadOperation() throws {
+        do {
+            let persistence = try PersistenceController(storeURL: temporaryURL("clear-other-scope.sqlite"))
+            let service = NeedService(persistence: persistence)
+            let first = try service.createHousehold(name: "First")
+            let second = try service.createHousehold(name: "Second")
+            let needID = try service.addOneTimeNeed(title: "Ice", listID: first.listID)
+            try service.setCarted(true, needID: needID)
+            let token = try service.captureCarted(householdID: first.householdID, listID: first.listID)
+            let imported = persistence.simulationContext()
+            try imported.performAndWait {
+                let householdRequest = Household.fetchRequest()
+                householdRequest.predicate = NSPredicate(format: "id == %@", second.householdID as CVarArg)
+                let household = try XCTUnwrap(imported.fetch(householdRequest).first)
+                let listRequest = GroceryList.fetchRequest()
+                listRequest.predicate = NSPredicate(format: "id == %@", second.listID as CVarArg)
+                let list = try XCTUnwrap(imported.fetch(listRequest).first)
+                let operation = NSEntityDescription.insertNewObject(forEntityName: "ClearOperation", into: imported) as! ClearOperation
+                operation.id = token.id
+                operation.createdAt = Date()
+                operation.snapshot = try JSONEncoder().encode(ClearCartedToken(
+                    id: token.id,
+                    householdID: second.householdID,
+                    listID: second.listID,
+                    revisionsByNeedID: [:]
+                ))
+                operation.household = household
+                operation.list = list
+                try imported.save()
+            }
+
+            XCTAssertThrowsError(try service.clearCarted(using: token)) {
+                XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
+            }
+            XCTAssertFalse(try isArchived(needID, in: persistence))
+            XCTAssertEqual(try service.allActiveNeedIDs(householdID: first.householdID), [needID])
+        }
+
+        do {
+            let persistence = try PersistenceController(storeURL: temporaryURL("clear-payload.sqlite"))
+            let service = NeedService(persistence: persistence)
+            let selection = try service.createHousehold()
+            let needID = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
+            try service.setCarted(true, needID: needID)
+            let token = try service.captureCarted(householdID: selection.householdID, listID: selection.listID)
+            let imported = persistence.simulationContext()
+            try imported.performAndWait {
+                let householdRequest = Household.fetchRequest()
+                householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
+                let household = try XCTUnwrap(imported.fetch(householdRequest).first)
+                let listRequest = GroceryList.fetchRequest()
+                listRequest.predicate = NSPredicate(format: "id == %@", selection.listID as CVarArg)
+                let list = try XCTUnwrap(imported.fetch(listRequest).first)
+                let operation = NSEntityDescription.insertNewObject(forEntityName: "ClearOperation", into: imported) as! ClearOperation
+                operation.id = token.id
+                operation.createdAt = Date()
+                operation.snapshot = try JSONEncoder().encode(ClearCartedToken(
+                    id: token.id,
+                    householdID: selection.householdID,
+                    listID: selection.listID,
+                    revisionsByNeedID: [needID: token.revisionsByNeedID[needID, default: 0] + 1]
+                ))
+                operation.household = household
+                operation.list = list
+                try imported.save()
+            }
+
+            XCTAssertThrowsError(try service.clearCarted(using: token)) {
+                XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
+            }
+            XCTAssertFalse(try isArchived(needID, in: persistence))
+        }
+    }
+
+    func testCartedRowScopeRejectsForeignHouseholdWithDuplicateListID() throws {
+        let persistence = try PersistenceController(storeURL: temporaryURL("carted-scope.sqlite"))
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold(name: "First")
+        let second = try service.createHousehold(name: "Second")
+        let firstNeedID = try service.addOneTimeNeed(title: "First", listID: first.listID)
+        let secondNeedID = try service.addOneTimeNeed(title: "Second", listID: second.listID)
+        try service.setCarted(true, needID: firstNeedID)
+        try service.setCarted(true, needID: secondNeedID)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let secondListRequest = GroceryList.fetchRequest()
+            secondListRequest.predicate = NSPredicate(format: "id == %@", second.listID as CVarArg)
+            try XCTUnwrap(context.fetch(secondListRequest).first).id = first.listID
+            try context.save()
+
+            let needs = try context.fetch(Need.fetchRequest())
+            let selection = PersistenceSelection(householdID: first.householdID, listID: first.listID)
+            let visible = needs.filter { GroceryRowScope.matches($0, selection: selection) && $0.carted }
+            XCTAssertEqual(visible.map(\.id), [firstNeedID])
+        }
+    }
+
+    func testClearRecoveryRejectsWrongExpectedScopeAndDuplicateOperationIdentityWithoutMutation() throws {
+        let persistence = try PersistenceController(storeURL: temporaryURL("ambiguous-clear.sqlite"))
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold(name: "First")
+        let second = try service.createHousehold(name: "Second")
+        let firstNeed = try service.addOneTimeNeed(title: "First ice", listID: first.listID)
+        let secondNeed = try service.addOneTimeNeed(title: "Second ice", listID: second.listID)
+        try service.setCarted(true, needID: firstNeed)
+        try service.setCarted(true, needID: secondNeed)
+        let firstToken = try service.captureCarted(householdID: first.householdID, listID: first.listID)
+        let secondToken = try service.captureCarted(householdID: second.householdID, listID: second.listID)
+        XCTAssertEqual(try service.clearCarted(using: firstToken), 1)
+        XCTAssertEqual(try service.clearCarted(using: secondToken), 1)
+
+        XCTAssertThrowsError(try service.undoClear(
+            operationID: firstToken.id,
+            expectedHouseholdID: second.householdID,
+            expectedListID: second.listID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+        XCTAssertTrue(try isArchived(firstNeed, in: persistence))
+        XCTAssertTrue(try isArchived(secondNeed, in: persistence))
+
+        let imported = persistence.simulationContext()
+        try imported.performAndWait {
+            let operationRequest = ClearOperation.fetchRequest()
+            operationRequest.predicate = NSPredicate(format: "id == %@", secondToken.id as CVarArg)
+            let secondOperation = try XCTUnwrap(imported.fetch(operationRequest).first)
+            secondOperation.id = firstToken.id
+            let needRequest = Need.fetchRequest()
+            needRequest.predicate = NSPredicate(format: "id == %@", secondNeed as CVarArg)
+            try XCTUnwrap(imported.fetch(needRequest).first).clearOperationID = firstToken.id
+            try imported.save()
+        }
+
+        XCTAssertThrowsError(try service.undoClear(
+            operationID: firstToken.id,
+            expectedHouseholdID: first.householdID,
+            expectedListID: first.listID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .invalidClearOperationIdentity) }
+        XCTAssertThrowsError(try service.clearCarted(using: firstToken)) {
+            XCTAssertEqual($0 as? NeedServiceError, .invalidClearOperationIdentity)
+        }
+        XCTAssertTrue(try isArchived(firstNeed, in: persistence))
+        XCTAssertTrue(try isArchived(secondNeed, in: persistence))
+    }
+
     func testMissingImportedClearSnapshotLeavesArchivedOccurrenceRetryable() throws {
         let persistence = try PersistenceController(storeURL: temporaryURL("missing-snapshot.sqlite"))
         let service = NeedService(persistence: persistence)
@@ -313,6 +459,15 @@ final class PersistenceContainerTests: XCTestCase {
             let need = try XCTUnwrap(verify.fetch(request).first)
             XCTAssertTrue(need.archived)
             XCTAssertEqual(need.clearOperationID, token.id)
+        }
+    }
+
+    private func isArchived(_ needID: UUID, in persistence: PersistenceController) throws -> Bool {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
+            return try XCTUnwrap(context.fetch(request).first).archived
         }
     }
 

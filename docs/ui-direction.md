@@ -1,0 +1,42 @@
+# Native grocery UI direction
+
+Audience: a couple planning and shopping across familiar stores. Primary task: see what must be bought here, what may be bought here, and mark the same household grocery as carted.
+
+## Compact visual tokens
+- Canvas: adaptive system background (light #FFFFFF); supporting surfaces: system grouped background (light #F2F2F7).
+- Text: adaptive label (light #1C1C1E); secondary text: adaptive secondary label (light approximately #636366).
+- Primary action/selected store: restrained grocery green #25634B, with an appropriate lighter dark-mode variant.
+- Urgency: #B54A1E in light mode, always accompanied by the word Urgent and an icon; never color alone.
+- Type: native SF text styles for Dynamic Type—largeTitle, headline, body, subheadline, caption. SF is deliberate for one-handed native iPhone use, rather than importing a web display face.
+- Controls: native 44pt minimum tap regions; list rows grow for long names and accessibility type sizes. No fixed-height text clipping.
+
+## Layout choices
+A horizontal chip strip for every store would bury All and make long names awkward. Use a compact explicit All button plus selected-store menu, with a labeled Filters action. Let the store choice and required/flexible split carry the visual identity; keep rows quiet.
+
+    Groceries                              +
+    Search groceries
+    All     Costco v              Filters 2
+
+    Must buy here
+    ( ) Frozen strawberries             2
+        Urgent       Only buy at Costco
+
+    Flexible here
+    ( ) Dinner rolls                    1
+        Buy at Costco, Walmart
+
+    Carted (3) >
+    Recently cleared >
+
+    Groceries       Catalog       Settings
+
+Left-align names and supporting detail; align quantity at the trailing edge. Tapping the cart control changes carted state. Tapping the row edits details. Clear carted belongs inside carted/recovery actions with count/scope confirmation; no Delete all control exists.
+
+All view groups uncarted needs with urgency first and optional global category order; Uncategorized last. A selected store always partitions eligible rows into Must buy here then Flexible here, with urgency first inside each section. Text/category/urgency/include-exclude only narrow those rows.
+
+Empty household: Add groceries is the primary action. Empty filtered result: explain no matches and Reset filters; don't imply the underlying list is empty. Catalog has reusable items only; Recently cleared is explicit recovery, never a suggestion source. Forms stage data until Save and preserve input on failure.
+
+## Review against brief
+This is a native utility, so avoid a marketing hero, decorative cards, gradients, custom animation or artificial branding. The useful distinction is the buying rule: Only buy at Costco vs Buy at Costco/Walmart vs Any store. No retailer-stock claims, trips, events, reminders or price engine. Native text scaling, VoiceOver labels, reduced motion and clear item state have priority over ornamental novelty.
+
+Implementation follows Plane issue dependencies. Navigation destinations may be scaffolded first; usable add/edit and safe clear are completed by their dedicated issues before any MVP claim.

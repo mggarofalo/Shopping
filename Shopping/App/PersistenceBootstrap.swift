@@ -46,23 +46,39 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var pendingShareAssociationCount = 0
     @Published private(set) var shareAssociationError: Error?
     private let configuration: () throws -> PersistenceConfiguration
+    private var preloadedPreviewEnvironment: ShoppingPreviewEnvironment?
     private var remoteObserver: NSObjectProtocol?
     private var associationObserver: NSObjectProtocol?
     private var historyConsumer: PersistentHistoryConsumer?
     private var associationWorker: ManagedShareAssociationWorker?
     private var generation = 0
 
-    init(configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() }) {
+    init(
+        configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() },
+        preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil
+    ) {
         self.configuration = configuration
+        self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
-        PersistenceBootstrap {
-            if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
-                return .local(storeURL: URL(fileURLWithPath: path))
+        if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
+            let storeURL = URL(fileURLWithPath: path)
+            if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
+               let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
+                do {
+                    let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
+                    return PersistenceBootstrap(
+                        configuration: { .local(storeURL: storeURL) },
+                        preloadedPreviewEnvironment: environment
+                    )
+                } catch {
+                    return PersistenceBootstrap(configuration: { throw error })
+                }
             }
-            return try .applicationLocal()
+            return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
         }
+        return PersistenceBootstrap()
     }
 
     deinit {
@@ -88,15 +104,27 @@ final class PersistenceBootstrap: ObservableObject {
 
     private func load() {
         do {
-            let configuration = try configuration()
-            let persistence = try PersistenceController(configuration: configuration)
-            let service = NeedService(persistence: persistence)
-            var selection = try service.firstHouseholdSelection()
-            if selection == nil, !configuration.isManaged, try service.isPersistentStoreEmpty() {
-                let created = try service.createHousehold()
-                selection = (created.householdID, created.listID)
+            let resolvedConfiguration: PersistenceConfiguration
+            let persistence: PersistenceController
+            let service: NeedService
+            var selection: (householdID: UUID, listID: UUID)?
+            if let preview = preloadedPreviewEnvironment {
+                resolvedConfiguration = preview.persistence.configuration
+                persistence = preview.persistence
+                service = preview.service
+                selection = (preview.ids.householdID, preview.ids.listID)
+                preloadedPreviewEnvironment = nil
+            } else {
+                resolvedConfiguration = try self.configuration()
+                persistence = try PersistenceController(configuration: resolvedConfiguration)
+                service = NeedService(persistence: persistence)
+                selection = try service.firstHouseholdSelection()
+                if selection == nil, !resolvedConfiguration.isManaged, try service.isPersistentStoreEmpty() {
+                    let created = try service.createHousehold()
+                    selection = (created.householdID, created.listID)
+                }
             }
-            let checkpointDirectory = (configuration.stores.first?.url?.deletingLastPathComponent())
+            let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
                 ?? FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingHistory")
             let consumer = PersistentHistoryConsumer(
                 persistence: persistence,

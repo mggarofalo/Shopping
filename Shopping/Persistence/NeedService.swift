@@ -48,6 +48,7 @@ enum NeedServiceError: Error, Equatable {
     case invalidOccurrenceIdentity
     case invalidCatalogIdentity
     case invalidStoreIdentity
+    case invalidClearOperationIdentity
     case incompleteRecoveryData
 }
 
@@ -693,10 +694,15 @@ final class NeedService {
                   list.household == household else {
                 throw NeedServiceError.scopeChanged
             }
-            let existingRequest = ClearOperation.fetchRequest()
-            existingRequest.fetchLimit = 1
-            existingRequest.predicate = NSPredicate(format: "id == %@", token.id as CVarArg)
-            if try context.fetch(existingRequest).first != nil {
+            if let existing = try self.clearOperation(id: token.id, in: context) {
+                guard existing.household == household, existing.list == list else {
+                    throw NeedServiceError.scopeChanged
+                }
+                guard let snapshot = existing.snapshot else {
+                    throw NeedServiceError.incompleteRecoveryData
+                }
+                let existingToken = try self.decoder.decode(ClearCartedToken.self, from: snapshot)
+                guard existingToken == token else { throw NeedServiceError.scopeChanged }
                 return 0
             }
             let operation: ClearOperation = self.insert("ClearOperation", in: context)
@@ -726,15 +732,27 @@ final class NeedService {
     }
 
     @discardableResult
-    func undoClear(operationID: UUID) throws -> Int {
+    func undoClear(
+        operationID: UUID,
+        expectedHouseholdID: UUID? = nil,
+        expectedListID: UUID? = nil
+    ) throws -> Int {
         try write { context in
-            let operationRequest = ClearOperation.fetchRequest()
-            operationRequest.fetchLimit = 1
-            operationRequest.predicate = NSPredicate(format: "id == %@", operationID as CVarArg)
-            guard let operation = try context.fetch(operationRequest).first else { return 0 }
+            guard let operation = try self.clearOperation(id: operationID, in: context) else { return 0 }
+            if expectedHouseholdID != nil || expectedListID != nil {
+                guard let expectedHouseholdID, let expectedListID,
+                      let expectedHousehold = try self.household(id: expectedHouseholdID, in: context),
+                      let expectedList = try self.list(id: expectedListID, in: context),
+                      expectedList.household == expectedHousehold,
+                      operation.household == expectedHousehold,
+                      operation.list == expectedList else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
             guard let snapshot = operation.snapshot else { throw NeedServiceError.incompleteRecoveryData }
             let token = try self.decoder.decode(ClearCartedToken.self, from: snapshot)
-            guard operation.household?.id == token.householdID,
+            guard token.id == operationID,
+                  operation.household?.id == token.householdID,
                   operation.list?.id == token.listID else {
                 throw NeedServiceError.scopeChanged
             }
@@ -882,6 +900,15 @@ final class NeedService {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NeedServiceError.invalidName }
         return trimmed
+    }
+
+    private func clearOperation(id: UUID, in context: NSManagedObjectContext) throws -> ClearOperation? {
+        try fetch(
+            id: id,
+            request: ClearOperation.fetchRequest(),
+            in: context,
+            identityError: .invalidClearOperationIdentity
+        )
     }
 
     private func need(id: UUID, in context: NSManagedObjectContext) throws -> Need? {

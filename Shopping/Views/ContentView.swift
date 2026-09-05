@@ -1,34 +1,34 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var navigation = GroceryNavigationState()
+
     var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "Your grocery list",
-                systemImage: "cart",
-                description: Text("One place for your household’s groceries.")
-            )
-            .accessibilityIdentifier("shopping.emptyState")
-            .navigationTitle("Groceries")
+        TabView(selection: $navigation.selectedTab) {
+            GroceriesView(navigation: navigation)
+                .tabItem { Label("Groceries", systemImage: "cart") }
+                .tag(GroceryNavigationState.Tab.groceries)
+            CatalogView()
+                .tabItem { Label("Catalog", systemImage: "books.vertical") }
+                .tag(GroceryNavigationState.Tab.catalog)
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(GroceryNavigationState.Tab.settings)
         }
+        .tint(.groceryAccent)
     }
 }
 
 #Preview("Populated grocery environment") {
-    ShoppingPreviewHost(.populated) {
-        ContentView()
-    }
+    ShoppingPreviewHost(.populated) { ContentView() }
 }
 
 #Preview("Empty grocery environment") {
-    ShoppingPreviewHost(.empty) {
-        ContentView()
-    }
+    ShoppingPreviewHost(.empty) { ContentView() }
 }
 
 #Preview("Large text · Accessibility") {
     ShoppingPreviewHost(.largeText) {
-        ContentView()
-            .environment(\.dynamicTypeSize, .accessibility3)
+        ContentView().environment(\.dynamicTypeSize, .accessibility3)
     }
 }
