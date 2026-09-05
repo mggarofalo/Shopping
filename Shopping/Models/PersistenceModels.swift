@@ -7,6 +7,7 @@ final class Household: NSManagedObject {
     @NSManaged var groceryList: GroceryList?
     @NSManaged var stores: Set<Store>?
     @NSManaged var items: Set<Item>?
+    @NSManaged var categories: Set<Category>?
     @NSManaged var clearOperations: Set<ClearOperation>?
 }
 
@@ -14,6 +15,8 @@ final class Household: NSManagedObject {
 final class Store: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var name: String
+    @NSManaged var displayOrder: Int64
+    @NSManaged var isArchived: Bool
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?
 }
@@ -24,8 +27,18 @@ final class Item: NSManagedObject {
     @NSManaged var name: String
     @NSManaged var anyStore: Bool
     @NSManaged var household: Household?
+    @NSManaged var category: Category?
     @NSManaged var stores: Set<Store>?
     @NSManaged var needs: Set<Need>?
+}
+
+@objc(Category)
+final class Category: NSManagedObject {
+    @NSManaged var id: UUID
+    @NSManaged var name: String
+    @NSManaged var displayOrder: Int64
+    @NSManaged var household: Household?
+    @NSManaged var items: Set<Item>?
 }
 
 @objc(GroceryList)
@@ -74,6 +87,12 @@ extension Store {
 extension Item {
     @nonobjc class func fetchRequest() -> NSFetchRequest<Item> {
         NSFetchRequest(entityName: "Item")
+    }
+}
+
+extension Category {
+    @nonobjc class func fetchRequest() -> NSFetchRequest<Category> {
+        NSFetchRequest(entityName: "Category")
     }
 }
 

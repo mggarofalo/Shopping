@@ -1,7 +1,7 @@
 import CoreData
 
 enum PersistenceModel {
-    // Experimental local schema for SHOPPING-27. Production versioning is deliberately deferred.
+    // Experimental local schema; SHOPPING-20 will freeze the versioned production model and fixtures.
     static let name = "Shopping"
     private static let unsetID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
 
@@ -14,7 +14,14 @@ enum PersistenceModel {
         ])
         let store = entity("Store", Store.self, [
             attribute("id", .UUIDAttributeType, unsetID),
-            attribute("name", .stringAttributeType, "")
+            attribute("name", .stringAttributeType, ""),
+            attribute("displayOrder", .integer64AttributeType, 0),
+            attribute("isArchived", .booleanAttributeType, false)
+        ])
+        let category = entity("Category", Category.self, [
+            attribute("id", .UUIDAttributeType, unsetID),
+            attribute("name", .stringAttributeType, ""),
+            attribute("displayOrder", .integer64AttributeType, 0)
         ])
         let item = entity("Item", Item.self, [
             attribute("id", .UUIDAttributeType, unsetID),
@@ -42,14 +49,16 @@ enum PersistenceModel {
 
         relate(household, "groceryList", list, "household", toManyDestination: false, toManySource: false)
         relate(household, "stores", store, "household", toManyDestination: true, toManySource: false)
+        relate(household, "categories", category, "household", toManyDestination: true, toManySource: false)
         relate(household, "items", item, "household", toManyDestination: true, toManySource: false)
+        relate(category, "items", item, "category", toManyDestination: true, toManySource: false)
         relate(item, "stores", store, "items", toManyDestination: true, toManySource: true)
         relate(list, "needs", need, "list", toManyDestination: true, toManySource: false)
         relate(item, "needs", need, "item", toManyDestination: true, toManySource: false)
         relate(household, "clearOperations", clearOperation, "household", toManyDestination: true, toManySource: false)
         relate(list, "clearOperations", clearOperation, "list", toManyDestination: true, toManySource: false)
 
-        model.entities = [household, store, item, list, need, clearOperation]
+        model.entities = [household, store, category, item, list, need, clearOperation]
         return model
     }
 

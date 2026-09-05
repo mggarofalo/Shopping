@@ -12,8 +12,17 @@ enum NeedServiceError: Error, Equatable {
     case listNotFound
     case itemNotFound
     case needNotFound
+    case storeNotFound
+    case categoryNotFound
     case scopeChanged
     case invalidQuantity
+    case invalidName
+}
+
+enum StoreEligibility: Equatable {
+    case anyStore
+    case activeStores([UUID])
+    case needsStore
 }
 
 final class NeedService {
@@ -27,28 +36,97 @@ final class NeedService {
 
     @discardableResult
     func createHousehold(name: String = "Household") throws -> (householdID: UUID, listID: UUID) {
-        try write { context in
+        return try write { context in
             let household: Household = self.insert("Household", in: context)
             household.id = UUID()
             household.name = name
             let list: GroceryList = self.insert("GroceryList", in: context)
             list.id = UUID()
+            self.route(list, with: household, in: context)
             list.household = household
             return (household.id, list.id)
         }
     }
 
     @discardableResult
-    func createStore(name: String, householdID: UUID) throws -> UUID {
-        try write { context in
+    func createStore(name: String, householdID: UUID, displayOrder: Int64 = 0) throws -> UUID {
+        let name = try validatedName(name)
+        return try write { context in
             guard let household = try self.household(id: householdID, in: context) else {
                 throw NeedServiceError.householdNotFound
             }
             let store: Store = self.insert("Store", in: context)
             store.id = UUID()
             store.name = name
+            store.displayOrder = displayOrder
+            store.isArchived = false
+            self.route(store, with: household, in: context)
             store.household = household
             return store.id
+        }
+    }
+
+    @discardableResult
+    func createCategory(name: String, householdID: UUID, displayOrder: Int64 = 0) throws -> UUID {
+        let name = try validatedName(name)
+        return try write { context in
+            guard let household = try self.household(id: householdID, in: context) else {
+                throw NeedServiceError.householdNotFound
+            }
+            let category: Category = self.insert("Category", in: context)
+            category.id = UUID()
+            category.name = name
+            category.displayOrder = displayOrder
+            self.route(category, with: household, in: context)
+            category.household = household
+            return category.id
+        }
+    }
+
+    func setStoreArchived(_ archived: Bool, storeID: UUID, householdID: UUID) throws {
+        try write { context in
+            guard let store = try self.store(id: storeID, in: context) else {
+                throw NeedServiceError.storeNotFound
+            }
+            guard store.household?.id == householdID else {
+                throw NeedServiceError.scopeChanged
+            }
+            store.isArchived = archived
+        }
+    }
+
+    func setCategory(itemID: UUID, categoryID: UUID?) throws {
+        try write { context in
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            guard let itemHousehold = item.household else {
+                throw NeedServiceError.scopeChanged
+            }
+            guard let categoryID else {
+                item.category = nil
+                return
+            }
+            guard let category = try self.category(id: categoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard category.household == itemHousehold,
+                  category.objectID.persistentStore == item.objectID.persistentStore else {
+                throw NeedServiceError.scopeChanged
+            }
+            item.category = category
+        }
+    }
+
+    func removeCategory(categoryID: UUID, householdID: UUID) throws {
+        try write { context in
+            guard let category = try self.category(id: categoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard category.household?.id == householdID else {
+                throw NeedServiceError.scopeChanged
+            }
+            context.delete(category)
         }
     }
 
@@ -62,6 +140,7 @@ final class NeedService {
             item.id = UUID()
             item.name = name
             item.anyStore = anyStore
+            self.route(item, with: household, in: context)
             item.household = household
             return item.id
         }
@@ -79,11 +158,38 @@ final class NeedService {
             request.predicate = NSPredicate(format: "id IN %@", Array(storeIDs))
             let stores = try context.fetch(request)
             guard stores.count == storeIDs.count,
-                  stores.allSatisfy({ $0.household == itemHousehold }) else {
+                  stores.allSatisfy({
+                      $0.household == itemHousehold &&
+                      $0.objectID.persistentStore == item.objectID.persistentStore
+                  }) else {
                 throw NeedServiceError.scopeChanged
             }
             item.stores = Set(stores)
         }
+    }
+
+    func storeEligibility(itemID: UUID) throws -> StoreEligibility {
+        try readOnWriter { context in
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            guard item.household != nil else { return .needsStore }
+            if item.anyStore { return .anyStore }
+            let active = (item.stores ?? []).filter { !$0.isArchived }.sorted(by: Self.storeDisplayOrder)
+            return active.isEmpty ? .needsStore : .activeStores(active.map(\.id))
+        }
+    }
+
+    static func storeDisplayOrder(_ lhs: Store, _ rhs: Store) -> Bool {
+        ordered(lhsOrder: lhs.displayOrder, lhsID: lhs.id, rhsOrder: rhs.displayOrder, rhsID: rhs.id)
+    }
+
+    static func categoryDisplayOrder(_ lhs: Category, _ rhs: Category) -> Bool {
+        ordered(lhsOrder: lhs.displayOrder, lhsID: lhs.id, rhsOrder: rhs.displayOrder, rhsID: rhs.id)
+    }
+
+    private static func ordered(lhsOrder: Int64, lhsID: UUID, rhsOrder: Int64, rhsID: UUID) -> Bool {
+        lhsOrder == rhsOrder ? lhsID.uuidString < rhsID.uuidString : lhsOrder < rhsOrder
     }
 
     @discardableResult
@@ -96,7 +202,8 @@ final class NeedService {
                 throw NeedServiceError.listNotFound
             }
             guard let household = item.household,
-                  list.household == household else {
+                  list.household == household,
+                  item.objectID.persistentStore == list.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
             }
             let request = Need.fetchRequest()
@@ -179,6 +286,7 @@ final class NeedService {
             operation.id = token.id
             operation.createdAt = Date()
             operation.snapshot = try self.encoder.encode(token)
+            self.route(operation, with: household, in: context)
             operation.household = household
             operation.list = list
 
@@ -259,6 +367,9 @@ final class NeedService {
         need.urgency = "normal"
         need.revision = 0
         need.archived = false
+        if let store = list.objectID.persistentStore {
+            context.assign(need, to: store)
+        }
         need.list = list
         return need
     }
@@ -273,6 +384,20 @@ final class NeedService {
 
     private func item(id: UUID, in context: NSManagedObjectContext) throws -> Item? {
         try fetch(id: id, request: Item.fetchRequest(), in: context)
+    }
+
+    private func store(id: UUID, in context: NSManagedObjectContext) throws -> Store? {
+        try fetch(id: id, request: Store.fetchRequest(), in: context)
+    }
+
+    private func category(id: UUID, in context: NSManagedObjectContext) throws -> Category? {
+        try fetch(id: id, request: Category.fetchRequest(), in: context)
+    }
+
+    private func validatedName(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw NeedServiceError.invalidName }
+        return trimmed
     }
 
     private func need(id: UUID, in context: NSManagedObjectContext) throws -> Need? {
@@ -308,6 +433,11 @@ final class NeedService {
 
     private func insert<T: NSManagedObject>(_ entityName: String, in context: NSManagedObjectContext) -> T {
         NSEntityDescription.insertNewObject(forEntityName: entityName, into: context) as! T
+    }
+
+    private func route(_ object: NSManagedObject, with household: Household, in context: NSManagedObjectContext) {
+        guard let store = household.objectID.persistentStore else { return }
+        context.assign(object, to: store)
     }
 
     private func readOnWriter<T>(_ body: @escaping (NSManagedObjectContext) throws -> T) throws -> T {

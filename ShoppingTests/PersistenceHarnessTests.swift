@@ -185,6 +185,145 @@ final class PersistenceHarnessTests: XCTestCase {
         XCTAssertThrowsError(try service.setQuantity(0, needID: needID))
     }
 
+    func testStoreArchiveAndRestorePreserveRememberedMembershipAndNeedAcrossRelaunch() throws {
+        let storeURL = temporaryStoreURL()
+        var householdID: UUID!
+        var storeID: UUID!
+        var itemID: UUID!
+        var needID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: persistence)
+            let ids = try service.createHousehold()
+            householdID = ids.householdID
+            storeID = try service.createStore(name: " Costco ", householdID: householdID)
+            itemID = try service.createItem(name: "Olive oil", householdID: householdID, anyStore: false)
+            try service.setStoreTags(itemID: itemID, storeIDs: [storeID])
+            needID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+            try service.setQuantity(3, needID: needID)
+            try service.setCarted(true, needID: needID)
+            try service.setStoreArchived(true, storeID: storeID, householdID: householdID)
+            XCTAssertEqual(try service.storeEligibility(itemID: itemID), .needsStore)
+        }
+
+        let relaunched = try PersistenceController(storeURL: storeURL)
+        let service = NeedService(persistence: relaunched)
+        XCTAssertEqual(try itemState(itemID, in: relaunched.simulationContext()).storeIDs, [storeID])
+        let savedNeed = try needState(needID, in: relaunched.simulationContext())
+        XCTAssertEqual(savedNeed.quantity, 3)
+        XCTAssertTrue(savedNeed.carted)
+        try service.setStoreArchived(false, storeID: storeID, householdID: householdID)
+        XCTAssertEqual(try service.storeEligibility(itemID: itemID), .activeStores([storeID]))
+    }
+
+    func testRemovingCategoryNullifiesItemAndPreservesCatalogAndNeed() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let categoryID = try service.createCategory(name: " Produce ", householdID: ids.householdID)
+        let itemID = try service.createItem(name: "Apples", householdID: ids.householdID)
+        try service.setCategory(itemID: itemID, categoryID: categoryID)
+        let needID = try service.addRememberedNeed(itemID: itemID, listID: ids.listID)
+        try service.setQuantity(4, needID: needID)
+
+        try service.removeCategory(categoryID: categoryID, householdID: ids.householdID)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let item = try self.fetchItem(itemID, in: context)
+            XCTAssertNil(item.category)
+            XCTAssertEqual(item.needs?.map(\.id), [needID])
+            XCTAssertEqual(try self.fetchNeed(needID, in: context).quantity, 4)
+            XCTAssertEqual(try context.count(for: Category.fetchRequest()), 0)
+        }
+    }
+
+    func testNamesAreTrimmedNonblankAndOrderTiesUseUUID() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        XCTAssertThrowsError(try service.createStore(name: " \n ", householdID: ids.householdID))
+        XCTAssertThrowsError(try service.createCategory(name: "", householdID: ids.householdID))
+        let firstID = try service.createStore(name: " Same ", householdID: ids.householdID, displayOrder: 2)
+        let secondID = try service.createStore(name: "Same", householdID: ids.householdID, displayOrder: 2)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let stores = try context.fetch(Store.fetchRequest()).sorted(by: NeedService.storeDisplayOrder)
+            XCTAssertEqual(stores.map(\.id), [firstID, secondID].sorted { $0.uuidString < $1.uuidString })
+            XCTAssertEqual(Set(stores.map(\.name)), ["Same"])
+        }
+    }
+
+    func testCategoryAssignmentRejectsForeignHouseholdAtomicallyAndAllowsUnlink() throws {
+        let persistence = try sqlitePersistence()
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold()
+        let second = try service.createHousehold()
+        let localCategory = try service.createCategory(name: "Local", householdID: first.householdID)
+        let foreignCategory = try service.createCategory(name: "Foreign", householdID: second.householdID)
+        let itemID = try service.createItem(name: "Milk", householdID: first.householdID)
+        try service.setCategory(itemID: itemID, categoryID: localCategory)
+        XCTAssertThrowsError(try service.setCategory(itemID: itemID, categoryID: foreignCategory))
+        XCTAssertEqual(try itemCategoryID(itemID, in: persistence.simulationContext()), localCategory)
+        try service.setCategory(itemID: itemID, categoryID: nil)
+        XCTAssertNil(try itemCategoryID(itemID, in: persistence.simulationContext()))
+    }
+
+    func testOwnedGraphCommandsStayInHouseholdsPersistentStore() throws {
+        let firstURL = temporaryStoreURL()
+        let secondURL = temporaryStoreURL()
+        let persistence = try PersistenceController(storeURL: firstURL, additionalStoreURLs: [secondURL])
+        let secondStore = try XCTUnwrap(persistence.container.persistentStoreCoordinator.persistentStores.last)
+        let setup = persistence.simulationContext()
+        let householdID = UUID()
+        let listID = UUID()
+        try setup.performAndWait {
+            let household = Household(context: setup)
+            household.id = householdID
+            household.name = "Imported household"
+            setup.assign(household, to: secondStore)
+            let list = GroceryList(context: setup)
+            list.id = listID
+            setup.assign(list, to: secondStore)
+            list.household = household
+            try setup.save()
+        }
+
+        let service = NeedService(persistence: persistence)
+        let storeID = try service.createStore(name: "Costco", householdID: householdID)
+        let categoryID = try service.createCategory(name: "Pantry", householdID: householdID)
+        let itemID = try service.createItem(name: "Rice", householdID: householdID)
+        try service.setCategory(itemID: itemID, categoryID: categoryID)
+        let needID = try service.addRememberedNeed(itemID: itemID, listID: listID)
+
+        let verify = persistence.simulationContext()
+        try verify.performAndWait {
+            let objects: [NSManagedObject] = [
+                try self.fetchStore(storeID, in: verify),
+                try self.fetchItem(itemID, in: verify),
+                try self.fetchNeed(needID, in: verify)
+            ]
+            let categoryRequest = Category.fetchRequest()
+            categoryRequest.predicate = NSPredicate(format: "id == %@", categoryID as CVarArg)
+            objects.forEach { XCTAssertEqual($0.objectID.persistentStore, secondStore) }
+            XCTAssertEqual(try XCTUnwrap(verify.fetch(categoryRequest).first).objectID.persistentStore, secondStore)
+        }
+    }
+
+    func testFailedFirstStoreIsNotHiddenBySuccessfulSecondStore() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingLoadFailure-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let invalidParent = directory.appendingPathComponent("file-not-directory")
+        try Data("file".utf8).write(to: invalidParent)
+        let validURL = directory.appendingPathComponent("valid.sqlite")
+        XCTAssertThrowsError(try PersistenceController(
+            storeURL: invalidParent.appendingPathComponent("invalid.sqlite"),
+            additionalStoreURLs: [validURL]
+        ))
+        XCTAssertThrowsError(try PersistenceController(additionalStoreURLs: [validURL]))
+    }
+
     private typealias NeedState = (revision: Int64, carted: Bool, quantity: Int64, archived: Bool, itemID: UUID?)
     private typealias ItemState = (storeIDs: Set<UUID>, anyStore: Bool)
 
@@ -233,6 +372,10 @@ final class PersistenceHarnessTests: XCTestCase {
             let item = try fetchItem(id, in: context)
             return (Set(item.stores?.map(\.id) ?? []), item.anyStore)
         }
+    }
+
+    private func itemCategoryID(_ id: UUID, in context: NSManagedObjectContext) throws -> UUID? {
+        try context.performAndWait { try fetchItem(id, in: context).category?.id }
     }
 
     private func count<T>(_ request: NSFetchRequest<T>, in context: NSManagedObjectContext) throws -> Int {

@@ -1,31 +1,42 @@
 import CoreData
 
+enum PersistenceSetupError: Error {
+    case missingPrimaryStoreURL
+}
+
 final class PersistenceController {
     let container: NSPersistentContainer
     let writer: NSManagedObjectContext
 
-    init(storeURL: URL? = nil, inMemory: Bool = false) throws {
+    init(storeURL: URL? = nil, additionalStoreURLs: [URL] = [], inMemory: Bool = false) throws {
+        guard storeURL != nil || additionalStoreURLs.isEmpty else {
+            throw PersistenceSetupError.missingPrimaryStoreURL
+        }
         // This harness intentionally uses a local container; managed CloudKit stores are installed later.
         container = NSPersistentContainer(
             name: PersistenceModel.name,
             managedObjectModel: PersistenceModel.make()
         )
 
-        let description = NSPersistentStoreDescription()
-        description.type = inMemory ? NSInMemoryStoreType : NSSQLiteStoreType
-        if let storeURL {
-            description.url = storeURL
+        let urls = storeURL.map { [$0] + additionalStoreURLs } ?? []
+        let descriptions = (urls.isEmpty ? [nil] : urls.map(Optional.some)).map { url -> NSPersistentStoreDescription in
+            let description = NSPersistentStoreDescription()
+            description.type = inMemory ? NSInMemoryStoreType : NSSQLiteStoreType
+            description.url = url
+            description.shouldMigrateStoreAutomatically = true
+            description.shouldInferMappingModelAutomatically = true
+            description.shouldAddStoreAsynchronously = false
+            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            return description
         }
-        description.shouldMigrateStoreAutomatically = true
-        description.shouldInferMappingModelAutomatically = true
-        description.shouldAddStoreAsynchronously = false
-        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        container.persistentStoreDescriptions = [description]
+        container.persistentStoreDescriptions = descriptions
 
         var loadError: Error?
         container.loadPersistentStores { _, error in
-            loadError = error
+            if let error, loadError == nil {
+                loadError = error
+            }
         }
         if let loadError {
             throw loadError
