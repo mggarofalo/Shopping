@@ -87,9 +87,7 @@ final class ShoppingLaunchTests: XCTestCase {
     func testCancelingInlineStoreAndParentAddCreatesNeitherStoreNorNeed() {
         let app = launchApp()
         openOneTimeAdd(in: app, groceryName: "Canceled grocery")
-        let addStore = app.buttons["shopping.tags.addStore"]
-        for _ in 0..<8 where !addStore.exists || !addStore.isHittable { app.swipeUp() }
-        addStore.tap()
+        revealInlineAddStore(in: app).tap()
         XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
         let storeName = app.textFields["shopping.tags.storeName"]
         storeName.tap()
@@ -107,9 +105,7 @@ final class ShoppingLaunchTests: XCTestCase {
     func testSavingInlineStoreSelectsItButParentCancelCreatesNoNeed() {
         let app = launchApp()
         openOneTimeAdd(in: app, groceryName: "Canceled tagged grocery")
-        let addStore = app.buttons["shopping.tags.addStore"]
-        for _ in 0..<8 where !addStore.exists || !addStore.isHittable { app.swipeUp() }
-        addStore.tap()
+        revealInlineAddStore(in: app).tap()
         XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
         let storeName = app.textFields["shopping.tags.storeName"]
         storeName.tap()
@@ -298,6 +294,26 @@ final class ShoppingLaunchTests: XCTestCase {
         let bananas = app.staticTexts["Bananas"]
         for _ in 0..<6 where !bananas.exists { app.swipeUp() }
         XCTAssertTrue(bananas.waitForExistence(timeout: 2))
+    }
+
+    private func revealInlineAddStore(in app: XCUIApplication) -> XCUIElement {
+        let button = app.buttons["shopping.tags.addStore"]
+        for _ in 0..<8 {
+            let top = app.navigationBars["Add grocery"].frame.maxY
+            let bottom = app.keyboards.firstMatch.exists
+                ? app.keyboards.firstMatch.frame.minY - 60 : app.frame.maxY - 40
+            // iOS 18 can report an offscreen link as hittable behind the keyboard.
+            // Its keyboard frame excludes the prediction bar, so leave room above it.
+            if button.exists && button.isHittable && button.frame.minY >= top && button.frame.maxY <= bottom {
+                return button
+            }
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: app.frame.midX, dy: bottom - 24))
+            let end = origin.withOffset(CGVector(dx: app.frame.midX, dy: top + 24))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTFail("Inline Add store did not become visible above the keyboard")
+        return button
     }
 
     private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false) -> XCUIApplication {
