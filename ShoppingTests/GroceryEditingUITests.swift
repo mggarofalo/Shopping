@@ -130,21 +130,22 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
     }
 
-    func testCartedNeedAgainOffersShowAllWhenCurrentStoreHidesTheGrocery() {
+    func testCartedUncartOffersShowAllWhenCurrentStoreHidesTheGrocery() {
         let app = launchApp(fixture: "populated")
         app.buttons["shopping.store.menu"].tap()
         app.buttons["Publix"].tap()
-        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (1)")).firstMatch
+        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (0)")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 2))
         carted.tap()
         XCTAssertTrue(app.navigationBars["Carted"].waitForExistence(timeout: 2))
+        app.buttons["shopping.carted.all"].tap()
         groceryRow(named: "Strawberries", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.navigationBars["Carted"].waitForExistence(timeout: 2))
         XCTAssertTrue(groceryRow(named: "Strawberries", app: app).exists)
-        app.buttons["Need again Strawberries"].tap()
-        XCTAssertTrue(app.staticTexts["Nothing carted"].waitForExistence(timeout: 3))
+        app.buttons["Uncart Strawberries"].tap()
+        XCTAssertTrue(app.staticTexts["Nothing carted in this scope"].waitForExistence(timeout: 3))
         app.navigationBars["Carted"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
         let showAll = app.buttons["shopping.grocery.showAll"]

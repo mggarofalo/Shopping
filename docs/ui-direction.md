@@ -72,3 +72,11 @@ Add starts as Remember this item and Normal. Matching names appear beside the ne
 New remembered Save commits catalog knowledge and current demand together. Existing edits stage catalog and current-purchase fields until Save; edits follow the agreed last-update-wins behavior. One-time Save writes only the current grocery. Switching identity is a creation choice; promotion of an existing one-time grocery remains a separate explicit action. Name collision discovery uses normalized names, and a distinct-item choice applies only to that save attempt.
 
 Remove is a separate confirmed action with Undo. Its confirmation captures the occurrence, revision and household before acting; a changed grocery is not removed by a stale confirmation. Recovery is persisted and does not create reusable knowledge for one-time groceries. Carted remembered rows offer Need again; carted one-time rows move the same occurrence back without creating a template. A saved or renewed grocery hidden by the current filters receives a Show all action after the local view observes the saved change.
+
+## Checklist and recovery
+
+Cart and quantity controls save immediately to the current household list. Separate 44-point minus, plus, cart and edit targets keep the visible quantity readable and avoid shared list-row button actions. At accessibility text sizes, scope controls scroll with groceries so the header cannot consume the shopping area.
+
+Carted inherits the store, explicit tag, search, category and urgency filters shown in Groceries. Its local All carted option broadens only that recovery view. Uncart preserves urgency and offers Show all on return when the original grocery filters hide the item. Deliberate remembered Need again remains a separate action that resets urgency to Normal.
+
+Clear carted previews the exact names, quantities, count and readable scope. Confirmation and retry keep the same captured occurrence IDs and revisions; changed rows are skipped. Cancel does not write. Clear errors remain visible inside the confirmation sheet, and Undo and Recently cleared explain when newer changes prevent restoration. One-time recovery creates no remembered catalog item.

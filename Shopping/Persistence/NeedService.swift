@@ -7,6 +7,19 @@ struct ClearCartedToken: Codable, Equatable {
     let revisionsByNeedID: [UUID: Int64]
 }
 
+struct ClearCartedPreview: Equatable {
+    let token: ClearCartedToken
+    let rows: [ClearCartedPreviewRow]
+}
+
+struct ClearCartedPreviewRow: Equatable {
+    let needID: UUID
+    let revision: Int64
+    let title: String
+    let quantity: Int64
+    let oneTime: Bool
+}
+
 enum NeedUrgency: String, Codable, CaseIterable {
     case normal
     case urgent
@@ -914,6 +927,31 @@ final class NeedService {
         try editNeed(id: needID) { $0.quantity = quantity }
     }
 
+    func setNeedCarted(needID: UUID, householdID: UUID, listID: UUID, carted: Bool) throws {
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context)
+            let (revision, overflow) = resolved.need.revision.addingReportingOverflow(1)
+            guard !overflow else { throw NeedServiceError.scopeChanged }
+            resolved.need.carted = carted
+            resolved.need.clearOperationID = nil
+            resolved.need.revision = revision
+        }
+    }
+
+    func setNeedQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64) throws {
+        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+        try write { context in
+            let resolved = try self.validatedActiveNeed(
+                needID: needID, householdID: householdID, listID: listID, in: context)
+            let (revision, overflow) = resolved.need.revision.addingReportingOverflow(1)
+            guard !overflow else { throw NeedServiceError.scopeChanged }
+            resolved.need.quantity = quantity
+            resolved.need.clearOperationID = nil
+            resolved.need.revision = revision
+        }
+    }
+
     func setUrgency(_ urgency: NeedUrgency, needID: UUID) throws {
         try editNeed(id: needID) { $0.urgency = urgency.rawValue }
     }
@@ -1054,17 +1092,73 @@ final class NeedService {
         // A pre-confirmation allowlist captured by the caller (for example, visible or selected rows).
         restrictedToNeedIDs: Set<UUID>? = nil
     ) throws -> ClearCartedToken {
+        try prepareClearCarted(
+            householdID: householdID, listID: listID, filter: GroceryNeedFilter(carted: true),
+            restrictedToNeedIDs: restrictedToNeedIDs
+        ).token
+    }
+
+    func prepareClearCarted(
+        householdID: UUID,
+        listID: UUID,
+        filter: GroceryNeedFilter,
+        restrictedToNeedIDs: Set<UUID>? = nil
+    ) throws -> ClearCartedPreview {
         try readOnWriter { context in
-            guard let list = try self.list(id: listID, in: context),
-                  list.household?.id == householdID else {
-                throw NeedServiceError.scopeChanged
-            }
+            guard let household = try self.household(id: householdID, in: context),
+                let list = try self.list(id: listID, in: context)
+            else { throw NeedServiceError.scopeChanged }
+            try self.validate(list: list, belongsTo: household)
+            let activeStores = try self.activeStoreIDs(household: household, in: context)
             let request = Need.fetchRequest()
-            request.predicate = NSPredicate(
-                format: "list.id == %@ AND carted == YES AND archived == NO",
-                listID as CVarArg
-            )
-            let captured = try context.fetch(request).filter { restrictedToNeedIDs?.contains($0.id) ?? true }
+            request.predicate = NSPredicate(format: "list == %@ AND carted == YES AND archived == NO", list)
+            let candidates = try context.fetch(request)
+            try self.validateOccurrenceIdentities(candidates)
+            let captured = try candidates.filter { need in
+                guard restrictedToNeedIDs?.contains(need.id) ?? true else { return false }
+                guard let canonicalNeed = try self.need(id: need.id, in: context), canonicalNeed === need
+                else {
+                    throw NeedServiceError.invalidOccurrenceIdentity
+                }
+                let item = need.item
+                if let item {
+                    guard let canonicalItem = try self.item(id: item.id, in: context), canonicalItem === item
+                    else {
+                        throw NeedServiceError.invalidCatalogIdentity
+                    }
+                    try self.validate(item: item, belongsTo: household)
+                }
+                let oneTime = need.kind == NeedKind.oneTime.rawValue
+                let relatedStores = item?.stores ?? (oneTime ? need.oneTimeStores ?? [] : [])
+                for store in relatedStores {
+                    guard let canonicalStore = try self.store(id: store.id, in: context),
+                        canonicalStore === store,
+                        store.household == household,
+                        store.objectID.persistentStore == household.objectID.persistentStore
+                    else {
+                        throw NeedServiceError.invalidStoreIdentity
+                    }
+                }
+                let relatedCategory = item?.category ?? (oneTime ? need.oneTimeCategory : nil)
+                if let category = relatedCategory {
+                    guard let canonicalCategory = try self.category(id: category.id, in: context),
+                        canonicalCategory === category,
+                        category.household == household,
+                        category.objectID.persistentStore == household.objectID.persistentStore
+                    else {
+                        throw NeedServiceError.categoryNotFound
+                    }
+                }
+                let value = PurchaseRuleValue(
+                    explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
+                        ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
+                    anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore))
+                return filter.purchase.matches(value, activeStoreIDs: activeStores)
+                    && CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text)
+                    && (filter.categoryID == nil
+                        || (item?.category ?? (oneTime ? need.oneTimeCategory : nil))?.id == filter.categoryID)
+                    && (filter.urgency == nil || need.urgency == filter.urgency)
+            }
             var snapshot: [UUID: Int64] = [:]
             for need in captured {
                 guard need.id != PersistenceModel.unsetID, snapshot[need.id] == nil else {
@@ -1072,12 +1166,14 @@ final class NeedService {
                 }
                 snapshot[need.id] = need.revision
             }
-            return ClearCartedToken(
-                id: UUID(),
-                householdID: householdID,
-                listID: listID,
-                revisionsByNeedID: snapshot
-            )
+            let token = ClearCartedToken(
+                id: UUID(), householdID: householdID, listID: listID, revisionsByNeedID: snapshot)
+            let rows = captured.map {
+                ClearCartedPreviewRow(
+                    needID: $0.id, revision: $0.revision, title: $0.item?.name ?? $0.title,
+                    quantity: $0.quantity, oneTime: $0.kind == NeedKind.oneTime.rawValue)
+            }.sorted { $0.needID.uuidString < $1.needID.uuidString }
+            return ClearCartedPreview(token: token, rows: rows)
         }
     }
 
@@ -1117,9 +1213,11 @@ final class NeedService {
                       need.revision == capturedRevision else {
                     continue
                 }
+                let (archivedRevision, overflow) = need.revision.addingReportingOverflow(1)
+                guard !overflow, archivedRevision < Int64.max else { continue }
                 need.archived = true
                 need.clearOperationID = token.id
-                need.revision += 1
+                need.revision = archivedRevision
                 count += 1
             }
             return count

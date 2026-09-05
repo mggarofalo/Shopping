@@ -30,9 +30,14 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
         XCTAssertTrue(staticText(named: "Must buy here", in: app).waitForExistence(timeout: 2))
-        XCTAssertTrue(staticText(named: "Flexible here", in: app).exists)
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Carted")).firstMatch.exists)
+        let flexibleSection = staticText(named: "Flexible here", in: app)
+        for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(flexibleSection.exists)
+        XCTAssertTrue(flexibleSection.isHittable)
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
     }
 
