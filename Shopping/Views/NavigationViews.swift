@@ -44,6 +44,7 @@ struct GroceriesView: View {
     @State private var searchText = ""
     @State private var visibleNeedIDs: Set<UUID> = []
     @State private var showingFilters = false
+    @State private var showingStorePicker = false
     @State private var addScope: GroceryAddScope?
     @State private var error: Error?
 
@@ -136,6 +137,15 @@ struct GroceriesView: View {
             .sheet(isPresented: $showingFilters) {
                 GroceryFiltersView(navigation: navigation, stores: activeStores)
             }
+            .confirmationDialog(
+                "Choose store",
+                isPresented: $showingStorePicker,
+                titleVisibility: .visible
+            ) {
+                ForEach(activeStores, id: \.objectID) { store in
+                    Button(store.name) { navigation.selectStore(store.id) }
+                }
+            }
             .sheet(item: $addScope) { scope in
                 OneTimeGrocerySheet(scope: scope) {
                     addScope = nil
@@ -195,11 +205,7 @@ struct GroceriesView: View {
     }
 
     private var storeMenu: some View {
-        Menu {
-            ForEach(activeStores, id: \.objectID) { store in
-                Button(store.name) { navigation.selectStore(store.id) }
-            }
-        } label: {
+        Button { showingStorePicker = true } label: {
             Label(selectedStoreName, systemImage: dynamicTypeSize.isAccessibilitySize ? "chevron.down" : "storefront")
                 .frame(minHeight: 44)
         }
