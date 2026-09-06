@@ -11,13 +11,11 @@ struct SettingsView: View {
                 NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
                 NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
                 Section("Appearance") {
-                    Picker("Color scheme", selection: $appearance) {
-                        ForEach(AppearancePreference.allCases) { preference in
-                            Text(preference.title).tag(preference.rawValue)
-                        }
+                    if dynamicTypeSize.isAccessibilitySize {
+                        appearancePicker.pickerStyle(.menu)
+                    } else {
+                        appearancePicker.pickerStyle(.segmented)
                     }
-                    .accessibilityIdentifier("shopping.appearance")
-                    .pickerStyle(dynamicTypeSize.isAccessibilitySize ? .menu : .segmented)
                 }
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
@@ -28,6 +26,15 @@ struct SettingsView: View {
             .navigationTitle("Settings")
         }
     }
+    private var appearancePicker: some View {
+        Picker("Color scheme", selection: $appearance) {
+            ForEach(AppearancePreference.allCases) { preference in
+                Text(preference.title).tag(preference.rawValue)
+            }
+        }
+        .accessibilityIdentifier("shopping.appearance")
+    }
+
 }
 
 struct StoreManagementCommandScope: Equatable {

@@ -29,10 +29,10 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(staticText(named: "Must buy here", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Must buy here ·")).firstMatch.waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
-        let flexibleSection = staticText(named: "Flexible here", in: app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
+        let flexibleSection = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Flexible here ·")).firstMatch
         for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
             app.swipeUp()
         }
@@ -222,7 +222,10 @@ final class ShoppingLaunchTests: XCTestCase {
         let app = launchApp(fixture: "populated")
         openCatalog(in: app)
         XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
-        app.staticTexts["Granola"].tap()
+        let catalogRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.item."))
+            .containing(.staticText, identifier: "Granola").firstMatch
+        reveal(catalogRow, in: app)
+        catalogRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
         reveal(app.buttons["shopping.catalog.archive"], in: app)
         app.buttons["shopping.catalog.archive"].tap()
@@ -407,18 +410,15 @@ final class ShoppingLaunchTests: XCTestCase {
         ).firstMatch
         reveal(header, in: app)
         XCTAssertTrue(header.exists)
-        let tags = app.switches.matching(NSPredicate(
+        let tags = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label == %@", section.identifierPrefix, name
         ))
-        let toggle = tags.firstMatch
-        reveal(toggle, in: app)
+        let pill = tags.firstMatch
+        reveal(pill, in: app)
         XCTAssertEqual(tags.count, 1)
-        XCTAssertTrue(toggle.isHittable)
-        if (toggle.value as? String == "1") != on {
-            let control = toggle.switches.firstMatch
-            (control.exists ? control : toggle).tap()
-        }
-        XCTAssertEqual(toggle.value as? String, on ? "1" : "0")
+        XCTAssertTrue(pill.isHittable)
+        if (pill.value as? String == "Selected") != on { pill.tap() }
+        XCTAssertEqual(pill.value as? String, on ? "Selected" : "Not selected")
     }
 
     private func revealGrocery(named name: String, in app: XCUIApplication, towardTop: Bool = false) {
@@ -463,14 +463,17 @@ final class ShoppingLaunchTests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<10 {
             let appFrame = app.frame
-            let navigationFrame = app.navigationBars.firstMatch.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let navigationFrame = navigationBar.frame
             guard usable(appFrame), usable(navigationFrame) else { continue }
+            let targetIsInNavigationBar = contains(element, in: navigationBar)
             let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
             let targetIsInFixedScope = contains(element, in: fixedScope)
-            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable && !targetIsInFixedScope
-                ? fixedScope.frame : nil
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable
+                && !targetIsInNavigationBar && !targetIsInFixedScope ? fixedScope.frame : nil
             if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
-            let top = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let contentTop = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let top = targetIsInNavigationBar ? appFrame.minY : contentTop
             let keyboard = app.keyboards.firstMatch
             let keyboardFrame = keyboard.exists ? keyboard.frame : nil
             if let keyboardFrame, !usable(keyboardFrame) { continue }

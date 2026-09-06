@@ -86,6 +86,7 @@ final class ShoppingDeviceUITests: XCTestCase {
 
     func testDefaultQuantityIsVisibleAndFilterChipsCanBeRemoved() {
         let app = launch(fixture: "populated")
+        selectCostco(in: app)
         app.buttons["shopping.filters"].tap()
         XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 3))
         let urgent = app.switches["Urgent only"]
@@ -95,6 +96,14 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["Done"].tap()
         let removeUrgent = app.buttons["Remove Urgent filter"]
         XCTAssertTrue(removeUrgent.waitForExistence(timeout: 3))
+        let clearStore = app.buttons["shopping.store.clear"]
+        reveal(clearStore, in: app, towardTop: true)
+        XCTAssertEqual(clearStore.label, "Clear selected store")
+        clearStore.tap()
+        XCTAssertFalse(clearStore.exists)
+        XCTAssertTrue(app.buttons["shopping.store.all"].isSelected)
+        XCTAssertTrue(removeUrgent.exists)
+        XCTAssertTrue(app.buttons["Remove Pantry filter"].exists)
         let quantity = app.staticTexts["Quantity 1"]
         reveal(quantity, in: app)
         XCTAssertGreaterThan(quantity.frame.width, 0)
@@ -178,9 +187,15 @@ final class ShoppingDeviceUITests: XCTestCase {
         _ element: XCUIElement, in app: XCUIApplication, fullyVisible: Bool = true, towardTop: Bool = false
     ) {
         for _ in 0..<12 {
-            let top = app.navigationBars.firstMatch.frame.maxY
-            let bottom = app.tabBars.firstMatch.frame.minY
-            guard top.isFinite, bottom.isFinite, bottom - top > 48 else { continue }
+            let window = app.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let navigationFrame = navigationBar.frame
+            let tabBarFrame = app.tabBars.firstMatch.frame
+            guard usable(window), usable(navigationFrame), usable(tabBarFrame) else { continue }
+            let targetIsInNavigationBar = contains(element, in: navigationBar)
+            let top = targetIsInNavigationBar ? window.minY : navigationFrame.maxY
+            let bottom = tabBarFrame.minY
+            guard bottom - top > 48 else { continue }
             let frame = element.exists ? element.frame : .null
             let visibleHeight = min(frame.maxY, bottom) - max(frame.minY, top)
             if element.exists && element.isHittable
@@ -188,8 +203,6 @@ final class ShoppingDeviceUITests: XCTestCase {
             {
                 return
             }
-            let window = app.frame
-            guard window.height.isFinite, window.height > 0 else { continue }
             let movingDown = (!frame.isNull && frame.minY < top) || (frame.isNull && towardTop)
             let overflow = frame.isNull
                 ? (bottom - top) * 0.4
@@ -203,6 +216,19 @@ final class ShoppingDeviceUITests: XCTestCase {
             start.press(forDuration: 0.05, thenDragTo: end)
         }
         XCTFail("Could not reveal the requested element between navigation and tab bars")
+    }
+
+    private func contains(_ element: XCUIElement, in container: XCUIElement) -> Bool {
+        guard element.exists, usable(element.frame), container.exists else { return false }
+        return container.descendants(matching: element.elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", element.identifier, element.label
+        )).firstMatch.exists
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
     private func alignRowNearTop(_ cell: XCUIElement, in app: XCUIApplication) {

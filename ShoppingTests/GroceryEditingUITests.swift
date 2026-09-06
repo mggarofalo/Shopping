@@ -145,7 +145,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         XCTAssertTrue(groceryRow(named: "Strawberries", app: app).exists)
         app.buttons["Remove from cart Strawberries"].tap()
-        XCTAssertTrue(app.staticTexts["Nothing carted in this scope"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Nothing in cart in this view"].waitForExistence(timeout: 3))
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
         let showAll = app.buttons["shopping.grocery.showAll"]
@@ -208,14 +208,17 @@ final class GroceryEditingUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<8 {
             let appFrame = app.frame
-            let navigationFrame = app.navigationBars.firstMatch.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let navigationFrame = navigationBar.frame
             guard usable(appFrame), usable(navigationFrame) else { continue }
+            let targetIsInNavigationBar = contains(element, in: navigationBar)
             let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
             let targetIsInFixedScope = contains(element, in: fixedScope)
-            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable && !targetIsInFixedScope
-                ? fixedScope.frame : nil
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable
+                && !targetIsInNavigationBar && !targetIsInFixedScope ? fixedScope.frame : nil
             if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
-            let top = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let contentTop = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let top = targetIsInNavigationBar ? appFrame.minY : contentTop
             let keyboard = app.keyboards.firstMatch
             let keyboardFrame = keyboard.exists ? keyboard.frame : nil
             if let keyboardFrame, !usable(keyboardFrame) { continue }

@@ -216,7 +216,7 @@ struct GroceryEditorView: View {
                 if isEditing, !remembered {
                     promotionSection
                 }
-                Section("Quantity and urgency") {
+                Section {
                     Stepper(value: $quantity, in: 1...99) {
                         LabeledContent("Quantity") { Text("\(quantity)") }
                     }

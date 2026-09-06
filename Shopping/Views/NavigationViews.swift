@@ -232,28 +232,24 @@ struct GroceriesView: View {
                             let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
                             if !mustBuy.isEmpty {
                                 Section {
-                                    groupedRows(mustBuy)
-                                } header: {
-                                    Text("Must buy here").foregroundStyle(Color.grocerySecondary)
+                                    groupedRows(mustBuy, sectionTitle: "Must buy here")
                                 }
                             }
                             if !flexible.isEmpty {
                                 Section {
-                                    groupedRows(flexible)
-                                } header: {
-                                    Text("Flexible here").foregroundStyle(Color.grocerySecondary)
+                                    groupedRows(flexible, sectionTitle: "Flexible here")
                                 }
                             }
                         } else {
                             Section {
                                 groupedRows(visibleNeeds)
-                            } header: {
-                                Text("Needed").foregroundStyle(Color.grocerySecondary)
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
-
+                    .contentMargins(
+                        .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
+                    )
                 }
             }
     }
@@ -333,21 +329,12 @@ struct GroceriesView: View {
         .accessibilityLabel("Remove \(title) filter")
     }
 
-    @ViewBuilder
     private var allButton: some View {
-        if navigation.selectedStoreID == nil {
-            allStoreAction.buttonStyle(.borderedProminent)
-        } else {
-            allStoreAction.buttonStyle(.bordered)
-        }
-    }
-
-    private var allStoreAction: some View {
-        Button("All") { navigation.selectAll() }
-            .tint(.groceryAccent)
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("shopping.store.all")
-            .accessibilityAddTraits(navigation.selectedStoreID == nil ? .isSelected : [])
+        SelectionPill(
+            title: "All",
+            isSelected: navigation.selectedStoreID == nil,
+            identifier: "shopping.store.all"
+        ) { navigation.selectAll() }
     }
 
     private var storeMenu: some View {
@@ -561,7 +548,7 @@ struct GroceriesView: View {
     }
 
     @ViewBuilder
-    private func groupedRows(_ values: [Need]) -> some View {
+    private func groupedRows(_ values: [Need], sectionTitle: String? = nil) -> some View {
         let groups = CategoryGrouping.groups(
             needs: values,
             categories: activeCategories,
@@ -569,18 +556,24 @@ struct GroceriesView: View {
         )
         ForEach(groups) { priority in
             ForEach(priority.categories) { category in
-                Text(category.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityAddTraits(.isHeader)
                 ForEach(category.needs, id: \.objectID) { need in
-                    GroceryNeedRow(
-                        need: need,
-                        activeStores: activeStores,
-                        onEdit: focus,
-                        onCartedChange: setCarted,
-                        onQuantityChange: setQuantity
-                    )
+                    VStack(alignment: .leading, spacing: 8) {
+                        if need.objectID == category.needs.first?.objectID {
+                            let isFirstGroup = priority.id == groups.first?.id && category.id == priority.categories.first?.id
+                            Text(isFirstGroup ? [sectionTitle, category.title].compactMap { $0 }.joined(separator: " · ") : category.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.grocerySecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityAddTraits(.isHeader)
+                        }
+                        GroceryNeedRow(
+                            need: need,
+                            activeStores: activeStores,
+                            onEdit: focus,
+                            onCartedChange: setCarted,
+                            onQuantityChange: setQuantity
+                        )
+                    }
                 }
             }
         }
@@ -792,6 +785,8 @@ struct GroceryNeedRow: View {
             .accessibilityIdentifier("shopping.grocery.row.\(need.id.uuidString)")
         } else {
             details
+                .accessibilityLabel(title)
+                .accessibilityValue(accessibilityDetails)
         }
     }
 
@@ -916,35 +911,37 @@ struct GroceryFiltersView: View {
             Form {
                 Toggle("Urgent only", isOn: $navigation.urgentOnly)
                 Section("Category") {
-                    Button("Any category") { navigation.categoryID = nil }
-                    ForEach(categories, id: \.objectID) { category in
-                        Button {
-                            navigation.categoryID = navigation.categoryID == category.id ? nil : category.id
-                        } label: {
-                            HStack {
-                                Text(category.name)
-                                Spacer()
-                                if navigation.categoryID == category.id { Image(systemName: "checkmark") }
+                    PillFlowLayout {
+                        SelectionPill(title: "Any category", isSelected: navigation.categoryID == nil) {
+                            navigation.categoryID = nil
+                        }
+                        ForEach(categories, id: \.objectID) { category in
+                            SelectionPill(title: category.name, isSelected: navigation.categoryID == category.id) {
+                                navigation.categoryID = navigation.categoryID == category.id ? nil : category.id
                             }
                         }
                     }
                 }
                 Section("Include a store tag") {
-                    ForEach(stores, id: \.objectID) { store in
-                        Toggle(store.name, isOn: Binding(
-                            get: { navigation.includedStoreIDs.contains(store.id) },
-                            set: { navigation.setIncluded($0, storeID: store.id) }
-                        ))
-                        .accessibilityIdentifier("shopping.filters.include.\(store.id.uuidString)")
+                    PillFlowLayout {
+                        ForEach(stores, id: \.objectID) { store in
+                            SelectionPill(
+                                title: store.name,
+                                isSelected: navigation.includedStoreIDs.contains(store.id),
+                                identifier: "shopping.filters.include.\(store.id.uuidString)"
+                            ) { navigation.setIncluded(!navigation.includedStoreIDs.contains(store.id), storeID: store.id) }
+                        }
                     }
                 }
                 Section("Exclude a store tag") {
-                    ForEach(stores, id: \.objectID) { store in
-                        Toggle(store.name, isOn: Binding(
-                            get: { navigation.excludedStoreIDs.contains(store.id) },
-                            set: { navigation.setExcluded($0, storeID: store.id) }
-                        ))
-                        .accessibilityIdentifier("shopping.filters.exclude.\(store.id.uuidString)")
+                    PillFlowLayout {
+                        ForEach(stores, id: \.objectID) { store in
+                            SelectionPill(
+                                title: store.name,
+                                isSelected: navigation.excludedStoreIDs.contains(store.id),
+                                identifier: "shopping.filters.exclude.\(store.id.uuidString)"
+                            ) { navigation.setExcluded(!navigation.excludedStoreIDs.contains(store.id), storeID: store.id) }
+                        }
                     }
                 }
                 Button("Reset filters", action: onReset)

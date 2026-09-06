@@ -248,14 +248,17 @@ final class OneTimePromotionUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<10 {
             let appFrame = app.frame
-            let navigationFrame = app.navigationBars.firstMatch.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let navigationFrame = navigationBar.frame
             guard usable(appFrame), usable(navigationFrame) else { continue }
+            let targetIsInNavigationBar = contains(element, in: navigationBar)
             let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
             let targetIsInFixedScope = contains(element, in: fixedScope)
-            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable && !targetIsInFixedScope
-                ? fixedScope.frame : nil
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable
+                && !targetIsInNavigationBar && !targetIsInFixedScope ? fixedScope.frame : nil
             if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
-            let top = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let contentTop = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let top = targetIsInNavigationBar ? appFrame.minY : contentTop
             let keyboard = app.keyboards.firstMatch
             let keyboardFrame = keyboard.exists ? keyboard.frame : nil
             if let keyboardFrame, !usable(keyboardFrame) { continue }
