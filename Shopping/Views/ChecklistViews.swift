@@ -67,7 +67,7 @@ struct CartedGroceriesView: View {
         let activeStores = validActiveStores
         List {
             Section {
-                Button("All carted", action: showAllCarted)
+                Button("All in cart", action: showAllCarted)
                     .accessibilityIdentifier("shopping.carted.all")
                 Text(scopeDescription).font(.footnote).foregroundStyle(.secondary)
             }
@@ -83,11 +83,11 @@ struct CartedGroceriesView: View {
                         activeStores: activeStores)
                 }
             } else {
-                Section("Carted") { rows(carted, activeStores: activeStores) }
+                Section("In cart") { rows(carted, activeStores: activeStores) }
             }
             if !carted.isEmpty {
                 Section {
-                    Button("Clear carted", role: .destructive) { prepareClear(carted) }
+                    Button("Clear items in cart", role: .destructive) { prepareClear(carted) }
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("shopping.carted.clear")
                 }
@@ -95,15 +95,15 @@ struct CartedGroceriesView: View {
         }
         .overlay {
             if carted.isEmpty {
-                ContentUnavailableView("Nothing carted in this scope", systemImage: "cart")
+                ContentUnavailableView("Nothing in cart in this view", systemImage: "cart")
                     .allowsHitTesting(false)
             }
         }
-        .navigationTitle("Carted")
+        .navigationTitle("In cart")
         .sheet(item: $clearDraft, content: clearSheet)
         .safeAreaInset(edge: .bottom) { resultBar }
         .alert(
-            "Couldn’t update carted groceries",
+            "Couldn’t update groceries in cart",
             isPresented: Binding(
                 get: { error != nil }, set: { if !$0 { error = nil } }
             )
@@ -172,7 +172,7 @@ struct CartedGroceriesView: View {
                     }
                 }
             }
-            .navigationTitle("Clear carted?")
+            .navigationTitle("Clear items in cart?")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { clearDraft = nil }
@@ -265,7 +265,7 @@ struct CartedGroceriesView: View {
             parts.append("category \(name)")
         }
         if filter.urgency == NeedUrgency.urgent.rawValue { parts.append("Urgent") }
-        return parts.isEmpty ? "All carted groceries" : parts.joined(separator: " · ")
+        return parts.isEmpty ? "All groceries in cart" : parts.joined(separator: " · ")
     }
 
     private func refreshProjection() {

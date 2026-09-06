@@ -11,7 +11,7 @@ final class ChecklistUITests: XCTestCase {
         cart("Chipotles in adobo", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
-        XCTAssertTrue(app.navigationBars["Carted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         XCTAssertFalse(row("Strawberries", app: app).exists)
 
         openClear(app: app)
@@ -47,7 +47,9 @@ final class ChecklistUITests: XCTestCase {
         name.tap()
         name.typeText("Weekend ice")
         setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
-        setSwitch(app.switches["Any store"], on: true, app: app)
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
+        reveal(anyStore, app: app)
+        if anyStore.value as? String != "Selected" { anyStore.tap() }
         app.buttons["shopping.grocery.save"].tap()
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
@@ -67,8 +69,8 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(cartedLink(count: 1, app: app).waitForExistence(timeout: 3))
         cartedLink(count: 1, app: app).tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 2))
-        app.buttons["Uncart Weekend ice"].tap()
-        app.navigationBars["Carted"].buttons.firstMatch.tap()
+        app.buttons["Remove from cart Weekend ice"].tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
@@ -85,11 +87,11 @@ final class ChecklistUITests: XCTestCase {
         cart("Granola", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
-        let uncart = app.buttons["Uncart Granola"]
+        let uncart = app.buttons["Remove from cart Granola"]
         reveal(uncart, app: app)
         XCTAssertGreaterThanOrEqual(uncart.frame.height, 44 - 0.01)
         uncart.tap()
-        app.navigationBars["Carted"].buttons.firstMatch.tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
         reveal(row("Granola", app: app), app: app)
 
         app.terminate()
@@ -100,15 +102,15 @@ final class ChecklistUITests: XCTestCase {
         reveal(row("Granola", app: app), app: app)
         row("Granola", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.textFields["shopping.grocery.quantity"].value as? String, "2")
+        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
-        XCTAssertTrue(app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"].isSelected)
+        XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
     }
 
     func testChecklistControlsRemainUsableAtAccessibilityTextSize() {
         let app = launchApp(fixture: "populated", largeText: true)
         selectStore("Costco", app: app)
-        let cart = app.buttons["Cart Granola"]
+        let cart = app.buttons["Add to cart Granola"]
         reveal(cart, app: app)
         XCTAssertGreaterThanOrEqual(cart.frame.height, 44 - 0.01)
         let quantity = app.buttons["Increase quantity for Granola"]
@@ -141,14 +143,14 @@ final class ChecklistUITests: XCTestCase {
     }
 
     private func cart(_ name: String, app: XCUIApplication) {
-        let button = app.buttons["Cart \(name)"]
+        let button = app.buttons["Add to cart \(name)"]
         reveal(button, app: app)
         button.tap()
         XCTAssertFalse(button.exists)
     }
 
     private func cartedLink(count: Int, app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (\(count))")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (\(count))")).firstMatch
     }
 
     private func row(_ name: String, app: XCUIApplication) -> XCUIElement {

@@ -31,7 +31,7 @@ final class ShoppingLaunchTests: XCTestCase {
         costco.tap()
         XCTAssertTrue(staticText(named: "Must buy here", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Carted")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
         let flexibleSection = staticText(named: "Flexible here", in: app)
         for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
             app.swipeUp()
@@ -64,27 +64,27 @@ final class ShoppingLaunchTests: XCTestCase {
         app.buttons["Save store"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
 
-        app.buttons["Rename"].tap()
+        app.buttons["Rename Neighborhood Market"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.renameName"], with: "Canceled Market")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
 
-        app.buttons["Rename"].tap()
+        app.buttons["Rename Neighborhood Market"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.renameName"], with: "Local Market")
         app.buttons["Save"].tap()
         XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
 
-        app.buttons["Archive"].tap()
+        app.buttons["Archive Local Market"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Restore"].exists)
+        XCTAssertTrue(app.buttons["Restore Local Market"].exists)
         attachScreenshot(named: "Store Management Archived", app: app)
-        app.buttons["Restore"].tap()
+        app.buttons["Restore Local Market"].tap()
         XCTAssertFalse(app.staticTexts["Archived"].exists)
-        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Archive Local Market"].waitForExistence(timeout: 2))
     }
 
     func testCancelingInlineStoreAndParentAddCreatesNeitherStoreNorNeed() {
@@ -116,9 +116,9 @@ final class ShoppingLaunchTests: XCTestCase {
         app.buttons["Save store"].tap()
 
         XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
-        let selectedStore = app.switches["Corner Shop"]
+        let selectedStore = app.buttons["Corner Shop"]
         XCTAssertTrue(selectedStore.waitForExistence(timeout: 2))
-        XCTAssertEqual(selectedStore.value as? String, "1")
+        XCTAssertEqual(selectedStore.value as? String, "Selected")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
 
@@ -190,11 +190,11 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.catalog.name"], with: "Reusable coffee")
         replaceText(in: app.textFields["shopping.catalog.notes"], with: "Whole bean")
-        let anyStore = app.switches["Any store"]
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
         XCTAssertTrue(anyStore.waitForExistence(timeout: 2))
         let anyStoreControl = anyStore.switches.firstMatch
         (anyStoreControl.exists ? anyStoreControl : anyStore).tap()
-        XCTAssertEqual(anyStore.value as? String, "1")
+        XCTAssertEqual(anyStore.value as? String, "Selected")
         let save = app.buttons["shopping.catalog.save"]
         XCTAssertTrue(save.isEnabled)
         save.tap()
@@ -378,6 +378,13 @@ final class ShoppingLaunchTests: XCTestCase {
     }
 
     private func setSwitch(named name: String, on: Bool, in app: XCUIApplication) {
+        if name == "Any store" {
+            let pill = app.buttons["shopping.purchase.anyStore"]
+            reveal(pill, in: app)
+            if (pill.value as? String == "Selected") != on { pill.tap() }
+            XCTAssertEqual(pill.value as? String, on ? "Selected" : "Not selected")
+            return
+        }
         let toggle = app.switches[name]
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 2))
@@ -432,15 +439,14 @@ final class ShoppingLaunchTests: XCTestCase {
 
     private func enableArchivedItems(in app: XCUIApplication) {
         XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
-        let archived = app.switches["Archived items"]
+        let archived = app.buttons["shopping.catalog.archived"]
         for _ in 0..<3 where !archived.exists || !archived.isHittable {
             app.swipeUp()
         }
         XCTAssertTrue(archived.waitForExistence(timeout: 2))
         XCTAssertTrue(archived.isHittable)
-        let archivedControl = archived.switches.firstMatch
-        (archivedControl.exists ? archivedControl : archived).tap()
-        XCTAssertEqual(archived.value as? String, "1")
+        archived.tap()
+        XCTAssertEqual(archived.value as? String, "Selected")
     }
 
     private func tapArchiveStateConfirmation(in title: String, app: XCUIApplication) {

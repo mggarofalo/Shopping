@@ -21,7 +21,9 @@ final class ClearInterruptionUITests: XCTestCase {
         reveal(notes, app: app)
         notes.tap()
         notes.typeText("Keep cold")
-        setSwitch(app.switches["Any store"], on: true, app: app)
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
+        reveal(anyStore, app: app)
+        if anyStore.value as? String != "Selected" { anyStore.tap() }
         app.buttons["shopping.grocery.save"].tap()
         let row = app.buttons.matching(
             NSPredicate(
@@ -30,14 +32,14 @@ final class ClearInterruptionUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         let originalID = row.identifier
-        app.buttons["Cart Fresh ice"].tap()
-        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (1)")).firstMatch
+        app.buttons["Add to cart Fresh ice"].tap()
+        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.tap()
         let clear = app.buttons["shopping.carted.clear"]
         reveal(clear, app: app)
         clear.tap()
-        XCTAssertTrue(app.navigationBars["Clear carted?"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Clear items in cart?"].waitForExistence(timeout: 2))
         app.buttons["shopping.clear.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
@@ -62,7 +64,7 @@ final class ClearInterruptionUITests: XCTestCase {
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Keep cold")
         XCTAssertTrue(app.descendants(matching: .any)["shopping.grocery.oneTime"].exists)
         app.buttons["shopping.grocery.cancel"].tap()
-        app.navigationBars["Carted"].buttons.firstMatch.tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 3))
     }

@@ -100,70 +100,24 @@ struct GroceriesView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if visibleNeeds.isEmpty {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        ScrollView {
-                            VStack(spacing: 16) { scopeControls; emptyState }
-                        }
-                    } else {
-                        emptyState
-                    }
-                } else {
-                    List {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            Section {
-                                HStack { allButton; Spacer(); filtersButton }
-                                    .buttonStyle(.borderless)
-                                storeMenu.buttonStyle(.borderless)
-                                recoveryLinks
-                                activeFilterChips
-                            }
-                        }
-                        if let selectedStoreID = navigation.selectedStoreID {
-                            let mustBuy = storePartition(.mustBuyHere, selectedStoreID: selectedStoreID)
-                            let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
-                            if !mustBuy.isEmpty {
-                                Section {
-                                    groupedRows(mustBuy)
-                                } header: {
-                                    Text("Must buy here").foregroundStyle(Color.grocerySecondary)
-                                }
-                            }
-                            if !flexible.isEmpty {
-                                Section {
-                                    groupedRows(flexible)
-                                } header: {
-                                    Text("Flexible here").foregroundStyle(Color.grocerySecondary)
-                                }
-                            }
-                        } else {
-                            Section {
-                                groupedRows(visibleNeeds)
-                            } header: {
-                                Text("Needed").foregroundStyle(Color.grocerySecondary)
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                    .contentMargins(
-                        .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
-                    )
-                }
-            }
+            groceryContent
             .navigationTitle("Groceries")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text: $searchText, prompt: "Search groceries")
             .onSubmit(of: .search, refreshProjection)
             .onChange(of: searchText) { _, _ in refreshProjection() }
-            .safeAreaInset(edge: .top) {
-                if !dynamicTypeSize.isAccessibilitySize {
-                    scopeControls
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("shopping.grocery.fixedScope")
-                }
-            }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink(value: GroceryDestination.recentlyCleared) {
+                        Label("Recently cleared", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    recoveryLinks
+                        .labelStyle(.iconOnly)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { presentAdd() } label: { Label("Add grocery", systemImage: "plus") }
                         .accessibilityIdentifier("shopping.addGrocery")
@@ -259,6 +213,51 @@ struct GroceriesView: View {
         }
     }
 
+    private var groceryContent: some View {
+            Group {
+                if visibleNeeds.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 16) { scopeControls; emptyState }
+                    }
+                } else {
+                    List {
+                        Section {
+                            scopeControls
+                                .buttonStyle(.borderless)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowBackground(Color.clear)
+                        }
+                        if let selectedStoreID = navigation.selectedStoreID {
+                            let mustBuy = storePartition(.mustBuyHere, selectedStoreID: selectedStoreID)
+                            let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
+                            if !mustBuy.isEmpty {
+                                Section {
+                                    groupedRows(mustBuy)
+                                } header: {
+                                    Text("Must buy here").foregroundStyle(Color.grocerySecondary)
+                                }
+                            }
+                            if !flexible.isEmpty {
+                                Section {
+                                    groupedRows(flexible)
+                                } header: {
+                                    Text("Flexible here").foregroundStyle(Color.grocerySecondary)
+                                }
+                            }
+                        } else {
+                            Section {
+                                groupedRows(visibleNeeds)
+                            } header: {
+                                Text("Needed").foregroundStyle(Color.grocerySecondary)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+
+                }
+            }
+    }
+
     private var emptyState: some View {
         ContentUnavailableView {
             Label(
@@ -281,29 +280,19 @@ struct GroceriesView: View {
     @ViewBuilder
     private var scopeControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if dynamicTypeSize.isAccessibilitySize {
-                HStack {
-                    allButton
-                    Spacer()
-                    filtersButton
-                }
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                allButton
                 storeMenu
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 8) { recoveryLinks }
-            } else {
-                HStack {
-                    allButton
-                    storeMenu
-                    Spacer()
-                    filtersButton
-                }
-                HStack { recoveryLinks }
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                filtersButton
             }
             activeFilterChips
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder
@@ -334,9 +323,13 @@ struct GroceriesView: View {
             Label(title, systemImage: "xmark")
                 .font(.subheadline)
                 .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
                 .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .accessibilityLabel("Remove \(title) filter")
     }
 
@@ -358,11 +351,24 @@ struct GroceriesView: View {
     }
 
     private var storeMenu: some View {
-        Button { showingStorePicker = true } label: {
-            Label(selectedStoreName, systemImage: dynamicTypeSize.isAccessibilitySize ? "chevron.down" : "storefront")
-                .frame(minHeight: 44)
+        HStack(spacing: 0) {
+            Button { showingStorePicker = true } label: {
+                Label(selectedStoreName, systemImage: "storefront")
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("shopping.store.menu")
+            if navigation.selectedStoreID != nil {
+                Button { navigation.selectAll() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Clear selected store")
+                .accessibilityIdentifier("shopping.store.clear")
+            }
         }
-        .accessibilityIdentifier("shopping.store.menu")
     }
 
     private var filtersButton: some View {
@@ -376,12 +382,7 @@ struct GroceriesView: View {
     @ViewBuilder
     private var recoveryLinks: some View {
         NavigationLink(value: GroceryDestination.carted) {
-            Label("Carted (\(cartedCount))", systemImage: "cart.fill")
-                .frame(minHeight: 44)
-        }
-        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-        NavigationLink(value: GroceryDestination.recentlyCleared) {
-            Label("Recently cleared", systemImage: "clock.arrow.circlepath")
+            Label("In cart (\(cartedCount))", systemImage: "cart.fill")
                 .frame(minHeight: 44)
         }
     }
@@ -568,7 +569,7 @@ struct GroceriesView: View {
         )
         ForEach(groups) { priority in
             ForEach(priority.categories) { category in
-                Text("\(priority.title) · \(category.title)")
+                Text(category.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.grocerySecondary)
                     .accessibilityAddTraits(.isHeader)
@@ -818,7 +819,7 @@ struct GroceryNeedRow: View {
                         .frame(minWidth: 44, minHeight: 44)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("\(need.carted ? "Uncart" : "Cart") \(title)")
+                .accessibilityLabel("\(need.carted ? "Remove from cart" : "Add to cart") \(title)")
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }
         }
@@ -841,10 +842,14 @@ struct GroceryNeedRow: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.body)
-            if need.urgency == NeedUrgency.urgent.rawValue {
-                Label("Urgent", systemImage: "exclamationmark.circle.fill")
-                    .font(.caption).foregroundStyle(Color.groceryUrgent)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(.body)
+                if need.urgency == NeedUrgency.urgent.rawValue {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(Color.groceryUrgent)
+                        .accessibilityHidden(true)
+                }
             }
             if need.kind == NeedKind.oneTime.rawValue {
                 Label("One-time", systemImage: "1.circle")
@@ -869,9 +874,10 @@ struct GroceryNeedRow: View {
     private var title: String { need.item?.name ?? need.title }
 
     private var accessibilityDetails: String {
-        var values = [need.urgency == NeedUrgency.urgent.rawValue ? "Urgent" : "Normal"]
+        var values: [String] = []
+        if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
-        if need.carted { values.append("Carted") }
+        if need.carted { values.append("In cart") }
         if let purchaseRuleLabel { values.append(purchaseRuleLabel) }
         if needsStore { values.append("Needs store") }
         if !need.notes.isEmpty { values.append(need.notes) }
@@ -1159,5 +1165,5 @@ private struct GroceryFiltersPreview: View {
     )
 }
 #Preview("Grocery filters") { ShoppingPreviewHost(.populated) { GroceryFiltersPreview() } }
-#Preview("Carted groceries") { ShoppingPreviewHost(.populated) { NavigationStack { CartedGroceriesView() } } }
+#Preview("Groceries in cart") { ShoppingPreviewHost(.populated) { NavigationStack { CartedGroceriesView() } } }
 #Preview("Recently cleared") { ShoppingPreviewHost(.populated) { NavigationStack { RecentlyClearedView() } } }
