@@ -56,6 +56,14 @@ private struct CatalogEditSession: Identifiable {
     let values: CatalogItemValues
 }
 
+private struct CatalogArchiveTarget {
+    let itemID: UUID
+    let householdID: UUID
+    let listID: UUID
+    let name: String
+    let archived: Bool
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
@@ -71,6 +79,7 @@ struct CatalogView: View {
     @State private var showingFilters = false
     @State private var showingStores = false
     @State private var editor: CatalogEditSession?
+    @State private var archiveTarget: CatalogArchiveTarget?
     @State private var errorMessage: String?
 
     private var canonicalList: GroceryList? {
@@ -109,6 +118,17 @@ struct CatalogView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button { prepareArchive(item) } label: {
+                                Label(item.isArchived ? "Restore" : "Archive",
+                                      systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox")
+                            }
+                            .tint(item.isArchived ? .green : .orange)
+                            .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
+                        }
+                        .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
+                            prepareArchive(item)
+                        }
                     }
                     if visibleItems.isEmpty {
                         ContentUnavailableView {
@@ -148,6 +168,18 @@ struct CatalogView: View {
             }
             .sheet(item: $editor) { session in
                 CatalogEditorView(session: session) { refresh() }
+            }
+            .alert(archiveTarget?.archived == true ? "Archive catalog item?" : "Restore catalog item?",
+                   isPresented: Binding(
+                    get: { archiveTarget != nil }, set: { if !$0 { archiveTarget = nil } }
+                   ), presenting: archiveTarget) { target in
+                Button(target.archived ? "Archive" : "Restore") { applyArchive(target) }
+                    .accessibilityIdentifier("shopping.catalog.confirmSwipeArchive")
+                Button("Cancel", role: .cancel) {}
+            } message: { target in
+                Text(target.archived
+                     ? "Hide \(target.name) from the catalog? Current groceries and saved details are kept. Restore it with the Archived items filter."
+                     : "Show \(target.name) in the active catalog again?")
             }
             .alert("Couldn’t load catalog", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
@@ -236,6 +268,30 @@ struct CatalogView: View {
 
     private func edit(_ item: Item) {
         editor = CatalogEditSession(selection: selection, itemID: item.id, values: item.catalogValues)
+    }
+
+    private func prepareArchive(_ item: Item) {
+        guard let list = canonicalList, let householdID = list.household?.id,
+              scopedItems.contains(item), service != nil else { return }
+        archiveTarget = CatalogArchiveTarget(
+            itemID: item.id, householdID: householdID, listID: list.id,
+            name: item.name, archived: !item.isArchived
+        )
+    }
+
+    private func applyArchive(_ target: CatalogArchiveTarget) {
+        guard let service, selection.householdID == target.householdID,
+              selection.listID == target.listID, canonicalList != nil else {
+            errorMessage = "Return to the household where you started this change."
+            return
+        }
+        do {
+            try service.setCatalogItemArchived(
+                itemID: target.itemID, householdID: target.householdID,
+                listID: target.listID, archived: target.archived
+            )
+            refresh()
+        } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 }
 

@@ -17,6 +17,7 @@ private struct CheckoutResult {
     let listID: UUID
     let cleared: Int
     let skipped: Int
+    var isIndividualRemoval = false
 }
 
 struct CartedGroceriesView: View {
@@ -131,7 +132,15 @@ struct CartedGroceriesView: View {
             VStack(alignment: .leading, spacing: 8) {
                 GroceryNeedRow(
                     need: need, activeStores: activeStores, onEdit: onEdit,
-                    onCartedChange: setCarted, onQuantityChange: setQuantity
+                    onCartedChange: setCarted, onQuantityChange: setQuantity,
+                    onRemoved: { operationID, householdID, listID in
+                        checkoutResult = CheckoutResult(
+                            operationID: operationID, householdID: householdID, listID: listID,
+                            cleared: 1, skipped: 0, isIndividualRemoval: true
+                        )
+                        resultNotice = nil
+                        refreshProjection()
+                    }
                 )
                 if let onNeedAgain, let item = need.item {
                     Button("Need again \(item.name)") { onNeedAgain(need) }
@@ -205,7 +214,9 @@ struct CartedGroceriesView: View {
         } else if let checkoutResult {
             HStack {
                 Text(
-                    checkoutResult.skipped == 0
+                    checkoutResult.isIndividualRemoval
+                        ? "Item removed"
+                        : checkoutResult.skipped == 0
                         ? "Checked out \(checkoutResult.cleared) items"
                         : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
                 )
