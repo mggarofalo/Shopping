@@ -988,22 +988,15 @@ final class NeedService {
 
     func rememberOneTimeNeed(needID: UUID, existingItemID: UUID) throws -> UUID {
         try write { context in
-            guard let need = try self.need(id: needID, in: context) else { throw NeedServiceError.needNotFound }
-            guard !need.archived, need.kind == NeedKind.oneTime.rawValue, need.item == nil,
-                  let list = need.list, let household = list.household else {
-                throw NeedServiceError.scopeChanged
-            }
+            let resolved = try self.validatedOneTimeNeedInferringScope(needID: needID, in: context)
             guard let item = try self.item(id: existingItemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }
             guard !item.isArchived else { throw NeedServiceError.itemArchived }
-            guard item.household == household,
-                  item.objectID.persistentStore == need.objectID.persistentStore else {
-                throw NeedServiceError.scopeChanged
-            }
+            try self.validate(item: item, belongsTo: resolved.household)
             let conflicts = try self.activeRememberedNeeds(
                 itemID: existingItemID,
-                listID: list.id,
+                listID: resolved.list.id,
                 in: context
             )
             if let conflict = conflicts.first {
@@ -1014,24 +1007,69 @@ final class NeedService {
                 }
                 throw NeedServiceError.activeRememberedNeedConflict(conflict.id)
             }
-            need.item = item
-            need.kind = NeedKind.remembered.rawValue
-            need.title = item.name
-            need.oneTimeCategory = nil
-            need.oneTimeStores = []
-            need.oneTimeAnyStore = false
-            need.revision += 1
+            try self.promote(
+                resolved.need,
+                to: item,
+                values: RememberedNeedValues(
+                    quantity: resolved.need.quantity,
+                    purchaseNotes: resolved.need.notes,
+                    urgency: NeedUrgency(rawValue: resolved.need.urgency) ?? .normal
+                )
+            )
+            return item.id
+        }
+    }
+
+    func rememberOneTimeGroceryCreatingItem(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        catalog: CatalogItemValues,
+        need values: RememberedNeedValues,
+        allowingCatalogNameCollision: Bool = false
+    ) throws -> UUID {
+        try validate(needValues: values)
+        return try write { context in
+            let resolved = try self.validatedActiveNeed(needID: needID, householdID: householdID, listID: listID, in: context)
+            guard resolved.need.kind == NeedKind.oneTime.rawValue, resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
+            let validated = try self.validatedCatalogValues(catalog, household: resolved.household, in: context)
+            let collisions = try self.catalogNameCollisions(name: validated.name, household: resolved.household, excluding: nil, in: context)
+            guard allowingCatalogNameCollision || collisions.isEmpty else { throw NeedServiceError.catalogNameCollision(collisions) }
+            let item = self.insertCatalogItem(validated, household: resolved.household, in: context)
+            try self.promote(resolved.need, to: item, values: values)
+            return item.id
+        }
+    }
+
+    func rememberOneTimeGrocery(
+        needID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        existingItemID: UUID,
+        need values: RememberedNeedValues
+    ) throws -> UUID {
+        try validate(needValues: values)
+        return try write { context in
+            let resolved = try self.validatedActiveNeed(needID: needID, householdID: householdID, listID: listID, in: context)
+            guard resolved.need.kind == NeedKind.oneTime.rawValue, resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
+            guard let item = try self.item(id: existingItemID, in: context) else { throw NeedServiceError.itemNotFound }
+            try self.validate(item: item, belongsTo: resolved.household)
+            guard !item.isArchived else { throw NeedServiceError.itemArchived }
+            let conflicts = try self.activeRememberedNeeds(itemID: item.id, listID: listID, in: context)
+            if let conflict = conflicts.first {
+                guard conflicts.count == 1 else { throw NeedServiceError.activeRememberedNeedDuplicates(try self.duplicateGroup(itemID: item.id, needs: conflicts)) }
+                throw NeedServiceError.activeRememberedNeedConflict(conflict.id)
+            }
+            try self.promote(resolved.need, to: item, values: values)
             return item.id
         }
     }
 
     func rememberOneTimeNeedCreatingItem(needID: UUID, itemNotes: String = "") throws -> UUID {
         try write { context in
-            guard let need = try self.need(id: needID, in: context) else { throw NeedServiceError.needNotFound }
-            guard !need.archived, need.kind == NeedKind.oneTime.rawValue, need.item == nil,
-                  let list = need.list, let household = list.household else {
-                throw NeedServiceError.scopeChanged
-            }
+            let resolved = try self.validatedOneTimeNeedInferringScope(needID: needID, in: context)
+            let need = resolved.need
+            let household = resolved.household
             let name = try self.validatedName(need.title)
             let normalized = CatalogProjection.normalizedName(name)
             let itemRequest = Item.fetchRequest()
@@ -1059,12 +1097,15 @@ final class NeedService {
             item.household = household
             item.category = category
             item.stores = stores
-            need.item = item
-            need.kind = NeedKind.remembered.rawValue
-            need.oneTimeCategory = nil
-            need.oneTimeStores = []
-            need.oneTimeAnyStore = false
-            need.revision += 1
+            try self.promote(
+                need,
+                to: item,
+                values: RememberedNeedValues(
+                    quantity: need.quantity,
+                    purchaseNotes: need.notes,
+                    urgency: NeedUrgency(rawValue: need.urgency) ?? .normal
+                )
+            )
             return item.id
         }
     }
@@ -1465,6 +1506,30 @@ final class NeedService {
         return (need, list, household)
     }
 
+    private func validatedOneTimeNeedInferringScope(
+        needID: UUID,
+        in context: NSManagedObjectContext
+    ) throws -> (need: Need, list: GroceryList, household: Household) {
+        guard let need = try self.need(id: needID, in: context) else {
+            throw NeedServiceError.needNotFound
+        }
+        guard !need.archived,
+              need.kind == NeedKind.oneTime.rawValue,
+              need.item == nil,
+              let listID = need.list?.id,
+              let householdID = need.list?.household?.id else {
+            throw NeedServiceError.scopeChanged
+        }
+        let resolved = try validatedActiveNeed(
+            needID: needID,
+            householdID: householdID,
+            listID: listID,
+            in: context
+        )
+        guard resolved.need === need else { throw NeedServiceError.invalidOccurrenceIdentity }
+        return resolved
+    }
+
     private func apply(_ values: RememberedNeedValues, to need: Need) throws {
         let (nextRevision, overflow) = need.revision.addingReportingOverflow(1)
         guard !overflow else { throw NeedServiceError.scopeChanged }
@@ -1473,6 +1538,22 @@ final class NeedService {
         need.urgency = values.urgency.rawValue
         need.clearOperationID = nil
         need.revision = nextRevision
+    }
+
+    private func promote(_ need: Need, to item: Item, values: RememberedNeedValues) throws {
+        let (revision, overflow) = need.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        need.item = item
+        need.kind = NeedKind.remembered.rawValue
+        need.title = item.name
+        need.oneTimeCategory = nil
+        need.oneTimeStores = []
+        need.oneTimeAnyStore = false
+        need.quantity = values.quantity
+        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.urgency = values.urgency.rawValue
+        need.clearOperationID = nil
+        need.revision = revision
     }
 
     private func catalogNameCollisions(

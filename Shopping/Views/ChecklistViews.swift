@@ -228,8 +228,11 @@ struct CartedGroceriesView: View {
         GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
             .filter { $0.carted && !$0.archived && matchingNeedIDs.contains($0.id) }
             .sorted {
-                ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
-                    == .orderedAscending
+                let leftUrgent = $0.urgency == NeedUrgency.urgent.rawValue
+                let rightUrgent = $1.urgency == NeedUrgency.urgent.rawValue
+                if leftUrgent != rightUrgent { return leftUrgent }
+                let order = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
+                return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
             }
     }
 

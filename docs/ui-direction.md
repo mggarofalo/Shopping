@@ -80,3 +80,9 @@ Cart and quantity controls save immediately to the current household list. Separ
 Carted inherits the store, explicit tag, search, category and urgency filters shown in Groceries. Its local All carted option broadens only that recovery view. Uncart preserves urgency and offers Show all on return when the original grocery filters hide the item. Deliberate remembered Need again remains a separate action that resets urgency to Normal.
 
 Clear carted previews the exact names, quantities, count and readable scope. Confirmation and retry keep the same captured occurrence IDs and revisions; changed rows are skipped. Cancel does not write. Clear errors remain visible inside the confirmation sheet, and Undo and Recently cleared explain when newer changes prevent restoration. One-time recovery creates no remembered catalog item.
+
+## Explicitly remembering a one-time grocery
+
+An existing one-time grocery stays independent until the user chooses Remember this item and confirms. Create new stages the name, category, purchase rules and separate catalog notes. Use existing shows saved catalog details for an explicitly selected item; those details are read-only. Quantity, purchase notes and urgency stay with the current grocery in either case. Successful promotion keeps its occurrence identity and carted state.
+
+Cancel and Keep as one-time do not promote or create catalog knowledge. A matching name requires choosing the existing item or explicitly creating a distinct item. If the selected catalog item is already needed, both groceries stay intact; the user can view the existing grocery or choose another item. Carted groceries also put Urgent before Normal within their store sections.

@@ -758,6 +758,7 @@ struct GroceryNeedRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Edit \(title)")
+            .accessibilityValue(accessibilityDetails)
             .accessibilityIdentifier("shopping.grocery.row.\(need.id.uuidString)")
         } else {
             details
@@ -834,6 +835,16 @@ struct GroceryNeedRow: View {
     }
 
     private var title: String { need.item?.name ?? need.title }
+
+    private var accessibilityDetails: String {
+        var values = [need.urgency == NeedUrgency.urgent.rawValue ? "Urgent" : "Normal"]
+        if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
+        if need.carted { values.append("Carted") }
+        if let purchaseRuleLabel { values.append(purchaseRuleLabel) }
+        if needsStore { values.append("Needs store") }
+        if !need.notes.isEmpty { values.append(need.notes) }
+        return values.joined(separator: ", ")
+    }
 
     private var purchaseRuleLabel: String? {
         let anyStore: Bool
