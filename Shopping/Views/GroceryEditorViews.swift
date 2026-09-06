@@ -197,32 +197,39 @@ struct GroceryEditorView: View {
                             .foregroundStyle(.secondary)
                     }
                     if remembered || (isPromotingOneTime && promotionChoice == .create) {
-                        TextField("Catalog notes", text: $catalogNotes, axis: .vertical)
-                            .accessibilityIdentifier("shopping.grocery.catalogNotes")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Item notes").font(.subheadline).fontWeight(.semibold)
+                            TextField("Add reusable details", text: $catalogNotes, axis: .vertical)
+                                .accessibilityIdentifier("shopping.grocery.catalogNotes")
+                            Text("Saved with this item and reused each time you add it.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
-                    TextField("Purchase notes", text: $purchaseNotes, axis: .vertical)
-                        .accessibilityIdentifier("shopping.grocery.purchaseNotes")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Grocery notes").font(.subheadline).fontWeight(.semibold)
+                        TextField("Add instructions for this grocery", text: $purchaseNotes, axis: .vertical)
+                            .accessibilityIdentifier("shopping.grocery.purchaseNotes")
+                        Text("Applies only to this grocery on the current list.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 if isEditing, !remembered {
                     promotionSection
                 }
                 Section("Quantity and urgency") {
-                    TextField("Quantity", value: $quantity, format: .number).keyboardType(.numberPad)
-                        .accessibilityIdentifier("shopping.grocery.quantity")
-                    Stepper("Quantity \(quantity)", value: $quantity, in: 1...99).accessibilityIdentifier(
-                        "shopping.grocery.quantityStepper")
-                    Picker("Urgency", selection: $urgency) {
-                        Text("Normal").tag(NeedUrgency.normal)
-                        Text("Urgent").tag(NeedUrgency.urgent)
-                    }.pickerStyle(.segmented).accessibilityIdentifier("shopping.grocery.urgency")
+                    Stepper(value: $quantity, in: 1...99) {
+                        LabeledContent("Quantity") { Text("\(quantity)") }
+                    }
+                    .accessibilityValue("\(quantity)")
+                    .accessibilityIdentifier("shopping.grocery.quantity")
+                    Toggle("Urgent", isOn: Binding(
+                        get: { urgency == .urgent },
+                        set: { urgency = $0 ? .urgent : .normal }
+                    ))
+                    .accessibilityIdentifier("shopping.grocery.urgency")
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
-                    Section("Category") {
-                        Picker("Category", selection: $categoryID) {
-                            Text("Uncategorized").tag(nil as UUID?)
-                            ForEach(scopedCategories, id: \.objectID) { Text($0.name).tag(Optional($0.id)) }
-                        }
-                    }
+                    CategoryPills(selection: $categoryID, categories: scopedCategories)
                     PurchaseRulesPicker(
                         storeIDs: $storeIDs, anyStore: $anyStore, householdID: target.scope.householdID,
                         listID: target.scope.listID)
@@ -251,7 +258,8 @@ struct GroceryEditorView: View {
                     }
                 }
                 if isEditing {
-                    Button("Remove grocery", role: .destructive) { captureRemoval() }.disabled(!scopeValid)
+                    Button("Remove grocery", systemImage: "trash", role: .destructive) { captureRemoval() }
+                        .disabled(!scopeValid)
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
@@ -261,8 +269,13 @@ struct GroceryEditorView: View {
                     Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isPromotingOneTime ? "Remember" : "Save", action: save).disabled(!canSave).accessibilityIdentifier(
-                        "shopping.grocery.save")
+                    Button(
+                        isPromotingOneTime ? "Remember" : "Save",
+                        systemImage: "checkmark",
+                        action: save
+                    )
+                    .disabled(!canSave)
+                    .accessibilityIdentifier("shopping.grocery.save")
                 }
             }
             .alert(

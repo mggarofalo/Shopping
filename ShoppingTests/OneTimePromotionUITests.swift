@@ -30,8 +30,8 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
-        XCTAssertEqual(app.textFields["shopping.grocery.quantity"].value as? String, "2")
-        XCTAssertTrue(app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"].isSelected)
+        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
+        XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
         screenshot("Explicitly remembered grocery", app: app)
         app.buttons["shopping.grocery.cancel"].tap()
         app.tabBars.buttons["Catalog"].tap()
@@ -61,18 +61,18 @@ final class OneTimePromotionUITests: XCTestCase {
         let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
         reveal(purchaseNotes, in: app)
         XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")
-        let quantity = app.textFields["shopping.grocery.quantity"]
+        let quantity = app.steppers["shopping.grocery.quantity"]
         reveal(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "2")
-        let urgency = app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"]
+        let urgency = app.switches["shopping.grocery.urgency"]
         reveal(urgency, in: app)
-        XCTAssertTrue(urgency.isSelected)
-        let anyStore = app.switches["Any store"]
+        XCTAssertEqual(urgency.value as? String, "1")
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
         reveal(anyStore, in: app)
-        XCTAssertEqual(anyStore.value as? String, "0")
-        let costco = app.switches["Costco"]
+        XCTAssertEqual(anyStore.value as? String, "Not selected")
+        let costco = purchaseStorePill(named: "Costco", app: app)
         reveal(costco, in: app)
-        XCTAssertEqual(costco.value as? String, "1")
+        XCTAssertEqual(costco.value as? String, "Selected")
         app.buttons["shopping.grocery.cancel"].tap()
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
@@ -128,18 +128,18 @@ final class OneTimePromotionUITests: XCTestCase {
 
     func testCartedUrgentGroceriesSortBeforeNormalGroceries() {
         let app = launchApp(fixture: "populated")
-        let cartBananas = app.buttons["Cart Bananas"]
+        let cartBananas = app.buttons["Add to cart Bananas"]
         reveal(cartBananas, in: app)
         cartBananas.tap()
-        let cartGranola = app.buttons["Cart Granola"]
+        let cartGranola = app.buttons["Add to cart Granola"]
         for _ in 0..<8 where !cartGranola.exists || !cartGranola.isHittable { app.swipeDown() }
         XCTAssertTrue(cartGranola.isHittable)
         cartGranola.tap()
-        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (3)")).firstMatch
+        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (3)")).firstMatch
         for _ in 0..<8 where !carted.exists || !carted.isHittable { app.swipeDown() }
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.tap()
-        XCTAssertTrue(app.navigationBars["Carted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         let granola = row("Granola", in: app)
         let bananas = row("Bananas", in: app)
         XCTAssertTrue(granola.waitForExistence(timeout: 3))
@@ -171,13 +171,12 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(notes, in: app)
         notes.tap()
         notes.typeText("Buy this week")
-        let quantity = app.textFields["shopping.grocery.quantity"]
+        let quantity = app.steppers["shopping.grocery.quantity"]
         reveal(quantity, in: app)
-        replace(quantity, with: "2")
-        let urgent = app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"]
-        reveal(urgent, in: app)
-        urgent.tap()
-        setSwitch(app.switches["Any store"], on: true, in: app)
+        quantity.buttons["Increment"].tap()
+        XCTAssertEqual(quantity.value as? String, "2")
+        setSwitch(app.switches["shopping.grocery.urgency"], on: true, in: app)
+        setPill(app.buttons["shopping.purchase.anyStore"], selected: true, in: app)
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
         reveal(row(name, in: app), in: app)
@@ -232,6 +231,18 @@ final class OneTimePromotionUITests: XCTestCase {
             (inner.exists ? inner : element).tap()
         }
         XCTAssertEqual(element.value as? String, on ? "1" : "0")
+    }
+
+    private func setPill(_ pill: XCUIElement, selected: Bool, in app: XCUIApplication) {
+        reveal(pill, in: app)
+        if (pill.value as? String == "Selected") != selected { pill.tap() }
+        XCTAssertEqual(pill.value as? String, selected ? "Selected" : "Not selected")
+    }
+
+    private func purchaseStorePill(named name: String, app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@", "shopping.purchase.store.", name
+        )).firstMatch
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {

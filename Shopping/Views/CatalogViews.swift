@@ -60,7 +60,6 @@ struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
@@ -99,11 +98,16 @@ struct CatalogView: View {
                 filterHeader
                 List {
                     ForEach(visibleItems, id: \.objectID) { item in
-                        Button { edit(item) } label: { CatalogItemRow(item: item) }
+                        Button { edit(item) } label: {
+                            CatalogItemRow(item: item)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
                     }
                 }
+                .contentMargins(.top, 0, for: .scrollContent)
                 .overlay {
                     if visibleItems.isEmpty {
                         ContentUnavailableView {
@@ -117,6 +121,7 @@ struct CatalogView: View {
                     }
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
             .navigationTitle("Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
@@ -154,25 +159,24 @@ struct CatalogView: View {
 
     private var filterHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
-            layout {
-                Button { showingStores = true } label: {
-                    Text(activeStores.first { $0.id == filters.selectedStoreID }.map { "Available at: \($0.name)" } ?? "All items")
-                }
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("shopping.catalog.available")
-                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-                Button { showingFilters = true } label: {
-                    Label("Filters\(filters.count == 0 ? "" : " (\(filters.count))")", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("shopping.catalog.filters")
+            PillFlowLayout {
+                SelectionPill(
+                    title: activeStores.first { $0.id == filters.selectedStoreID }
+                        .map { "Available: \($0.name)" } ?? "All items",
+                    isSelected: filters.selectedStoreID != nil,
+                    systemImage: "storefront",
+                    identifier: "shopping.catalog.available"
+                ) { showingStores = true }
+                SelectionPill(
+                    title: "Filters\(filters.count == 0 ? "" : " (\(filters.count))")",
+                    isSelected: filters.count > 0,
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    identifier: "shopping.catalog.filters"
+                ) { showingFilters = true }
             }
             if filters.count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
+                    HStack(spacing: 6) {
                         ForEach(activeStores.filter { filters.includedStoreIDs.contains($0.id) }, id: \.objectID) { store in
                             chip("Tagged: \(store.name)") { filters.includedStoreIDs.remove(store.id) }
                         }
@@ -187,12 +191,14 @@ struct CatalogView: View {
                 }
             }
         }
-        .padding(.horizontal).padding(.vertical, 10)
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
     }
 
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View {
-        Button(action: remove) { Label(title, systemImage: "xmark.circle.fill").font(.caption).frame(minHeight: 44) }
-            .buttonStyle(.bordered).accessibilityLabel("Remove filter: \(title)")
+        SelectionPill(title: title, isSelected: true, systemImage: "xmark", action: remove)
+            .accessibilityLabel("Remove filter: \(title)")
     }
 
     private func sanitizeFilters() {
@@ -252,37 +258,64 @@ private struct CatalogFiltersView: View {
         NavigationStack {
             Form {
                 Section {
-                    ForEach(stores, id: \.objectID) { store in
-                        Toggle(store.name, isOn: membership(store.id, in: $filters.includedStoreIDs))
+                    PillFlowLayout {
+                        ForEach(stores, id: \.objectID) { store in
+                            SelectionPill(
+                                title: store.name,
+                                isSelected: filters.includedStoreIDs.contains(store.id),
+                                identifier: "shopping.catalog.filters.include.\(store.id.uuidString)"
+                            ) { toggle(store.id, in: $filters.includedStoreIDs) }
+                        }
                     }
                 } header: { Text("Tagged (any selected)") } footer: {
                     Text("Match at least one explicit tag. Any store does not add tags.")
                 }
                 Section {
-                    ForEach(stores, id: \.objectID) { store in
-                        Toggle(store.name, isOn: membership(store.id, in: $filters.excludedStoreIDs))
+                    PillFlowLayout {
+                        ForEach(stores, id: \.objectID) { store in
+                            SelectionPill(
+                                title: store.name,
+                                isSelected: filters.excludedStoreIDs.contains(store.id),
+                                identifier: "shopping.catalog.filters.exclude.\(store.id.uuidString)"
+                            ) { toggle(store.id, in: $filters.excludedStoreIDs) }
+                        }
                     }
                 } header: { Text("Not tagged (none selected)") } footer: {
                     Text("Exclude every selected tag. Exclusions win over included tags.")
                 }
-                Picker("Category", selection: $filters.categoryID) {
-                    Text("All categories").tag(nil as UUID?)
-                    ForEach(categories, id: \.objectID) { Text($0.name).tag(Optional($0.id)) }
+                Section("Category") {
+                    PillFlowLayout {
+                        SelectionPill(title: "All categories", isSelected: filters.categoryID == nil) {
+                            filters.categoryID = nil
+                        }
+                        ForEach(categories, id: \.objectID) { category in
+                            SelectionPill(
+                                title: category.name,
+                                isSelected: filters.categoryID == category.id
+                            ) { filters.categoryID = category.id }
+                        }
+                    }
                 }
-                Toggle("Archived items", isOn: $filters.showArchived)
+                Section {
+                    SelectionPill(title: "Archived items", isSelected: filters.showArchived) {
+                        filters.showArchived.toggle()
+                    }
                     .accessibilityIdentifier("shopping.catalog.archived")
-                Button("Reset filters") { filters = CatalogFilterState() }
+                    Button("Reset filters", systemImage: "arrow.counterclockwise") {
+                        filters = CatalogFilterState()
+                    }
+                    .frame(minHeight: 44)
                     .accessibilityIdentifier("shopping.catalog.reset")
+                }
             }
             .navigationTitle("Catalog filters")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 
-    private func membership(_ id: UUID, in ids: Binding<Set<UUID>>) -> Binding<Bool> {
-        Binding(get: { ids.wrappedValue.contains(id) }, set: {
-            if $0 { ids.wrappedValue.insert(id) } else { ids.wrappedValue.remove(id) }
-        })
+    private func toggle(_ id: UUID, in ids: Binding<Set<UUID>>) {
+        if ids.wrappedValue.contains(id) { ids.wrappedValue.remove(id) }
+        else { ids.wrappedValue.insert(id) }
     }
 }
 
@@ -338,15 +371,21 @@ private struct CatalogEditorView: View {
             Form {
                 Section("Remembered grocery") {
                     TextField("Item name", text: $values.name).accessibilityIdentifier("shopping.catalog.name")
-                    TextField("General notes", text: $values.notes, axis: .vertical)
-                        .accessibilityIdentifier("shopping.catalog.notes")
-                    Text("These details are reused when you add this grocery again.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Item notes").font(.subheadline).fontWeight(.semibold)
+                        TextField("Add reusable details", text: $values.notes, axis: .vertical)
+                            .accessibilityIdentifier("shopping.catalog.notes")
+                        Text("Saved with this item and reused each time you add it.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 if !matches.isEmpty {
                     Section("Existing items") {
                         ForEach(matches, id: \.objectID) { item in
-                            Button("Edit \(item.name)\(item.isArchived ? " (archived)" : "")") {
+                            Button(
+                                "Edit \(item.name)\(item.isArchived ? " (archived)" : "")",
+                                systemImage: "pencil"
+                            ) {
                                 itemID = item.id
                                 values = item.catalogValues
                                 allowingNameCollision = false
@@ -360,20 +399,23 @@ private struct CatalogEditorView: View {
                         }
                     }
                 }
-                PurchaseRulesPicker(storeIDs: $values.storeIDs, anyStore: $values.anyStore,
-                    householdID: session.selection.householdID, listID: session.selection.listID)
-                Section {
-                    Picker("Category", selection: $values.categoryID) {
-                        Text("Uncategorized").tag(nil as UUID?)
-                        ForEach(scopedCategories, id: \.objectID) { Text($0.name).tag(Optional($0.id)) }
-                        if let id = values.categoryID, !scopedCategories.contains(where: { $0.id == id }) {
-                            Text("Unavailable category").tag(Optional(id))
-                        }
-                    }
-                } footer: { Text("Categories group groceries across all stores.") }
+                CategoryPills(
+                    selection: $values.categoryID,
+                    categories: scopedCategories,
+                    includeUnavailable: true
+                )
+                PurchaseRulesPicker(
+                    storeIDs: $values.storeIDs,
+                    anyStore: $values.anyStore,
+                    householdID: session.selection.householdID,
+                    listID: session.selection.listID
+                )
                 if let item = currentItem {
                     Section {
-                        Button(item.isArchived ? "Restore item" : "Archive item") {
+                        Button(
+                            item.isArchived ? "Restore item" : "Archive item",
+                            systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox"
+                        ) {
                             if item.isArchived && values == item.catalogValues { archive(false) }
                             else { requestedArchived = !item.isArchived; showingArchiveConfirmation = true }
                         }
@@ -392,7 +434,9 @@ private struct CatalogEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }.disabled(!canSave).accessibilityIdentifier("shopping.catalog.save")
+                    Button("Save", systemImage: "checkmark") { save() }
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("shopping.catalog.save")
                 }
             }
             .onChange(of: values.name) { _, _ in allowingNameCollision = false }
