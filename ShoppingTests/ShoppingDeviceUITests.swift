@@ -81,7 +81,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertTrue(quantity.exists)
         XCTAssertGreaterThan(quantity.frame.width, 0)
         screenshot("Fully visible grocery at largest text", app: app)
-        try audit(app)
+        try audit(app, groceryViewport: true)
     }
 
     func testDefaultQuantityIsVisibleAndFilterChipsCanBeRemoved() {
@@ -146,19 +146,42 @@ final class ShoppingDeviceUITests: XCTestCase {
         }
     }
 
-    private func audit(_ app: XCUIApplication, types: XCUIAccessibilityAuditType = .all) throws {
+    private func audit(
+        _ app: XCUIApplication,
+        types: XCUIAccessibilityAuditType = .all,
+        groceryViewport: Bool = false
+    ) throws {
         // Collect every issue before failing, so diagnostics aren't limited to the first result.
         var failures: [String] = []
         try app.performAccessibilityAudit(for: types) { issue in
             let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
-            failures.append("\(issue.compactDescription): \(issue.element?.label ?? "unidentified element")")
+            // The platform can report contrast for List text wholly covered by the
+            // opaque grocery navigation bar. It cannot measure those hidden pixels.
+            // Keep every visible, partially visible, toolbar, and unidentified finding.
+            let covered = groceryViewport && issue.auditType == .contrast
+                && self.isCoveredGroceryText(issue.element, in: app)
+            if !covered {
+                failures.append("\(issue.compactDescription): \(issue.element?.label ?? "unidentified element")")
+            }
             let attachment = XCTAttachment(string: details)
-            attachment.name = "Accessibility audit details"
+            attachment.name = covered ? "Covered content: contrast not measurable" : "Accessibility audit details"
             attachment.lifetime = .keepAlways
             self.add(attachment)
             return true
         }
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n\n"))
+    }
+
+    private func isCoveredGroceryText(_ element: XCUIElement?, in app: XCUIApplication) -> Bool {
+        guard let element, element.elementType == .staticText, element.exists,
+            !element.isHittable else { return false }
+        let bar = app.navigationBars["Groceries"]
+        guard bar.exists, usable(bar.frame), usable(element.frame),
+            element.frame.maxY <= bar.frame.maxY,
+            !contains(element, in: bar),
+            contains(element, in: app.collectionViews.firstMatch)
+        else { return false }
+        return true
     }
 
     private func launch(
@@ -213,7 +236,7 @@ final class ShoppingDeviceUITests: XCTestCase {
             let end = app.coordinate(withNormalizedOffset: CGVector(
                 dx: 0.5, dy: startY + (movingDown ? distance : -distance)
             ))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         XCTFail("Could not reveal the requested element between navigation and tab bars")
     }
@@ -256,7 +279,7 @@ final class ShoppingDeviceUITests: XCTestCase {
             let end = origin.withOffset(CGVector(
                 dx: app.frame.midX, dy: startY + (offset > 0 ? -distance : distance)
             ))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         XCTFail("Could not position the complete grocery row clear of the navigation overlay")
     }
