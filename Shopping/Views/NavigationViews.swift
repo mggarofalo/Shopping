@@ -121,27 +121,47 @@ struct GroceriesView: View {
                             }
                         }
                         if let selectedStoreID = navigation.selectedStoreID {
-                            Section("Must buy here") {
-                                groupedRows(storePartition(.mustBuyHere, selectedStoreID: selectedStoreID))
+                            let mustBuy = storePartition(.mustBuyHere, selectedStoreID: selectedStoreID)
+                            let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
+                            if !mustBuy.isEmpty {
+                                Section {
+                                    groupedRows(mustBuy)
+                                } header: {
+                                    Text("Must buy here").foregroundStyle(Color.grocerySecondary)
+                                }
                             }
-                            Section("Flexible here") {
-                                groupedRows(storePartition(.flexibleHere, selectedStoreID: selectedStoreID))
+                            if !flexible.isEmpty {
+                                Section {
+                                    groupedRows(flexible)
+                                } header: {
+                                    Text("Flexible here").foregroundStyle(Color.grocerySecondary)
+                                }
                             }
                         } else {
-                            Section("Needed") {
+                            Section {
                                 groupedRows(visibleNeeds)
+                            } header: {
+                                Text("Needed").foregroundStyle(Color.grocerySecondary)
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .contentMargins(
+                        .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
+                    )
                 }
             }
             .navigationTitle("Groceries")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search groceries")
             .onSubmit(of: .search, refreshProjection)
             .onChange(of: searchText) { _, _ in refreshProjection() }
             .safeAreaInset(edge: .top) {
-                if !dynamicTypeSize.isAccessibilitySize { scopeControls }
+                if !dynamicTypeSize.isAccessibilitySize {
+                    scopeControls
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("shopping.grocery.fixedScope")
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -215,6 +235,8 @@ struct GroceriesView: View {
                         .background(.bar)
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("shopping.grocery.feedback")
             }
             .onAppear(perform: completeSaveFeedback)
             .task(id: "\(selection.householdID?.uuidString ?? "nil")-\(selection.listID?.uuidString ?? "nil")") {
@@ -311,18 +333,28 @@ struct GroceriesView: View {
         Button(action: remove) {
             Label(title, systemImage: "xmark")
                 .font(.subheadline)
+                .foregroundStyle(.primary)
                 .frame(minHeight: 44)
         }
         .buttonStyle(.bordered)
         .accessibilityLabel("Remove \(title) filter")
     }
 
+    @ViewBuilder
     private var allButton: some View {
+        if navigation.selectedStoreID == nil {
+            allStoreAction.buttonStyle(.borderedProminent)
+        } else {
+            allStoreAction.buttonStyle(.bordered)
+        }
+    }
+
+    private var allStoreAction: some View {
         Button("All") { navigation.selectAll() }
-            .buttonStyle(.borderedProminent)
-            .tint(navigation.selectedStoreID == nil ? .groceryAccent : .secondary)
+            .tint(.groceryAccent)
             .frame(minHeight: 44)
             .accessibilityIdentifier("shopping.store.all")
+            .accessibilityAddTraits(navigation.selectedStoreID == nil ? .isSelected : [])
     }
 
     private var storeMenu: some View {
@@ -538,7 +570,7 @@ struct GroceriesView: View {
             ForEach(priority.categories) { category in
                 Text("\(priority.title) · \(category.title)")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.grocerySecondary)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(category.needs, id: \.objectID) { need in
                     GroceryNeedRow(
@@ -732,18 +764,15 @@ struct GroceryNeedRow: View {
     private var needsStore: Bool { GroceryRowScope.needsStore(need, activeStores: activeStores) }
 
     var body: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    detailsControl
-                    controls.frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            } else {
-                HStack(alignment: .center, spacing: 12) {
-                    detailsControl
-                    controls
-                }
-            }
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        layout {
+            detailsControl
+            controls.fixedSize(horizontal: true, vertical: false).frame(
+                maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                alignment: .trailing
+            )
         }
         .frame(minHeight: 44)
     }
@@ -771,12 +800,15 @@ struct GroceryNeedRow: View {
                 quantityButton("minus", change: -1, action: onQuantityChange)
                 Text("\(need.quantity)")
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .foregroundStyle(Color.grocerySecondary)
                     .accessibilityLabel("Quantity \(need.quantity)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
                 quantityButton("plus", change: 1, action: onQuantityChange)
             } else {
-                Text("\(need.quantity)").foregroundStyle(.secondary)
+                Text("\(need.quantity)").foregroundStyle(Color.grocerySecondary)
                     .accessibilityLabel("Quantity \(need.quantity)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
             }
             if let onCartedChange {
                 Button {
@@ -812,21 +844,21 @@ struct GroceryNeedRow: View {
             Text(title).font(.body)
             if need.urgency == NeedUrgency.urgent.rawValue {
                 Label("Urgent", systemImage: "exclamationmark.circle.fill")
-                    .font(.caption).foregroundStyle(Color(red: 0.71, green: 0.29, blue: 0.12))
+                    .font(.caption).foregroundStyle(Color.groceryUrgent)
             }
             if need.kind == NeedKind.oneTime.rawValue {
                 Label("One-time", systemImage: "1.circle")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Color.grocerySecondary)
             }
             if let purchaseRuleLabel {
                 Text(purchaseRuleLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.grocerySecondary)
             }
             if needsStore {
-                Label("Needs store", systemImage: "storefront").font(.caption).foregroundStyle(.secondary)
+                Label("Needs store", systemImage: "storefront").font(.caption).foregroundStyle(Color.grocerySecondary)
             }
-            if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(.secondary) }
+            if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 44)
@@ -897,6 +929,7 @@ struct GroceryFiltersView: View {
                             get: { navigation.includedStoreIDs.contains(store.id) },
                             set: { navigation.setIncluded($0, storeID: store.id) }
                         ))
+                        .accessibilityIdentifier("shopping.filters.include.\(store.id.uuidString)")
                     }
                 }
                 Section("Exclude a store tag") {
@@ -905,6 +938,7 @@ struct GroceryFiltersView: View {
                             get: { navigation.excludedStoreIDs.contains(store.id) },
                             set: { navigation.setExcluded($0, storeID: store.id) }
                         ))
+                        .accessibilityIdentifier("shopping.filters.exclude.\(store.id.uuidString)")
                     }
                 }
                 Button("Reset filters", action: onReset)
@@ -1066,10 +1100,20 @@ struct RecentlyClearedView: View {
 
 
 extension Color {
+    static let grocerySecondary = Color(UIColor { traits in
+        UIColor(white: traits.userInterfaceStyle == .dark ? 0.75 : 0.35, alpha: 1)
+    })
+
+    static let groceryUrgent = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.95, green: 0.58, blue: 0.30, alpha: 1)
+            : UIColor(red: 0.60, green: 0.20, blue: 0.07, alpha: 1)
+    })
+
     static let groceryAccent = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 0.35, green: 0.72, blue: 0.55, alpha: 1)
-            : UIColor(red: 0.15, green: 0.39, blue: 0.29, alpha: 1)
+            : UIColor(red: 0.10, green: 0.32, blue: 0.23, alpha: 1)
     })
 }
 

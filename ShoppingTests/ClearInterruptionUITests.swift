@@ -77,8 +77,76 @@ final class ClearInterruptionUITests: XCTestCase {
     }
 
     private func reveal(_ element: XCUIElement, app: XCUIApplication) {
-        for _ in 0..<10 where !element.exists || !element.isHittable { app.swipeUp() }
+        for _ in 0..<10 {
+            let appFrame = app.frame
+            let navigationFrame = app.navigationBars.firstMatch.frame
+            guard usable(appFrame), usable(navigationFrame) else { continue }
+            let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
+            let targetIsInFixedScope = contains(element, in: fixedScope)
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable && !targetIsInFixedScope
+                ? fixedScope.frame : nil
+            if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
+            let top = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let keyboard = app.keyboards.firstMatch
+            let keyboardFrame = keyboard.exists ? keyboard.frame : nil
+            if let keyboardFrame, !usable(keyboardFrame) { continue }
+            let tabBar = app.tabBars.firstMatch
+            let tabBarFrame = tabBar.exists && tabBar.isHittable ? tabBar.frame : nil
+            if let tabBarFrame, !usable(tabBarFrame) { continue }
+            let lowerSystemBound = keyboardFrame.map { $0.minY - 60 }
+                ?? tabBarFrame.map(\.minY) ?? appFrame.maxY
+            let feedback = app.otherElements["shopping.grocery.feedback"]
+            let targetIsInFeedback = contains(element, in: feedback)
+            let feedbackFrame = feedback.exists && feedback.isHittable && !targetIsInFeedback
+                ? feedback.frame : nil
+            if let feedbackFrame, !usable(feedbackFrame) { continue }
+            let bottom = min(lowerSystemBound, feedbackFrame?.minY ?? lowerSystemBound)
+            guard bottom - top > 48 else { continue }
+            let elementFrame = element.exists ? element.frame : nil
+            if let elementFrame, !usable(elementFrame) { continue }
+            if let elementFrame, element.isHittable && elementFrame.minY >= top
+                && elementFrame.maxY <= bottom
+            {
+                return
+            }
+            let x = appFrame.midX
+            let viewportHeight = bottom - top
+            let upper = top + viewportHeight / 4
+            let lower = top + viewportHeight * 3 / 4
+            let maximumTravel = lower - upper
+            let minimumTravel = min(60, maximumTravel)
+            if let elementFrame, elementFrame.minY < top {
+                let travel = min(max(top - elementFrame.minY + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: upper, to: upper + travel)
+            } else if let elementFrame, elementFrame.maxY > bottom {
+                let travel = min(max(elementFrame.maxY - bottom + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: lower, to: lower - travel)
+            } else {
+                drag(in: app, x: x, from: lower, to: upper)
+            }
+        }
+        XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
         XCTAssertTrue(element.waitForExistence(timeout: 2))
         XCTAssertTrue(element.isHittable)
+    }
+
+    private func contains(_ element: XCUIElement, in container: XCUIElement) -> Bool {
+        guard element.exists, usable(element.frame), container.exists else { return false }
+        return container.descendants(matching: element.elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", element.identifier, element.label
+        )).firstMatch.exists
+    }
+
+    private func drag(in app: XCUIApplication, x: CGFloat, from startY: CGFloat, to endY: CGFloat) {
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: x, dy: startY))
+        let end = origin.withOffset(CGVector(dx: x, dy: endY))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 }

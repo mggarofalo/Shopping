@@ -57,13 +57,22 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(original, in: app)
         XCTAssertTrue(original.label.contains("Granola"))
         original.tap()
-        XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
-        XCTAssertEqual(app.textFields["shopping.grocery.quantity"].value as? String, "2")
-        XCTAssertTrue(app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"].isSelected)
+        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
+        reveal(purchaseNotes, in: app)
+        XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")
+        let quantity = app.textFields["shopping.grocery.quantity"]
+        reveal(quantity, in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        let urgency = app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"]
+        reveal(urgency, in: app)
+        XCTAssertTrue(urgency.isSelected)
         let anyStore = app.switches["Any store"]
         reveal(anyStore, in: app)
         XCTAssertEqual(anyStore.value as? String, "0")
-        XCTAssertEqual(app.switches["Costco"].value as? String, "1")
+        let costco = app.switches["Costco"]
+        reveal(costco, in: app)
+        XCTAssertEqual(costco.value as? String, "1")
         app.buttons["shopping.grocery.cancel"].tap()
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
@@ -187,6 +196,8 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(search, in: app)
         search.tap()
         search.typeText(name)
+        search.typeText("\n")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         let match = app.buttons.matching(
             NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
@@ -225,36 +236,70 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<10 {
-            // A dismissed sheet can briefly leave a null navigation-bar frame in AX.
-            // Wait for usable geometry before constructing a drag coordinate.
             let appFrame = app.frame
             let navigationFrame = app.navigationBars.firstMatch.frame
             guard usable(appFrame), usable(navigationFrame) else { continue }
-            let top = navigationFrame.maxY
+            let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
+            let targetIsInFixedScope = contains(element, in: fixedScope)
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable && !targetIsInFixedScope
+                ? fixedScope.frame : nil
+            if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
+            let top = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
             let keyboard = app.keyboards.firstMatch
-            let editing =
-                app.navigationBars["Edit grocery"].exists || app.navigationBars["Add grocery"].exists
             let keyboardFrame = keyboard.exists ? keyboard.frame : nil
             if let keyboardFrame, !usable(keyboardFrame) { continue }
-            let bottom = keyboardFrame.map { $0.minY - 60 } ?? appFrame.maxY - (editing ? 30 : 90)
+            let tabBar = app.tabBars.firstMatch
+            let tabBarFrame = tabBar.exists && tabBar.isHittable ? tabBar.frame : nil
+            if let tabBarFrame, !usable(tabBarFrame) { continue }
+            let lowerSystemBound = keyboardFrame.map { $0.minY - 60 }
+                ?? tabBarFrame.map(\.minY) ?? appFrame.maxY
+            let feedback = app.otherElements["shopping.grocery.feedback"]
+            let targetIsInFeedback = contains(element, in: feedback)
+            let feedbackFrame = feedback.exists && feedback.isHittable && !targetIsInFeedback
+                ? feedback.frame : nil
+            if let feedbackFrame, !usable(feedbackFrame) { continue }
+            let bottom = min(lowerSystemBound, feedbackFrame?.minY ?? lowerSystemBound)
             guard bottom - top > 48 else { continue }
-            if element.exists && element.isHittable && element.frame.minY >= top
-                && element.frame.maxY <= bottom
+            let elementFrame = element.exists ? element.frame : nil
+            if let elementFrame, !usable(elementFrame) { continue }
+            if let elementFrame, element.isHittable && elementFrame.minY >= top
+                && elementFrame.maxY <= bottom
             {
                 return
             }
             let x = appFrame.midX
-            let lower = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: x, dy: bottom - 24))
-            let upper = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: x, dy: top + 24))
-            if element.exists && element.frame.minY < top {
-                upper.press(forDuration: 0.05, thenDragTo: lower)
+            let viewportHeight = bottom - top
+            let upper = top + viewportHeight / 4
+            let lower = top + viewportHeight * 3 / 4
+            let maximumTravel = lower - upper
+            let minimumTravel = min(60, maximumTravel)
+            if let elementFrame, elementFrame.minY < top {
+                let travel = min(max(top - elementFrame.minY + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: upper, to: upper + travel)
+            } else if let elementFrame, elementFrame.maxY > bottom {
+                let travel = min(max(elementFrame.maxY - bottom + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: lower, to: lower - travel)
             } else {
-                lower.press(forDuration: 0.05, thenDragTo: upper)
+                drag(in: app, x: x, from: lower, to: upper)
             }
         }
         XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
+        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        XCTAssertTrue(element.isHittable)
+    }
+
+    private func contains(_ element: XCUIElement, in container: XCUIElement) -> Bool {
+        guard element.exists, usable(element.frame), container.exists else { return false }
+        return container.descendants(matching: element.elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", element.identifier, element.label
+        )).firstMatch.exists
+    }
+
+    private func drag(in app: XCUIApplication, x: CGFloat, from startY: CGFloat, to endY: CGFloat) {
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: x, dy: startY))
+        let end = origin.withOffset(CGVector(dx: x, dy: endY))
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     private func usable(_ frame: CGRect) -> Bool {
