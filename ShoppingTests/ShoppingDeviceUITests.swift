@@ -281,6 +281,8 @@ final class ShoppingDeviceUITests: XCTestCase {
         _ element: XCUIElement, in app: XCUIApplication, fullyVisible: Bool = true, towardTop: Bool = false
     ) {
         var diagnostics: [String] = []
+        var previousDirection: Bool?
+        var preciseAlignment = false
         for _ in 0..<12 {
             let window = app.frame
             let navigationBar = app.navigationBars.firstMatch
@@ -301,6 +303,10 @@ final class ShoppingDeviceUITests: XCTestCase {
                 return
             }
             let movingDown = (!frame.isNull && frame.minY < top) || (frame.isNull && towardTop)
+            if let previousDirection, movingDown != previousDirection {
+                preciseAlignment = true
+            }
+            previousDirection = movingDown
             let overflow = frame.isNull
                 ? (bottom - top) * 0.4
                 : (movingDown ? top - frame.minY : frame.maxY - bottom) + 12
@@ -313,9 +319,14 @@ final class ShoppingDeviceUITests: XCTestCase {
             let end = origin.withOffset(CGVector(
                 dx: window.midX, dy: startY + (movingDown ? distance : -distance)
             ))
-            // Use a normal pan to engage the List/search-bar scroll interaction.
-            // Slow held drags are reserved for the final audit alignment below.
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // A normal pan engages the List/search-bar interaction. Once a pan
+            // overshoots, remove momentum so a tall cell can fit the viewport
+            // without bouncing repeatedly between its two edges.
+            if preciseAlignment {
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            } else {
+                start.press(forDuration: 0.05, thenDragTo: end)
+            }
         }
         let attachment = XCTAttachment(string: diagnostics.joined(separator: "\n") + "\n" + app.debugDescription)
         attachment.name = "Failed reveal geometry"
