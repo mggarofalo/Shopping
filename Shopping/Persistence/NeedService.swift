@@ -344,7 +344,8 @@ final class NeedService {
     func removeStore(
         storeID: UUID,
         householdID: UUID,
-        listID: UUID
+        listID: UUID,
+        confirmedAction: StoreRemovalAction? = nil
     ) throws -> StoreRemovalAction {
         try write { context in
             let household = try self.validatedCommandHousehold(
@@ -353,7 +354,7 @@ final class NeedService {
             let store = try self.validatedStoreForManagement(
                 storeID: storeID, household: household, in: context
             )
-            if self.storeHasReferences(store) {
+            if confirmedAction == .archive || self.storeHasReferences(store) {
                 store.isArchived = true
                 return .archive
             }

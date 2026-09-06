@@ -244,11 +244,12 @@ private struct StoreManagementView: View {
     }
 
     private func remove() {
-        guard let store = removingStore, let scope = removalScope,
+        guard let store = removingStore, let scope = removalScope, let removalAction,
               StoreManagementScope.permits(scope, canonicalList: canonicalList), let service else { return }
         do {
             _ = try service.removeStore(
-                storeID: store.id, householdID: scope.householdID, listID: scope.listID
+                storeID: store.id, householdID: scope.householdID, listID: scope.listID,
+                confirmedAction: removalAction
             )
             hapticFeedback.play(.warning)
             clearRemoval()

@@ -117,12 +117,12 @@ struct CartedGroceriesView: View {
         } message: {
             Text(error?.localizedDescription ?? "Unknown error")
         }
-        .onAppear(perform: refreshProjection)
+        .onAppear(perform: sanitizeFilterAndRefresh)
         .onReceive(
             NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange, object: viewContext
             )
-        ) { _ in refreshProjection() }
+        ) { _ in sanitizeFilterAndRefresh() }
     }
 
     @ViewBuilder
@@ -291,6 +291,16 @@ struct CartedGroceriesView: View {
             self.error = error
             matchingNeedIDs = []
         }
+    }
+
+    private func sanitizeFilterAndRefresh() {
+        filter = filter.sanitized(
+            activeStoreIDs: Set(validActiveStores.map(\.id)),
+            activeCategoryIDs: Set(
+                GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).map(\.id)
+            )
+        )
+        refreshProjection()
     }
 
     private func showAllCarted() {

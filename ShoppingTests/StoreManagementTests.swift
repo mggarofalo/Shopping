@@ -562,6 +562,40 @@ final class StoreManagementTests: XCTestCase {
         }
     }
 
+    func testConfirmedArchiveNeverBecomesDeleteWhenReferencesDisappear() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let storeID = try service.createStore(
+            name: "Costco", householdID: selection.householdID)
+        let itemID = try service.createItem(
+            name: "Strawberries",
+            storeIDs: [storeID],
+            householdID: selection.householdID,
+            anyStore: false
+        )
+
+        let confirmedAction = try service.storeRemovalAction(
+            storeID: storeID,
+            householdID: selection.householdID,
+            listID: selection.listID
+        )
+        XCTAssertEqual(confirmedAction, .archive)
+
+        try service.setPurchaseRules(itemID: itemID, anyStore: true, storeIDs: [])
+        XCTAssertEqual(
+            try service.removeStore(
+                storeID: storeID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                confirmedAction: confirmedAction
+            ),
+            .archive
+        )
+        XCTAssertTrue(try hasStore(storeID, persistence: persistence))
+        XCTAssertTrue(try storeIsArchived(storeID, persistence: persistence))
+    }
+
     private struct StoreState: Equatable {
         let id: UUID
         let name: String
