@@ -316,7 +316,13 @@ final class ShoppingLaunchTests: XCTestCase {
         let catalogGranola = app.staticTexts["Granola"]
         reveal(catalogGranola, in: app)
         XCTAssertTrue(catalogGranola.waitForExistence(timeout: 3))
-        app.buttons["shopping.catalog.filters"].tap()
+        let filters = app.buttons["shopping.catalog.filters"]
+        for _ in 0..<8 where !filters.exists || !filters.isHittable {
+            app.collectionViews["shopping.catalog.list"].swipeDown()
+        }
+        XCTAssertTrue(filters.waitForExistence(timeout: 3))
+        XCTAssertTrue(filters.isHittable)
+        filters.tap()
         enableArchivedItems(in: app)
         resetCatalogFilters(in: app)
         app.buttons["Done"].tap()
