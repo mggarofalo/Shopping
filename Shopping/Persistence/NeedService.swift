@@ -71,6 +71,11 @@ enum StoreEligibility: Equatable {
     case needsStore
 }
 
+enum StoreRemovalAction: Equatable {
+    case delete
+    case archive
+}
+
 struct CatalogItemValues: Equatable {
     var name: String
     var notes: String
@@ -301,7 +306,8 @@ final class NeedService {
             )
             let request = Store.fetchRequest()
             let owned = try context.fetch(request).filter {
-                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+                !$0.isArchived && $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore
             }
             let ownedIDs = owned.map(\.id)
             guard !ownedIDs.contains(PersistenceModel.unsetID),
@@ -315,6 +321,44 @@ final class NeedService {
             }
             let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
             for (index, id) in orderedStoreIDs.enumerated() { byID[id]?.displayOrder = Int64(index) }
+        }
+    }
+
+    func storeRemovalAction(
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> StoreRemovalAction {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let store = try self.validatedStoreForManagement(
+                storeID: storeID, household: household, in: context
+            )
+            return self.storeHasReferences(store) ? .archive : .delete
+        }
+    }
+
+    @discardableResult
+    func removeStore(
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> StoreRemovalAction {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let store = try self.validatedStoreForManagement(
+                storeID: storeID, household: household, in: context
+            )
+            if self.storeHasReferences(store) {
+                store.isArchived = true
+                return .archive
+            }
+            context.delete(store)
+            return .delete
         }
     }
 
@@ -1548,6 +1592,25 @@ final class NeedService {
         }
         try validate(list: list, belongsTo: household)
         return household
+    }
+
+    private func validatedStoreForManagement(
+        storeID: UUID,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> Store {
+        guard let store = try self.store(id: storeID, in: context) else {
+            throw NeedServiceError.storeNotFound
+        }
+        guard store.household == household,
+              store.objectID.persistentStore == household.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+        return store
+    }
+
+    private func storeHasReferences(_ store: Store) -> Bool {
+        !(store.items?.isEmpty ?? true) || !(store.oneTimeNeeds?.isEmpty ?? true)
     }
 
     private func validatedActiveNeed(

@@ -53,38 +53,60 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Fresh basil"].exists)
     }
 
-    func testStoreManagementStagesRenameAndSupportsArchiveRestore() {
+    func testStoreManagementStagesRenameAndDeletesUnreferencedStore() {
         let app = launchApp()
         openStoreManagement(in: app)
 
-        let createName = app.textFields["shopping.stores.createName"]
+        app.buttons["shopping.stores.add"].tap()
+        XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
+        let createName = app.textFields["shopping.stores.name"]
         XCTAssertTrue(createName.waitForExistence(timeout: 2))
-        createName.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         createName.typeText("Neighborhood Market")
         app.buttons["Save store"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
 
         app.buttons["Rename Neighborhood Market"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
-        replaceText(in: app.textFields["shopping.stores.renameName"], with: "Canceled Market")
+        replaceText(in: app.textFields["shopping.stores.name"], with: "Canceled Market")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
 
         app.buttons["Rename Neighborhood Market"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
-        replaceText(in: app.textFields["shopping.stores.renameName"], with: "Local Market")
-        app.buttons["Save"].tap()
+        replaceText(in: app.textFields["shopping.stores.name"], with: "Local Market")
+        app.buttons["Save store"].tap()
         XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
 
-        app.buttons["Archive Local Market"].tap()
-        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Restore Local Market"].exists)
-        attachScreenshot(named: "Store Management Archived", app: app)
-        app.buttons["Restore Local Market"].tap()
-        XCTAssertFalse(app.staticTexts["Archived"].exists)
-        XCTAssertTrue(app.buttons["Archive Local Market"].waitForExistence(timeout: 2))
+        app.buttons["Delete Local Market"].tap()
+        XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
+        app.buttons["Delete store"].tap()
+        XCTAssertFalse(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
+    }
+
+    func testStoreManagementArchivesReferencedStoreHidesItAndResetsSelectedStore() {
+        let app = launchApp(fixture: "populated")
+        app.buttons["shopping.store.menu"].tap()
+        app.buttons.matching(
+            NSPredicate(format: "label == %@ AND identifier != %@", "Costco", "shopping.store.menu")
+        ).firstMatch.tap()
+        XCTAssertTrue(app.buttons["shopping.store.clear"].waitForExistence(timeout: 2))
+
+        openStoreManagement(in: app)
+        XCTAssertFalse(app.staticTexts["Neighborhood Market (closed)"].exists)
+        app.buttons["Delete Costco"].tap()
+        XCTAssertTrue(app.staticTexts["Archive Costco?"].waitForExistence(timeout: 2))
+        app.buttons["Archive store"].tap()
+        XCTAssertFalse(app.buttons["Delete Costco"].waitForExistence(timeout: 2))
+
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.buttons["shopping.store.all"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.store.all"].isSelected)
+        XCTAssertFalse(app.buttons["shopping.store.clear"].exists)
+        app.buttons["shopping.store.menu"].tap()
+        XCTAssertFalse(app.buttons["Costco"].waitForExistence(timeout: 2))
     }
 
     func testCancelingInlineStoreAndParentAddCreatesNeitherStoreNorNeed() {
