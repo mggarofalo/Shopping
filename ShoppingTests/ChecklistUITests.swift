@@ -94,7 +94,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertTrue(item.label.contains("Any store"))
+        XCTAssertFalse(item.label.contains("Any store"))
     }
 
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {

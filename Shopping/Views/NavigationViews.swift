@@ -232,18 +232,18 @@ struct GroceriesView: View {
                             let mustBuy = storePartition(.mustBuyHere, selectedStoreID: selectedStoreID)
                             let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
                             if !mustBuy.isEmpty {
-                                Section {
-                                    groupedRows(mustBuy, sectionTitle: "Must buy here")
+                                Section("Only buy here") {
+                                    shoppingRows(mustBuy)
                                 }
                             }
                             if !flexible.isEmpty {
-                                Section {
-                                    groupedRows(flexible, sectionTitle: "Flexible here")
+                                Section("Can buy here") {
+                                    shoppingRows(flexible)
                                 }
                             }
                         } else {
                             Section {
-                                groupedRows(visibleNeeds)
+                                shoppingRows(visibleNeeds)
                             }
                         }
                     }
@@ -557,41 +557,21 @@ struct GroceriesView: View {
         }
     }
 
-    @ViewBuilder
-    private func groupedRows(_ values: [Need], sectionTitle: String? = nil) -> some View {
-        let groups = CategoryGrouping.groups(
-            needs: values,
-            categories: activeCategories,
-            household: canonicalList?.household
-        )
-        ForEach(groups) { priority in
-            ForEach(priority.categories) { category in
-                ForEach(category.needs, id: \.objectID) { need in
-                    VStack(alignment: .leading, spacing: 8) {
-                        if need.objectID == category.needs.first?.objectID {
-                            let isFirstGroup = priority.id == groups.first?.id && category.id == priority.categories.first?.id
-                            Text(isFirstGroup ? [sectionTitle, category.title].compactMap { $0 }.joined(separator: " · ") : category.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.grocerySecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityAddTraits(.isHeader)
-                        }
-                        GroceryNeedRow(
-                            need: need,
-                            activeStores: activeStores,
-                            onEdit: focus,
-                            onCartedChange: setCarted,
-                            onQuantityChange: setQuantity,
-                            onRemoved: { operationID, householdID, listID in
-                                removed(operationID, scope: GroceryAddScope(
-                                    householdID: householdID, listID: listID,
-                                    selectedStoreID: nil, selectedStoreName: nil
-                                ))
-                            }
-                        )
-                    }
+    private func shoppingRows(_ values: [Need]) -> some View {
+        ForEach(sorted(values), id: \.objectID) { need in
+            GroceryNeedRow(
+                need: need,
+                activeStores: activeStores,
+                onEdit: focus,
+                onCartedChange: setCarted,
+                onQuantityChange: setQuantity,
+                onRemoved: { operationID, householdID, listID in
+                    removed(operationID, scope: GroceryAddScope(
+                        householdID: householdID, listID: listID,
+                        selectedStoreID: nil, selectedStoreName: nil
+                    ))
                 }
-            }
+            )
         }
     }
 
@@ -602,7 +582,8 @@ struct GroceriesView: View {
             let oneTime = need.kind == NeedKind.oneTime.rawValue
             let value = PurchaseRuleValue(
                 explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) } ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
-                anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore)
+                anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
+                hasResolvedIdentity: item != nil || oneTime
             )
             return PurchaseFilter().availability(of: value, selectedStoreID: selectedStoreID, activeStoreIDs: activeIDs) == availability
         })
@@ -723,7 +704,7 @@ enum GroceryRowScope {
         } else {
             return true
         }
-        return !anyStore && !tags.contains {
+        return !anyStore && !tags.isEmpty && !tags.contains {
             !$0.isArchived && $0.id != PersistenceModel.unsetID &&
                 $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
         }
@@ -741,7 +722,7 @@ enum GroceryRowScope {
         } else {
             return true
         }
-        return !anyStore && activeStores.allSatisfy { !tags.contains($0) }
+        return !anyStore && !tags.isEmpty && activeStores.allSatisfy { !tags.contains($0) }
     }
 
     static func matches(_ need: Need, canonicalList: GroceryList?) -> Bool {
@@ -786,7 +767,6 @@ struct GroceryNeedRow: View {
     @State private var removal: SwipeRemovalTarget?
     @State private var removalError: String?
 
-    private var needsStore: Bool { GroceryRowScope.needsStore(need, activeStores: activeStores) }
 
     var body: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
@@ -951,14 +931,6 @@ struct GroceryNeedRow: View {
                 Label("One-time", systemImage: "1.circle")
                     .font(.caption).foregroundStyle(Color.grocerySecondary)
             }
-            if let purchaseRuleLabel {
-                Text(purchaseRuleLabel)
-                    .font(.caption)
-                    .foregroundStyle(Color.grocerySecondary)
-            }
-            if needsStore {
-                Label("Needs store", systemImage: "storefront").font(.caption).foregroundStyle(Color.grocerySecondary)
-            }
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -974,30 +946,10 @@ struct GroceryNeedRow: View {
         if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
         if need.carted { values.append("In cart") }
-        if let purchaseRuleLabel { values.append(purchaseRuleLabel) }
-        if needsStore { values.append("Needs store") }
         if !need.notes.isEmpty { values.append(need.notes) }
         return values.joined(separator: ", ")
     }
 
-    private var purchaseRuleLabel: String? {
-        let anyStore: Bool
-        let stores: Set<Store>
-        if let item = need.item {
-            anyStore = item.anyStore
-            stores = item.stores ?? []
-        } else if need.kind == NeedKind.oneTime.rawValue {
-            anyStore = need.oneTimeAnyStore
-            stores = need.oneTimeStores ?? []
-        } else {
-            return nil
-        }
-        return GroceryPurchaseRuleLabel.text(
-            anyStore: anyStore,
-            stores: stores,
-            activeStores: activeStores
-        )
-    }
 }
 
 struct GroceryFiltersView: View {
@@ -1074,7 +1026,6 @@ struct OneTimeGrocerySheet: View {
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             service != nil && scope.listID != nil && scope.householdID != nil &&
-            (anyStore || !selectedStoreIDs.isEmpty) &&
             currentSelection == PersistenceSelection(householdID: scope.householdID, listID: scope.listID)
     }
 

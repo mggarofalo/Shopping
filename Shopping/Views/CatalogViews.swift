@@ -262,7 +262,7 @@ struct CatalogView: View {
         guard household != nil else { return }
         editor = CatalogEditSession(selection: selection, itemID: nil, values: CatalogItemValues(
             name: searchText, notes: "", categoryID: nil,
-            anyStore: false, storeIDs: filters.selectedStoreID.map { [$0] } ?? []
+            anyStore: filters.selectedStoreID == nil, storeIDs: filters.selectedStoreID.map { [$0] } ?? []
         ))
     }
 
@@ -301,7 +301,6 @@ private struct CatalogItemRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.name).foregroundStyle(.primary)
-            Text(item.purchaseDescription).font(.caption).foregroundStyle(Color.grocerySecondary)
             if let category = item.category { Text(category.name).font(.caption).foregroundStyle(Color.grocerySecondary) }
             if !item.notes.isEmpty { Text(item.notes).font(.subheadline).foregroundStyle(Color.grocerySecondary) }
             if item.isArchived { Text("Archived").font(.caption).foregroundStyle(Color.grocerySecondary) }
@@ -425,7 +424,6 @@ private struct CatalogEditorView: View {
     }
     private var canSave: Bool {
         scopeAvailable && !CatalogProjection.normalizedName(values.name).isEmpty &&
-            (values.anyStore || !values.storeIDs.isEmpty) &&
             (itemID == nil || currentItem != nil) && (!hasExactMatch || allowingNameCollision)
     }
 
@@ -555,15 +553,6 @@ private extension Item {
             anyStore: anyStore, storeIDs: Set(stores?.map(\.id) ?? []))
     }
 
-    var purchaseDescription: String {
-        let names = (stores ?? []).filter {
-            !$0.isArchived && $0.id != PersistenceModel.unsetID && $0.household != nil &&
-                $0.household == household && $0.objectID.persistentStore == objectID.persistentStore
-        }.sorted(by: NeedService.storeDisplayOrder).map(\.name)
-        if anyStore { return names.isEmpty ? "Any store" : "Any store · Tagged: \(names.joined(separator: ", "))" }
-        if names.isEmpty { return "Needs store" }
-        return "\(names.count == 1 ? "Only buy at" : "Buy at") \(names.joined(separator: ", "))"
-    }
 }
 
 private enum CatalogErrorCopy {

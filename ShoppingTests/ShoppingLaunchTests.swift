@@ -29,10 +29,10 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Must buy here ·")).firstMatch.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Only buy here"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
-        let flexibleSection = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Flexible here ·")).firstMatch
+        let flexibleSection = app.staticTexts["Can buy here"]
         for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
             app.swipeUp()
         }
@@ -41,10 +41,33 @@ final class ShoppingLaunchTests: XCTestCase {
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
     }
 
+    func testCompactStoreGroupsOmitRepeatedPurchaseRulesInBothAppearances() {
+        for appearance in ["light", "dark"] {
+            let app = launchApp(fixture: "populated", appearance: appearance)
+            XCTAssertFalse(app.staticTexts["Only buy here"].exists)
+            XCTAssertFalse(app.staticTexts["Can buy here"].exists)
+            XCTAssertFalse(app.staticTexts["Needs store"].exists)
+            app.buttons["shopping.store.menu"].tap()
+            app.buttons["Costco"].tap()
+            XCTAssertTrue(app.staticTexts["Only buy here"].waitForExistence(timeout: 2))
+            let canBuy = app.staticTexts["Can buy here"]
+            reveal(canBuy, in: app)
+            XCTAssertTrue(canBuy.isHittable)
+            XCTAssertFalse(app.staticTexts["Pantry"].exists)
+            XCTAssertFalse(app.staticTexts["Produce"].exists)
+            XCTAssertFalse(app.staticTexts["Buy at any store"].exists)
+            XCTAssertFalse(app.staticTexts["Only buy at Costco"].exists)
+            XCTAssertFalse(app.buttons["Edit Chipotles in adobo"].exists)
+            XCTAssertFalse(app.buttons["Edit Local honey"].exists)
+            attachScreenshot(named: "Compact Costco \(appearance)", app: app)
+            app.terminate()
+        }
+    }
+
     func testOneTimeAddSavesWithoutStoreSetupAndDoesNotPolluteCatalog() {
         let app = launchApp()
         openOneTimeAdd(in: app, groceryName: "Fresh basil")
-        setSwitch(named: "Any store", on: true, in: app)
+        XCTAssertTrue(app.buttons["shopping.grocery.save"].isEnabled)
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(app.staticTexts["Fresh basil"].waitForExistence(timeout: 3))
 
@@ -359,11 +382,12 @@ final class ShoppingLaunchTests: XCTestCase {
         return button
     }
 
-    private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false) -> XCUIApplication {
+    private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false, appearance: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
+        if let appearance { app.launchArguments += ["-shopping.appearance", appearance] }
         if accessibilitySize {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
         }

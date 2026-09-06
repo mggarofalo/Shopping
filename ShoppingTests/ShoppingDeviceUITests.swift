@@ -12,7 +12,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         let row = app.buttons["Edit \(longName)"]
         reveal(row, in: app, fullyVisible: false)
         XCTAssertEqual(row.label, "Edit \(longName)")
-        XCTAssertTrue((row.value as? String ?? "").contains("Buy at any store"))
+        XCTAssertFalse((row.value as? String ?? "").contains("Buy at any store"))
         screenshot("Long grocery title at largest text", app: app)
 
         let increase = app.buttons["Increase quantity for \(longName)"]
@@ -110,9 +110,9 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertEqual(row.label, "Edit Granola")
         let value = row.value as? String ?? ""
         XCTAssertTrue(value.contains("Urgent"))
-        XCTAssertTrue(value.contains("Only buy at Costco"))
+        XCTAssertFalse(value.contains("Only buy at Costco"))
         XCTAssertTrue(value.contains("Low sugar"))
-        let header = app.staticTexts["Must buy here · Pantry"]
+        let header = app.staticTexts["Only buy here"]
         XCTAssertTrue(header.exists)
         XCTAssertTrue(header.isHittable)
     }

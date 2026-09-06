@@ -18,50 +18,48 @@ Store, category and literal-tag choices use compact wrapping pills so long names
     Search groceries
     All     Costco v  ×                 Filters
 
-    Must buy here · Produce
+    Only buy here
     Frozen strawberries (!)       −  2  +  Cart
-    Only buy at Costco
 
-    Flexible here · Bakery
+    Can buy here
     Dinner rolls                  −  1  +  Cart
-    Buy at Costco, Walmart
 
     Groceries       Catalog       Settings
 
 Left-align names and supporting detail; align quantity at the trailing edge. The dedicated Add to cart or Remove from cart control changes carted state. Tapping the row edits details. Clear items in cart belongs inside In cart/recovery actions with count/scope confirmation; no Delete all control exists.
 
-All view orders uncarted needs with urgent needs first and optional global category order; Uncategorized last, without Normal or Urgent group headings. A selected store always partitions eligible rows into Must buy here then Flexible here, with urgent needs first inside each section. Text/category/urgency/include-exclude only narrow those rows.
+All shows one ungrouped list. A selected store partitions eligible rows into Only buy here then Can buy here, omitting empty groups. Within each list, urgency comes first, then name. No category or urgency headings and no repeated purchase-rule captions are needed. Text/category/urgency/include-exclude only narrow those rows. This economy also establishes the direction for a future store-shopping watch app; watch implementation is not part of this release.
 
 Empty household: Add groceries is the primary action. Empty filtered result: explain no matches and Reset filters; don't imply the underlying list is empty. Catalog has reusable items only; Recently cleared is explicit recovery, never a suggestion source. Forms stage data until Save and preserve input on failure.
 
 ## Review against brief
-This is a native utility, so avoid a marketing hero, decorative cards, gradients, custom animation or artificial branding. The useful distinction is the buying rule: Only buy at Costco vs Buy at Costco/Walmart vs Any store. No retailer-stock claims, trips, events, reminders or price engine. Native text scaling, VoiceOver labels, reduced motion and clear item state have priority over ornamental novelty.
+This is a native utility, so avoid a marketing hero, decorative cards, gradients, custom animation or artificial branding. Group headings carry the buying distinction; saved rules remain editable in details. No retailer-stock claims, trips, events, reminders or price engine. Native text scaling, VoiceOver labels, reduced motion and clear item state have priority over ornamental novelty.
 
 Implementation follows Plane issue dependencies. Navigation destinations may be scaffolded first; usable add/edit and safe clear are completed by their dedicated issues before any MVP claim.
 
 ## Store management and purchase tags
 
-Settings supports explicit store creation, staged rename, exact-set ordering, and archive/restore. Archive preserves catalog memberships and groceries. Archived tags remain known; they do not make a grocery eligible at a current store. All and Catalog expose Needs store when no active purchase option remains.
+Settings supports explicit store creation, staged rename, exact-set ordering, and archive/restore. Archive preserves catalog memberships and groceries. Archived tags remain known; they do not make a grocery eligible at a current store. All and Catalog retain these items without a Needs store label; details expose saved tags for editing.
 
-The purchase-rule picker keeps Any store separate from literal tags. Existing archived tags may remain alongside an active tag or Any store; unavailable identities can be explicitly removed. Choices and inline existing-store suggestions use the selected list's household object and persistent store, and exclude ambiguous store IDs.
+No store tags defaults to Any store, including existing records. Selecting the first tag restricts the item; removing the last returns it to Any store. The picker also supports explicit Any store alongside literal tags. Existing archived tags may remain alongside an active tag or Any store; unavailable identities can be explicitly removed. Choices and inline existing-store suggestions use the selected list's household object and persistent store, and exclude ambiguous store IDs.
 
 Add store opens within the tagging form. Cancel leaves the grocery draft intact. Save store explicitly adds household metadata and selects its tag; the grocery remains staged until Add. Canceling the parent after Save store retains that explicitly saved store but creates no grocery or catalog entry.
 
 ## Reusable catalog
 
-Catalog stores general item knowledge independently of current demand. Create/edit stages the name, reusable item notes, optional category, Any store flag, and literal store tags; category selection appears before Where to buy. Save submits them in one atomic command. The full catalog row opens its editor. Cancel makes no catalog or grocery change. A new item starts with the current catalog availability-store filter as its explicit tag, or asks for a store/Any store when viewing all stores. Existing items always start with their own saved rules.
+Catalog stores general item knowledge independently of current demand. Create/edit stages the name, reusable item notes, optional category, Any store flag, and literal store tags; category selection appears before Where to buy. Save submits them in one atomic command. The full catalog row opens its editor. Cancel makes no catalog or grocery change. A new item starts with the current catalog availability-store filter as its explicit tag, or defaults to Any store when viewing all stores. Existing items always start with their own saved rules.
 
 Search shows existing matches before creation. Introducing a normalized same-name item through creation or rename requires an explicit distinct-item choice; editing an already intentional same-name variant does not require reconfirming its identity. Match selection opens that existing item's staged editor and does not add a grocery.
 
 Available at store first limits eligibility. Tagged (any selected), Not tagged (none selected), text, and optional category then narrow the result. Filter chips expose literal membership and can be removed individually. Reset filters changes no stored data. Archived items have their own filter, and archive/restore never changes current grocery demand. Discarding a dirty draft during archive or restore requires confirmation.
 
-## Grocery filters and category grouping
+## Grocery filters and compact rows
 
 All and the selected-store clear icon change only the store selection. Reset filters clears the store, search, urgency, category and literal tag filters; neither action changes groceries. Removable chips make each additional filter visible. Include and exclude selections remain independent, so selecting the same literal tag in both produces no matches until one is removed. Any store never implies a literal store tag.
 
-Within Must buy here/Flexible here (or All), urgency comes first, followed by the household's category order and then Uncategorized. Category management supports staged rename, exact reorder and confirmed removal. Removing a category keeps its groceries and catalog items, with their category becoming Uncategorized; it is not grocery deletion.
+Within each shopping group (or All), urgency comes first, then name. Categories remain editable and filterable, without adding row headings. Category management supports staged rename, exact reorder and confirmed removal. Removing a category keeps its groceries and catalog items, with their category becoming Uncategorized; it is not grocery deletion.
 
-Rows show One-time in words and urgent status with an accessible icon, and describe only valid active purchase choices. Any-store rows also show their explicit active tags, so literal tag filters remain understandable. Missing, archived-only or ambiguous store choices show Needs store in All. Imported ambiguous category identities group under Uncategorized consistently with the category filter.
+Rows retain names, quantities, grocery notes, One-time in words, and urgent status with an accessible icon. They omit purchase-rule captions and Needs store labels. Missing, archived-only or ambiguous store choices remain recoverable in All without widening their eligibility. Untagged valid catalog items and one-time groceries are available at any store.
 
 ## Add, edit and recover a grocery
 

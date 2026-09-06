@@ -87,10 +87,10 @@ final class GroceryNeedTests: XCTestCase {
         let local = try service.createHousehold()
         let foreign = try service.createHousehold()
         let foreignStore = try service.createStore(name: "Foreign", householdID: foreign.householdID)
-        XCTAssertThrowsError(try service.addOneTimeNeed(title: "Ice", storeIDs: [], anyStore: false, listID: local.listID))
+        let untagged = try service.addOneTimeNeed(title: "Ice", storeIDs: [], anyStore: false, listID: local.listID)
         XCTAssertThrowsError(try service.addOneTimeNeed(title: "Ice", storeIDs: [foreignStore], listID: local.listID))
         XCTAssertThrowsError(try service.addOneTimeNeed(title: "Ice", quantity: 100, listID: local.listID))
-        XCTAssertTrue(try service.allActiveNeedIDs(householdID: local.householdID).isEmpty)
+        XCTAssertEqual(try service.allActiveNeedIDs(householdID: local.householdID), [untagged])
 
         let valid = try service.addOneTimeNeed(title: "Ice", quantity: 99, listID: local.listID)
         XCTAssertThrowsError(try service.setQuantity(0, needID: valid))

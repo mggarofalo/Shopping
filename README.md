@@ -6,7 +6,7 @@ Shopping is a household iOS grocery app for people who buy familiar items at spe
 
 - One household grocery list will be shared by the user and their wife. A checked grocery will become carted everywhere; it is not copied into a store trip.
 - Catalog items remember purchase rules such as `Buy at Costco` or `Any store`. Those tags express where the household chooses to buy an item; they do not assert retailer inventory or rank stores.
-- A selected store shows a need only when it is tagged for that store or is `Any store`. `Must buy here` means that store is its sole explicit active tag and the item is not `Any store`; other eligible items are flexible. Filters can narrow this result but cannot broaden it.
+- A selected store shows a need only when it is tagged for that store or is `Any store`; untagged items default to Any store. `Only buy here` means that store is its sole explicit active tag and the item is not `Any store`; other eligible items appear under `Can buy here`. All has no group headings, and rows omit repeated purchase-rule labels. Filters can narrow this result but cannot broaden it.
 - Re-adding a catalog item reuses its saved tags. There is one active remembered need per catalog item during normal use.
 - Urgency is a current-need setting (`Normal` or `Urgent`), not catalog knowledge. It cannot override store purchase rules.
 - A one-time need is a separate, shareable occurrence. It can be recovered after a clear, but never becomes a catalog item, template, future suggestion, or learned default unless the user explicitly chooses to remember it.

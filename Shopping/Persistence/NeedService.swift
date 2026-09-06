@@ -835,10 +835,18 @@ final class NeedService {
             return activeNeeds.filter { need in
                 let item = need.item
                 let isOneTime = need.kind == NeedKind.oneTime.rawValue
+                let resolvedItem = item.flatMap { candidate -> Item? in
+                    guard candidate.id != PersistenceModel.unsetID,
+                          candidate.household == need.list?.household,
+                          candidate.objectID.persistentStore == need.objectID.persistentStore,
+                          (try? self.item(id: candidate.id, in: context)) === candidate else { return nil }
+                    return candidate
+                }
                 let value = PurchaseRuleValue(
                     explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
                         ?? (isOneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
-                    anyStore: item?.anyStore ?? (isOneTime && need.oneTimeAnyStore)
+                    anyStore: item?.anyStore ?? (isOneTime && need.oneTimeAnyStore),
+                    hasResolvedIdentity: resolvedItem != nil || (item == nil && isOneTime)
                 )
                 return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text) &&
@@ -855,7 +863,7 @@ final class NeedService {
                 throw NeedServiceError.itemNotFound
             }
             guard item.household != nil else { return .needsStore }
-            if item.anyStore { return .anyStore }
+            if item.anyStore || (item.stores ?? []).isEmpty { return .anyStore }
             let active = try self.validActiveStores(
                 Array(item.stores ?? [])
             ).filter {
@@ -1298,7 +1306,8 @@ final class NeedService {
                 let value = PurchaseRuleValue(
                     explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
                         ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
-                    anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore))
+                    anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
+                    hasResolvedIdentity: item != nil || oneTime)
                 return filter.purchase.matches(value, activeStoreIDs: activeStores)
                     && CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text)
                     && (filter.categoryID == nil
@@ -1505,7 +1514,7 @@ final class NeedService {
                   $0.household == household &&
                   $0.objectID.persistentStore == household.objectID.persistentStore
               }) else { throw NeedServiceError.scopeChanged }
-        guard anyStore || stores.contains(where: { !$0.isArchived }) else {
+        guard anyStore || ids.isEmpty || stores.contains(where: { !$0.isArchived }) else {
             throw NeedServiceError.scopeChanged
         }
         return Set(stores)
@@ -1529,7 +1538,7 @@ final class NeedService {
             }
             stores.insert(store)
         }
-        guard values.anyStore || stores.contains(where: { !$0.isArchived }) else {
+        guard values.anyStore || stores.isEmpty || stores.contains(where: { !$0.isArchived }) else {
             throw NeedServiceError.scopeChanged
         }
         return ValidatedCatalogItemValues(
@@ -1537,7 +1546,7 @@ final class NeedService {
             notes: values.notes.trimmingCharacters(in: .whitespacesAndNewlines),
             category: category,
             stores: stores,
-            anyStore: values.anyStore
+            anyStore: values.anyStore || stores.isEmpty
         )
     }
 
