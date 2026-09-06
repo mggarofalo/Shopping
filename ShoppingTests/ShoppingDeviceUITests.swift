@@ -280,6 +280,7 @@ final class ShoppingDeviceUITests: XCTestCase {
     private func reveal(
         _ element: XCUIElement, in app: XCUIApplication, fullyVisible: Bool = true, towardTop: Bool = false
     ) {
+        var diagnostics: [String] = []
         for _ in 0..<12 {
             let window = app.frame
             let navigationBar = app.navigationBars.firstMatch
@@ -291,6 +292,8 @@ final class ShoppingDeviceUITests: XCTestCase {
             let bottom = tabBarFrame.minY
             guard bottom - top > 48 else { continue }
             let frame = element.exists ? element.frame : .null
+            let targetExists = element.exists
+            diagnostics.append("Target \(targetExists ? element.label : "missing"): \(frame); hittable \(targetExists && element.isHittable); viewport \(top)...\(bottom)")
             let visibleHeight = min(frame.maxY, bottom) - max(frame.minY, top)
             if element.exists && element.isHittable
                 && (fullyVisible ? frame.minY >= top && frame.maxY <= bottom : visibleHeight >= 44)
@@ -310,8 +313,15 @@ final class ShoppingDeviceUITests: XCTestCase {
             let end = origin.withOffset(CGVector(
                 dx: window.midX, dy: startY + (movingDown ? distance : -distance)
             ))
-            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            // Use a normal pan to engage the List/search-bar scroll interaction.
+            // Slow held drags are reserved for the final audit alignment below.
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
+        let attachment = XCTAttachment(string: diagnostics.joined(separator: "\n") + "\n" + app.debugDescription)
+        attachment.name = "Failed reveal geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        screenshot("Failed reveal viewport", app: app)
         XCTFail("Could not reveal the requested element between navigation and tab bars")
     }
 
