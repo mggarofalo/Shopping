@@ -575,7 +575,6 @@ struct GroceriesView: View {
                                 .foregroundStyle(Color.grocerySecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityAddTraits(.isHeader)
-                                .accessibilityRespondsToUserInteraction(false)
                         }
                         GroceryNeedRow(
                             need: need,
@@ -827,13 +826,11 @@ struct GroceryNeedRow: View {
                         .foregroundStyle(Color.grocerySecondary)
                         .accessibilityLabel("Quantity \(quantity)")
                         .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                        .accessibilityRespondsToUserInteraction(false)
                     quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
                 } else {
                     Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
                         .accessibilityLabel("Quantity \(quantity)")
                         .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                        .accessibilityRespondsToUserInteraction(false)
                 }
             }
         }
