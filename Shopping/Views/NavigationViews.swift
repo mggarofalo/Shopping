@@ -616,9 +616,9 @@ struct GroceriesView: View {
         } catch { self.error = error }
     }
 
-    private func setQuantity(_ need: Need, _ quantity: Int64) {
+    private func setQuantity(_ need: Need, _ quantity: Int64?) {
         guard let service, let canonicalList, let householdID = canonicalList.household?.id,
-              (1...99).contains(quantity),
+              quantity.map({ (1...99).contains($0) }) ?? true,
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
         do {
@@ -762,7 +762,7 @@ struct GroceryNeedRow: View {
     let activeStores: [Store]
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
-    var onQuantityChange: ((Need, Int64) -> Void)? = nil
+    var onQuantityChange: ((Need, Int64?) -> Void)? = nil
 
     private var needsStore: Bool { GroceryRowScope.needsStore(need, activeStores: activeStores) }
 
@@ -815,19 +815,21 @@ struct GroceryNeedRow: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            if let onQuantityChange {
-                quantityButton("minus", change: -1, action: onQuantityChange)
-                Text("\(need.quantity)")
-                    .monospacedDigit()
-                    .fixedSize()
-                    .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(need.quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                quantityButton("plus", change: 1, action: onQuantityChange)
-            } else {
-                Text("\(need.quantity)").foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(need.quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+            if let quantity = need.quantity {
+                if let onQuantityChange {
+                    quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
+                    Text("\(quantity)")
+                        .monospacedDigit()
+                        .fixedSize()
+                        .foregroundStyle(Color.grocerySecondary)
+                        .accessibilityLabel("Quantity \(quantity)")
+                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+                    quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
+                } else {
+                    Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
+                        .accessibilityLabel("Quantity \(quantity)")
+                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+                }
             }
         }
     }
@@ -845,15 +847,15 @@ struct GroceryNeedRow: View {
     }
 
     private func quantityButton(
-        _ symbol: String, change: Int64, action: @escaping (Need, Int64) -> Void
+        _ symbol: String, quantity: Int64, change: Int64, action: @escaping (Need, Int64?) -> Void
     ) -> some View {
         Button {
-            action(need, need.quantity + change)
+            action(need, quantity + change)
         } label: {
             Image(systemName: symbol).frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.borderless)
-        .disabled(change < 0 ? need.quantity <= 1 : need.quantity >= 99)
+        .disabled(change < 0 ? quantity <= 1 : quantity >= 99)
         .accessibilityLabel("\(change < 0 ? "Decrease" : "Increase") quantity for \(title)")
         .accessibilityIdentifier(
             "shopping.checklist.quantity.\(change < 0 ? "decrease" : "increase").\(need.id.uuidString)")

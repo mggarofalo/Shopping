@@ -161,7 +161,7 @@ final class LocalDataRegressionTests: XCTestCase {
         }
     }
     private struct Occurrence: Equatable {
-        let quantity: Int64
+        let quantity: Int64?
         let notes: String
         let urgency: NeedUrgency
         let carted: Bool
@@ -232,7 +232,7 @@ final class LocalDataRegressionTests: XCTestCase {
         try c.performAndWait {
             let q = Need.fetchRequest()
             q.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-            return try XCTUnwrap(try c.fetch(q).first).quantity
+            return try XCTUnwrap(try XCTUnwrap(try c.fetch(q).first).quantity)
         }
     }
     private func storeIDs(_ c: NSManagedObjectContext, _ id: UUID) throws -> Set<UUID> {

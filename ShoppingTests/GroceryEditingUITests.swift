@@ -31,7 +31,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
+        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
         attachScreenshot(named: "Remembered grocery editor", app: app)
     }
 
@@ -98,7 +98,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(match.waitForExistence(timeout: 2))
         match.tap()
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
+        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
         app.buttons["shopping.grocery.cancel"].tap()
@@ -343,5 +343,20 @@ final class GroceryEditingUITests: XCTestCase {
         screenshot.name = name
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+}
+
+extension GroceryEditingUITests {
+    func testQuantityStartsUnsetAndCanBeAddedThenCleared() {
+        let app = launchApp()
+        openAdd(in: app)
+        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.steppers["shopping.grocery.quantity"].exists)
+
+        app.buttons["shopping.grocery.quantity.add"].tap()
+        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
+        app.buttons["shopping.grocery.quantity.clear"].tap()
+        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.steppers["shopping.grocery.quantity"].exists)
     }
 }

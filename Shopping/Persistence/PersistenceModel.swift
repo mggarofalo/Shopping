@@ -17,7 +17,7 @@ enum PersistenceModelError: LocalizedError {
 enum PersistenceModel {
     static let name = "Shopping"
     static let unsetID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-    static let versionIdentifier = "ShoppingSchemaV1"
+    static let versionIdentifier = "ShoppingSchemaV2"
 
     static func make() throws -> NSManagedObjectModel {
         guard let modelURL = Bundle(for: PersistenceModelBundleToken.self)

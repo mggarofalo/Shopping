@@ -16,7 +16,7 @@ struct ClearCartedPreviewRow: Equatable {
     let needID: UUID
     let revision: Int64
     let title: String
-    let quantity: Int64
+    let quantity: Int64?
     let oneTime: Bool
 }
 
@@ -37,7 +37,7 @@ struct RememberedDuplicateGroup: Equatable {
 
 struct RememberedDuplicateCandidate: Equatable {
     let needID: UUID
-    let quantity: Int64
+    let quantity: Int64?
     let carted: Bool
     let urgency: NeedUrgency
     let notes: String
@@ -80,7 +80,7 @@ struct CatalogItemValues: Equatable {
 }
 
 struct RememberedNeedValues: Equatable {
-    var quantity: Int64 = 1
+    var quantity: Int64? = nil
     var purchaseNotes: String = ""
     var urgency: NeedUrgency = .normal
 }
@@ -896,7 +896,7 @@ final class NeedService {
             let need = self.makeNeed(title: item.name, list: list, context: context)
             need.kind = NeedKind.remembered.rawValue
             need.item = item
-            need.quantity = quantity ?? 1
+            need.quantity = quantity
             need.notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             need.urgency = urgency.rawValue
             return need.id
@@ -910,13 +910,13 @@ final class NeedService {
         categoryID: UUID? = nil,
         storeIDs: Set<UUID> = [],
         anyStore: Bool = true,
-        quantity: Int64 = 1,
+        quantity: Int64? = nil,
         urgency: NeedUrgency = .normal,
         householdID: UUID? = nil,
         listID: UUID
     ) throws -> UUID {
         let title = try validatedName(title)
-        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+        if let quantity, !(1...99).contains(quantity) { throw NeedServiceError.invalidQuantity }
         return try write { context in
             guard let list = try self.list(id: listID, in: context) else {
                 throw NeedServiceError.listNotFound
@@ -972,8 +972,8 @@ final class NeedService {
         try editNeed(id: needID) { $0.carted = carted }
     }
 
-    func setQuantity(_ quantity: Int64, needID: UUID) throws {
-        guard (1...99).contains(quantity) else {
+    func setQuantity(_ quantity: Int64?, needID: UUID) throws {
+        if let quantity, !(1...99).contains(quantity) {
             throw NeedServiceError.invalidQuantity
         }
         try editNeed(id: needID) { $0.quantity = quantity }
@@ -991,8 +991,8 @@ final class NeedService {
         }
     }
 
-    func setNeedQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64) throws {
-        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+    func setNeedQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64?) throws {
+        if let quantity, !(1...99).contains(quantity) { throw NeedServiceError.invalidQuantity }
         try write { context in
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context)
@@ -1389,7 +1389,7 @@ final class NeedService {
         need.kind = ""
         need.title = title
         need.notes = ""
-        need.quantity = 1
+        need.quantity = nil
         need.carted = false
         need.urgency = "normal"
         need.revision = 0
@@ -1522,7 +1522,7 @@ final class NeedService {
     }
 
     private func validate(needValues: RememberedNeedValues) throws {
-        guard (1...99).contains(needValues.quantity) else {
+        if let quantity = needValues.quantity, !(1...99).contains(quantity) {
             throw NeedServiceError.invalidQuantity
         }
     }

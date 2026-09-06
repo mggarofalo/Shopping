@@ -44,7 +44,7 @@ struct GroceryEditorView: View {
     @State private var name: String
     @State private var catalogNotes: String
     @State private var purchaseNotes: String
-    @State private var quantity: Int
+    @State private var quantity: Int?
     @State private var urgency: NeedUrgency
     @State private var categoryID: UUID?
     @State private var storeIDs: Set<UUID>
@@ -79,7 +79,7 @@ struct GroceryEditorView: View {
         _name = State(initialValue: item?.name ?? need?.title ?? "")
         _catalogNotes = State(initialValue: item?.notes ?? "")
         _purchaseNotes = State(initialValue: need?.notes ?? "")
-        _quantity = State(initialValue: Int(need?.quantity ?? 1))
+        _quantity = State(initialValue: need?.quantity.map(Int.init))
         _urgency = State(initialValue: NeedUrgency(rawValue: need?.urgency ?? "") ?? .normal)
         if let need {
             if let item {
@@ -124,7 +124,7 @@ struct GroceryEditorView: View {
         }
         return need.kind == NeedKind.oneTime.rawValue && need.item == nil
     }
-    private var validQuantity: Bool { (1...99).contains(quantity) }
+    private var validQuantity: Bool { quantity.map { (1...99).contains($0) } ?? true }
     private var canSave: Bool {
         guard scopeValid, validQuantity else { return false }
         if isPromotingOneTime && promotionChoice == .existing {
@@ -226,11 +226,26 @@ struct GroceryEditorView: View {
                     promotionSection
                 }
                 Section {
-                    Stepper(value: $quantity, in: 1...99) {
-                        LabeledContent("Quantity") { Text("\(quantity)") }
+                    if let quantity {
+                        Stepper(
+                            value: Binding(
+                                get: { self.quantity ?? 1 },
+                                set: { self.quantity = $0 }
+                            ),
+                            in: 1...99
+                        ) {
+                            LabeledContent("Quantity") { Text("\(quantity)") }
+                        }
+                        .accessibilityValue("\(quantity)")
+                        .accessibilityIdentifier("shopping.grocery.quantity")
+                        Button("Clear quantity") { self.quantity = nil }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.quantity.clear")
+                    } else {
+                        Button("Add quantity") { quantity = 1 }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
-                    .accessibilityValue("\(quantity)")
-                    .accessibilityIdentifier("shopping.grocery.quantity")
                     Toggle("Urgent", isOn: Binding(
                         get: { urgency == .urgent },
                         set: { urgency = $0 ? .urgent : .normal }
@@ -456,7 +471,7 @@ struct GroceryEditorView: View {
             return
                 "That Catalog item is already on the current list. Both groceries were kept; you can view the existing grocery or choose another Catalog item."
         case .invalidQuantity:
-            return "Enter a quantity from 1 to 99."
+            return "Enter a quantity from 1 to 99, or clear it."
         case .invalidName:
             return "Enter a grocery name."
         case .storeNotFound, .invalidStoreIdentity:
@@ -477,7 +492,7 @@ struct GroceryEditorView: View {
     }
 
     private func values() -> RememberedNeedValues {
-        RememberedNeedValues(quantity: Int64(quantity), purchaseNotes: purchaseNotes, urgency: urgency)
+        RememberedNeedValues(quantity: quantity.map(Int64.init), purchaseNotes: purchaseNotes, urgency: urgency)
     }
 
     private func save() {
@@ -516,7 +531,7 @@ struct GroceryEditorView: View {
                 savedID = try service.addOneTimeNeed(
                     title: name, notes: purchaseNotes,
                     categoryID: categoryID, storeIDs: storeIDs, anyStore: anyStore,
-                    quantity: Int64(quantity), urgency: urgency, householdID: householdID, listID: listID)
+                    quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
             }
             onSaved(savedID)
             dismiss()

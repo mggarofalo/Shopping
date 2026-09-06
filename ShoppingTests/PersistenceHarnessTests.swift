@@ -356,7 +356,7 @@ final class PersistenceHarnessTests: XCTestCase {
         XCTAssertThrowsError(try PersistenceController(additionalStoreURLs: [validURL]))
     }
 
-    private typealias NeedState = (revision: Int64, carted: Bool, quantity: Int64, archived: Bool, itemID: UUID?)
+    private typealias NeedState = (revision: Int64, carted: Bool, quantity: Int64?, archived: Bool, itemID: UUID?)
     private typealias ItemState = (storeIDs: Set<UUID>, anyStore: Bool)
 
     private func sqlitePersistence() throws -> PersistenceController {

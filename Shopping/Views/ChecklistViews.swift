@@ -152,7 +152,9 @@ struct CartedGroceriesView: View {
                                 if row.oneTime { Text("One-time").font(.caption).foregroundStyle(.secondary) }
                             }
                             Spacer()
-                            Text("Quantity \(row.quantity)").foregroundStyle(.secondary)
+                            if let quantity = row.quantity {
+                                Text("Quantity \(quantity)").foregroundStyle(.secondary)
+                            }
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("shopping.clear.row.\(row.needID.uuidString)")
@@ -295,7 +297,7 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private func setQuantity(_ need: Need, _ quantity: Int64) {
+    private func setQuantity(_ need: Need, _ quantity: Int64?) {
         mutate(need) {
             try $0.setNeedQuantity(needID: $1, householdID: $2, listID: $3, quantity: quantity)
         }

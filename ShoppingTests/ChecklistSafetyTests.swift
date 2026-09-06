@@ -246,7 +246,7 @@ final class ChecklistSafetyTests: XCTestCase {
         return try c.performAndWait { Set(try c.fetch(Need.fetchRequest()).filter(\.carted).map(\.id)) }
     }
     private func needState(_ id: UUID, _ p: PersistenceController) throws -> (
-        quantity: Int64, notes: String, urgency: String, carted: Bool
+        quantity: Int64?, notes: String, urgency: String, carted: Bool
     ) {
         let c = p.simulationContext()
         return try c.performAndWait {

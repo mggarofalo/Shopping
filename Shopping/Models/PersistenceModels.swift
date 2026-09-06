@@ -68,7 +68,22 @@ final class Need: IdentifiedManagedObject {
     @NSManaged var kind: String
     @NSManaged var title: String
     @NSManaged var notes: String
-    @NSManaged var quantity: Int64
+    var quantity: Int64? {
+        get {
+            willAccessValue(forKey: "quantity")
+            defer { didAccessValue(forKey: "quantity") }
+            return (primitiveValue(forKey: "quantity") as? NSNumber)?.int64Value
+        }
+        set {
+            willChangeValue(forKey: "quantity")
+            if let newValue {
+                setPrimitiveValue(NSNumber(value: newValue), forKey: "quantity")
+            } else {
+                setPrimitiveValue(nil, forKey: "quantity")
+            }
+            didChangeValue(forKey: "quantity")
+        }
+    }
     @NSManaged var carted: Bool
     @NSManaged var urgency: String
     @NSManaged var revision: Int64
