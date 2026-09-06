@@ -375,8 +375,9 @@ private struct CatalogEditorView: View {
                         Text("Item notes").font(.subheadline).fontWeight(.semibold)
                         TextField("Add reusable details", text: $values.notes, axis: .vertical)
                             .accessibilityIdentifier("shopping.catalog.notes")
-                        Text("Saved with this item and reused each time you add it.")
+                        Text("Reused whenever you add this item.")
                             .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if !matches.isEmpty {

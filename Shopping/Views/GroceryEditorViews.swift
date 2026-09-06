@@ -201,16 +201,18 @@ struct GroceryEditorView: View {
                             Text("Item notes").font(.subheadline).fontWeight(.semibold)
                             TextField("Add reusable details", text: $catalogNotes, axis: .vertical)
                                 .accessibilityIdentifier("shopping.grocery.catalogNotes")
-                            Text("Saved with this item and reused each time you add it.")
+                            Text("Reused whenever you add this item.")
                                 .font(.footnote).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Grocery notes").font(.subheadline).fontWeight(.semibold)
                         TextField("Add instructions for this grocery", text: $purchaseNotes, axis: .vertical)
                             .accessibilityIdentifier("shopping.grocery.purchaseNotes")
-                        Text("Applies only to this grocery on the current list.")
+                        Text("Only for this grocery.")
                             .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if isEditing, !remembered {
