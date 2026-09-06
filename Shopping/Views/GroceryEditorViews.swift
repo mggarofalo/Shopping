@@ -315,7 +315,7 @@ struct GroceryEditorView: View {
                 .accessibilityIdentifier("shopping.grocery.promotion.choice")
 
                 if promotionChoice == .create {
-                    Text("The grocery name, category, and purchase rules in this editor will become a new Catalog item. Purchase notes, quantity, and urgency stay with this grocery.")
+                    Text("The grocery name, category, and purchase rules in this editor will become a new Catalog item. Grocery notes, quantity, and urgency stay with this grocery.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
                     TextField("Search Catalog", text: $catalogSearch)
