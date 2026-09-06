@@ -2,11 +2,21 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink("Stores", destination: StoreManagementView())
-                NavigationLink("Categories", destination: CategoryManagementView())
+                NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
+                NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
+                Section("Appearance") {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        appearancePicker.pickerStyle(.menu)
+                    } else {
+                        appearancePicker.pickerStyle(.segmented)
+                    }
+                }
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
                     Text("Groceries are available in this app’s current local household store.")
@@ -16,6 +26,15 @@ struct SettingsView: View {
             .navigationTitle("Settings")
         }
     }
+    private var appearancePicker: some View {
+        Picker("Color scheme", selection: $appearance) {
+            ForEach(AppearancePreference.allCases) { preference in
+                Text(preference.title).tag(preference.rawValue)
+            }
+        }
+        .accessibilityIdentifier("shopping.appearance")
+    }
+
 }
 
 struct StoreManagementCommandScope: Equatable {
@@ -107,7 +126,7 @@ private struct StoreManagementView: View {
             Section("Add store") {
                 TextField("Store name", text: $draftName).accessibilityIdentifier(
                     "shopping.stores.createName")
-                Button("Save store") { create() }
+                Button { create() } label: { Label("Save store", systemImage: "checkmark") }
                     .disabled(
                         draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !createAvailable)
@@ -135,9 +154,11 @@ private struct StoreManagementView: View {
                         Text(store.name)
                         Spacer()
                         if store.isArchived { Text("Archived").foregroundStyle(.secondary) }
-                        Button("Rename") { beginRename(store) }.buttonStyle(.borderless)
+                        Button { beginRename(store) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
+                            .accessibilityLabel("Rename \(store.name)").buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
-                        Button(store.isArchived ? "Restore" : "Archive") { archive(store) }
+                        Button { archive(store) } label: { Image(systemName: store.isArchived ? "arrow.uturn.backward" : "archivebox").frame(minWidth: 44, minHeight: 44) }
+                            .accessibilityLabel("\(store.isArchived ? "Restore" : "Archive") \(store.name)")
                             .buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
                     }
@@ -184,7 +205,7 @@ private struct StoreManagementView: View {
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") { rename(store) }
+                            Button { rename(store) } label: { Label("Save", systemImage: "checkmark") }
                                 .disabled(
                                     renameName.trimmingCharacters(in: .whitespacesAndNewlines)
                                         .isEmpty || !renameAvailable)

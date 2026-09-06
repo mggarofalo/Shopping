@@ -1,6 +1,153 @@
 import CoreData
 import SwiftUI
 
+struct PillFlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let subviewProposal = ProposedViewSize(width: width.isFinite ? width : nil, height: nil)
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var contentWidth: CGFloat = 0
+
+        for subview in subviews {
+            let measured = subview.sizeThatFits(subviewProposal)
+            let size = CGSize(width: min(measured.width, width), height: measured.height)
+            if rowWidth > 0 && rowWidth + spacing + size.width > width {
+                contentWidth = max(contentWidth, rowWidth)
+                totalHeight += rowHeight + spacing
+                rowWidth = size.width
+                rowHeight = size.height
+            } else {
+                rowWidth += (rowWidth == 0 ? 0 : spacing) + size.width
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+        contentWidth = max(contentWidth, rowWidth)
+        totalHeight += rowHeight
+        return CGSize(width: proposal.width ?? contentWidth, height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let measured = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            let size = CGSize(width: min(measured.width, bounds.width), height: measured.height)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+struct SelectionPill: View {
+    let title: String
+    let isSelected: Bool
+    var systemImage: String? = nil
+    var identifier: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                } else if isSelected {
+                    Image(systemName: "checkmark")
+                }
+                Text(title)
+            }
+            .font(.subheadline)
+            .fontWeight(isSelected ? .semibold : .regular)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? Color.groceryAccent.opacity(0.18) : Color.secondary.opacity(0.1))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.groceryAccent : Color.secondary.opacity(0.35))
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .applyAccessibilityIdentifier(identifier)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func applyAccessibilityIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
+    }
+}
+
+struct CategoryPills: View {
+    @Binding var selection: UUID?
+    let categories: [Category]
+    var includeUnavailable = false
+
+    var body: some View {
+        Section {
+            PillFlowLayout {
+                SelectionPill(
+                    title: "Uncategorized",
+                    isSelected: selection == nil,
+                    identifier: "shopping.category.none"
+                ) { selection = nil }
+                ForEach(categories, id: \.objectID) { category in
+                    SelectionPill(
+                        title: category.name,
+                        isSelected: selection == category.id,
+                        identifier: "shopping.category.\(category.id.uuidString)"
+                    ) { selection = category.id }
+                }
+                if includeUnavailable, let selection,
+                   !categories.contains(where: { $0.id == selection }) {
+                    SelectionPill(title: "Unavailable category", isSelected: true) {}
+                        .disabled(true)
+                }
+            }
+        } header: {
+            Text("Category")
+        } footer: {
+            Text("Categories group groceries across all stores.")
+        }
+    }
+}
+
 enum PurchaseRulesStoreScope {
     static func listsRequest() -> NSFetchRequest<GroceryList> {
         let request = GroceryList.fetchRequest()
@@ -54,29 +201,34 @@ struct PurchaseRulesPicker: View {
 
     var body: some View {
         Section("Where to buy") {
-            Toggle("Any store", isOn: $anyStore)
+            PillFlowLayout {
+                SelectionPill(
+                    title: "Any store",
+                    isSelected: anyStore,
+                    identifier: "shopping.purchase.anyStore"
+                ) { anyStore.toggle() }
+                ForEach(validStores.filter { !$0.isArchived || storeIDs.contains($0.id) }, id: \.objectID) { store in
+                    SelectionPill(
+                        title: store.isArchived ? "\(store.name) · Archived" : store.name,
+                        isSelected: storeIDs.contains(store.id),
+                        identifier: "shopping.purchase.store.\(store.id.uuidString)"
+                    ) {
+                        if storeIDs.contains(store.id) { storeIDs.remove(store.id) }
+                        else { storeIDs.insert(store.id) }
+                    }
+                }
+            }
             if anyStore {
                 Text("Can buy at any store, even when tagged.")
                     .font(.footnote).foregroundStyle(.secondary)
-            }
-            ForEach(validStores.filter { !$0.isArchived || storeIDs.contains($0.id) }, id: \.objectID) { store in
-                Toggle(isOn: Binding(
-                    get: { storeIDs.contains(store.id) },
-                    set: { selected in
-                        if selected { storeIDs.insert(store.id) } else { storeIDs.remove(store.id) }
-                    }
-                )) {
-                    VStack(alignment: .leading) {
-                        Text(store.name)
-                        if store.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
-                    }
-                }
             }
             let unavailable = storeIDs.subtracting(Set(validStores.map(\.id)))
             if !unavailable.isEmpty {
                 Text("Remove unavailable tags, then choose where to buy.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Button("Remove unavailable tags") { storeIDs.subtract(unavailable) }
+                Button("Remove unavailable tags", systemImage: "xmark.circle") {
+                    storeIDs.subtract(unavailable)
+                }
             }
             if !anyStore && storeIDs.isEmpty {
                 Text("Choose a store or turn on Any store.").font(.footnote).foregroundStyle(.secondary)
@@ -158,7 +310,7 @@ private struct StoreCreationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save store", action: save)
+                    Button("Save store", systemImage: "checkmark", action: save)
                         .disabled(!scopeAvailable || CatalogProjection.normalizedName(name).isEmpty)
                 }
             }

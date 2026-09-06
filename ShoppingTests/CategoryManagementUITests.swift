@@ -18,14 +18,14 @@ final class CategoryManagementUITests: XCTestCase {
         app.buttons["Save category"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
 
-        app.buttons["Rename"].tap()
+        app.buttons["Rename Pantry"].tap()
         XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.categories.renameName"], with: "Canceled category")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled category"].exists)
 
-        app.buttons["Rename"].tap()
+        app.buttons["Rename Pantry"].tap()
         replaceText(in: app.textFields["shopping.categories.renameName"], with: "Dry goods")
         app.buttons["Save"].tap()
         XCTAssertTrue(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
@@ -34,7 +34,7 @@ final class CategoryManagementUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.buttons["Remove"].tap()
+        app.buttons["Remove Dry goods"].tap()
         let confirmation = app.sheets["Remove category?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",

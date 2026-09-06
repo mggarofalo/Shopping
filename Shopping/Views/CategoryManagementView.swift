@@ -154,7 +154,7 @@ struct CategoryManagementView: View {
             Section("Add category") {
                 TextField("Category name", text: $draftName)
                     .accessibilityIdentifier("shopping.categories.createName")
-                Button("Save category", action: create)
+                Button(action: create) { Label("Save category", systemImage: "checkmark") }
                     .frame(minHeight: 44)
                     .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                         !selectionAvailable)
@@ -169,11 +169,13 @@ struct CategoryManagementView: View {
                     HStack {
                         Text(category.name)
                         Spacer()
-                        Button("Rename") { beginRename(category) }
+                        Button { beginRename(category) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
+                            .accessibilityLabel("Rename \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)
-                        Button("Remove", role: .destructive) { removingCategory = category }
+                        Button(role: .destructive) { removingCategory = category } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
+                            .accessibilityLabel("Remove \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)
@@ -204,7 +206,7 @@ struct CategoryManagementView: View {
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCategory = nil } }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") { rename(category) }
+                            Button { rename(category) } label: { Label("Save", systemImage: "checkmark") }
                                 .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                     !selectionAvailable)
                         }

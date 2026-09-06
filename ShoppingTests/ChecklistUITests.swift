@@ -11,7 +11,7 @@ final class ChecklistUITests: XCTestCase {
         cart("Chipotles in adobo", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
-        XCTAssertTrue(app.navigationBars["Carted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         XCTAssertFalse(row("Strawberries", app: app).exists)
 
         openClear(app: app)
@@ -47,7 +47,9 @@ final class ChecklistUITests: XCTestCase {
         name.tap()
         name.typeText("Weekend ice")
         setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
-        setSwitch(app.switches["Any store"], on: true, app: app)
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
+        reveal(anyStore, app: app)
+        if anyStore.value as? String != "Selected" { anyStore.tap() }
         app.buttons["shopping.grocery.save"].tap()
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
@@ -67,8 +69,8 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(cartedLink(count: 1, app: app).waitForExistence(timeout: 3))
         cartedLink(count: 1, app: app).tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 2))
-        app.buttons["Uncart Weekend ice"].tap()
-        app.navigationBars["Carted"].buttons.firstMatch.tap()
+        app.buttons["Remove from cart Weekend ice"].tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
@@ -85,11 +87,11 @@ final class ChecklistUITests: XCTestCase {
         cart("Granola", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
-        let uncart = app.buttons["Uncart Granola"]
+        let uncart = app.buttons["Remove from cart Granola"]
         reveal(uncart, app: app)
         XCTAssertGreaterThanOrEqual(uncart.frame.height, 44 - 0.01)
         uncart.tap()
-        app.navigationBars["Carted"].buttons.firstMatch.tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
         reveal(row("Granola", app: app), app: app)
 
         app.terminate()
@@ -100,15 +102,15 @@ final class ChecklistUITests: XCTestCase {
         reveal(row("Granola", app: app), app: app)
         row("Granola", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
-        XCTAssertEqual(app.textFields["shopping.grocery.quantity"].value as? String, "2")
+        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
-        XCTAssertTrue(app.segmentedControls["shopping.grocery.urgency"].buttons["Urgent"].isSelected)
+        XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
     }
 
     func testChecklistControlsRemainUsableAtAccessibilityTextSize() {
         let app = launchApp(fixture: "populated", largeText: true)
         selectStore("Costco", app: app)
-        let cart = app.buttons["Cart Granola"]
+        let cart = app.buttons["Add to cart Granola"]
         reveal(cart, app: app)
         XCTAssertGreaterThanOrEqual(cart.frame.height, 44 - 0.01)
         let quantity = app.buttons["Increase quantity for Granola"]
@@ -141,14 +143,14 @@ final class ChecklistUITests: XCTestCase {
     }
 
     private func cart(_ name: String, app: XCUIApplication) {
-        let button = app.buttons["Cart \(name)"]
+        let button = app.buttons["Add to cart \(name)"]
         reveal(button, app: app)
         button.tap()
         XCTAssertFalse(button.exists)
     }
 
     private func cartedLink(count: Int, app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Carted (\(count))")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (\(count))")).firstMatch
     }
 
     private func row(_ name: String, app: XCUIApplication) -> XCUIElement {
@@ -174,11 +176,82 @@ final class ChecklistUITests: XCTestCase {
     }
 
     private func reveal(_ element: XCUIElement, app: XCUIApplication, upwards: Bool = true) {
-        for _ in 0..<8 where !element.exists || !element.isHittable {
-            if upwards { app.swipeUp() } else { app.swipeDown() }
+        for _ in 0..<10 {
+            let appFrame = app.frame
+            let navigationBar = app.navigationBars.firstMatch
+            let navigationFrame = navigationBar.frame
+            guard usable(appFrame), usable(navigationFrame) else { continue }
+            let targetIsInNavigationBar = contains(element, in: navigationBar)
+            let fixedScope = app.otherElements["shopping.grocery.fixedScope"]
+            let targetIsInFixedScope = contains(element, in: fixedScope)
+            let fixedScopeFrame = fixedScope.exists && fixedScope.isHittable
+                && !targetIsInNavigationBar && !targetIsInFixedScope ? fixedScope.frame : nil
+            if let fixedScopeFrame, !usable(fixedScopeFrame) { continue }
+            let contentTop = max(navigationFrame.maxY, fixedScopeFrame?.maxY ?? navigationFrame.maxY)
+            let top = targetIsInNavigationBar ? appFrame.minY : contentTop
+            let keyboard = app.keyboards.firstMatch
+            let keyboardFrame = keyboard.exists ? keyboard.frame : nil
+            if let keyboardFrame, !usable(keyboardFrame) { continue }
+            let tabBar = app.tabBars.firstMatch
+            let tabBarFrame = tabBar.exists && tabBar.isHittable ? tabBar.frame : nil
+            if let tabBarFrame, !usable(tabBarFrame) { continue }
+            let lowerSystemBound = keyboardFrame.map { $0.minY - 60 }
+                ?? tabBarFrame.map(\.minY) ?? appFrame.maxY
+            let feedback = app.otherElements["shopping.grocery.feedback"]
+            let targetIsInFeedback = contains(element, in: feedback)
+            let feedbackFrame = feedback.exists && feedback.isHittable && !targetIsInFeedback
+                ? feedback.frame : nil
+            if let feedbackFrame, !usable(feedbackFrame) { continue }
+            let bottom = min(lowerSystemBound, feedbackFrame?.minY ?? lowerSystemBound)
+            guard bottom - top > 48 else { continue }
+            let elementFrame = element.exists ? element.frame : nil
+            if let elementFrame, !usable(elementFrame) { continue }
+            if let elementFrame, element.isHittable && elementFrame.minY >= top
+                && elementFrame.maxY <= bottom
+            {
+                return
+            }
+            let x = appFrame.midX
+            let viewportHeight = bottom - top
+            let upper = top + viewportHeight / 4
+            let lower = top + viewportHeight * 3 / 4
+            let maximumTravel = lower - upper
+            let minimumTravel = min(60, maximumTravel)
+            if let elementFrame, elementFrame.minY < top {
+                let travel = min(max(top - elementFrame.minY + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: upper, to: upper + travel)
+            } else if let elementFrame, elementFrame.maxY > bottom {
+                let travel = min(max(elementFrame.maxY - bottom + 12, minimumTravel), maximumTravel)
+                drag(in: app, x: x, from: lower, to: lower - travel)
+            } else if !upwards {
+                drag(in: app, x: x, from: upper, to: lower)
+            } else {
+                drag(in: app, x: x, from: lower, to: upper)
+            }
         }
+        XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
         XCTAssertTrue(element.waitForExistence(timeout: 2))
         XCTAssertTrue(element.isHittable)
+    }
+
+    private func contains(_ element: XCUIElement, in container: XCUIElement) -> Bool {
+        guard element.exists, usable(element.frame), container.exists else { return false }
+        return container.descendants(matching: element.elementType).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", element.identifier, element.label
+        )).firstMatch.exists
+    }
+
+    private func drag(in app: XCUIApplication, x: CGFloat, from startY: CGFloat, to endY: CGFloat) {
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: x, dy: startY))
+        let end = origin.withOffset(CGVector(dx: x, dy: endY))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
     private func attachScreenshot(_ name: String, app: XCUIApplication) {

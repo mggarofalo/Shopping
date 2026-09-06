@@ -1,5 +1,12 @@
 import SwiftUI
 
+enum AppearancePreference: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var colorScheme: ColorScheme? { self == .system ? nil : self == .light ? .light : .dark }
+}
+
 struct ContentView: View {
     @StateObject private var navigation = GroceryNavigationState()
 
