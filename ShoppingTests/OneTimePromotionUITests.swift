@@ -251,6 +251,13 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func quantityControls(in app: XCUIApplication) -> (value: XCUIElement, increment: XCUIElement) {
         let quantity = app.steppers["shopping.grocery.quantity"]
+        if !quantity.exists {
+            let addQuantity = app.buttons["shopping.grocery.quantity.add"]
+            reveal(addQuantity, in: app)
+            XCTAssertTrue(addQuantity.isHittable)
+            addQuantity.tap()
+            XCTAssertTrue(quantity.waitForExistence(timeout: 2))
+        }
         let increments = quantity.buttons.matching(NSPredicate(
             format: "identifier == %@ OR label == %@",
             "shopping.grocery.quantity-Increment", "Increment"
