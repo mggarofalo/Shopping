@@ -357,7 +357,7 @@ final class ShoppingLaunchTests: XCTestCase {
         let groceryGranola = app.staticTexts["Granola"]
         reveal(groceryGranola, in: app)
         XCTAssertTrue(groceryGranola.waitForExistence(timeout: 2))
-        let bananas = app.staticTexts["Bananas"]
+        let bananas = app.buttons["Edit Bananas"]
         for _ in 0..<6 where !bananas.exists { app.swipeUp() }
         XCTAssertTrue(bananas.waitForExistence(timeout: 2))
     }
@@ -474,7 +474,7 @@ final class ShoppingLaunchTests: XCTestCase {
     }
 
     private func revealGrocery(named name: String, in app: XCUIApplication, towardTop: Bool = false) {
-        let grocery = staticText(named: name, in: app)
+        let grocery = app.buttons["Edit \(name)"]
         for _ in 0..<6 where !grocery.exists {
             if towardTop { app.swipeDown() } else { app.swipeUp() }
         }
@@ -482,7 +482,7 @@ final class ShoppingLaunchTests: XCTestCase {
     }
 
     private func assertNoGrocery(named name: String, in app: XCUIApplication) {
-        let grocery = staticText(named: name, in: app)
+        let grocery = app.buttons["Edit \(name)"]
         for _ in 0..<6 where !grocery.exists {
             app.swipeUp()
         }
