@@ -168,15 +168,15 @@ struct GroceryEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(isEditing ? "Current grocery" : "New item") {
+                Section(isEditing ? "Current item" : "New item") {
                     if isEditing {
                         Label(
-                            remembered ? "Remembered grocery" : "One-time grocery",
+                            remembered ? "Remembered item" : "One-time item",
                             systemImage: remembered ? "bookmark" : "1.circle"
                         ).accessibilityIdentifier(
                             remembered ? "shopping.grocery.remembered" : "shopping.grocery.oneTime")
                     } else if target.need?.kind == NeedKind.oneTime.rawValue {
-                        Label("One-time grocery", systemImage: "1.circle").accessibilityIdentifier(
+                        Label("One-time item", systemImage: "1.circle").accessibilityIdentifier(
                             "shopping.grocery.oneTime")
                     } else {
                         Toggle("Remember this item", isOn: $remembered).accessibilityIdentifier(
@@ -265,7 +265,7 @@ struct GroceryEditorView: View {
                 }
                 if !scopeValid {
                     Text(
-                        "This grocery or household is no longer available. Your draft has been kept; close it and try again."
+                        "This item or household is no longer available. Your draft has been kept; close it and try again."
                     ).foregroundStyle(.secondary)
                 }
                 if let error {
@@ -281,18 +281,18 @@ struct GroceryEditorView: View {
                     }
                     if let conflictingNeedID,
                        let conflictingNeed = activeRememberedNeed(id: conflictingNeedID) {
-                        Button("View existing grocery") { onFocusNeed(conflictingNeed) }
+                        Button("View existing item") { onFocusNeed(conflictingNeed) }
                             .frame(minHeight: 44)
                             .accessibilityIdentifier("shopping.grocery.promotion.viewConflict")
                     }
                 }
                 if isEditing {
-                    Button("Remove grocery", systemImage: "trash", role: .destructive) { captureRemoval() }
+                    Button("Remove item", systemImage: "trash", role: .destructive) { captureRemoval() }
                         .disabled(!scopeValid)
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
-            .navigationTitle(isEditing ? "Edit grocery" : "Add item")
+            .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
@@ -470,11 +470,11 @@ struct GroceryEditorView: View {
                 "A remembered item already has this name. Choose an existing match above or explicitly create a distinct item."
         case .activeRememberedNeedConflict:
             return
-                "That Catalog item is already on the current list. Both groceries were kept; you can view the existing grocery or choose another Catalog item."
+                "That Catalog item is already on the current list. Both items were kept; you can view the existing item or choose another Catalog item."
         case .invalidQuantity:
             return "Enter a quantity from 1 to 99, or clear it."
         case .invalidName:
-            return "Enter a grocery name."
+            return "Enter an item name."
         case .storeNotFound, .invalidStoreIdentity:
             return "A selected store is unavailable. Choose an active store or Any store and try again."
         case .categoryNotFound:
@@ -483,12 +483,12 @@ struct GroceryEditorView: View {
             return "This item is archived in Catalog. Restore it there before adding it again."
         case .activeRememberedNeedDuplicates, .invalidCatalogIdentity, .invalidOccurrenceIdentity:
             return
-                "This grocery has conflicting saved records. Your draft has been kept and nothing was changed."
+                "This item has conflicting saved records. Your draft has been kept and nothing was changed."
         case .scopeChanged, .householdNotFound, .listNotFound, .itemNotFound, .needNotFound:
             return
-                "The grocery or household changed. Your draft has been kept; close it and reopen the current grocery."
+                "The item or household changed. Your draft has been kept; close it and reopen the current item."
         default:
-            return "The grocery could not be saved. Your draft has been kept; try again."
+            return "The item could not be saved. Your draft has been kept; try again."
         }
     }
 

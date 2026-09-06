@@ -178,7 +178,7 @@ struct GroceriesView: View {
                     }
                     if let removedOperationID {
                         HStack {
-                            Text("Grocery removed")
+                            Text("Item removed")
                             Spacer()
                             Button("Undo") { undo(removedOperationID) }
                                 .frame(minHeight: 44)
@@ -404,7 +404,7 @@ struct GroceriesView: View {
 
     private var emptyDescription: String {
         !hasActiveUncartedNeeds
-            ? "Add a grocery to get started."
+            ? "Add an item to get started."
             : "Try All, another store, search, or filters. Your shared grocery list is unchanged."
     }
 
@@ -1008,9 +1008,9 @@ struct OneTimeGrocerySheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("One-time grocery") {
-                    TextField("Grocery name", text: $name)
-                    Text("This grocery won’t be remembered in Catalog.")
+                Section("One-time item") {
+                    TextField("Item name", text: $name)
+                    Text("This item won’t be remembered in Catalog.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 PurchaseRulesPicker(
@@ -1026,7 +1026,7 @@ struct OneTimeGrocerySheet: View {
                 }
                 if let error { Text(error.localizedDescription).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("Add one-time grocery")
+            .navigationTitle("Add one-time item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -1113,7 +1113,7 @@ struct RecentlyClearedView: View {
             } else if skipped > 0 {
                 restoreMessage = "Restored \(restored); skipped \(skipped) with newer changes."
             } else {
-                restoreMessage = restored == 1 ? "Restored 1 grocery" : "Restored \(restored) groceries"
+                restoreMessage = restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
             }
         } catch { self.error = error }
     }
@@ -1182,8 +1182,8 @@ private struct GroceryFiltersPreview: View {
     }
 }
 
-#Preview("Add one-time grocery · Costco") { ShoppingPreviewHost(.populated) { AddGroceryPreview() } }
-#Preview("Add one-time grocery · unavailable") {
+#Preview("Add one-time item · Costco") { ShoppingPreviewHost(.populated) { AddGroceryPreview() } }
+#Preview("Add one-time item · unavailable") {
     OneTimeGrocerySheet(
         scope: GroceryAddScope(householdID: nil, listID: nil, selectedStoreID: nil, selectedStoreName: nil),
         onSaved: {}

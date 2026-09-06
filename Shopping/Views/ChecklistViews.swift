@@ -389,7 +389,7 @@ struct CartedGroceriesView: View {
         if skipped > 0 {
             return "Restored \(restored); skipped \(skipped) with newer changes."
         }
-        return restored == 1 ? "Restored 1 grocery" : "Restored \(restored) groceries"
+        return restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
     }
 
     private func availability(_ need: Need, storeID: UUID) -> PurchaseAvailability {

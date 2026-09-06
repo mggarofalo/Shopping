@@ -49,7 +49,7 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Fresh basil"].waitForExistence(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Fresh basil"].exists)
     }
 

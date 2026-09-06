@@ -73,7 +73,7 @@ final class ChecklistUITests: XCTestCase {
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Weekend ice"].exists)
     }
 
@@ -98,7 +98,7 @@ final class ChecklistUITests: XCTestCase {
         selectStore("Costco", app: app)
         reveal(row("Granola", app: app), app: app)
         row("Granola", app: app).tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")

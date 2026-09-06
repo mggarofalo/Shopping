@@ -111,9 +111,9 @@ struct CatalogView: View {
                 .overlay {
                     if visibleItems.isEmpty {
                         ContentUnavailableView {
-                            Label(hasNarrowing ? "No matching items" : "No remembered groceries", systemImage: "books.vertical")
+                            Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
                         } description: {
-                            Text(hasNarrowing ? "Your filters may hide saved items." : "Save groceries here to reuse their purchase tags.")
+                            Text(hasNarrowing ? "Your filters may hide saved items." : "Save items here to reuse their purchase tags.")
                         } actions: {
                             if hasNarrowing { Button("Reset filters", action: resetFilters) }
                             else { Button("New catalog item", action: create).disabled(household == nil) }
@@ -370,7 +370,7 @@ private struct CatalogEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Remembered grocery") {
+                Section("Remembered item") {
                     TextField("Item name", text: $values.name).accessibilityIdentifier("shopping.catalog.name")
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Item notes").font(.subheadline).fontWeight(.semibold)
@@ -396,7 +396,7 @@ private struct CatalogEditorView: View {
                         }
                         if hasExactMatch {
                             Toggle("Create a distinct item", isOn: $allowingNameCollision)
-                            Text("Use this for an intentional brand or size variant. Existing groceries stay separate.")
+                            Text("Use this for an intentional brand or size variant. Existing items stay separate.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     }

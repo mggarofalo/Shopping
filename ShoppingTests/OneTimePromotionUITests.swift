@@ -13,7 +13,7 @@ final class OneTimePromotionUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(row("Green tea", in: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         app.tabBars.buttons["Groceries"].tap()
         row("Green tea", in: app).tap()
         startPromotion(in: app)
@@ -27,7 +27,7 @@ final class OneTimePromotionUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 5))
         app.buttons[originalID].tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
         let quantity = quantityControls(in: app).value
@@ -58,7 +58,7 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(original, in: app)
         XCTAssertTrue(original.label.contains("Granola"))
         original.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
         reveal(purchaseNotes, in: app)
         XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")

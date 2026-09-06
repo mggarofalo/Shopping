@@ -13,7 +13,7 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         app.tabBars.buttons["Groceries"].tap()
 
         openAdd(in: app)
@@ -30,9 +30,9 @@ final class GroceryEditingUITests: XCTestCase {
         let row = groceryRow(named: "Coconut yogurt", app: app)
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
-        attachScreenshot(named: "Remembered grocery editor", app: app)
+        attachScreenshot(named: "Remembered item editor", app: app)
     }
 
     func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {
@@ -97,7 +97,7 @@ final class GroceryEditingUITests: XCTestCase {
         )).firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 2))
         match.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
@@ -106,7 +106,7 @@ final class GroceryEditingUITests: XCTestCase {
         openAdd(in: app)
         enterName("Strawberries", in: app)
         app.buttons["Edit current Strawberries"].tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)"))
             .firstMatch.waitForExistence(timeout: 3))
@@ -131,7 +131,7 @@ final class GroceryEditingUITests: XCTestCase {
         let row = groceryRow(named: "Single-use ice", app: app)
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         let remove = app.buttons["shopping.grocery.remove"]
         reveal(remove, in: app)
         remove.tap()
@@ -147,7 +147,7 @@ final class GroceryEditingUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(groceryRow(named: "Single-use ice", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Single-use ice"].exists)
     }
 
@@ -163,7 +163,7 @@ final class GroceryEditingUITests: XCTestCase {
         )).firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 2))
         match.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         let anyStore = app.buttons["shopping.purchase.anyStore"]
         reveal(anyStore, in: app)
         XCTAssertEqual(anyStore.value as? String, "Selected")
@@ -178,7 +178,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertEqual(anyStore.value as? String, "Not selected")
         reveal(costco, in: app)
         XCTAssertEqual(costco.value as? String, "Selected")
-        attachScreenshot(named: "New grocery uses selected store", app: app)
+        attachScreenshot(named: "New item uses selected store", app: app)
         app.buttons["shopping.grocery.cancel"].tap()
     }
 
@@ -192,7 +192,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         app.buttons["shopping.carted.all"].tap()
         groceryRow(named: "Strawberries", app: app).tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         XCTAssertTrue(groceryRow(named: "Strawberries", app: app).exists)

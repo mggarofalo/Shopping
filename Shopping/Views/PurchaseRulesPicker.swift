@@ -307,7 +307,7 @@ private struct StoreCreationView: View {
                         }
                     }
                 }
-                Text("Save store adds it to your household. The grocery is saved separately.")
+                Text("Save store adds it to your household. The item is saved separately.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if !scopeAvailable { Text("This household is unavailable. Your store draft is still here.") }
                 if let error { Text(error.localizedDescription).foregroundStyle(.red) }

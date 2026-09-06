@@ -67,7 +67,7 @@ final class ClearInterruptionUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 3))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {
