@@ -59,6 +59,37 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertEqual(PurchaseFilter().availability(of: .init(explicitStoreIDs: [], anyStore: false), selectedStoreID: nil, activeStoreIDs: [a, b]), .needsStore)
     }
 
+    func testGroceryFilterSanitizationDropsInactiveScopeAndPreservesOtherCriteria() {
+        let activeStore = UUID()
+        let archivedStore = UUID()
+        let activeCategory = UUID()
+        let removedCategory = UUID()
+        let filter = GroceryNeedFilter(
+            purchase: PurchaseFilter(
+                selectedStoreID: archivedStore,
+                includedStoreIDs: [activeStore, archivedStore],
+                excludedStoreIDs: [activeStore, archivedStore],
+                requiresAnyStore: false
+            ),
+            text: "berries",
+            categoryID: removedCategory,
+            carted: true,
+            urgency: NeedUrgency.urgent.rawValue
+        )
+
+        let sanitized = filter.sanitized(
+            activeStoreIDs: [activeStore], activeCategoryIDs: [activeCategory])
+
+        XCTAssertNil(sanitized.purchase.selectedStoreID)
+        XCTAssertEqual(sanitized.purchase.includedStoreIDs, [activeStore])
+        XCTAssertEqual(sanitized.purchase.excludedStoreIDs, [activeStore])
+        XCTAssertEqual(sanitized.purchase.requiresAnyStore, false)
+        XCTAssertEqual(sanitized.text, "berries")
+        XCTAssertNil(sanitized.categoryID)
+        XCTAssertEqual(sanitized.carted, true)
+        XCTAssertEqual(sanitized.urgency, NeedUrgency.urgent.rawValue)
+    }
+
     func testCatalogMetadataRoundTripsAndTagEditDoesNotChangeDemand() throws {
         let url = temporaryStoreURL()
         var householdID: UUID!, itemID: UUID!, needID: UUID!, costcoID: UUID!, publixID: UUID!

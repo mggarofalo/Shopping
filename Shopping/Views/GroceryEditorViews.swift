@@ -30,6 +30,7 @@ private enum OneTimePromotionChoice: String, CaseIterable {
 struct GroceryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
@@ -44,7 +45,7 @@ struct GroceryEditorView: View {
     @State private var name: String
     @State private var catalogNotes: String
     @State private var purchaseNotes: String
-    @State private var quantity: Int
+    @State private var quantity: Int?
     @State private var urgency: NeedUrgency
     @State private var categoryID: UUID?
     @State private var storeIDs: Set<UUID>
@@ -57,6 +58,9 @@ struct GroceryEditorView: View {
     @State private var catalogSearch = ""
     @State private var selectedCatalogItemID: UUID?
     @State private var conflictingNeedID: UUID?
+    @State private var showingCategoryCreation = false
+    @State private var didRequestInitialFocus = false
+    @FocusState private var nameIsFocused: Bool
     let target: GroceryEditorTarget
     let onSaved: (UUID) -> Void
     let onFocusNeed: (Need) -> Void
@@ -76,7 +80,7 @@ struct GroceryEditorView: View {
         _name = State(initialValue: item?.name ?? need?.title ?? "")
         _catalogNotes = State(initialValue: item?.notes ?? "")
         _purchaseNotes = State(initialValue: need?.notes ?? "")
-        _quantity = State(initialValue: Int(need?.quantity ?? 1))
+        _quantity = State(initialValue: need?.quantity.map(Int.init))
         _urgency = State(initialValue: NeedUrgency(rawValue: need?.urgency ?? "") ?? .normal)
         if let need {
             if let item {
@@ -121,7 +125,7 @@ struct GroceryEditorView: View {
         }
         return need.kind == NeedKind.oneTime.rawValue && need.item == nil
     }
-    private var validQuantity: Bool { (1...99).contains(quantity) }
+    private var validQuantity: Bool { quantity.map { (1...99).contains($0) } ?? true }
     private var canSave: Bool {
         guard scopeValid, validQuantity else { return false }
         if isPromotingOneTime && promotionChoice == .existing {
@@ -164,15 +168,15 @@ struct GroceryEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(isEditing ? "Current grocery" : "New grocery") {
+                Section(isEditing ? "Current item" : "New item") {
                     if isEditing {
                         Label(
-                            remembered ? "Remembered grocery" : "One-time grocery",
+                            remembered ? "Remembered item" : "One-time item",
                             systemImage: remembered ? "bookmark" : "1.circle"
                         ).accessibilityIdentifier(
                             remembered ? "shopping.grocery.remembered" : "shopping.grocery.oneTime")
                     } else if target.need?.kind == NeedKind.oneTime.rawValue {
-                        Label("One-time grocery", systemImage: "1.circle").accessibilityIdentifier(
+                        Label("One-time item", systemImage: "1.circle").accessibilityIdentifier(
                             "shopping.grocery.oneTime")
                     } else {
                         Toggle("Remember this item", isOn: $remembered).accessibilityIdentifier(
@@ -187,12 +191,15 @@ struct GroceryEditorView: View {
                         }
                         .accessibilityIdentifier("shopping.grocery.promotion.selectedName")
                     } else {
-                        TextField("Grocery name", text: $name)
+                        TextField("Item name", text: $name)
                             .accessibilityIdentifier("shopping.grocery.name")
+                            .focused($nameIsFocused)
+                            .submitLabel(.done)
+                            .onSubmit { nameIsFocused = false }
                     }
                     if !isEditing { matches }
                     if !remembered && !isPromotingOneTime {
-                        Text("This grocery won’t be remembered in Catalog.")
+                        Text("This item won’t be remembered in Catalog.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -207,10 +214,11 @@ struct GroceryEditorView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Grocery notes").font(.subheadline).fontWeight(.semibold)
-                        TextField("Add instructions for this grocery", text: $purchaseNotes, axis: .vertical)
+                        Text(remembered ? "Temporary notes" : "Notes")
+                            .font(.subheadline).fontWeight(.semibold)
+                        TextField("Add notes for this item", text: $purchaseNotes, axis: .vertical)
                             .accessibilityIdentifier("shopping.grocery.purchaseNotes")
-                        Text("Only for this grocery.")
+                        Text(remembered ? "Only for this item on the current list." : "Only for this item.")
                             .font(.footnote).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -219,11 +227,26 @@ struct GroceryEditorView: View {
                     promotionSection
                 }
                 Section {
-                    Stepper(value: $quantity, in: 1...99) {
-                        LabeledContent("Quantity") { Text("\(quantity)") }
+                    if let quantity {
+                        Stepper(
+                            value: Binding(
+                                get: { self.quantity ?? 1 },
+                                set: { self.quantity = $0 }
+                            ),
+                            in: 1...99
+                        ) {
+                            LabeledContent("Quantity") { Text("\(quantity)") }
+                        }
+                        .accessibilityValue("\(quantity)")
+                        .accessibilityIdentifier("shopping.grocery.quantity")
+                        Button("Clear quantity") { self.quantity = nil }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.quantity.clear")
+                    } else {
+                        Button("Add quantity") { quantity = 1 }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
-                    .accessibilityValue("\(quantity)")
-                    .accessibilityIdentifier("shopping.grocery.quantity")
                     Toggle("Urgent", isOn: Binding(
                         get: { urgency == .urgent },
                         set: { urgency = $0 ? .urgent : .normal }
@@ -231,14 +254,18 @@ struct GroceryEditorView: View {
                     .accessibilityIdentifier("shopping.grocery.urgency")
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
-                    CategoryPills(selection: $categoryID, categories: scopedCategories)
+                    CategoryPills(
+                        selection: $categoryID,
+                        categories: scopedCategories,
+                        onAddCategory: { showingCategoryCreation = true }
+                    )
                     PurchaseRulesPicker(
                         storeIDs: $storeIDs, anyStore: $anyStore, householdID: target.scope.householdID,
                         listID: target.scope.listID)
                 }
                 if !scopeValid {
                     Text(
-                        "This grocery or household is no longer available. Your draft has been kept; close it and try again."
+                        "This item or household is no longer available. Your draft has been kept; close it and try again."
                     ).foregroundStyle(.secondary)
                 }
                 if let error {
@@ -254,18 +281,18 @@ struct GroceryEditorView: View {
                     }
                     if let conflictingNeedID,
                        let conflictingNeed = activeRememberedNeed(id: conflictingNeedID) {
-                        Button("View existing grocery") { onFocusNeed(conflictingNeed) }
+                        Button("View existing item") { onFocusNeed(conflictingNeed) }
                             .frame(minHeight: 44)
                             .accessibilityIdentifier("shopping.grocery.promotion.viewConflict")
                     }
                 }
                 if isEditing {
-                    Button("Remove grocery", systemImage: "trash", role: .destructive) { captureRemoval() }
+                    Button("Remove item", systemImage: "trash", role: .destructive) { captureRemoval() }
                         .disabled(!scopeValid)
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
-            .navigationTitle(isEditing ? "Edit grocery" : "Add grocery")
+            .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
@@ -292,6 +319,17 @@ struct GroceryEditorView: View {
             } message: { _ in
                 Text("You can undo this removal or restore the grocery from Recently cleared.")
             }
+            .sheet(isPresented: $showingCategoryCreation) {
+                CategoryCreationView(
+                    householdID: target.scope.householdID,
+                    listID: target.scope.listID
+                ) { categoryID = $0 }
+            }
+            .onAppear {
+                guard !isEditing, !didRequestInitialFocus else { return }
+                didRequestInitialFocus = true
+                DispatchQueue.main.async { nameIsFocused = true }
+            }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
             .onChange(of: promotionChoice) { _, _ in
                 allowDuplicate = false
@@ -315,7 +353,7 @@ struct GroceryEditorView: View {
                 .accessibilityIdentifier("shopping.grocery.promotion.choice")
 
                 if promotionChoice == .create {
-                    Text("The grocery name, category, and purchase rules in this editor will become a new Catalog item. Grocery notes, quantity, and urgency stay with this grocery.")
+                    Text("The item name, category, and purchase rules in this editor will become a new Catalog item. Notes, quantity, and urgency stay with this item.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
                     TextField("Search Catalog", text: $catalogSearch)
@@ -432,11 +470,11 @@ struct GroceryEditorView: View {
                 "A remembered item already has this name. Choose an existing match above or explicitly create a distinct item."
         case .activeRememberedNeedConflict:
             return
-                "That Catalog item is already on the current list. Both groceries were kept; you can view the existing grocery or choose another Catalog item."
+                "That Catalog item is already on the current list. Both items were kept; you can view the existing item or choose another Catalog item."
         case .invalidQuantity:
-            return "Enter a quantity from 1 to 99."
+            return "Enter a quantity from 1 to 99, or clear it."
         case .invalidName:
-            return "Enter a grocery name."
+            return "Enter an item name."
         case .storeNotFound, .invalidStoreIdentity:
             return "A selected store is unavailable. Choose an active store or Any store and try again."
         case .categoryNotFound:
@@ -445,17 +483,17 @@ struct GroceryEditorView: View {
             return "This item is archived in Catalog. Restore it there before adding it again."
         case .activeRememberedNeedDuplicates, .invalidCatalogIdentity, .invalidOccurrenceIdentity:
             return
-                "This grocery has conflicting saved records. Your draft has been kept and nothing was changed."
+                "This item has conflicting saved records. Your draft has been kept and nothing was changed."
         case .scopeChanged, .householdNotFound, .listNotFound, .itemNotFound, .needNotFound:
             return
-                "The grocery or household changed. Your draft has been kept; close it and reopen the current grocery."
+                "The item or household changed. Your draft has been kept; close it and reopen the current item."
         default:
-            return "The grocery could not be saved. Your draft has been kept; try again."
+            return "The item could not be saved. Your draft has been kept; try again."
         }
     }
 
     private func values() -> RememberedNeedValues {
-        RememberedNeedValues(quantity: Int64(quantity), purchaseNotes: purchaseNotes, urgency: urgency)
+        RememberedNeedValues(quantity: quantity.map(Int64.init), purchaseNotes: purchaseNotes, urgency: urgency)
     }
 
     private func save() {
@@ -494,8 +532,9 @@ struct GroceryEditorView: View {
                 savedID = try service.addOneTimeNeed(
                     title: name, notes: purchaseNotes,
                     categoryID: categoryID, storeIDs: storeIDs, anyStore: anyStore,
-                    quantity: Int64(quantity), urgency: urgency, householdID: householdID, listID: listID)
+                    quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
             }
+            hapticFeedback.play(.success)
             onSaved(savedID)
             dismiss()
         } catch { self.error = error }
@@ -542,6 +581,7 @@ struct GroceryEditorView: View {
                     existingItemID: item.id, need: values()
                 )
             }
+            hapticFeedback.play(.success)
             onSaved(needID)
             dismiss()
         } catch {
@@ -620,6 +660,63 @@ struct GroceryEditorView: View {
 
 }
 
+private struct CategoryCreationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.needService) private var service
+    @State private var name = ""
+    @State private var error: Error?
+    @FocusState private var nameIsFocused: Bool
+    let householdID: UUID?
+    let listID: UUID?
+    let onSelected: (UUID) -> Void
+
+    private var canSave: Bool {
+        service != nil && householdID != nil && listID != nil
+            && !CatalogProjection.normalizedName(name).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Category name", text: $name)
+                    .accessibilityIdentifier("shopping.category.name")
+                    .focused($nameIsFocused)
+                    .submitLabel(.done)
+                    .onSubmit(save)
+                if let error {
+                    Text(error.localizedDescription).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Add category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("shopping.category.cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save category", systemImage: "checkmark", action: save)
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("shopping.category.save")
+                }
+            }
+            .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
+        }
+    }
+
+    private func save() {
+        guard canSave, let service, let householdID, let listID else { return }
+        do {
+            onSelected(try service.createCategory(
+                name: name, householdID: householdID, listID: listID
+            ))
+            dismiss()
+        } catch {
+            self.error = error
+        }
+    }
+}
+
 private struct GroceryEditorPreview: View {
     @Environment(\.persistenceSelection) private var selection
 
@@ -634,4 +731,4 @@ private struct GroceryEditorPreview: View {
     }
 }
 
-#Preview("Add grocery") { ShoppingPreviewHost(.populated) { GroceryEditorPreview() } }
+#Preview("Add item") { ShoppingPreviewHost(.populated) { GroceryEditorPreview() } }

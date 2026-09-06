@@ -16,7 +16,7 @@ struct ClearCartedPreviewRow: Equatable {
     let needID: UUID
     let revision: Int64
     let title: String
-    let quantity: Int64
+    let quantity: Int64?
     let oneTime: Bool
 }
 
@@ -37,7 +37,7 @@ struct RememberedDuplicateGroup: Equatable {
 
 struct RememberedDuplicateCandidate: Equatable {
     let needID: UUID
-    let quantity: Int64
+    let quantity: Int64?
     let carted: Bool
     let urgency: NeedUrgency
     let notes: String
@@ -71,6 +71,11 @@ enum StoreEligibility: Equatable {
     case needsStore
 }
 
+enum StoreRemovalAction: Equatable {
+    case delete
+    case archive
+}
+
 struct CatalogItemValues: Equatable {
     var name: String
     var notes: String
@@ -80,7 +85,7 @@ struct CatalogItemValues: Equatable {
 }
 
 struct RememberedNeedValues: Equatable {
-    var quantity: Int64 = 1
+    var quantity: Int64? = nil
     var purchaseNotes: String = ""
     var urgency: NeedUrgency = .normal
 }
@@ -301,7 +306,8 @@ final class NeedService {
             )
             let request = Store.fetchRequest()
             let owned = try context.fetch(request).filter {
-                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+                !$0.isArchived && $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore
             }
             let ownedIDs = owned.map(\.id)
             guard !ownedIDs.contains(PersistenceModel.unsetID),
@@ -315,6 +321,45 @@ final class NeedService {
             }
             let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
             for (index, id) in orderedStoreIDs.enumerated() { byID[id]?.displayOrder = Int64(index) }
+        }
+    }
+
+    func storeRemovalAction(
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> StoreRemovalAction {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let store = try self.validatedStoreForManagement(
+                storeID: storeID, household: household, in: context
+            )
+            return self.storeHasReferences(store) ? .archive : .delete
+        }
+    }
+
+    @discardableResult
+    func removeStore(
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        confirmedAction: StoreRemovalAction? = nil
+    ) throws -> StoreRemovalAction {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let store = try self.validatedStoreForManagement(
+                storeID: storeID, household: household, in: context
+            )
+            if confirmedAction == .archive || self.storeHasReferences(store) {
+                store.isArchived = true
+                return .archive
+            }
+            context.delete(store)
+            return .delete
         }
     }
 
@@ -896,7 +941,7 @@ final class NeedService {
             let need = self.makeNeed(title: item.name, list: list, context: context)
             need.kind = NeedKind.remembered.rawValue
             need.item = item
-            need.quantity = quantity ?? 1
+            need.quantity = quantity
             need.notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             need.urgency = urgency.rawValue
             return need.id
@@ -910,13 +955,13 @@ final class NeedService {
         categoryID: UUID? = nil,
         storeIDs: Set<UUID> = [],
         anyStore: Bool = true,
-        quantity: Int64 = 1,
+        quantity: Int64? = nil,
         urgency: NeedUrgency = .normal,
         householdID: UUID? = nil,
         listID: UUID
     ) throws -> UUID {
         let title = try validatedName(title)
-        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+        if let quantity, !(1...99).contains(quantity) { throw NeedServiceError.invalidQuantity }
         return try write { context in
             guard let list = try self.list(id: listID, in: context) else {
                 throw NeedServiceError.listNotFound
@@ -972,8 +1017,8 @@ final class NeedService {
         try editNeed(id: needID) { $0.carted = carted }
     }
 
-    func setQuantity(_ quantity: Int64, needID: UUID) throws {
-        guard (1...99).contains(quantity) else {
+    func setQuantity(_ quantity: Int64?, needID: UUID) throws {
+        if let quantity, !(1...99).contains(quantity) {
             throw NeedServiceError.invalidQuantity
         }
         try editNeed(id: needID) { $0.quantity = quantity }
@@ -991,8 +1036,8 @@ final class NeedService {
         }
     }
 
-    func setNeedQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64) throws {
-        guard (1...99).contains(quantity) else { throw NeedServiceError.invalidQuantity }
+    func setNeedQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64?) throws {
+        if let quantity, !(1...99).contains(quantity) { throw NeedServiceError.invalidQuantity }
         try write { context in
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context)
@@ -1189,6 +1234,14 @@ final class NeedService {
             householdID: householdID, listID: listID, filter: GroceryNeedFilter(carted: true),
             restrictedToNeedIDs: restrictedToNeedIDs
         ).token
+    }
+
+    func prepareCheckout(householdID: UUID, listID: UUID) throws -> ClearCartedPreview {
+        try prepareClearCarted(
+            householdID: householdID,
+            listID: listID,
+            filter: GroceryNeedFilter(carted: true)
+        )
     }
 
     func prepareClearCarted(
@@ -1389,7 +1442,7 @@ final class NeedService {
         need.kind = ""
         need.title = title
         need.notes = ""
-        need.quantity = 1
+        need.quantity = nil
         need.carted = false
         need.urgency = "normal"
         need.revision = 0
@@ -1522,7 +1575,7 @@ final class NeedService {
     }
 
     private func validate(needValues: RememberedNeedValues) throws {
-        guard (1...99).contains(needValues.quantity) else {
+        if let quantity = needValues.quantity, !(1...99).contains(quantity) {
             throw NeedServiceError.invalidQuantity
         }
     }
@@ -1548,6 +1601,25 @@ final class NeedService {
         }
         try validate(list: list, belongsTo: household)
         return household
+    }
+
+    private func validatedStoreForManagement(
+        storeID: UUID,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> Store {
+        guard let store = try self.store(id: storeID, in: context) else {
+            throw NeedServiceError.storeNotFound
+        }
+        guard store.household == household,
+              store.objectID.persistentStore == household.objectID.persistentStore else {
+            throw NeedServiceError.scopeChanged
+        }
+        return store
+    }
+
+    private func storeHasReferences(_ store: Store) -> Bool {
+        !(store.items?.isEmpty ?? true) || !(store.oneTimeNeeds?.isEmpty ?? true)
     }
 
     private func validatedActiveNeed(

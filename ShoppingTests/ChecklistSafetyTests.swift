@@ -4,6 +4,60 @@ import XCTest
 @testable import Shopping
 
 final class ChecklistSafetyTests: XCTestCase {
+    func testCheckoutCapturesAllCartedRowsAndSkipsLaterChangesWithoutLosingCatalog() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let storeID = try service.createStore(name: "Market", householdID: selection.householdID)
+        let categoryID = try service.createCategory(name: "Pantry", householdID: selection.householdID)
+        let itemID = try service.createItem(
+            name: "Rice", categoryID: categoryID, storeIDs: [storeID],
+            householdID: selection.householdID, anyStore: false)
+        let rememberedID = try service.addRememberedNeed(
+            itemID: itemID, listID: selection.listID, householdID: selection.householdID)
+        let oneTimeID = try service.addOneTimeNeed(
+            title: "Ice", categoryID: categoryID, storeIDs: [storeID], anyStore: false,
+            householdID: selection.householdID, listID: selection.listID)
+        let addedAfterCaptureID = try service.addOneTimeNeed(
+            title: "Flowers", anyStore: true,
+            householdID: selection.householdID, listID: selection.listID)
+        for id in [rememberedID, oneTimeID] {
+            try service.setNeedCarted(
+                needID: id, householdID: selection.householdID,
+                listID: selection.listID, carted: true)
+        }
+
+        let preview = try service.prepareCheckout(
+            householdID: selection.householdID, listID: selection.listID)
+        XCTAssertEqual(Set(preview.rows.map(\.needID)), Set([rememberedID, oneTimeID]))
+        XCTAssertEqual(preview.rows.filter(\.oneTime).map(\.needID), [oneTimeID])
+
+        try service.setNeedQuantity(
+            needID: oneTimeID, householdID: selection.householdID,
+            listID: selection.listID, quantity: 4)
+        try service.setNeedCarted(
+            needID: addedAfterCaptureID, householdID: selection.householdID,
+            listID: selection.listID, carted: true)
+
+        XCTAssertEqual(try service.clearCarted(using: preview.token), 1)
+        XCTAssertTrue(try archived(rememberedID, persistence))
+        XCTAssertFalse(try archived(oneTimeID, persistence))
+        XCTAssertFalse(try archived(addedAfterCaptureID, persistence))
+        XCTAssertEqual(try needState(oneTimeID, persistence).quantity, 4)
+        let catalog = try catalogState(itemID, persistence)
+        XCTAssertEqual(catalog.name, "Rice")
+        XCTAssertEqual(catalog.category, "Pantry")
+        XCTAssertEqual(catalog.stores, Set(["Market"]))
+        XCTAssertEqual(try itemCount(persistence), 1, "One-time checkout must not create catalog items")
+
+        XCTAssertEqual(try service.undoClear(
+            operationID: preview.token.id,
+            expectedHouseholdID: selection.householdID,
+            expectedListID: selection.listID), 1)
+        XCTAssertFalse(try archived(rememberedID, persistence))
+        XCTAssertEqual(try itemCount(persistence), 1)
+    }
+
     func testPreparedClearUsesForcedCartedFilterAndDoesNotWrite() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
@@ -246,7 +300,7 @@ final class ChecklistSafetyTests: XCTestCase {
         return try c.performAndWait { Set(try c.fetch(Need.fetchRequest()).filter(\.carted).map(\.id)) }
     }
     private func needState(_ id: UUID, _ p: PersistenceController) throws -> (
-        quantity: Int64, notes: String, urgency: String, carted: Bool
+        quantity: Int64?, notes: String, urgency: String, carted: Bool
     ) {
         let c = p.simulationContext()
         return try c.performAndWait {
@@ -268,6 +322,21 @@ final class ChecklistSafetyTests: XCTestCase {
         let c = p.simulationContext()
         return try c.performAndWait {
             try c.count(for: NSFetchRequest<NSFetchRequestResult>(entityName: "ClearOperation"))
+        }
+    }
+    private func itemCount(_ p: PersistenceController) throws -> Int {
+        let c = p.simulationContext()
+        return try c.performAndWait { try c.count(for: Item.fetchRequest()) }
+    }
+    private func catalogState(_ id: UUID, _ p: PersistenceController) throws -> (
+        name: String, category: String?, stores: Set<String>
+    ) {
+        let c = p.simulationContext()
+        return try c.performAndWait {
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            let item = try XCTUnwrap(try c.fetch(request).first)
+            return (item.name, item.category?.name, Set(item.stores?.map(\.name) ?? []))
         }
     }
 }

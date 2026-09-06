@@ -72,6 +72,10 @@ enum StoreManagementScope {
         GroceryRowScope.validStores(stores, canonicalList: canonicalList)
     }
 
+    static func activeStores(_ stores: [Store], canonicalList: GroceryList?) -> [Store] {
+        validStores(stores, canonicalList: canonicalList).filter { !$0.isArchived }
+    }
+
     static func permits(
         _ commandScope: StoreManagementCommandScope?,
         canonicalList: GroceryList?
@@ -82,6 +86,7 @@ enum StoreManagementScope {
 
 private struct StoreManagementView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores:
         FetchedResults<Store>
@@ -89,11 +94,12 @@ private struct StoreManagementView: View {
         FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
         FetchedResults<Household>
-    @State private var draftName = ""
-    @State private var createScope: StoreManagementCommandScope?
-    @State private var renameName = ""
-    @State private var editingStore: Store?
-    @State private var renameScope: StoreManagementCommandScope?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var editor: StoreEditorSession?
+    @State private var editorName = ""
+    @State private var removingStore: Store?
+    @State private var removalScope: StoreManagementCommandScope?
+    @State private var removalAction: StoreRemovalAction?
     @State private var error: Error?
 
     private var canonicalList: GroceryList? {
@@ -103,115 +109,60 @@ private struct StoreManagementView: View {
     }
 
     private var householdStores: [Store] {
-        StoreManagementScope.validStores(Array(stores), canonicalList: canonicalList)
+        StoreManagementScope.activeStores(Array(stores), canonicalList: canonicalList)
     }
 
     private var selectionAvailable: Bool {
         service != nil && canonicalList != nil
     }
 
-    private var createAvailable: Bool {
-        selectionAvailable
-            && StoreManagementScope.permits(createScope, canonicalList: canonicalList)
-    }
-
-    private var renameAvailable: Bool {
-        selectionAvailable
-            && StoreManagementScope.permits(renameScope, canonicalList: canonicalList)
-            && editingStore.map { householdStores.contains($0) } == true
-    }
-
     var body: some View {
         List {
-            Section("Add store") {
-                TextField("Store name", text: $draftName).accessibilityIdentifier(
-                    "shopping.stores.createName")
-                Button { create() } label: { Label("Save store", systemImage: "checkmark") }
-                    .disabled(
-                        draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !createAvailable)
-                if !selectionAvailable || (!draftName.isEmpty && !createAvailable) {
-                    Text("This household is unavailable. Your draft is still here.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                if !draftName.isEmpty {
-                    let matches = householdStores.filter {
-                        $0.name.localizedCaseInsensitiveCompare(
-                            draftName.trimmingCharacters(in: .whitespacesAndNewlines))
-                            == .orderedSame
-                    }
-                    if !matches.isEmpty {
-                        Text("Existing match").font(.footnote).foregroundStyle(.secondary)
-                        ForEach(matches, id: \.objectID) { store in
-                            Button("Use \(store.name)") { beginRename(store) }
-                        }
-                    }
-                }
-            }
             Section("Stores") {
                 ForEach(householdStores, id: \.objectID) { store in
-                    HStack {
-                        Text(store.name)
-                        Spacer()
-                        if store.isArchived { Text("Archived").foregroundStyle(.secondary) }
-                        Button { beginRename(store) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
-                            .accessibilityLabel("Rename \(store.name)").buttonStyle(.borderless)
-                            .disabled(!selectionAvailable)
-                        Button { archive(store) } label: { Image(systemName: store.isArchived ? "arrow.uturn.backward" : "archivebox").frame(minWidth: 44, minHeight: 44) }
-                            .accessibilityLabel("\(store.isArchived ? "Restore" : "Archive") \(store.name)")
-                            .buttonStyle(.borderless)
-                            .disabled(!selectionAvailable)
-                    }
+                    storeRow(store)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 8))
                 }
                 .onMove(perform: reorder)
             }
         }
         .navigationTitle("Stores")
-        .toolbar { EditButton().disabled(!selectionAvailable) }
-        .onChange(of: draftName) { oldValue, newValue in
-            if newValue.isEmpty {
-                createScope = nil
-            } else if oldValue.isEmpty {
-                createScope = StoreManagementCommandScope(canonicalList: canonicalList)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
+                    .disabled(!selectionAvailable)
+                    .accessibilityIdentifier("shopping.stores.add")
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                EditButton().disabled(!selectionAvailable)
             }
         }
-        .sheet(
-            isPresented: Binding(
-                get: { editingStore != nil },
-                set: {
-                    if !$0 {
-                        editingStore = nil
-                        renameScope = nil
-                    }
-                })
+        .sheet(item: $editor) { session in
+            StoreEditorView(
+                title: session.store == nil ? "Add store" : "Rename store",
+                name: $editorName,
+                available: StoreManagementScope.permits(session.scope, canonicalList: canonicalList),
+                onSave: { save(session) },
+                onCancel: { editor = nil }
+            )
+        }
+        .confirmationDialog(
+            removalAction == .archive ? "Archive \(removingStore?.name ?? "store")?" :
+                "Delete \(removingStore?.name ?? "store")?",
+            isPresented: Binding(get: { removingStore != nil }, set: { if !$0 { clearRemoval() } }),
+            titleVisibility: .visible
         ) {
-            if let store = editingStore {
-                NavigationStack {
-                    Form {
-                        TextField("Store name", text: $renameName)
-                            .accessibilityIdentifier("shopping.stores.renameName")
-                        if !renameAvailable {
-                            Text("This household is unavailable. Your draft is still here.")
-                                .foregroundStyle(.secondary)
-                        }
-                        if let error { Text(error.localizedDescription).foregroundStyle(.red) }
-                    }
-                    .navigationTitle("Rename store")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") {
-                                editingStore = nil
-                                renameScope = nil
-                            }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { rename(store) } label: { Label("Save", systemImage: "checkmark") }
-                                .disabled(
-                                    renameName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        .isEmpty || !renameAvailable)
-                        }
-                    }
-                }
+            if removalAction == .archive {
+                Button("Archive store", role: .destructive, action: remove)
+            } else {
+                Button("Delete store", role: .destructive, action: remove)
+            }
+            Button("Cancel", role: .cancel, action: clearRemoval)
+        } message: {
+            if removalAction == .archive {
+                Text("Catalog items or one-time groceries still use this store. Archiving keeps their purchase tags recoverable and hides the store from active choices.")
+            } else {
+                Text("This store has no catalog or one-time grocery references and will be removed.")
             }
         }
         .alert(
@@ -224,41 +175,91 @@ private struct StoreManagementView: View {
         }
     }
 
-    private func create() {
-        guard createAvailable, let service, let createScope else { return }
-        do {
-            _ = try service.createStore(
-                name: draftName, householdID: createScope.householdID, listID: createScope.listID)
-            draftName = ""
-            self.createScope = nil
-        } catch { self.error = error }
+    @ViewBuilder
+    private func storeRow(_ store: Store) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 8))
+        layout {
+            Text(store.name)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            HStack(spacing: 0) {
+                Button { beginRename(store) } label: {
+                    Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("Rename \(store.name)")
+                .buttonStyle(.borderless)
+                .disabled(!selectionAvailable)
+                Button { beginRemoval(store) } label: {
+                    Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("Delete \(store.name)")
+                .buttonStyle(.borderless)
+                .disabled(!selectionAvailable)
+            }
+        }
+        .frame(minHeight: 44)
     }
-    private func archive(_ store: Store) {
-        guard selectionAvailable, householdStores.contains(store), let service, let canonicalList,
-            let householdID = canonicalList.household?.id
-        else { return }
-        do {
-            try service.setStoreArchived(
-                !store.isArchived, storeID: store.id, householdID: householdID,
-                listID: canonicalList.id)
-        } catch { self.error = error }
+
+    private func beginCreate() {
+        guard let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        editorName = ""
+        editor = StoreEditorSession(store: nil, scope: scope)
     }
+
     private func beginRename(_ store: Store) {
-        guard selectionAvailable, householdStores.contains(store) else { return }
-        renameName = store.name
-        renameScope = StoreManagementCommandScope(canonicalList: canonicalList)
+        guard selectionAvailable, householdStores.contains(store),
+              let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        editorName = store.name
         error = nil
-        editingStore = store
+        editor = StoreEditorSession(store: store, scope: scope)
     }
-    private func rename(_ store: Store) {
-        guard renameAvailable, let service, let renameScope else { return }
+
+    private func save(_ session: StoreEditorSession) {
+        guard StoreManagementScope.permits(session.scope, canonicalList: canonicalList), let service else { return }
         do {
-            try service.renameStore(
-                name: renameName, storeID: store.id, householdID: renameScope.householdID,
-                listID: renameScope.listID)
-            editingStore = nil
-            self.renameScope = nil
+            if let store = session.store {
+                try service.renameStore(
+                    name: editorName, storeID: store.id, householdID: session.scope.householdID,
+                    listID: session.scope.listID)
+            } else {
+                _ = try service.createStore(
+                    name: editorName, householdID: session.scope.householdID, listID: session.scope.listID)
+            }
+            hapticFeedback.play(.success)
+            editor = nil
         } catch { self.error = error }
+    }
+
+    private func beginRemoval(_ store: Store) {
+        guard selectionAvailable, householdStores.contains(store), let service,
+              let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        do {
+            removalAction = try service.storeRemovalAction(
+                storeID: store.id, householdID: scope.householdID, listID: scope.listID
+            )
+            removalScope = scope
+            removingStore = store
+        } catch { self.error = error }
+    }
+
+    private func remove() {
+        guard let store = removingStore, let scope = removalScope, let removalAction,
+              StoreManagementScope.permits(scope, canonicalList: canonicalList), let service else { return }
+        do {
+            _ = try service.removeStore(
+                storeID: store.id, householdID: scope.householdID, listID: scope.listID,
+                confirmedAction: removalAction
+            )
+            hapticFeedback.play(.warning)
+            clearRemoval()
+        } catch { self.error = error }
+    }
+
+    private func clearRemoval() {
+        removingStore = nil
+        removalScope = nil
+        removalAction = nil
     }
     private func reorder(from offsets: IndexSet, to destination: Int) {
         guard selectionAvailable, let service, let canonicalList,
@@ -271,6 +272,51 @@ private struct StoreManagementView: View {
         do {
             try service.reorderStores(ids, householdID: householdID, listID: canonicalList.id)
         } catch { self.error = error }
+    }
+}
+
+private struct StoreEditorSession: Identifiable {
+    let id = UUID()
+    let store: Store?
+    let scope: StoreManagementCommandScope
+}
+
+private struct StoreEditorView: View {
+    let title: String
+    @Binding var name: String
+    @FocusState private var nameFocused: Bool
+    let available: Bool
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    private var canSave: Bool {
+        available && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Store name", text: $name)
+                    .accessibilityIdentifier("shopping.stores.name")
+                    .focused($nameFocused)
+                    .submitLabel(.done)
+                    .onSubmit { if canSave { onSave() } }
+                if !available {
+                    Text("This household is unavailable. Your draft is still here.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onAppear { nameFocused = true }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: onSave) { Image(systemName: "checkmark") }
+                        .accessibilityLabel("Save store")
+                        .disabled(!canSave)
+                }
+            }
+        }
     }
 }
 

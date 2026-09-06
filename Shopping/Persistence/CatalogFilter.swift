@@ -89,6 +89,23 @@ struct GroceryNeedFilter: Equatable {
         self.carted = carted
         self.urgency = urgency
     }
+
+    func sanitized(activeStoreIDs: Set<UUID>, activeCategoryIDs: Set<UUID>) -> GroceryNeedFilter {
+        GroceryNeedFilter(
+            purchase: PurchaseFilter(
+                selectedStoreID: purchase.selectedStoreID.flatMap {
+                    activeStoreIDs.contains($0) ? $0 : nil
+                },
+                includedStoreIDs: purchase.includedStoreIDs.intersection(activeStoreIDs),
+                excludedStoreIDs: purchase.excludedStoreIDs.intersection(activeStoreIDs),
+                requiresAnyStore: purchase.requiresAnyStore
+            ),
+            text: text,
+            categoryID: categoryID.flatMap { activeCategoryIDs.contains($0) ? $0 : nil },
+            carted: carted,
+            urgency: urgency
+        )
+    }
 }
 
 enum CatalogProjection {

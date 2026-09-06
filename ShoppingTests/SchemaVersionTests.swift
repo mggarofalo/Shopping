@@ -3,7 +3,7 @@ import XCTest
 @testable import Shopping
 
 final class SchemaVersionTests: XCTestCase {
-    func testBundledV1ModelPreservesProductionSchemaContract() throws {
+    func testBundledV2ModelPreservesProductionSchemaContract() throws {
         let model = try PersistenceModel.make()
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
@@ -15,7 +15,9 @@ final class SchemaVersionTests: XCTestCase {
         XCTAssertEqual(need.managedObjectClassName, NSStringFromClass(Need.self))
         XCTAssertEqual(try attribute("kind", in: need).defaultValue as? String, "")
         XCTAssertEqual(try attribute("title", in: need).defaultValue as? String, "")
-        XCTAssertEqual(try attribute("quantity", in: need).defaultValue as? Int64, 1)
+        let quantity = try attribute("quantity", in: need)
+        XCTAssertTrue(quantity.isOptional)
+        XCTAssertNil(quantity.defaultValue)
         XCTAssertEqual(try attribute("notes", in: need).defaultValue as? String, "")
         XCTAssertEqual(try attribute("carted", in: need).defaultValue as? Bool, false)
         XCTAssertEqual(try attribute("urgency", in: need).defaultValue as? String, "normal")
@@ -127,19 +129,15 @@ final class SchemaVersionTests: XCTestCase {
             at: fixtureURL,
             options: nil
         )
-        XCTAssertTrue(model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata))
+        XCTAssertFalse(model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata))
 
-        let coordinator = NSPersistentStoreCoordinator(managedObjectModel: model)
-        let store = try coordinator.addPersistentStore(
-            ofType: NSSQLiteStoreType,
-            configurationName: nil,
-            at: fixtureURL,
-            options: [NSReadOnlyPersistentStoreOption: true]
-        )
-        defer { try? coordinator.remove(store) }
-
-        let context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-        context.persistentStoreCoordinator = coordinator
+        let migrationDirectoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingV1Migration-\(UUID().uuidString)")
+        let migratedStoreURL = migrationDirectoryURL.appendingPathComponent("ShoppingV1Recovery.sqlite")
+        try FileManager.default.createDirectory(at: migrationDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixtureURL, to: migratedStoreURL)
+        let migrated = try PersistenceController(storeURL: migratedStoreURL)
+        let context = migrated.simulationContext()
         try context.performAndWait {
             let needRequest = Need.fetchRequest()
             needRequest.predicate = NSPredicate(format: "id == %@", UUID(uuidString: "11111111-1111-1111-1111-111111111111")! as CVarArg)
@@ -165,6 +163,9 @@ final class SchemaVersionTests: XCTestCase {
             XCTAssertEqual(need.revision, 9)
             XCTAssertEqual(operation.list?.id, need.list?.id)
         }
+
+        try close(migrated, contexts: [context])
+        try FileManager.default.removeItem(at: migrationDirectoryURL)
 
         let recoveryDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingV1Recovery-\(UUID().uuidString)")

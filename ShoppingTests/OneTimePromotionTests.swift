@@ -341,7 +341,7 @@ final class OneTimePromotionTests: XCTestCase {
         let itemID: UUID?
         let kind: NeedKind
         let title: String
-        let quantity: Int64
+        let quantity: Int64?
         let notes: String
         let urgency: NeedUrgency
         let carted: Bool

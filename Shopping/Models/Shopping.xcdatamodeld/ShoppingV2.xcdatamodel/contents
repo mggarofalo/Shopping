@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23000" systemVersion="24A335" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="ShoppingSchemaV2" usedWithCloudKit="YES">
+    <entity name="Household" representedClassName="Household" syncable="YES">
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String" defaultValueString="Household"/>
+        <relationship name="categories" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Category" inverseName="household" inverseEntity="Category"/>
+        <relationship name="clearOperations" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="ClearOperation" inverseName="household" inverseEntity="ClearOperation"/>
+        <relationship name="groceryList" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="GroceryList" inverseName="household" inverseEntity="GroceryList"/>
+        <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Item" inverseName="household" inverseEntity="Item"/>
+        <relationship name="stores" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Store" inverseName="household" inverseEntity="Store"/>
+    </entity>
+    <entity name="Store" representedClassName="Store" syncable="YES">
+        <attribute name="displayOrder" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isArchived" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String" defaultValueString=""/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="stores" inverseEntity="Household"/>
+        <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Item" inverseName="stores" inverseEntity="Item"/>
+        <relationship name="oneTimeNeeds" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Need" inverseName="oneTimeStores" inverseEntity="Need"/>
+    </entity>
+    <entity name="Category" representedClassName="Category" syncable="YES">
+        <attribute name="displayOrder" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String" defaultValueString=""/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="categories" inverseEntity="Household"/>
+        <relationship name="items" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Item" inverseName="category" inverseEntity="Item"/>
+        <relationship name="oneTimeNeeds" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Need" inverseName="oneTimeCategory" inverseEntity="Need"/>
+    </entity>
+    <entity name="Item" representedClassName="Item" syncable="YES">
+        <attribute name="anyStore" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isArchived" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String" defaultValueString=""/>
+        <attribute name="notes" attributeType="String" defaultValueString=""/>
+        <relationship name="category" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Category" inverseName="items" inverseEntity="Category"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="items" inverseEntity="Household"/>
+        <relationship name="needs" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Need" inverseName="item" inverseEntity="Need"/>
+        <relationship name="stores" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Store" inverseName="items" inverseEntity="Store"/>
+    </entity>
+    <entity name="GroceryList" representedClassName="GroceryList" syncable="YES">
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <relationship name="clearOperations" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="ClearOperation" inverseName="list" inverseEntity="ClearOperation"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="groceryList" inverseEntity="Household"/>
+        <relationship name="needs" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Need" inverseName="list" inverseEntity="Need"/>
+    </entity>
+    <entity name="Need" representedClassName="Need" syncable="YES">
+        <attribute name="archived" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="carted" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="clearOperationID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="kind" attributeType="String" defaultValueString=""/>
+        <attribute name="notes" attributeType="String" defaultValueString=""/>
+        <attribute name="oneTimeAnyStore" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="quantity" optional="YES" attributeType="Integer 64" usesScalarValueType="NO"/>
+        <attribute name="revision" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="title" attributeType="String" defaultValueString=""/>
+        <attribute name="urgency" attributeType="String" defaultValueString="normal"/>
+        <relationship name="item" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Item" inverseName="needs" inverseEntity="Item"/>
+        <relationship name="list" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="GroceryList" inverseName="needs" inverseEntity="GroceryList"/>
+        <relationship name="oneTimeCategory" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Category" inverseName="oneTimeNeeds" inverseEntity="Category"/>
+        <relationship name="oneTimeStores" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Store" inverseName="oneTimeNeeds" inverseEntity="Store"/>
+    </entity>
+    <entity name="ClearOperation" representedClassName="ClearOperation" syncable="YES">
+        <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="-978307200" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="snapshot" optional="YES" attributeType="Binary" usesScalarValueType="NO"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="clearOperations" inverseEntity="Household"/>
+        <relationship name="list" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="GroceryList" inverseName="clearOperations" inverseEntity="GroceryList"/>
+    </entity>
+    <elements>
+        <element name="Household" positionX="-63" positionY="-18" width="128" height="134"/>
+        <element name="Store" positionX="127" positionY="-18" width="128" height="110"/>
+        <element name="Category" positionX="127" positionY="130" width="128" height="110"/>
+        <element name="Item" positionX="317" positionY="-18" width="128" height="134"/>
+        <element name="GroceryList" positionX="317" positionY="170" width="128" height="86"/>
+        <element name="Need" positionX="507" positionY="-18" width="128" height="242"/>
+        <element name="ClearOperation" positionX="507" positionY="280" width="128" height="110"/>
+    </elements>
+</model>

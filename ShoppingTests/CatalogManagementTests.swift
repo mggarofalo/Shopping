@@ -370,7 +370,7 @@ final class CatalogManagementTests: XCTestCase {
         let id: UUID
         let title: String
         let itemID: UUID?
-        let quantity: Int64
+        let quantity: Int64?
         let carted: Bool
         let urgency: String
         let notes: String

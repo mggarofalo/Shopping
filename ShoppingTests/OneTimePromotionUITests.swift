@@ -13,7 +13,7 @@ final class OneTimePromotionUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(row("Green tea", in: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
         app.tabBars.buttons["Groceries"].tap()
         row("Green tea", in: app).tap()
         startPromotion(in: app)
@@ -27,7 +27,7 @@ final class OneTimePromotionUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 5))
         app.buttons[originalID].tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
         let quantity = quantityControls(in: app).value
@@ -58,7 +58,7 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(original, in: app)
         XCTAssertTrue(original.label.contains("Granola"))
         original.tap()
-        XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
         reveal(purchaseNotes, in: app)
         XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")
@@ -128,13 +128,15 @@ final class OneTimePromotionUITests: XCTestCase {
 
     func testCartedUrgentGroceriesSortBeforeNormalGroceries() {
         let app = launchApp(fixture: "populated")
-        let cartBananas = app.buttons["Add to cart Bananas"]
-        reveal(cartBananas, in: app)
-        cartBananas.tap()
-        let cartGranola = app.buttons["Add to cart Granola"]
-        for _ in 0..<8 where !cartGranola.exists || !cartGranola.isHittable { app.swipeDown() }
-        XCTAssertTrue(cartGranola.isHittable)
-        cartGranola.tap()
+        let bananasRow = row("Bananas", in: app)
+        reveal(bananasRow, in: app)
+        bananasRow.swipeLeft()
+        app.buttons["In cart"].tap()
+        let granolaRow = row("Granola", in: app)
+        for _ in 0..<8 where !granolaRow.exists || !granolaRow.isHittable { app.swipeDown() }
+        XCTAssertTrue(granolaRow.isHittable)
+        granolaRow.swipeLeft()
+        app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (3)")).firstMatch
         for _ in 0..<8 where !carted.exists || !carted.isHittable { app.swipeDown() }
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
@@ -161,7 +163,7 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func createOneTime(_ name: String, in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         let remembered = app.switches["shopping.grocery.remembered"]
         setSwitch(remembered, on: false, in: app)
         let field = app.textFields["shopping.grocery.name"]
@@ -249,6 +251,13 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func quantityControls(in app: XCUIApplication) -> (value: XCUIElement, increment: XCUIElement) {
         let quantity = app.steppers["shopping.grocery.quantity"]
+        if !quantity.exists {
+            let addQuantity = app.buttons["shopping.grocery.quantity.add"]
+            reveal(addQuantity, in: app)
+            XCTAssertTrue(addQuantity.isHittable)
+            addQuantity.tap()
+            XCTAssertTrue(quantity.waitForExistence(timeout: 2))
+        }
         let increments = quantity.buttons.matching(NSPredicate(
             format: "identifier == %@ OR label == %@",
             "shopping.grocery.quantity-Increment", "Increment"

@@ -108,7 +108,7 @@ final class PreviewFixtureTests: XCTestCase {
 
     private struct NeedSnapshot {
         let title: String
-        let quantity: Int64
+        let quantity: Int64?
         let notes: String
         let carted: Bool
         let urgency: String

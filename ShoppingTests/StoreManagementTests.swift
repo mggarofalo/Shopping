@@ -391,6 +391,33 @@ final class StoreManagementTests: XCTestCase {
         }
     }
 
+    func testReorderUsesOnlyVisibleActiveStoresAfterArchive() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let aldi = try service.createStore(
+            name: "Aldi", householdID: selection.householdID, displayOrder: 0)
+        let closed = try service.createStore(
+            name: "Closed", householdID: selection.householdID, displayOrder: 1)
+        let costco = try service.createStore(
+            name: "Costco", householdID: selection.householdID, displayOrder: 2)
+
+        try service.setStoreArchived(
+            true, storeID: closed, householdID: selection.householdID, listID: selection.listID)
+        try service.reorderStores(
+            [costco, aldi], householdID: selection.householdID, listID: selection.listID)
+
+        XCTAssertEqual(
+            try activeOrderedStoreIDs(selection.householdID, persistence: persistence),
+            [costco, aldi]
+        )
+        XCTAssertTrue(try storeIsArchived(closed, persistence: persistence))
+        assertError(.scopeChanged) {
+            try service.reorderStores(
+                [costco, aldi, closed], householdID: selection.householdID, listID: selection.listID)
+        }
+    }
+
     func testStoreCommandsRejectStoreFromAnotherPersistentStore() throws {
         let primaryURL = temporaryStoreURL()
         let secondaryURL = temporaryStoreURL()
@@ -456,6 +483,119 @@ final class StoreManagementTests: XCTestCase {
         XCTAssertFalse(snapshot.storeArchived)
     }
 
+    func testRemoveStoreDeletesOnlyUnreferencedAndArchivesReferencedTags() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let unreferenced = try service.createStore(name: "Unused", householdID: selection.householdID)
+        let fallback = try service.createStore(name: "Fallback", householdID: selection.householdID)
+        let referenced = try service.createStore(name: "Referenced", householdID: selection.householdID)
+        let foreign = try service.createHousehold(name: "Foreign")
+        let foreignStore = try service.createStore(name: "Foreign store", householdID: foreign.householdID)
+        let itemID = try service.createItem(
+            name: "Tea", storeIDs: [referenced], householdID: selection.householdID, anyStore: false)
+        let oneTimeNeedID = try service.addOneTimeNeed(
+            title: "Ice", storeIDs: [referenced], anyStore: false, listID: selection.listID)
+
+        XCTAssertEqual(
+            try service.storeRemovalAction(
+                storeID: unreferenced, householdID: selection.householdID, listID: selection.listID),
+            .delete
+        )
+        XCTAssertEqual(
+            try service.removeStore(
+                storeID: unreferenced, householdID: selection.householdID, listID: selection.listID),
+            .delete
+        )
+        XCTAssertFalse(try hasStore(unreferenced, persistence: persistence))
+
+        XCTAssertEqual(
+            try service.storeRemovalAction(
+                storeID: fallback, householdID: selection.householdID, listID: selection.listID),
+            .delete
+        )
+        _ = try service.createItem(
+            name: "Added after confirmation", storeIDs: [fallback],
+            householdID: selection.householdID, anyStore: false)
+        XCTAssertEqual(
+            try service.removeStore(
+                storeID: fallback, householdID: selection.householdID, listID: selection.listID),
+            .archive
+        )
+        XCTAssertTrue(try hasStore(fallback, persistence: persistence))
+        XCTAssertTrue(try storeIsArchived(fallback, persistence: persistence))
+
+        XCTAssertEqual(
+            try service.storeRemovalAction(
+                storeID: referenced, householdID: selection.householdID, listID: selection.listID),
+            .archive
+        )
+        XCTAssertEqual(
+            try service.removeStore(
+                storeID: referenced, householdID: selection.householdID, listID: selection.listID),
+            .archive
+        )
+        XCTAssertEqual(try service.storeEligibility(itemID: itemID), .needsStore)
+        let snapshot = try membershipSnapshot(
+            itemID: itemID, oneTimeNeedID: oneTimeNeedID, persistence: persistence)
+        XCTAssertEqual(snapshot.itemStoreIDs, [referenced])
+        XCTAssertEqual(snapshot.oneTimeStoreIDs, [referenced])
+        XCTAssertTrue(snapshot.storeArchived)
+
+        XCTAssertThrowsError(
+            try service.removeStore(
+                storeID: foreignStore, householdID: selection.householdID, listID: selection.listID)
+        ) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+        XCTAssertTrue(try hasStore(foreignStore, persistence: persistence))
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let lists = try context.fetch(PurchaseRulesStoreScope.listsRequest())
+            let households = try context.fetch(NavigationFetchRequests.households())
+            let stores = try context.fetch(NavigationFetchRequests.stores())
+            let list = try XCTUnwrap(StoreManagementScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: selection.householdID, listID: selection.listID)
+            ))
+            XCTAssertTrue(StoreManagementScope.activeStores(stores, canonicalList: list).isEmpty)
+        }
+    }
+
+    func testConfirmedArchiveNeverBecomesDeleteWhenReferencesDisappear() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let storeID = try service.createStore(
+            name: "Costco", householdID: selection.householdID)
+        let itemID = try service.createItem(
+            name: "Strawberries",
+            storeIDs: [storeID],
+            householdID: selection.householdID,
+            anyStore: false
+        )
+
+        let confirmedAction = try service.storeRemovalAction(
+            storeID: storeID,
+            householdID: selection.householdID,
+            listID: selection.listID
+        )
+        XCTAssertEqual(confirmedAction, .archive)
+
+        try service.setPurchaseRules(itemID: itemID, anyStore: true, storeIDs: [])
+        XCTAssertEqual(
+            try service.removeStore(
+                storeID: storeID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                confirmedAction: confirmedAction
+            ),
+            .archive
+        )
+        XCTAssertTrue(try hasStore(storeID, persistence: persistence))
+        XCTAssertTrue(try storeIsArchived(storeID, persistence: persistence))
+    }
+
     private struct StoreState: Equatable {
         let id: UUID
         let name: String
@@ -512,6 +652,15 @@ final class StoreManagementTests: XCTestCase {
         }
     }
 
+    private func hasStore(_ id: UUID, persistence: PersistenceController) throws -> Bool {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Store.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            return try !context.fetch(request).isEmpty
+        }
+    }
+
     private func writerRaceState(
         _ householdID: UUID,
         persistence: PersistenceController
@@ -558,6 +707,31 @@ final class StoreManagementTests: XCTestCase {
             return try context.fetch(request).map {
                 StoreState(id: $0.id, name: $0.name, displayOrder: $0.displayOrder)
             }
+        }
+    }
+
+    private func activeOrderedStoreIDs(_ householdID: UUID, persistence: PersistenceController) throws
+        -> [UUID]
+    {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Store.fetchRequest()
+            request.predicate = NSPredicate(format: "household.id == %@ AND isArchived == NO", householdID as CVarArg)
+            return try context.fetch(request)
+                .sorted {
+                    $0.displayOrder == $1.displayOrder
+                        ? $0.id.uuidString < $1.id.uuidString : $0.displayOrder < $1.displayOrder
+                }
+                .map(\.id)
+        }
+    }
+
+    private func storeIsArchived(_ id: UUID, persistence: PersistenceController) throws -> Bool {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Store.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            return try XCTUnwrap(context.fetch(request).first).isArchived
         }
     }
 

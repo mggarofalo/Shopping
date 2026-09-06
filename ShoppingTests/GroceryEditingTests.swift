@@ -465,7 +465,7 @@ final class GroceryEditingTests: XCTestCase {
     private struct NeedSnapshot: Equatable {
         let itemID: UUID?
         let title: String
-        let quantity: Int64
+        let quantity: Int64?
         let notes: String
         let urgency: NeedUrgency
         let carted: Bool

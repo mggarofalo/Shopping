@@ -32,15 +32,16 @@ final class ClearInterruptionUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         let originalID = row.identifier
-        app.buttons["Add to cart Fresh ice"].tap()
+        row.swipeLeft()
+        app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.tap()
-        let clear = app.buttons["shopping.carted.clear"]
-        reveal(clear, app: app)
-        clear.tap()
-        XCTAssertTrue(app.navigationBars["Clear items in cart?"].waitForExistence(timeout: 2))
-        app.buttons["shopping.clear.confirm"].tap()
+        let checkout = app.buttons["shopping.checkout.start"]
+        reveal(checkout, app: app)
+        checkout.tap()
+        XCTAssertTrue(app.navigationBars["Checkout?"].waitForExistence(timeout: 2))
+        app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_EXIT_AFTER_CLEAR")
@@ -66,7 +67,7 @@ final class ClearInterruptionUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered groceries"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 3))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {

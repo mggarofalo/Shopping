@@ -355,7 +355,7 @@ final class GroceryNeedTests: XCTestCase {
         XCTAssertEqual(try verify.performAndWait { try verify.count(for: Item.fetchRequest()) }, 0)
     }
 
-    private typealias State = (quantity: Int64, carted: Bool, urgency: String, archived: Bool, notes: String, itemID: UUID?)
+    private typealias State = (quantity: Int64?, carted: Bool, urgency: String, archived: Bool, notes: String, itemID: UUID?)
 
     private func state(_ id: UUID, persistence: PersistenceController) throws -> State {
         let context = persistence.simulationContext()

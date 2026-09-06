@@ -47,6 +47,7 @@ enum NavigationFetchRequests {
 
 struct GroceriesView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -119,7 +120,7 @@ struct GroceriesView: View {
                         .labelStyle(.iconOnly)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { presentAdd() } label: { Label("Add grocery", systemImage: "plus") }
+                    Button { presentAdd() } label: { Label("Add item", systemImage: "plus") }
                         .accessibilityIdentifier("shopping.addGrocery")
                         .disabled(canonicalList == nil)
                 }
@@ -177,7 +178,7 @@ struct GroceriesView: View {
                     }
                     if let removedOperationID {
                         HStack {
-                            Text("Grocery removed")
+                            Text("Item removed")
                             Spacer()
                             Button("Undo") { undo(removedOperationID) }
                                 .frame(minHeight: 44)
@@ -263,7 +264,7 @@ struct GroceriesView: View {
             Text(emptyDescription)
         } actions: {
             if !hasActiveUncartedNeeds {
-                Button("Add grocery") { presentAdd() }
+                Button("Add item") { presentAdd() }
                     .buttonStyle(.borderedProminent)
                     .disabled(canonicalList == nil)
             } else {
@@ -403,7 +404,7 @@ struct GroceriesView: View {
 
     private var emptyDescription: String {
         !hasActiveUncartedNeeds
-            ? "Add a grocery to get started."
+            ? "Add an item to get started."
             : "Try All, another store, search, or filters. Your shared grocery list is unchanged."
     }
 
@@ -612,13 +613,14 @@ struct GroceriesView: View {
                 listID: canonicalList.id,
                 carted: carted
             )
+            hapticFeedback.play(.lightImpact)
             refreshProjection()
         } catch { self.error = error }
     }
 
-    private func setQuantity(_ need: Need, _ quantity: Int64) {
+    private func setQuantity(_ need: Need, _ quantity: Int64?) {
         guard let service, let canonicalList, let householdID = canonicalList.household?.id,
-              (1...99).contains(quantity),
+              quantity.map({ (1...99).contains($0) }) ?? true,
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
         do {
@@ -762,7 +764,7 @@ struct GroceryNeedRow: View {
     let activeStores: [Store]
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
-    var onQuantityChange: ((Need, Int64) -> Void)? = nil
+    var onQuantityChange: ((Need, Int64?) -> Void)? = nil
 
     private var needsStore: Bool { GroceryRowScope.needsStore(need, activeStores: activeStores) }
 
@@ -778,6 +780,20 @@ struct GroceryNeedRow: View {
             )
         }
         .frame(minHeight: 44)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if let onCartedChange {
+                Button {
+                    onCartedChange(need, !need.carted)
+                } label: {
+                    Label(cartActionTitle, systemImage: cartActionSymbol)
+                }
+                .tint(need.carted ? .orange : .blue)
+                .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
+            }
+        }
+        .accessibilityAction(named: Text(cartActionAccessibilityTitle)) {
+            onCartedChange?(need, !need.carted)
+        }
     }
 
     @ViewBuilder
@@ -801,44 +817,47 @@ struct GroceryNeedRow: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            if let onQuantityChange {
-                quantityButton("minus", change: -1, action: onQuantityChange)
-                Text("\(need.quantity)")
-                    .monospacedDigit()
-                    .fixedSize()
-                    .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(need.quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                quantityButton("plus", change: 1, action: onQuantityChange)
-            } else {
-                Text("\(need.quantity)").foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(need.quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-            }
-            if let onCartedChange {
-                Button {
-                    onCartedChange(need, !need.carted)
-                } label: {
-                    Image(systemName: need.carted ? "cart.badge.minus" : "cart.badge.plus")
-                        .frame(minWidth: 44, minHeight: 44)
+            if let quantity = need.quantity {
+                if let onQuantityChange {
+                    quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
+                    Text("\(quantity)")
+                        .monospacedDigit()
+                        .fixedSize()
+                        .foregroundStyle(Color.grocerySecondary)
+                        .accessibilityLabel("Quantity \(quantity)")
+                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+                    quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
+                } else {
+                    Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
+                        .accessibilityLabel("Quantity \(quantity)")
+                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(need.carted ? "Remove from cart" : "Add to cart") \(title)")
-                .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }
         }
     }
 
+    private var cartActionTitle: String {
+        need.carted ? "Remove from cart" : "In cart"
+    }
+
+    private var cartActionSymbol: String {
+        need.carted ? "cart.badge.minus" : "cart.fill"
+    }
+
+    private var cartActionAccessibilityTitle: String {
+        "\(cartActionTitle) \(title)"
+    }
+
     private func quantityButton(
-        _ symbol: String, change: Int64, action: @escaping (Need, Int64) -> Void
+        _ symbol: String, quantity: Int64, change: Int64, action: @escaping (Need, Int64?) -> Void
     ) -> some View {
         Button {
-            action(need, need.quantity + change)
+            action(need, quantity + change)
         } label: {
             Image(systemName: symbol).frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.borderless)
-        .disabled(change < 0 ? need.quantity <= 1 : need.quantity >= 99)
+        .disabled(change < 0 ? quantity <= 1 : quantity >= 99)
         .accessibilityLabel("\(change < 0 ? "Decrease" : "Increase") quantity for \(title)")
         .accessibilityIdentifier(
             "shopping.checklist.quantity.\(change < 0 ? "decrease" : "increase").\(need.id.uuidString)")
@@ -989,9 +1008,9 @@ struct OneTimeGrocerySheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("One-time grocery") {
-                    TextField("Grocery name", text: $name)
-                    Text("This grocery won’t be remembered in Catalog.")
+                Section("One-time item") {
+                    TextField("Item name", text: $name)
+                    Text("This item won’t be remembered in Catalog.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 PurchaseRulesPicker(
@@ -1007,7 +1026,7 @@ struct OneTimeGrocerySheet: View {
                 }
                 if let error { Text(error.localizedDescription).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("Add one-time grocery")
+            .navigationTitle("Add one-time item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -1094,7 +1113,7 @@ struct RecentlyClearedView: View {
             } else if skipped > 0 {
                 restoreMessage = "Restored \(restored); skipped \(skipped) with newer changes."
             } else {
-                restoreMessage = restored == 1 ? "Restored 1 grocery" : "Restored \(restored) groceries"
+                restoreMessage = restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
             }
         } catch { self.error = error }
     }
@@ -1163,8 +1182,8 @@ private struct GroceryFiltersPreview: View {
     }
 }
 
-#Preview("Add one-time grocery · Costco") { ShoppingPreviewHost(.populated) { AddGroceryPreview() } }
-#Preview("Add one-time grocery · unavailable") {
+#Preview("Add one-time item · Costco") { ShoppingPreviewHost(.populated) { AddGroceryPreview() } }
+#Preview("Add one-time item · unavailable") {
     OneTimeGrocerySheet(
         scope: GroceryAddScope(householdID: nil, listID: nil, selectedStoreID: nil, selectedStoreName: nil),
         onSaved: {}
