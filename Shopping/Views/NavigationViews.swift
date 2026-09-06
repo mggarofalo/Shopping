@@ -119,7 +119,7 @@ struct GroceriesView: View {
                         .labelStyle(.iconOnly)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { presentAdd() } label: { Label("Add grocery", systemImage: "plus") }
+                    Button { presentAdd() } label: { Label("Add item", systemImage: "plus") }
                         .accessibilityIdentifier("shopping.addGrocery")
                         .disabled(canonicalList == nil)
                 }
@@ -263,7 +263,7 @@ struct GroceriesView: View {
             Text(emptyDescription)
         } actions: {
             if !hasActiveUncartedNeeds {
-                Button("Add grocery") { presentAdd() }
+                Button("Add item") { presentAdd() }
                     .buttonStyle(.borderedProminent)
                     .disabled(canonicalList == nil)
             } else {

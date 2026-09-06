@@ -96,7 +96,7 @@ final class ShoppingLaunchTests: XCTestCase {
         storeName.tap()
         storeName.typeText("Canceled store")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled store"].exists)
         app.buttons["Cancel"].tap()
 
@@ -115,7 +115,7 @@ final class ShoppingLaunchTests: XCTestCase {
         storeName.typeText("Corner Shop")
         app.buttons["Save store"].tap()
 
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         let selectedStore = app.buttons["Corner Shop"]
         XCTAssertTrue(selectedStore.waitForExistence(timeout: 2))
         XCTAssertEqual(selectedStore.value as? String, "Selected")
@@ -314,7 +314,7 @@ final class ShoppingLaunchTests: XCTestCase {
     private func revealInlineAddStore(in app: XCUIApplication) -> XCUIElement {
         let button = app.buttons["shopping.tags.addStore"]
         for _ in 0..<8 {
-            let top = app.navigationBars["Add grocery"].frame.maxY
+            let top = app.navigationBars["Add item"].frame.maxY
             let bottom = app.keyboards.firstMatch.exists
                 ? app.keyboards.firstMatch.frame.minY - 60 : app.frame.maxY - 40
             // iOS 18 can report an offscreen link as hittable behind the keyboard.
@@ -548,7 +548,7 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         setSwitch(named: "shopping.grocery.remembered", on: false, in: app)
         let name = app.textFields["shopping.grocery.name"]
         name.tap()

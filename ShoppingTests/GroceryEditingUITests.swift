@@ -35,6 +35,58 @@ final class GroceryEditingUITests: XCTestCase {
         attachScreenshot(named: "Remembered grocery editor", app: app)
     }
 
+    func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {
+        let app = launchApp(contentSize: "UICTContentSizeCategoryAccessibilityL")
+        openAdd(in: app)
+
+        let name = app.textFields["shopping.grocery.name"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertTrue(name.hasKeyboardFocus)
+        XCTAssertTrue(app.staticTexts["Item notes"].exists)
+        XCTAssertTrue(app.staticTexts["Temporary notes"].exists)
+        name.typeText("Rice noodles")
+        name.typeText("\n")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+
+        let remembered = app.switches["shopping.grocery.remembered"]
+        setSwitch(remembered, on: false, app: app)
+        XCTAssertFalse(app.staticTexts["Item notes"].exists)
+        XCTAssertTrue(app.staticTexts["Notes"].exists)
+        setSwitch(remembered, on: true, app: app)
+        setPill(app.buttons["shopping.purchase.anyStore"], selected: true, app: app)
+
+        let addCategory = app.buttons["shopping.category.add"]
+        reveal(addCategory, in: app)
+        addCategory.tap()
+        XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
+        let categoryName = app.textFields["shopping.category.name"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertTrue(categoryName.hasKeyboardFocus)
+        categoryName.typeText("Canceled category")
+        app.buttons["shopping.category.cancel"].tap()
+
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        XCTAssertEqual(name.value as? String, "Rice noodles")
+        XCTAssertEqual(app.buttons["shopping.purchase.anyStore"].value as? String, "Selected")
+        reveal(addCategory, in: app)
+        addCategory.tap()
+        let savedCategoryName = app.textFields["shopping.category.name"]
+        XCTAssertTrue(savedCategoryName.waitForExistence(timeout: 2))
+        savedCategoryName.typeText("Noodles")
+        savedCategoryName.typeText("\n")
+
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 3))
+        let noodles = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.category.", "Noodles"
+        )).firstMatch
+        reveal(noodles, in: app)
+        XCTAssertEqual(noodles.value as? String, "Selected")
+        XCTAssertEqual(name.value as? String, "Rice noodles")
+        app.buttons["shopping.grocery.save"].tap()
+        XCTAssertTrue(groceryRow(named: "Rice noodles", app: app).waitForExistence(timeout: 3))
+    }
+
     func testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts() {
         let app = launchApp(fixture: "populated")
         openAdd(in: app)
@@ -155,11 +207,14 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertFalse(showAll.exists)
     }
 
-    private func launchApp(fixture: String? = nil) -> XCUIApplication {
+    private func launchApp(fixture: String? = nil, contentSize: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingEditingUITest-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
+        if let contentSize {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize]
+        }
         app.launch()
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         return app
@@ -167,7 +222,7 @@ final class GroceryEditingUITests: XCTestCase {
 
     private func openAdd(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
     }
 
     private func enterName(_ name: String, in app: XCUIApplication) {

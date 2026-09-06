@@ -161,7 +161,7 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func createOneTime(_ name: String, in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add grocery"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         let remembered = app.switches["shopping.grocery.remembered"]
         setSwitch(remembered, on: false, in: app)
         let field = app.textFields["shopping.grocery.name"]

@@ -57,6 +57,9 @@ struct GroceryEditorView: View {
     @State private var catalogSearch = ""
     @State private var selectedCatalogItemID: UUID?
     @State private var conflictingNeedID: UUID?
+    @State private var showingCategoryCreation = false
+    @State private var didRequestInitialFocus = false
+    @FocusState private var nameIsFocused: Bool
     let target: GroceryEditorTarget
     let onSaved: (UUID) -> Void
     let onFocusNeed: (Need) -> Void
@@ -164,7 +167,7 @@ struct GroceryEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(isEditing ? "Current grocery" : "New grocery") {
+                Section(isEditing ? "Current grocery" : "New item") {
                     if isEditing {
                         Label(
                             remembered ? "Remembered grocery" : "One-time grocery",
@@ -187,12 +190,15 @@ struct GroceryEditorView: View {
                         }
                         .accessibilityIdentifier("shopping.grocery.promotion.selectedName")
                     } else {
-                        TextField("Grocery name", text: $name)
+                        TextField("Item name", text: $name)
                             .accessibilityIdentifier("shopping.grocery.name")
+                            .focused($nameIsFocused)
+                            .submitLabel(.done)
+                            .onSubmit { nameIsFocused = false }
                     }
                     if !isEditing { matches }
                     if !remembered && !isPromotingOneTime {
-                        Text("This grocery won’t be remembered in Catalog.")
+                        Text("This item won’t be remembered in Catalog.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -207,10 +213,11 @@ struct GroceryEditorView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Grocery notes").font(.subheadline).fontWeight(.semibold)
-                        TextField("Add instructions for this grocery", text: $purchaseNotes, axis: .vertical)
+                        Text(remembered ? "Temporary notes" : "Notes")
+                            .font(.subheadline).fontWeight(.semibold)
+                        TextField("Add notes for this item", text: $purchaseNotes, axis: .vertical)
                             .accessibilityIdentifier("shopping.grocery.purchaseNotes")
-                        Text("Only for this grocery.")
+                        Text(remembered ? "Only for this item on the current list." : "Only for this item.")
                             .font(.footnote).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -231,7 +238,11 @@ struct GroceryEditorView: View {
                     .accessibilityIdentifier("shopping.grocery.urgency")
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
-                    CategoryPills(selection: $categoryID, categories: scopedCategories)
+                    CategoryPills(
+                        selection: $categoryID,
+                        categories: scopedCategories,
+                        onAddCategory: { showingCategoryCreation = true }
+                    )
                     PurchaseRulesPicker(
                         storeIDs: $storeIDs, anyStore: $anyStore, householdID: target.scope.householdID,
                         listID: target.scope.listID)
@@ -265,7 +276,7 @@ struct GroceryEditorView: View {
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
-            .navigationTitle(isEditing ? "Edit grocery" : "Add grocery")
+            .navigationTitle(isEditing ? "Edit grocery" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
@@ -292,6 +303,17 @@ struct GroceryEditorView: View {
             } message: { _ in
                 Text("You can undo this removal or restore the grocery from Recently cleared.")
             }
+            .sheet(isPresented: $showingCategoryCreation) {
+                CategoryCreationView(
+                    householdID: target.scope.householdID,
+                    listID: target.scope.listID
+                ) { categoryID = $0 }
+            }
+            .onAppear {
+                guard !isEditing, !didRequestInitialFocus else { return }
+                didRequestInitialFocus = true
+                DispatchQueue.main.async { nameIsFocused = true }
+            }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
             .onChange(of: promotionChoice) { _, _ in
                 allowDuplicate = false
@@ -315,7 +337,7 @@ struct GroceryEditorView: View {
                 .accessibilityIdentifier("shopping.grocery.promotion.choice")
 
                 if promotionChoice == .create {
-                    Text("The grocery name, category, and purchase rules in this editor will become a new Catalog item. Grocery notes, quantity, and urgency stay with this grocery.")
+                    Text("The item name, category, and purchase rules in this editor will become a new Catalog item. Notes, quantity, and urgency stay with this item.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
                     TextField("Search Catalog", text: $catalogSearch)
@@ -620,6 +642,63 @@ struct GroceryEditorView: View {
 
 }
 
+private struct CategoryCreationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.needService) private var service
+    @State private var name = ""
+    @State private var error: Error?
+    @FocusState private var nameIsFocused: Bool
+    let householdID: UUID?
+    let listID: UUID?
+    let onSelected: (UUID) -> Void
+
+    private var canSave: Bool {
+        service != nil && householdID != nil && listID != nil
+            && !CatalogProjection.normalizedName(name).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Category name", text: $name)
+                    .accessibilityIdentifier("shopping.category.name")
+                    .focused($nameIsFocused)
+                    .submitLabel(.done)
+                    .onSubmit(save)
+                if let error {
+                    Text(error.localizedDescription).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Add category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("shopping.category.cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save category", systemImage: "checkmark", action: save)
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("shopping.category.save")
+                }
+            }
+            .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
+        }
+    }
+
+    private func save() {
+        guard canSave, let service, let householdID, let listID else { return }
+        do {
+            onSelected(try service.createCategory(
+                name: name, householdID: householdID, listID: listID
+            ))
+            dismiss()
+        } catch {
+            self.error = error
+        }
+    }
+}
+
 private struct GroceryEditorPreview: View {
     @Environment(\.persistenceSelection) private var selection
 
@@ -634,4 +713,4 @@ private struct GroceryEditorPreview: View {
     }
 }
 
-#Preview("Add grocery") { ShoppingPreviewHost(.populated) { GroceryEditorPreview() } }
+#Preview("Add item") { ShoppingPreviewHost(.populated) { GroceryEditorPreview() } }
