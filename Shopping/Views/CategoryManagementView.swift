@@ -154,7 +154,7 @@ struct CategoryManagementView: View {
             Section("Add category") {
                 TextField("Category name", text: $draftName)
                     .accessibilityIdentifier("shopping.categories.createName")
-                Button("Save category", action: create)
+                Button(action: create) { Label("Save category", systemImage: "checkmark") }
                     .frame(minHeight: 44)
                     .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                         !selectionAvailable)
@@ -169,11 +169,11 @@ struct CategoryManagementView: View {
                     HStack {
                         Text(category.name)
                         Spacer()
-                        Button("Rename") { beginRename(category) }
+                        Button { beginRename(category) } label: { Label("Rename", systemImage: "pencil") }
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)
-                        Button("Remove", role: .destructive) { removingCategory = category }
+                        Button(role: .destructive) { removingCategory = category } label: { Label("Remove", systemImage: "trash") }
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)

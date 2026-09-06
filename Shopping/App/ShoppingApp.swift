@@ -4,6 +4,7 @@ import SwiftUI
 struct ShoppingApp: App {
     @StateObject private var bootstrap: PersistenceBootstrap
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
         _bootstrap = StateObject(wrappedValue: .application())
@@ -29,6 +30,7 @@ struct ShoppingApp: App {
                 }
             }
             .environmentObject(bootstrap)
+            .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
             .task { bootstrap.start() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { bootstrap.applicationDidEnterForeground() }

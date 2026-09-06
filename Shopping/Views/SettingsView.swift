@@ -2,11 +2,22 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
+
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink("Stores", destination: StoreManagementView())
-                NavigationLink("Categories", destination: CategoryManagementView())
+                NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
+                NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
+                Section("Appearance") {
+                    Picker("Color scheme", selection: $appearance) {
+                        ForEach(AppearancePreference.allCases) { preference in
+                            Text(preference.title).tag(preference.rawValue)
+                        }
+                    }
+                    .accessibilityIdentifier("shopping.appearance")
+                    .pickerStyle(.segmented)
+                }
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
                     Text("Groceries are available in this app’s current local household store.")
@@ -107,7 +118,7 @@ private struct StoreManagementView: View {
             Section("Add store") {
                 TextField("Store name", text: $draftName).accessibilityIdentifier(
                     "shopping.stores.createName")
-                Button("Save store") { create() }
+                Button { create() } label: { Label("Save store", systemImage: "checkmark") }
                     .disabled(
                         draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !createAvailable)
@@ -135,9 +146,9 @@ private struct StoreManagementView: View {
                         Text(store.name)
                         Spacer()
                         if store.isArchived { Text("Archived").foregroundStyle(.secondary) }
-                        Button("Rename") { beginRename(store) }.buttonStyle(.borderless)
+                        Button { beginRename(store) } label: { Label("Rename", systemImage: "pencil") }.buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
-                        Button(store.isArchived ? "Restore" : "Archive") { archive(store) }
+                        Button { archive(store) } label: { Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox") }
                             .buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
                     }
