@@ -146,42 +146,80 @@ final class ShoppingDeviceUITests: XCTestCase {
         }
     }
 
+    private struct EdgeAuditCandidate: Equatable {
+        let type: XCUIAccessibilityAuditType
+        let identifier: String
+        let label: String
+    }
+
     private func audit(
         _ app: XCUIApplication,
         types: XCUIAccessibilityAuditType = .all,
         groceryViewport: Bool = false
     ) throws {
-        // Collect every issue before failing, so diagnostics aren't limited to the first result.
         var failures: [String] = []
+        var candidates: [EdgeAuditCandidate] = []
         try app.performAccessibilityAudit(for: types) { issue in
-            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
-            // The platform can report contrast for List text wholly covered by the
-            // opaque grocery navigation bar. It cannot measure those hidden pixels.
-            // Keep every visible, partially visible, toolbar, and unidentified finding.
-            let covered = groceryViewport && issue.auditType == .contrast
-                && self.isCoveredGroceryText(issue.element, in: app)
-            if !covered {
+            self.attachAudit(issue, phase: "Initial audit")
+            // Scrolling can place list text under the opaque navigation bar.
+            // Remeasure identified edge findings with that text fully visible.
+            if groceryViewport, let candidate = self.edgeCandidate(issue, in: app) {
+                if !candidates.contains(candidate) { candidates.append(candidate) }
+            } else {
                 failures.append("\(issue.compactDescription): \(issue.element?.label ?? "unidentified element")")
             }
-            let attachment = XCTAttachment(string: details)
-            attachment.name = covered ? "Covered content: contrast not measurable" : "Accessibility audit details"
-            attachment.lifetime = .keepAlways
-            self.add(attachment)
             return true
+        }
+        for candidate in candidates {
+            let matches = app.staticTexts.matching(NSPredicate(
+                format: "identifier == %@ AND label == %@", candidate.identifier, candidate.label
+            ))
+            guard matches.count == 1 else {
+                XCTFail("Cannot uniquely remeasure \(candidate.label)")
+                return
+            }
+            let element = matches.firstMatch
+            reveal(element, in: app, towardTop: true)
+            XCTAssertEqual(matches.count, 1)
+            XCTAssertTrue(element.isHittable)
+            XCTAssertTrue(usable(element.frame))
+            XCTAssertGreaterThanOrEqual(element.frame.minY, app.navigationBars["Groceries"].frame.maxY)
+            XCTAssertLessThanOrEqual(element.frame.maxY, app.tabBars.firstMatch.frame.minY)
+            screenshot("Remeasuring \(candidate.label) fully visible", app: app)
+            try app.performAccessibilityAudit(for: candidate.type) { issue in
+                self.attachAudit(issue, phase: "Remeasuring \(candidate.label)")
+                // A different original candidate may still be at the edge; it
+                // must pass its own visible remeasurement. All new findings fail.
+                if let edge = self.edgeCandidate(issue, in: app), edge != candidate,
+                    candidates.contains(edge) { return true }
+                failures.append("\(issue.compactDescription): \(issue.element?.label ?? "unidentified element")")
+                return true
+            }
         }
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n\n"))
     }
 
-    private func isCoveredGroceryText(_ element: XCUIElement?, in app: XCUIApplication) -> Bool {
-        guard let element, element.elementType == .staticText, element.exists,
-            !element.isHittable else { return false }
+    private func attachAudit(_ issue: XCUIAccessibilityAuditIssue, phase: String) {
+        let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
+        let attachment = XCTAttachment(string: details)
+        attachment.name = "\(phase): accessibility audit details"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func edgeCandidate(
+        _ issue: XCUIAccessibilityAuditIssue, in app: XCUIApplication
+    ) -> EdgeAuditCandidate? {
+        guard issue.auditType == .contrast || issue.auditType == .textClipped,
+            let element = issue.element, element.elementType == .staticText, element.exists
+        else { return nil }
         let bar = app.navigationBars["Groceries"]
         guard bar.exists, usable(bar.frame), usable(element.frame),
-            element.frame.maxY <= bar.frame.maxY,
+            element.frame.minY < bar.frame.maxY,
             !contains(element, in: bar),
             contains(element, in: app.collectionViews.firstMatch)
-        else { return false }
-        return true
+        else { return nil }
+        return EdgeAuditCandidate(type: issue.auditType, identifier: element.identifier, label: element.label)
     }
 
     private func launch(

@@ -30,7 +30,9 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
-        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
+        let quantity = app.steppers["shopping.grocery.quantity"]
+        reveal(quantity, in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
         screenshot("Explicitly remembered grocery", app: app)
         app.buttons["shopping.grocery.cancel"].tap()
@@ -167,16 +169,19 @@ final class OneTimePromotionUITests: XCTestCase {
         let field = app.textFields["shopping.grocery.name"]
         field.tap()
         field.typeText(name)
-        let notes = app.textFields["shopping.grocery.purchaseNotes"]
-        reveal(notes, in: app)
-        notes.tap()
-        notes.typeText("Buy this week")
+        field.typeText("\n")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         let quantity = app.steppers["shopping.grocery.quantity"]
         reveal(quantity, in: app)
         quantity.buttons["Increment"].tap()
         XCTAssertEqual(quantity.value as? String, "2")
         setSwitch(app.switches["shopping.grocery.urgency"], on: true, in: app)
         setPill(app.buttons["shopping.purchase.anyStore"], selected: true, in: app)
+        let notes = app.textFields["shopping.grocery.purchaseNotes"]
+        for _ in 0..<10 where !notes.exists { app.swipeDown() }
+        reveal(notes, in: app)
+        notes.tap()
+        notes.typeText("Buy this week")
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
         reveal(row(name, in: app), in: app)
