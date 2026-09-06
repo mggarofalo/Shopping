@@ -94,21 +94,22 @@ struct CatalogView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                filterHeader
-                List {
+            List {
+                Section {
+                    filterHeader
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+                Section {
                     ForEach(visibleItems, id: \.objectID) { item in
                         Button { edit(item) } label: {
                             CatalogItemRow(item: item)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
                     }
-                }
-                .contentMargins(.top, 0, for: .scrollContent)
-                .overlay {
                     if visibleItems.isEmpty {
                         ContentUnavailableView {
                             Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
@@ -118,9 +119,14 @@ struct CatalogView: View {
                             if hasNarrowing { Button("Reset filters", action: resetFilters) }
                             else { Button("New catalog item", action: create).disabled(household == nil) }
                         }
+                        .listRowBackground(Color.clear)
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(12)
+            .contentMargins(.top, 0, for: .scrollContent)
+            .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle("Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
