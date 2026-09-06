@@ -1235,6 +1235,14 @@ final class NeedService {
         ).token
     }
 
+    func prepareCheckout(householdID: UUID, listID: UUID) throws -> ClearCartedPreview {
+        try prepareClearCarted(
+            householdID: householdID,
+            listID: listID,
+            filter: GroceryNeedFilter(carted: true)
+        )
+    }
+
     func prepareClearCarted(
         householdID: UUID,
         listID: UUID,

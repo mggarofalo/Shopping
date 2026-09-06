@@ -4,15 +4,14 @@ import SwiftUI
 import Darwin
 #endif
 
-private struct ClearCartedDraft: Identifiable {
+private struct CheckoutDraft: Identifiable {
     let preview: ClearCartedPreview
-    let scopeDescription: String
     let householdID: UUID
     let listID: UUID
     var id: UUID { preview.token.id }
 }
 
-private struct ClearCartedResult {
+private struct CheckoutResult {
     let operationID: UUID
     let householdID: UUID
     let listID: UUID
@@ -35,8 +34,8 @@ struct CartedGroceriesView: View {
         FetchedResults<Category>
     @State private var filter: GroceryNeedFilter
     @State private var matchingNeedIDs: Set<UUID> = []
-    @State private var clearDraft: ClearCartedDraft?
-    @State private var clearResult: ClearCartedResult?
+    @State private var checkoutDraft: CheckoutDraft?
+    @State private var checkoutResult: CheckoutResult?
     @State private var resultNotice: String?
     @State private var clearErrorMessage: String?
     @State private var error: Error?
@@ -65,8 +64,20 @@ struct CartedGroceriesView: View {
 
     var body: some View {
         let carted = scopedCarted
+        let allCarted = allScopedCarted
         let activeStores = validActiveStores
         List {
+            if !allCarted.isEmpty {
+                Section {
+                    Button { prepareCheckout() } label: {
+                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityHint("Includes all items in cart, even when this view is filtered")
+                    .accessibilityIdentifier("shopping.checkout.start")
+                }
+            }
             Section {
                 Button("All in cart", action: showAllCarted)
                     .accessibilityIdentifier("shopping.carted.all")
@@ -86,22 +97,15 @@ struct CartedGroceriesView: View {
             } else {
                 Section("In cart") { rows(carted, activeStores: activeStores) }
             }
-            if !carted.isEmpty {
-                Section {
-                    Button("Clear items in cart", role: .destructive) { prepareClear(carted) }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("shopping.carted.clear")
-                }
-            }
         }
         .overlay {
-            if carted.isEmpty {
-                ContentUnavailableView("Nothing in cart in this view", systemImage: "cart")
+            if allCarted.isEmpty {
+                ContentUnavailableView("Nothing in cart", systemImage: "cart")
                     .allowsHitTesting(false)
             }
         }
         .navigationTitle("In cart")
-        .sheet(item: $clearDraft, content: clearSheet)
+        .sheet(item: $checkoutDraft, content: checkoutSheet)
         .safeAreaInset(edge: .bottom) { resultBar }
         .alert(
             "Couldn’t update groceries in cart",
@@ -138,14 +142,13 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private func clearSheet(_ draft: ClearCartedDraft) -> some View {
+    private func checkoutSheet(_ draft: CheckoutDraft) -> some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Only these captured groceries will be cleared, even if filters change.")
-                    Text(draft.scopeDescription).font(.subheadline).foregroundStyle(.secondary)
+                    Text("Checkout removes only these captured items from the active list. Items changed after this confirmation opened will be skipped.")
                 }
-                Section("Groceries (\(draft.preview.rows.count))") {
+                Section("Items (\(draft.preview.rows.count))") {
                     ForEach(draft.preview.rows, id: \.needID) { row in
                         HStack {
                             VStack(alignment: .leading) {
@@ -158,15 +161,15 @@ struct CartedGroceriesView: View {
                             }
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("shopping.clear.row.\(row.needID.uuidString)")
+                        .accessibilityIdentifier("shopping.checkout.row.\(row.needID.uuidString)")
                     }
                 }
                 if let clearErrorMessage {
-                    Section("Couldn’t clear groceries") {
+                    Section("Couldn’t checkout") {
                         Text(clearErrorMessage).foregroundStyle(.red)
-                        Button("Retry") { confirmClear(draft) }
+                        Button("Retry") { confirmCheckout(draft) }
                             .disabled(!selectionMatches(draft))
-                            .accessibilityIdentifier("shopping.clear.retry")
+                            .accessibilityIdentifier("shopping.checkout.retry")
                     }
                 } else if !selectionMatches(draft) {
                     Section {
@@ -175,18 +178,18 @@ struct CartedGroceriesView: View {
                     }
                 }
             }
-            .navigationTitle("Clear items in cart?")
+            .navigationTitle("Checkout?")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { clearDraft = nil }
-                        .accessibilityIdentifier("shopping.clear.cancel")
+                    Button("Cancel") { checkoutDraft = nil }
+                        .accessibilityIdentifier("shopping.checkout.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Clear \(draft.preview.rows.count) groceries", role: .destructive) {
-                        confirmClear(draft)
+                    Button(checkoutLabel(count: draft.preview.rows.count)) {
+                        confirmCheckout(draft)
                     }
                     .disabled(!selectionMatches(draft))
-                    .accessibilityIdentifier("shopping.clear.confirm")
+                    .accessibilityIdentifier("shopping.checkout.confirm")
                 }
             }
         }
@@ -199,22 +202,22 @@ struct CartedGroceriesView: View {
                 Spacer()
             }
             .padding().background(.bar)
-        } else if let clearResult {
+        } else if let checkoutResult {
             HStack {
                 Text(
-                    clearResult.skipped == 0
-                        ? "Cleared \(clearResult.cleared) groceries"
-                        : "Cleared \(clearResult.cleared); skipped \(clearResult.skipped) changed groceries"
+                    checkoutResult.skipped == 0
+                        ? "Checked out \(checkoutResult.cleared) items"
+                        : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
                 )
                 .font(.subheadline)
                 Spacer()
-                Button("Undo") { undo(clearResult) }
+                Button("Undo") { undo(checkoutResult) }
                     .frame(minHeight: 44)
                     .disabled(
-                        selection.householdID != clearResult.householdID
-                            || selection.listID != clearResult.listID
+                        selection.householdID != checkoutResult.householdID
+                            || selection.listID != checkoutResult.listID
                     )
-                    .accessibilityIdentifier("shopping.clear.undo")
+                    .accessibilityIdentifier("shopping.checkout.undo")
             }
             .padding().background(.bar)
         }
@@ -240,6 +243,11 @@ struct CartedGroceriesView: View {
                 let order = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
                 return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
             }
+    }
+
+    private var allScopedCarted: [Need] {
+        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+            .filter { $0.carted && !$0.archived }
     }
 
     private var scopeDescription: String {
@@ -323,29 +331,25 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private func prepareClear(_ rows: [Need]) {
+    private func prepareCheckout() {
         guard let service, let list = canonicalList, let householdID = list.household?.id else {
             return
         }
-        let frozenScope = scopeDescription
         do {
             clearErrorMessage = nil
-            let preview = try service.prepareClearCarted(
-                householdID: householdID, listID: list.id, filter: filter,
-                restrictedToNeedIDs: Set(rows.map(\.id))
-            )
-            clearDraft = ClearCartedDraft(
-                preview: preview, scopeDescription: frozenScope,
+            let preview = try service.prepareCheckout(householdID: householdID, listID: list.id)
+            checkoutDraft = CheckoutDraft(
+                preview: preview,
                 householdID: householdID, listID: list.id)
         } catch { self.error = error }
     }
 
-    private func selectionMatches(_ draft: ClearCartedDraft) -> Bool {
+    private func selectionMatches(_ draft: CheckoutDraft) -> Bool {
         selection.householdID == draft.householdID && selection.listID == draft.listID
             && canonicalList != nil
     }
 
-    private func confirmClear(_ draft: ClearCartedDraft) {
+    private func confirmCheckout(_ draft: CheckoutDraft) {
         guard let service, selectionMatches(draft) else { return }
         do {
             let cleared = try service.clearCarted(using: draft.preview.token)
@@ -356,18 +360,19 @@ struct CartedGroceriesView: View {
                 _exit(0)
             }
 #endif
-            clearResult = ClearCartedResult(
+            checkoutResult = CheckoutResult(
                 operationID: draft.preview.token.id,
                 householdID: draft.householdID, listID: draft.listID,
                 cleared: cleared, skipped: draft.preview.rows.count - cleared)
             resultNotice = nil
             clearErrorMessage = nil
-            clearDraft = nil
+            checkoutDraft = nil
             refreshProjection()
+            if cleared > 0 { hapticFeedback.play(.success) }
         } catch { clearErrorMessage = error.localizedDescription }
     }
 
-    private func undo(_ result: ClearCartedResult) {
+    private func undo(_ result: CheckoutResult) {
         guard let service, selection.householdID == result.householdID,
             selection.listID == result.listID
         else { return }
@@ -375,10 +380,14 @@ struct CartedGroceriesView: View {
             let restored = try service.undoClear(
                 operationID: result.operationID,
                 expectedHouseholdID: result.householdID, expectedListID: result.listID)
-            clearResult = nil
+            checkoutResult = nil
             resultNotice = restoreMessage(restored: restored, expected: result.cleared)
             refreshProjection()
         } catch { self.error = error }
+    }
+
+    private func checkoutLabel(count: Int) -> String {
+        count == 1 ? "Checkout 1 item" : "Checkout \(count) items"
     }
 
     private func restoreMessage(restored: Int, expected: Int) -> String {

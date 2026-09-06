@@ -3,7 +3,7 @@ import XCTest
 final class ChecklistUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    func testFilteredClearPreviewCancelAndUndoPreserveOtherStoreGroceries() {
+    func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
         let app = launchApp(fixture: "populated")
         selectStore("Publix", app: app)
         XCTAssertTrue(cartedLink(count: 0, app: app).waitForExistence(timeout: 2))
@@ -14,20 +14,19 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         XCTAssertFalse(row("Strawberries", app: app).exists)
 
-        openClear(app: app)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Publix")).firstMatch.exists)
-        XCTAssertTrue(app.buttons["shopping.clear.confirm"].label.contains("2"))
+        openCheckout(app: app)
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Birthday candles")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Chipotles in adobo")).firstMatch.exists)
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
-        attachScreenshot("Scoped clear preview", app: app)
-        app.buttons["shopping.clear.cancel"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
+        attachScreenshot("All-items checkout preview", app: app)
+        app.buttons["shopping.checkout.cancel"].tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 2))
         XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
 
-        openClear(app: app)
-        app.buttons["shopping.clear.confirm"].tap()
-        let undo = app.buttons["shopping.clear.undo"]
+        openCheckout(app: app)
+        app.buttons["shopping.checkout.confirm"].tap()
+        let undo = app.buttons["shopping.checkout.undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 3))
         XCTAssertFalse(row("Birthday candles", app: app).exists)
         XCTAssertFalse(row("Chipotles in adobo", app: app).exists)
@@ -53,9 +52,9 @@ final class ChecklistUITests: XCTestCase {
         app.buttons["shopping.grocery.save"].tap()
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
-        openClear(app: app)
-        app.buttons["shopping.clear.confirm"].tap()
-        XCTAssertTrue(app.buttons["shopping.clear.undo"].waitForExistence(timeout: 3))
+        openCheckout(app: app)
+        app.buttons["shopping.checkout.confirm"].tap()
+        XCTAssertTrue(app.buttons["shopping.checkout.undo"].waitForExistence(timeout: 3))
 
         app.terminate()
         app.launch()
@@ -116,6 +115,11 @@ final class ChecklistUITests: XCTestCase {
         attachScreenshot("Checklist at accessibility text size", app: app)
         fullSwipeLeft(granola, app: app)
         XCTAssertFalse(granola.exists)
+        cartedLink(count: 2, app: app).tap()
+        let checkout = app.buttons["shopping.checkout.start"]
+        reveal(checkout, app: app)
+        XCTAssertGreaterThanOrEqual(checkout.frame.height, 44 - 0.01)
+        XCTAssertTrue(checkout.label.contains("2"))
     }
 
     private func launchApp(fixture: String? = nil, largeText: Bool = false) -> XCUIApplication {
@@ -180,11 +184,11 @@ final class ChecklistUITests: XCTestCase {
         )).firstMatch
     }
 
-    private func openClear(app: XCUIApplication) {
-        let clear = app.buttons["shopping.carted.clear"]
-        reveal(clear, app: app)
-        clear.tap()
-        XCTAssertTrue(app.buttons["shopping.clear.confirm"].waitForExistence(timeout: 2))
+    private func openCheckout(app: XCUIApplication) {
+        let checkout = app.buttons["shopping.checkout.start"]
+        reveal(checkout, app: app)
+        checkout.tap()
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 2))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {

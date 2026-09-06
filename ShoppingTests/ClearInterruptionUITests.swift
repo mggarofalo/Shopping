@@ -37,11 +37,11 @@ final class ClearInterruptionUITests: XCTestCase {
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.tap()
-        let clear = app.buttons["shopping.carted.clear"]
-        reveal(clear, app: app)
-        clear.tap()
-        XCTAssertTrue(app.navigationBars["Clear items in cart?"].waitForExistence(timeout: 2))
-        app.buttons["shopping.clear.confirm"].tap()
+        let checkout = app.buttons["shopping.checkout.start"]
+        reveal(checkout, app: app)
+        checkout.tap()
+        XCTAssertTrue(app.navigationBars["Checkout?"].waitForExistence(timeout: 2))
+        app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_EXIT_AFTER_CLEAR")
