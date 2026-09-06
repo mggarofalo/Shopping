@@ -17,7 +17,8 @@ struct PillFlowLayout: Layout {
         var contentWidth: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(subviewProposal)
+            let measured = subview.sizeThatFits(subviewProposal)
+            let size = CGSize(width: min(measured.width, width), height: measured.height)
             if rowWidth > 0 && rowWidth + spacing + size.width > width {
                 contentWidth = max(contentWidth, rowWidth)
                 totalHeight += rowHeight + spacing
@@ -44,7 +45,8 @@ struct PillFlowLayout: Layout {
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            let measured = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            let size = CGSize(width: min(measured.width, bounds.width), height: measured.height)
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -82,15 +84,18 @@ struct SelectionPill: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(isSelected ? Color.groceryAccent.opacity(0.18) : Color.secondary.opacity(0.1))
-            .overlay {
-                Capsule().stroke(isSelected ? Color.groceryAccent : Color.secondary.opacity(0.35))
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? Color.groceryAccent.opacity(0.18) : Color.secondary.opacity(0.1))
             }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.groceryAccent : Color.secondary.opacity(0.35))
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
         .accessibilityLabel(title)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
