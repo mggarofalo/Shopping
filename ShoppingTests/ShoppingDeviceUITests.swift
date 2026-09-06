@@ -63,6 +63,32 @@ final class ShoppingDeviceUITests: XCTestCase {
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
     }
 
+    func testCatalogRowSupportingTextContrast() throws {
+        let app = launch(fixture: "populated")
+        app.tabBars.buttons["Catalog"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        search.tap()
+        search.typeText("Granola\n")
+        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.item."))
+        XCTAssertEqual(rows.count, 1)
+        let row = rows.firstMatch
+        XCTAssertTrue(row.isHittable)
+        XCTAssertGreaterThanOrEqual(row.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        XCTAssertLessThanOrEqual(row.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        screenshot("Catalog supporting text contrast", app: app)
+        // This regression measures the catalog row's title and small captions.
+        // Navigation and filter controls are outside its scope; retain their
+        // reports as diagnostics alongside the separate primary-control audits.
+        try app.performAccessibilityAudit(for: .contrast) { issue in
+            self.attachAudit(issue, phase: "Catalog row contrast")
+            guard let element = issue.element else { return false }
+            return !self.contains(element, in: row)
+        }
+    }
+
     func testVisibleGroceryRowPassesFullAuditAtLargestText() throws {
         let app = launch(fixture: "populated", largestText: true)
         selectCostco(in: app)

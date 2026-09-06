@@ -239,10 +239,10 @@ private struct CatalogItemRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.name).foregroundStyle(.primary)
-            Text(item.purchaseDescription).font(.caption).foregroundStyle(.secondary)
-            if let category = item.category { Text(category.name).font(.caption).foregroundStyle(.secondary) }
-            if !item.notes.isEmpty { Text(item.notes).font(.subheadline).foregroundStyle(.secondary) }
-            if item.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
+            Text(item.purchaseDescription).font(.caption).foregroundStyle(Color.grocerySecondary)
+            if let category = item.category { Text(category.name).font(.caption).foregroundStyle(Color.grocerySecondary) }
+            if !item.notes.isEmpty { Text(item.notes).font(.subheadline).foregroundStyle(Color.grocerySecondary) }
+            if item.isArchived { Text("Archived").font(.caption).foregroundStyle(Color.grocerySecondary) }
         }
         .padding(.vertical, 3)
     }
