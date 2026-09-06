@@ -63,8 +63,11 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.category.cancel"].tap()
 
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        revealAbove(name, in: app)
         XCTAssertEqual(name.value as? String, "Rice noodles")
-        XCTAssertEqual(app.buttons["shopping.purchase.anyStore"].value as? String, "Selected")
+        let anyStore = app.buttons["shopping.purchase.anyStore"]
+        reveal(anyStore, in: app)
+        XCTAssertEqual(anyStore.value as? String, "Selected")
         reveal(addCategory, in: app)
         addCategory.tap()
         let savedCategoryName = app.textFields["shopping.category.name"]
@@ -78,6 +81,7 @@ final class GroceryEditingUITests: XCTestCase {
         )).firstMatch
         reveal(noodles, in: app)
         XCTAssertEqual(noodles.value as? String, "Selected")
+        revealAbove(name, in: app)
         XCTAssertEqual(name.value as? String, "Rice noodles")
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(groceryRow(named: "Rice noodles", app: app).waitForExistence(timeout: 3))
@@ -255,6 +259,13 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label == %@", "shopping.purchase.store.", name
         )).firstMatch
+    }
+
+    private func revealAbove(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<8 where !element.exists || !element.isHittable {
+            app.swipeDown()
+        }
+        XCTAssertTrue(element.waitForExistence(timeout: 2))
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
