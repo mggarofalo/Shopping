@@ -128,13 +128,15 @@ final class OneTimePromotionUITests: XCTestCase {
 
     func testCartedUrgentGroceriesSortBeforeNormalGroceries() {
         let app = launchApp(fixture: "populated")
-        let cartBananas = app.buttons["Add to cart Bananas"]
-        reveal(cartBananas, in: app)
-        cartBananas.tap()
-        let cartGranola = app.buttons["Add to cart Granola"]
-        for _ in 0..<8 where !cartGranola.exists || !cartGranola.isHittable { app.swipeDown() }
-        XCTAssertTrue(cartGranola.isHittable)
-        cartGranola.tap()
+        let bananasRow = row("Bananas", in: app)
+        reveal(bananasRow, in: app)
+        bananasRow.swipeLeft()
+        app.buttons["In cart"].tap()
+        let granolaRow = row("Granola", in: app)
+        for _ in 0..<8 where !granolaRow.exists || !granolaRow.isHittable { app.swipeDown() }
+        XCTAssertTrue(granolaRow.isHittable)
+        granolaRow.swipeLeft()
+        app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (3)")).firstMatch
         for _ in 0..<8 where !carted.exists || !carted.isHittable { app.swipeDown() }
         XCTAssertTrue(carted.waitForExistence(timeout: 3))

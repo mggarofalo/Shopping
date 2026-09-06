@@ -32,7 +32,8 @@ final class ClearInterruptionUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         let originalID = row.identifier
-        app.buttons["Add to cart Fresh ice"].tap()
+        row.swipeLeft()
+        app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.tap()

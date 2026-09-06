@@ -20,12 +20,10 @@ final class ShoppingDeviceUITests: XCTestCase {
         assertTouchSize(increase)
         increase.tap()
         XCTAssertTrue(app.staticTexts["Quantity 7"].exists)
-        let cart = app.buttons["Add to cart \(longName)"]
-        reveal(cart, in: app)
-        assertTouchSize(cart)
-        screenshot("Separate quantity and cart controls at largest text", app: app)
-        cart.tap()
-        XCTAssertFalse(cart.exists)
+        screenshot("Quantity control and swipe affordance at largest text", app: app)
+        row.swipeLeft()
+        app.buttons["In cart"].tap()
+        XCTAssertFalse(row.exists)
 
         let carted = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "In cart (2)")
@@ -33,11 +31,11 @@ final class ShoppingDeviceUITests: XCTestCase {
         reveal(carted, in: app, towardTop: true)
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 3))
-        let uncart = app.buttons["Remove from cart \(longName)"]
-        reveal(uncart, in: app)
-        assertTouchSize(uncart)
-        uncart.tap()
-        XCTAssertFalse(uncart.exists)
+        let cartedRow = app.buttons["Edit \(longName)"]
+        reveal(cartedRow, in: app, fullyVisible: false)
+        cartedRow.swipeLeft()
+        app.buttons["Remove from cart"].tap()
+        XCTAssertFalse(cartedRow.exists)
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         reveal(row, in: app, fullyVisible: false)
         XCTAssertTrue(app.tabBars.buttons["Catalog"].isHittable)

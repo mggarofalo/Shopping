@@ -778,6 +778,20 @@ struct GroceryNeedRow: View {
             )
         }
         .frame(minHeight: 44)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if let onCartedChange {
+                Button {
+                    onCartedChange(need, !need.carted)
+                } label: {
+                    Label(cartActionTitle, systemImage: cartActionSymbol)
+                }
+                .tint(need.carted ? .orange : .blue)
+                .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
+            }
+        }
+        .accessibilityAction(named: Text(cartActionAccessibilityTitle)) {
+            onCartedChange?(need, !need.carted)
+        }
     }
 
     @ViewBuilder
@@ -815,18 +829,19 @@ struct GroceryNeedRow: View {
                     .accessibilityLabel("Quantity \(need.quantity)")
                     .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
             }
-            if let onCartedChange {
-                Button {
-                    onCartedChange(need, !need.carted)
-                } label: {
-                    Image(systemName: need.carted ? "cart.badge.minus" : "cart.badge.plus")
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(need.carted ? "Remove from cart" : "Add to cart") \(title)")
-                .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
-            }
         }
+    }
+
+    private var cartActionTitle: String {
+        need.carted ? "Remove from cart" : "In cart"
+    }
+
+    private var cartActionSymbol: String {
+        need.carted ? "cart.badge.minus" : "cart.fill"
+    }
+
+    private var cartActionAccessibilityTitle: String {
+        "\(cartActionTitle) \(title)"
     }
 
     private func quantityButton(

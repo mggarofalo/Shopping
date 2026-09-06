@@ -69,7 +69,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(cartedLink(count: 1, app: app).waitForExistence(timeout: 3))
         cartedLink(count: 1, app: app).tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 2))
-        app.buttons["Remove from cart Weekend ice"].tap()
+        uncart("Weekend ice", app: app)
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(row("Weekend ice", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
@@ -87,10 +87,7 @@ final class ChecklistUITests: XCTestCase {
         cart("Granola", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
-        let uncart = app.buttons["Remove from cart Granola"]
-        reveal(uncart, app: app)
-        XCTAssertGreaterThanOrEqual(uncart.frame.height, 44 - 0.01)
-        uncart.tap()
+        uncart("Granola", app: app)
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         reveal(row("Granola", app: app), app: app)
 
@@ -110,16 +107,15 @@ final class ChecklistUITests: XCTestCase {
     func testChecklistControlsRemainUsableAtAccessibilityTextSize() {
         let app = launchApp(fixture: "populated", largeText: true)
         selectStore("Costco", app: app)
-        let cart = app.buttons["Add to cart Granola"]
-        reveal(cart, app: app)
-        XCTAssertGreaterThanOrEqual(cart.frame.height, 44 - 0.01)
+        let granola = row("Granola", app: app)
+        reveal(granola, app: app)
+        XCTAssertGreaterThanOrEqual(granola.frame.height, 44 - 0.01)
         let quantity = app.buttons["Increase quantity for Granola"]
         reveal(quantity, app: app)
         XCTAssertGreaterThanOrEqual(quantity.frame.height, 44 - 0.01)
         attachScreenshot("Checklist at accessibility text size", app: app)
-        reveal(cart, app: app)
-        cart.tap()
-        XCTAssertFalse(cart.exists)
+        fullSwipeLeft(granola, app: app)
+        XCTAssertFalse(granola.exists)
     }
 
     private func launchApp(fixture: String? = nil, largeText: Bool = false) -> XCUIApplication {
@@ -143,10 +139,35 @@ final class ChecklistUITests: XCTestCase {
     }
 
     private func cart(_ name: String, app: XCUIApplication) {
-        let button = app.buttons["Add to cart \(name)"]
-        reveal(button, app: app)
-        button.tap()
-        XCTAssertFalse(button.exists)
+        let grocery = row(name, app: app)
+        reveal(grocery, app: app)
+        revealSwipeAction("In cart", for: grocery, app: app)
+        app.buttons["In cart"].tap()
+        XCTAssertFalse(grocery.exists)
+    }
+
+    private func uncart(_ name: String, app: XCUIApplication) {
+        let grocery = row(name, app: app)
+        reveal(grocery, app: app)
+        revealSwipeAction("Remove from cart", for: grocery, app: app)
+        app.buttons["Remove from cart"].tap()
+        XCTAssertFalse(grocery.exists)
+    }
+
+    private func revealSwipeAction(_ label: String, for row: XCUIElement, app: XCUIApplication) {
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 2))
+    }
+
+    private func fullSwipeLeft(_ row: XCUIElement, app: XCUIApplication) {
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(
+            dx: 0.01,
+            dy: row.frame.midY / app.frame.height
+        ))
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     private func cartedLink(count: Int, app: XCUIApplication) -> XCUIElement {
