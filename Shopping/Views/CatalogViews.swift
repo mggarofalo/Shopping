@@ -21,16 +21,13 @@ struct CatalogFilterState: Equatable {
     }
 }
 
-private enum CatalogScope {
-    static func household(lists: [GroceryList], selection: PersistenceSelection) -> Household? {
-        guard let householdID = selection.householdID, let listID = selection.listID,
-              householdID != PersistenceModel.unsetID, listID != PersistenceModel.unsetID else { return nil }
-        let matches = lists.filter { $0.id == listID }
-        guard matches.count == 1, let list = matches.first,
-              let household = list.household, household.id == householdID,
-              household.objectID.persistentStore != nil,
-              household.objectID.persistentStore == list.objectID.persistentStore else { return nil }
-        return household
+enum CatalogScope {
+    static func canonicalList(
+        lists: [GroceryList],
+        households: [Household],
+        selection: PersistenceSelection
+    ) -> GroceryList? {
+        GroceryRowScope.canonicalList(lists, households: households, selection: selection)
     }
 
     static func items(_ items: [Item], household: Household?) -> [Item] {
@@ -68,6 +65,7 @@ struct CatalogView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var searchText = ""
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
@@ -76,12 +74,17 @@ struct CatalogView: View {
     @State private var editor: CatalogEditSession?
     @State private var errorMessage: String?
 
-    private var household: Household? { CatalogScope.household(lists: Array(lists), selection: selection) }
+    private var canonicalList: GroceryList? {
+        CatalogScope.canonicalList(
+            lists: Array(lists), households: Array(households), selection: selection
+        )
+    }
+    private var household: Household? { canonicalList?.household }
     private var scopedItems: [Item] { CatalogScope.items(Array(items), household: household) }
     private var scopedCategories: [Category] { CatalogScope.categories(Array(categories), household: household) }
     private var activeStores: [Store] {
-        PurchaseRulesStoreScope.validStores(Array(stores), lists: Array(lists),
-            householdID: selection.householdID, listID: selection.listID).filter { !$0.isArchived }
+        GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+            .filter { !$0.isArchived }
     }
     private var visibleItems: [Item] {
         scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
@@ -290,6 +293,7 @@ private struct CatalogEditorView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var itemID: UUID?
     @State private var values: CatalogItemValues
     @State private var allowingNameCollision = false
@@ -306,7 +310,11 @@ private struct CatalogEditorView: View {
         _values = State(initialValue: session.values)
     }
 
-    private var household: Household? { CatalogScope.household(lists: Array(lists), selection: session.selection) }
+    private var household: Household? {
+        CatalogScope.canonicalList(
+            lists: Array(lists), households: Array(households), selection: session.selection
+        )?.household
+    }
     private var scopedItems: [Item] { CatalogScope.items(Array(items), household: household) }
     private var scopedCategories: [Category] { CatalogScope.categories(Array(categories), household: household) }
     private var currentItem: Item? { scopedItems.first { $0.id == itemID } }
@@ -399,19 +407,33 @@ private struct CatalogEditorView: View {
     }
 
     private func save() {
-        guard scopeAvailable, let service, let householdID = session.selection.householdID else { return }
+        guard scopeAvailable, let service, let householdID = session.selection.householdID,
+              let listID = session.selection.listID else { return }
         do {
-            if let itemID { try service.saveCatalogItem(itemID: itemID, householdID: householdID, values: values, allowingNameCollision: allowingNameCollision) }
-            else { _ = try service.createCatalogItem(values: values, householdID: householdID, allowingNameCollision: allowingNameCollision) }
+            if let itemID {
+                try service.saveCatalogItem(
+                    itemID: itemID, householdID: householdID, listID: listID,
+                    values: values, allowingNameCollision: allowingNameCollision
+                )
+            } else {
+                _ = try service.createCatalogItem(
+                    values: values, householdID: householdID, listID: listID,
+                    allowingNameCollision: allowingNameCollision
+                )
+            }
             onSaved()
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
     private func archive(_ archived: Bool) {
-        guard scopeAvailable, let service, let householdID = session.selection.householdID, let itemID else { return }
+        guard scopeAvailable, let service, let householdID = session.selection.householdID,
+              let listID = session.selection.listID, let itemID else { return }
         do {
-            try service.setCatalogItemArchived(itemID: itemID, householdID: householdID, archived: archived)
+            try service.setCatalogItemArchived(
+                itemID: itemID, householdID: householdID, listID: listID,
+                archived: archived
+            )
             onSaved()
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }

@@ -128,8 +128,9 @@ final class CategoryManagementTests: XCTestCase {
         let service = NeedService(persistence: persistence)
         let local = try service.createHousehold()
         let localCategoryID = try service.createCategory(name: "Local", householdID: local.householdID)
+        let foreignHouseholdID = UUID()
         try insertSecondaryCategoryGraph(
-            householdID: local.householdID,
+            householdID: foreignHouseholdID,
             listID: UUID(),
             categories: [(UUID(), "Foreign unique")],
             persistence: persistence
@@ -140,7 +141,7 @@ final class CategoryManagementTests: XCTestCase {
         )
 
         try insertCategoryInSecondaryHousehold(
-            id: localCategoryID, name: "Foreign duplicate", householdID: local.householdID, persistence: persistence
+            id: localCategoryID, name: "Foreign duplicate", householdID: foreignHouseholdID, persistence: persistence
         )
         XCTAssertEqual(
             try scopedCategoryIDs(householdID: local.householdID, listID: local.listID, persistence: persistence),
@@ -162,17 +163,68 @@ final class CategoryManagementTests: XCTestCase {
         let context = duplicateListPersistence.simulationContext()
         try context.performAndWait {
             let lists = try context.fetch(GroceryList.fetchRequest())
+            let households = try context.fetch(Household.fetchRequest())
             XCTAssertNil(CategoryManagementScope.household(
                 lists: lists,
+                households: households,
                 householdID: duplicateListLocal.householdID,
                 listID: duplicateListLocal.listID
             ))
             XCTAssertTrue(CategoryManagementScope.validCategories(
                 try context.fetch(Shopping.Category.fetchRequest()),
                 lists: lists,
+                households: households,
                 householdID: duplicateListLocal.householdID,
                 listID: duplicateListLocal.listID
             ).isEmpty)
+        }
+    }
+
+    func testCategoryAndCatalogUIScopesRejectDuplicateHouseholdIdentity() throws {
+        let persistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let categoryID = try service.createCategory(name: "Produce", householdID: local.householdID)
+        _ = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Apples", notes: "", categoryID: categoryID,
+                anyStore: true, storeIDs: []
+            ),
+            householdID: local.householdID
+        )
+        try insertSecondaryCategoryGraph(
+            householdID: local.householdID, listID: UUID(), categories: [],
+            persistence: persistence
+        )
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let lists = try context.fetch(GroceryList.fetchRequest())
+            let households = try context.fetch(Household.fetchRequest())
+            let categories = try context.fetch(Shopping.Category.fetchRequest())
+            let items = try context.fetch(Item.fetchRequest())
+            XCTAssertNil(CategoryManagementScope.household(
+                lists: lists, households: households,
+                householdID: local.householdID, listID: local.listID
+            ))
+            XCTAssertTrue(CategoryManagementScope.validCategories(
+                categories, lists: lists, households: households,
+                householdID: local.householdID, listID: local.listID
+            ).isEmpty)
+
+            let canonicalList = CatalogScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: local.householdID, listID: local.listID
+                )
+            )
+            XCTAssertNil(canonicalList)
+            XCTAssertTrue(CatalogScope.categories(
+                categories, household: canonicalList?.household
+            ).isEmpty)
+            XCTAssertTrue(CatalogScope.items(items, household: canonicalList?.household).isEmpty)
         }
     }
 
@@ -311,6 +363,7 @@ final class CategoryManagementTests: XCTestCase {
             CategoryManagementScope.validCategories(
                 try context.fetch(Shopping.Category.fetchRequest()),
                 lists: try context.fetch(GroceryList.fetchRequest()),
+                households: try context.fetch(Household.fetchRequest()),
                 householdID: householdID,
                 listID: listID
             ).map(\.id)

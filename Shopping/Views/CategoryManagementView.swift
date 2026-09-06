@@ -93,26 +93,27 @@ enum CategoryGrouping {
 enum CategoryManagementScope {
     static func household(
         lists: [GroceryList],
+        households: [Household],
         householdID: UUID?,
         listID: UUID?
     ) -> Household? {
-        guard let householdID, let listID,
-              householdID != PersistenceModel.unsetID, listID != PersistenceModel.unsetID else { return nil }
-        let matchingLists = lists.filter { $0.id == listID }
-        guard matchingLists.count == 1, let household = matchingLists[0].household,
-              household.id == householdID,
-              let persistentStore = household.objectID.persistentStore,
-              matchingLists[0].objectID.persistentStore == persistentStore else { return nil }
-        return household
+        GroceryRowScope.canonicalList(
+            lists, households: households,
+            selection: PersistenceSelection(householdID: householdID, listID: listID)
+        )?.household
     }
 
     static func validCategories(
         _ categories: [Category],
         lists: [GroceryList],
+        households: [Household],
         householdID: UUID?,
         listID: UUID?
     ) -> [Category] {
-        guard let household = Self.household(lists: lists, householdID: householdID, listID: listID),
+        guard let household = Self.household(
+            lists: lists, households: households,
+            householdID: householdID, listID: listID
+        ),
               let persistentStore = household.objectID.persistentStore else { return [] }
         let counts = Dictionary(grouping: categories, by: \.id).mapValues(\.count)
         return categories.filter {
@@ -127,6 +128,7 @@ struct CategoryManagementView: View {
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var draftName = ""
     @State private var renameName = ""
     @State private var editingCategory: Category?
@@ -135,14 +137,15 @@ struct CategoryManagementView: View {
 
     private var householdCategories: [Category] {
         CategoryManagementScope.validCategories(
-            Array(categories), lists: Array(lists),
+            Array(categories), lists: Array(lists), households: Array(households),
             householdID: selection.householdID, listID: selection.listID
         )
     }
 
     private var selectionAvailable: Bool {
         service != nil && CategoryManagementScope.household(
-            lists: Array(lists), householdID: selection.householdID, listID: selection.listID
+            lists: Array(lists), households: Array(households),
+            householdID: selection.householdID, listID: selection.listID
         ) != nil
     }
 
@@ -227,11 +230,15 @@ struct CategoryManagementView: View {
     }
 
     private func create() {
-        guard selectionAvailable, let service, let householdID = selection.householdID else { return }
+        guard selectionAvailable, let service, let householdID = selection.householdID,
+              let listID = selection.listID else { return }
         do {
             let currentMaximum = householdCategories.map(\.displayOrder).max() ?? -1
             let nextOrder = currentMaximum == Int64.max ? Int64.max : currentMaximum + 1
-            _ = try service.createCategory(name: draftName, householdID: householdID, displayOrder: nextOrder)
+            _ = try service.createCategory(
+                name: draftName, householdID: householdID, listID: listID,
+                displayOrder: nextOrder
+            )
             draftName = ""
         } catch { self.error = error }
     }
@@ -244,26 +251,36 @@ struct CategoryManagementView: View {
     }
 
     private func rename(_ category: Category) {
-        guard selectionAvailable, let service, let householdID = selection.householdID else { return }
+        guard selectionAvailable, let service, let householdID = selection.householdID,
+              let listID = selection.listID else { return }
         do {
-            try service.renameCategory(name: renameName, categoryID: category.id, householdID: householdID)
+            try service.renameCategory(
+                name: renameName, categoryID: category.id, householdID: householdID,
+                listID: listID
+            )
             editingCategory = nil
         } catch { self.error = error }
     }
 
     private func remove(_ category: Category) {
-        guard selectionAvailable, let service, let householdID = selection.householdID else { return }
+        guard selectionAvailable, let service, let householdID = selection.householdID,
+              let listID = selection.listID else { return }
         do {
-            try service.removeCategory(categoryID: category.id, householdID: householdID)
+            try service.removeCategory(
+                categoryID: category.id, householdID: householdID, listID: listID
+            )
             removingCategory = nil
         } catch { self.error = error }
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
-        guard selectionAvailable, let service, let householdID = selection.householdID else { return }
+        guard selectionAvailable, let service, let householdID = selection.householdID,
+              let listID = selection.listID else { return }
         var ids = householdCategories.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
-        do { try service.reorderCategories(ids, householdID: householdID) } catch { self.error = error }
+        do {
+            try service.reorderCategories(ids, householdID: householdID, listID: listID)
+        } catch { self.error = error }
     }
 }
 

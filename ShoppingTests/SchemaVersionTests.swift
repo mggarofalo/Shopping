@@ -70,7 +70,7 @@ final class SchemaVersionTests: XCTestCase {
             let listRequest = GroceryList.fetchRequest()
             listRequest.predicate = NSPredicate(format: "id == %@", ids.listID as CVarArg)
             let list = try XCTUnwrap(context.fetch(listRequest).first)
-            let need = Need(context: context)
+            let need = NSEntityDescription.insertNewObject(forEntityName: "Need", into: context) as! Need
             need.kind = NeedKind.oneTime.rawValue
             need.title = "Incomplete import"
             need.carted = true
@@ -90,19 +90,19 @@ final class SchemaVersionTests: XCTestCase {
             .appendingPathComponent("ShoppingIDAccessor-\(UUID().uuidString)")
         let storeURL = directory.appendingPathComponent("Store.sqlite")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
         let expectedID = UUID()
         do {
             let persistent = try PersistenceController(storeURL: storeURL)
             let savedContext = persistent.simulationContext()
             try savedContext.performAndWait {
-                let household = Household(context: savedContext)
+                let household = NSEntityDescription.insertNewObject(forEntityName: "Household", into: savedContext) as! Household
                 XCTAssertNil(household.primitiveValue(forKey: "id"))
                 XCTAssertEqual(household.id, PersistenceModel.unsetID)
                 household.id = expectedID
                 household.name = "Saved ID"
                 try savedContext.save()
             }
+            try close(persistent, contexts: [savedContext])
         }
         do {
             let reopened = try PersistenceController(storeURL: storeURL)
@@ -112,7 +112,9 @@ final class SchemaVersionTests: XCTestCase {
                 XCTAssertEqual(household.id, expectedID)
                 XCTAssertEqual(household.primitiveValue(forKey: "id") as? UUID, expectedID)
             }
+            try close(reopened, contexts: [reopenedContext])
         }
+        try FileManager.default.removeItem(at: directory)
     }
 
     func testSavedV1FixtureIsCompatibleAndPreservesRecoveryGraph() throws {
@@ -168,9 +170,6 @@ final class SchemaVersionTests: XCTestCase {
             .appendingPathComponent("ShoppingV1Recovery-\(UUID().uuidString)")
         let recoveryStoreURL = recoveryDirectoryURL.appendingPathComponent("ShoppingV1Recovery.sqlite")
         try FileManager.default.createDirectory(at: recoveryDirectoryURL, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: recoveryDirectoryURL)
-        }
         try FileManager.default.copyItem(at: fixtureURL, to: recoveryStoreURL)
         do {
             let persistence = try PersistenceController(storeURL: recoveryStoreURL)
@@ -188,7 +187,17 @@ final class SchemaVersionTests: XCTestCase {
                 XCTAssertEqual(recovered.oneTimeCategory?.name, "Frozen")
                 XCTAssertEqual(recovered.oneTimeStores?.map(\.name), ["Costco"])
             }
+            try close(persistence, contexts: [recoveryContext])
         }
+        try FileManager.default.removeItem(at: recoveryDirectoryURL)
+    }
+
+    private func close(_ persistence: PersistenceController, contexts: [NSManagedObjectContext]) throws {
+        for context in contexts + [persistence.writer, persistence.container.viewContext] {
+            context.performAndWait { context.reset() }
+        }
+        let coordinator = persistence.container.persistentStoreCoordinator
+        for store in coordinator.persistentStores { try coordinator.remove(store) }
     }
 
     private func attribute(_ name: String, in entity: NSEntityDescription) throws -> NSAttributeDescription {

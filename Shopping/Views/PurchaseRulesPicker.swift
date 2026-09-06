@@ -37,15 +37,19 @@ struct PurchaseRulesPicker: View {
     let listID: UUID?
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
 
     private var scopedListID: UUID? {
         listID ?? (selection.householdID == householdID ? selection.listID : nil)
     }
 
     private var validStores: [Store] {
-        PurchaseRulesStoreScope.validStores(
-            Array(stores), lists: Array(lists), householdID: householdID, listID: scopedListID
-        )
+        GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+    }
+
+    private var canonicalList: GroceryList? {
+        guard selection.householdID == householdID, selection.listID == scopedListID else { return nil }
+        return GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
     }
 
     var body: some View {
@@ -82,12 +86,12 @@ struct PurchaseRulesPicker: View {
                 Text("Choose an active store or turn on Any store.").font(.footnote).foregroundStyle(.secondary)
             }
             NavigationLink {
-                StoreCreationView(householdID: householdID, listID: listID) { id in
+                StoreCreationView(householdID: householdID, listID: scopedListID) { id in
                     storeIDs.insert(id)
                 }
             } label: { Label("Add store", systemImage: "plus") }
                 .accessibilityIdentifier("shopping.tags.addStore")
-                .disabled(householdID == nil)
+                .disabled(canonicalList == nil)
         }
 
     }
@@ -99,24 +103,30 @@ private struct StoreCreationView: View {
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var name = ""
     @State private var error: Error?
+    @State private var capturedScope: StoreManagementCommandScope?
+    @State private var didCaptureScope = false
     let householdID: UUID?
     let listID: UUID?
     let onSelected: (UUID) -> Void
 
     private var scopeAvailable: Bool {
-        householdID != nil && selection.householdID == householdID &&
-            (listID == nil || selection.listID == listID) && service != nil
+        service != nil && StoreManagementScope.permits(capturedScope, canonicalList: canonicalList)
+    }
+
+    private var canonicalList: GroceryList? {
+        guard householdID != nil, listID != nil,
+            selection.householdID == householdID, selection.listID == listID else { return nil }
+        return GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
     }
 
     private var matches: [Store] {
         let query = CatalogProjection.normalizedName(name)
         guard !query.isEmpty else { return [] }
-        return PurchaseRulesStoreScope.validStores(
-            Array(stores), lists: Array(lists), householdID: householdID,
-            listID: listID ?? (selection.householdID == householdID ? selection.listID : nil)
-        ).filter { CatalogProjection.normalizedName($0.name).contains(query) }
+        return GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+            .filter { CatalogProjection.normalizedName($0.name).contains(query) }
     }
 
     var body: some View {
@@ -133,12 +143,17 @@ private struct StoreCreationView: View {
                         }
                     }
                 }
-                Text("Save store adds it to your household. The grocery is saved separately when you tap Add.")
+                Text("Save store adds it to your household. The grocery is saved separately.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if !scopeAvailable { Text("This household is unavailable. Your store draft is still here.") }
                 if let error { Text(error.localizedDescription).foregroundStyle(.red) }
             }
             .navigationTitle("Add store")
+            .onAppear {
+                guard !didCaptureScope else { return }
+                capturedScope = StoreManagementCommandScope(canonicalList: canonicalList)
+                didCaptureScope = true
+            }
             .navigationBarBackButtonHidden()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -150,10 +165,11 @@ private struct StoreCreationView: View {
     }
 
     private func select(_ store: Store) {
-        guard scopeAvailable, let service, let householdID else { return }
+        guard scopeAvailable, matches.contains(store), let service, let capturedScope else { return }
         do {
             if store.isArchived {
-                try service.setStoreArchived(false, storeID: store.id, householdID: householdID)
+                try service.setStoreArchived(
+                    false, storeID: store.id, householdID: capturedScope.householdID, listID: capturedScope.listID)
             }
             onSelected(store.id)
             dismiss()
@@ -161,9 +177,10 @@ private struct StoreCreationView: View {
     }
 
     private func save() {
-        guard scopeAvailable, let service, let householdID else { return }
+        guard scopeAvailable, let service, let capturedScope else { return }
         do {
-            onSelected(try service.createStore(name: name, householdID: householdID))
+            onSelected(try service.createStore(
+                name: name, householdID: capturedScope.householdID, listID: capturedScope.listID))
             dismiss()
         } catch { self.error = error }
     }

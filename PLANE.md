@@ -62,3 +62,5 @@ Keep the root checkout on `main` and create every issue, epic, and milestone che
 The phase milestone branch is the integration target. Optional epic branches within a phase target the milestone branch, then completed issue branches are squash-merged locally into their parent or milestone. At phase completion, open the milestone-to-`main` PR; CI and required approval are mandatory before merging.
 
 Phase 2 local UI work is currently stacked on `milestone/phase-1` at `82669cd`. This carries the validated local persistence and fixtures while Phase 1 enrollment/live sharing proof remains open. Keep both milestones distinct; reconcile the phase-2 base after the approved phase-1 merge. A stacked branch is not evidence that the sharing gate is complete.
+
+Phase 3 local data validation is stacked on `milestone/phase-2` at `e37934c`, including the promotion test geometry repair after all core shopping-loop issues passed local validation. Its work remains isolated in `milestone/phase-3`; final integration waits for healthy upstream CI. Reconcile this stack after the approved earlier-phase merges. Physical-device and live-sharing acceptance remain separate gates.

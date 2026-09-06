@@ -1,8 +1,175 @@
 import CoreData
 import XCTest
+
 @testable import Shopping
 
 final class StoreManagementTests: XCTestCase {
+    func testSettingsScopeRequiresGloballyCanonicalHouseholdListAndStoreIdentities() throws {
+        let persistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let localStore = try service.createStore(
+            name: "Local store", householdID: local.householdID)
+
+        XCTAssertEqual(
+            try settingsScopeState(local, persistence: persistence),
+            SettingsScopeState(householdAvailable: true, storeIDs: [localStore])
+        )
+
+        try insertDuplicateHouseholdGraphInSecondary(
+            householdID: local.householdID, listID: UUID(), stores: [(UUID(), "Foreign")],
+            persistence: persistence
+        )
+        XCTAssertEqual(
+            try settingsScopeState(local, persistence: persistence),
+            SettingsScopeState(householdAvailable: false, storeIDs: [])
+        )
+
+        let duplicateListPersistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let duplicateListService = NeedService(persistence: duplicateListPersistence)
+        let duplicateListLocal = try duplicateListService.createHousehold(name: "Local")
+        _ = try duplicateListService.createStore(
+            name: "Local store", householdID: duplicateListLocal.householdID)
+        try insertDuplicateHouseholdGraphInSecondary(
+            householdID: UUID(), listID: duplicateListLocal.listID, stores: [(UUID(), "Foreign")],
+            persistence: duplicateListPersistence
+        )
+        XCTAssertEqual(
+            try settingsScopeState(duplicateListLocal, persistence: duplicateListPersistence),
+            SettingsScopeState(householdAvailable: false, storeIDs: [])
+        )
+
+        let duplicateStorePersistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let duplicateStoreService = NeedService(persistence: duplicateStorePersistence)
+        let duplicateStoreLocal = try duplicateStoreService.createHousehold(name: "Local")
+        let duplicateStoreID = try duplicateStoreService.createStore(
+            name: "Local store", householdID: duplicateStoreLocal.householdID
+        )
+        try insertDuplicateHouseholdGraphInSecondary(
+            householdID: UUID(), listID: UUID(),
+            stores: [(duplicateStoreID, "Globally duplicated store")],
+            persistence: duplicateStorePersistence
+        )
+        XCTAssertEqual(
+            try settingsScopeState(duplicateStoreLocal, persistence: duplicateStorePersistence),
+            SettingsScopeState(householdAvailable: true, storeIDs: [])
+        )
+    }
+
+    func testSettingsScopeDoesNotAdoptHouseholdGraphFromAnotherPersistentStore() throws {
+        let persistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let localStore = try service.createStore(name: "Local", householdID: local.householdID)
+        try insertDuplicateHouseholdGraphInSecondary(
+            householdID: UUID(), listID: UUID(), stores: [(UUID(), "Secondary")],
+            persistence: persistence
+        )
+
+        XCTAssertEqual(
+            try settingsScopeState(local, persistence: persistence),
+            SettingsScopeState(householdAvailable: true, storeIDs: [localStore])
+        )
+    }
+
+    func testStagedSettingsCommandRemainsBoundToOriginalCanonicalObjects() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let first = try service.createHousehold(name: "First")
+        let second = try service.createHousehold(name: "Second")
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let lists = try context.fetch(PurchaseRulesStoreScope.listsRequest())
+            let households = try context.fetch(NavigationFetchRequests.households())
+            let original = StoreManagementScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: first.householdID, listID: first.listID)
+            )
+            let staged = try XCTUnwrap(StoreManagementCommandScope(canonicalList: original))
+            XCTAssertTrue(StoreManagementScope.permits(staged, canonicalList: original))
+
+            let retargeted = StoreManagementScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: second.householdID, listID: second.listID)
+            )
+            XCTAssertFalse(StoreManagementScope.permits(staged, canonicalList: retargeted))
+            XCTAssertEqual(staged.householdID, first.householdID)
+            XCTAssertEqual(staged.listID, first.listID)
+        }
+    }
+
+    func testScopedStoreWritersRejectDuplicateListImportedAfterStaleUISnapshot() throws {
+        let persistence = try PersistenceController(
+            storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
+        )
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold(name: "Local")
+        let first = try service.createStore(
+            name: "First", householdID: selection.householdID, displayOrder: 0)
+        let second = try service.createStore(
+            name: "Second", householdID: selection.householdID, displayOrder: 1)
+
+        let staleUIContext = persistence.simulationContext()
+        let staleSnapshot = try staleUIContext.performAndWait {
+            let lists = try staleUIContext.fetch(PurchaseRulesStoreScope.listsRequest())
+            let households = try staleUIContext.fetch(NavigationFetchRequests.households())
+            let canonicalList = StoreManagementScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: selection.householdID, listID: selection.listID
+                )
+            )
+            return (
+                scope: try XCTUnwrap(StoreManagementCommandScope(canonicalList: canonicalList)),
+                list: try XCTUnwrap(canonicalList)
+            )
+        }
+        let before = try writerRaceState(selection.householdID, persistence: persistence)
+
+        try insertDuplicateHouseholdGraphInSecondary(
+            householdID: UUID(), listID: selection.listID, stores: [], persistence: persistence
+        )
+        XCTAssertTrue(
+            staleUIContext.performAndWait {
+                return StoreManagementScope.permits(
+                    staleSnapshot.scope, canonicalList: staleSnapshot.list
+                )
+            },
+            "The retained UI snapshot deliberately remains stale after the import"
+        )
+
+        assertError(.scopeChanged) {
+            try service.createStore(
+                name: "Must not exist", householdID: selection.householdID,
+                listID: selection.listID)
+        }
+        assertError(.scopeChanged) {
+            try service.renameStore(
+                name: "Must not rename", storeID: first, householdID: selection.householdID,
+                listID: selection.listID)
+        }
+        assertError(.scopeChanged) {
+            try service.setStoreArchived(
+                true, storeID: first, householdID: selection.householdID,
+                listID: selection.listID)
+        }
+        assertError(.scopeChanged) {
+            try service.reorderStores(
+                [second, first], householdID: selection.householdID, listID: selection.listID)
+        }
+        XCTAssertEqual(try writerRaceState(selection.householdID, persistence: persistence), before)
+    }
+
     func testPurchaseRuleStoreScopeUsesCanonicalListGraphAcrossPersistentStores() throws {
         let persistence = try PersistenceController(
             storeURL: temporaryStoreURL(),
@@ -10,7 +177,8 @@ final class StoreManagementTests: XCTestCase {
         )
         let service = NeedService(persistence: persistence)
         let local = try service.createHousehold(name: "Local")
-        let localStoreID = try service.createStore(name: "Local store", householdID: local.householdID)
+        let localStoreID = try service.createStore(
+            name: "Local store", householdID: local.householdID)
         let foreignStoreID = UUID()
         try insertDuplicateHouseholdGraphInSecondary(
             householdID: local.householdID,
@@ -22,7 +190,9 @@ final class StoreManagementTests: XCTestCase {
         var visible = try scopedStoreIDs(
             householdID: local.householdID, listID: local.listID, persistence: persistence
         )
-        XCTAssertEqual(visible, [localStoreID], "A duplicated household UUID must not widen the canonical list graph")
+        XCTAssertEqual(
+            visible, [localStoreID],
+            "A duplicated household UUID must not widen the canonical list graph")
 
         try insertStoreInSecondaryHousehold(
             id: localStoreID,
@@ -33,7 +203,8 @@ final class StoreManagementTests: XCTestCase {
         visible = try scopedStoreIDs(
             householdID: local.householdID, listID: local.listID, persistence: persistence
         )
-        XCTAssertEqual(visible, [], "A globally duplicated Store identity must not expose either candidate")
+        XCTAssertEqual(
+            visible, [], "A globally duplicated Store identity must not expose either candidate")
 
         let duplicateListPersistence = try PersistenceController(
             storeURL: temporaryStoreURL(),
@@ -68,17 +239,28 @@ final class StoreManagementTests: XCTestCase {
         let selection = try service.createHousehold()
         let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-        let storeA = try service.createStore(name: "Later inserted", householdID: selection.householdID, displayOrder: 4)
-        let storeB = try service.createStore(name: "Earlier UUID", householdID: selection.householdID, displayOrder: 4)
-        let categoryA = try service.createCategory(name: "Later inserted", householdID: selection.householdID, displayOrder: 9)
-        let categoryB = try service.createCategory(name: "Earlier UUID", householdID: selection.householdID, displayOrder: 9)
-        try replaceIDs([(storeA, secondID), (storeB, firstID)], entityName: "Store", persistence: persistence)
-        try replaceIDs([(categoryA, secondID), (categoryB, firstID)], entityName: "Category", persistence: persistence)
+        let storeA = try service.createStore(
+            name: "Later inserted", householdID: selection.householdID, displayOrder: 4)
+        let storeB = try service.createStore(
+            name: "Earlier UUID", householdID: selection.householdID, displayOrder: 4)
+        let categoryA = try service.createCategory(
+            name: "Later inserted", householdID: selection.householdID, displayOrder: 9)
+        let categoryB = try service.createCategory(
+            name: "Earlier UUID", householdID: selection.householdID, displayOrder: 9)
+        try replaceIDs(
+            [(storeA, secondID), (storeB, firstID)], entityName: "Store", persistence: persistence)
+        try replaceIDs(
+            [(categoryA, secondID), (categoryB, firstID)], entityName: "Category",
+            persistence: persistence)
 
         let context = persistence.simulationContext()
         for _ in 0..<2 {
-            let storeIDs = try context.performAndWait { try context.fetch(NavigationFetchRequests.stores()).map(\.id) }
-            let categoryIDs = try context.performAndWait { try context.fetch(NavigationFetchRequests.categories()).map(\.id) }
+            let storeIDs = try context.performAndWait {
+                try context.fetch(NavigationFetchRequests.stores()).map(\.id)
+            }
+            let categoryIDs = try context.performAndWait {
+                try context.fetch(NavigationFetchRequests.categories()).map(\.id)
+            }
             XCTAssertEqual(storeIDs, [firstID, secondID])
             XCTAssertEqual(categoryIDs, [firstID, secondID])
             context.performAndWait { context.reset() }
@@ -125,13 +307,19 @@ final class StoreManagementTests: XCTestCase {
         let foreign = try service.createHousehold(name: "Foreign")
         let storeID = try service.createStore(name: "Costco", householdID: local.householdID)
 
-        try service.renameStore(name: "  Costco Wholesale  ", storeID: storeID, householdID: local.householdID)
+        try service.renameStore(
+            name: "  Costco Wholesale  ", storeID: storeID, householdID: local.householdID)
         XCTAssertEqual(try storeState(storeID, persistence: persistence).name, "Costco Wholesale")
 
-        XCTAssertThrowsError(try service.renameStore(name: " \n ", storeID: storeID, householdID: local.householdID)) {
+        XCTAssertThrowsError(
+            try service.renameStore(name: " \n ", storeID: storeID, householdID: local.householdID)
+        ) {
             XCTAssertEqual($0 as? NeedServiceError, .invalidName)
         }
-        XCTAssertThrowsError(try service.renameStore(name: "Wrong", storeID: storeID, householdID: foreign.householdID)) {
+        XCTAssertThrowsError(
+            try service.renameStore(
+                name: "Wrong", storeID: storeID, householdID: foreign.householdID)
+        ) {
             XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
         }
         XCTAssertEqual(try storeState(storeID, persistence: persistence).name, "Costco Wholesale")
@@ -145,17 +333,23 @@ final class StoreManagementTests: XCTestCase {
         let aldi = try service.createStore(name: "Aldi", householdID: local.householdID)
         let costco = try service.createStore(name: "Costco", householdID: local.householdID)
         let publix = try service.createStore(name: "Publix", householdID: local.householdID)
-        let foreignStore = try service.createStore(name: "Foreign", householdID: foreign.householdID)
+        let foreignStore = try service.createStore(
+            name: "Foreign", householdID: foreign.householdID)
 
         try service.reorderStores([publix, aldi, costco], householdID: local.householdID)
         let expected = [publix, aldi, costco]
         XCTAssertEqual(try orderedStoreIDs(local.householdID, persistence: persistence), expected)
 
-        for invalid in [[publix, aldi], [publix, aldi, aldi], [publix, aldi, UUID()], [publix, aldi, foreignStore]] {
-            XCTAssertThrowsError(try service.reorderStores(invalid, householdID: local.householdID)) {
+        for invalid in [
+            [publix, aldi], [publix, aldi, aldi], [publix, aldi, UUID()],
+            [publix, aldi, foreignStore],
+        ] {
+            XCTAssertThrowsError(try service.reorderStores(invalid, householdID: local.householdID))
+            {
                 XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
             }
-            XCTAssertEqual(try orderedStoreIDs(local.householdID, persistence: persistence), expected)
+            XCTAssertEqual(
+                try orderedStoreIDs(local.householdID, persistence: persistence), expected)
         }
     }
 
@@ -164,7 +358,8 @@ final class StoreManagementTests: XCTestCase {
             let persistence = try makePersistence()
             let service = NeedService(persistence: persistence)
             let selection = try service.createHousehold()
-            let valid = try service.createStore(name: "Valid", householdID: selection.householdID, displayOrder: 7)
+            let valid = try service.createStore(
+                name: "Valid", householdID: selection.householdID, displayOrder: 7)
             try insertImportedStore(
                 id: importedID,
                 name: "Imported A",
@@ -183,30 +378,42 @@ final class StoreManagementTests: XCTestCase {
             }
 
             let before = try allStoreStates(selection.householdID, persistence: persistence)
-            let requested = importedID == PersistenceModel.unsetID ? [valid, importedID] : [valid, importedID, importedID]
-            XCTAssertThrowsError(try service.reorderStores(requested, householdID: selection.householdID)) {
+            let requested =
+                importedID == PersistenceModel.unsetID
+                ? [valid, importedID] : [valid, importedID, importedID]
+            XCTAssertThrowsError(
+                try service.reorderStores(requested, householdID: selection.householdID)
+            ) {
                 XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
             }
-            XCTAssertEqual(try allStoreStates(selection.householdID, persistence: persistence), before)
+            XCTAssertEqual(
+                try allStoreStates(selection.householdID, persistence: persistence), before)
         }
     }
 
     func testStoreCommandsRejectStoreFromAnotherPersistentStore() throws {
         let primaryURL = temporaryStoreURL()
         let secondaryURL = temporaryStoreURL()
-        let persistence = try PersistenceController(storeURL: primaryURL, additionalStoreURLs: [secondaryURL])
+        let persistence = try PersistenceController(
+            storeURL: primaryURL, additionalStoreURLs: [secondaryURL])
         let service = NeedService(persistence: persistence)
         let local = try service.createHousehold()
         let localStore = try service.createStore(name: "Local", householdID: local.householdID)
         let foreign = try insertHouseholdAndStoreInSecondary(persistence: persistence)
 
-        XCTAssertThrowsError(try service.renameStore(name: "Moved", storeID: foreign.storeID, householdID: local.householdID)) {
+        XCTAssertThrowsError(
+            try service.renameStore(
+                name: "Moved", storeID: foreign.storeID, householdID: local.householdID)
+        ) {
             XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
         }
-        XCTAssertThrowsError(try service.reorderStores([foreign.storeID], householdID: local.householdID)) {
+        XCTAssertThrowsError(
+            try service.reorderStores([foreign.storeID], householdID: local.householdID)
+        ) {
             XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
         }
-        XCTAssertEqual(try orderedStoreIDs(local.householdID, persistence: persistence), [localStore])
+        XCTAssertEqual(
+            try orderedStoreIDs(local.householdID, persistence: persistence), [localStore])
         XCTAssertEqual(try storeState(foreign.storeID, persistence: persistence).name, "Secondary")
     }
 
@@ -221,7 +428,8 @@ final class StoreManagementTests: XCTestCase {
             householdID: selection.householdID,
             anyStore: false
         )
-        let rememberedNeedID = try service.addRememberedNeed(itemID: itemID, listID: selection.listID)
+        let rememberedNeedID = try service.addRememberedNeed(
+            itemID: itemID, listID: selection.listID)
         let oneTimeNeedID = try service.addOneTimeNeed(
             title: "Party ice",
             storeIDs: [storeID],
@@ -231,7 +439,8 @@ final class StoreManagementTests: XCTestCase {
 
         try service.setStoreArchived(true, storeID: storeID, householdID: selection.householdID)
         XCTAssertEqual(try service.storeEligibility(itemID: itemID), .needsStore)
-        var snapshot = try membershipSnapshot(itemID: itemID, oneTimeNeedID: oneTimeNeedID, persistence: persistence)
+        var snapshot = try membershipSnapshot(
+            itemID: itemID, oneTimeNeedID: oneTimeNeedID, persistence: persistence)
         XCTAssertEqual(snapshot.itemStoreIDs, [storeID])
         XCTAssertEqual(snapshot.oneTimeStoreIDs, [storeID])
         XCTAssertEqual(snapshot.activeNeedIDs, [rememberedNeedID, oneTimeNeedID])
@@ -239,7 +448,8 @@ final class StoreManagementTests: XCTestCase {
 
         try service.setStoreArchived(false, storeID: storeID, householdID: selection.householdID)
         XCTAssertEqual(try service.storeEligibility(itemID: itemID), .activeStores([storeID]))
-        snapshot = try membershipSnapshot(itemID: itemID, oneTimeNeedID: oneTimeNeedID, persistence: persistence)
+        snapshot = try membershipSnapshot(
+            itemID: itemID, oneTimeNeedID: oneTimeNeedID, persistence: persistence)
         XCTAssertEqual(snapshot.itemStoreIDs, [storeID])
         XCTAssertEqual(snapshot.oneTimeStoreIDs, [storeID])
         XCTAssertEqual(snapshot.activeNeedIDs, [rememberedNeedID, oneTimeNeedID])
@@ -250,6 +460,18 @@ final class StoreManagementTests: XCTestCase {
         let id: UUID
         let name: String
         let displayOrder: Int64
+    }
+
+    private struct WriterRaceState: Equatable {
+        let ids: Set<UUID>
+        let namesByID: [UUID: String]
+        let archivedByID: [UUID: Bool]
+        let displayOrderByID: [UUID: Int64]
+    }
+
+    private struct SettingsScopeState: Equatable {
+        let householdAvailable: Bool
+        let storeIDs: [UUID]
     }
 
     private enum BadTag: CustomStringConvertible {
@@ -290,18 +512,52 @@ final class StoreManagementTests: XCTestCase {
         }
     }
 
-    private func orderedStoreIDs(_ householdID: UUID, persistence: PersistenceController) throws -> [UUID] {
-        try allStoreStates(householdID, persistence: persistence)
-            .sorted { $0.displayOrder == $1.displayOrder ? $0.id.uuidString < $1.id.uuidString : $0.displayOrder < $1.displayOrder }
-            .map(\.id)
-    }
-
-    private func allStoreStates(_ householdID: UUID, persistence: PersistenceController) throws -> [StoreState] {
+    private func writerRaceState(
+        _ householdID: UUID,
+        persistence: PersistenceController
+    ) throws -> WriterRaceState {
         let context = persistence.simulationContext()
         return try context.performAndWait {
             let request = Store.fetchRequest()
             request.predicate = NSPredicate(format: "household.id == %@", householdID as CVarArg)
-            return try context.fetch(request).map { StoreState(id: $0.id, name: $0.name, displayOrder: $0.displayOrder) }
+            let stores = try context.fetch(request)
+            return WriterRaceState(
+                ids: Set(stores.map(\.id)),
+                namesByID: Dictionary(uniqueKeysWithValues: stores.map { ($0.id, $0.name) }),
+                archivedByID: Dictionary(
+                    uniqueKeysWithValues: stores.map { ($0.id, $0.isArchived) }),
+                displayOrderByID: Dictionary(
+                    uniqueKeysWithValues: stores.map { ($0.id, $0.displayOrder) }
+                )
+            )
+        }
+    }
+
+    private func assertError<T>(_ expected: NeedServiceError, _ body: () throws -> T) {
+        XCTAssertThrowsError(try body()) { XCTAssertEqual($0 as? NeedServiceError, expected) }
+    }
+
+    private func orderedStoreIDs(_ householdID: UUID, persistence: PersistenceController) throws
+        -> [UUID]
+    {
+        try allStoreStates(householdID, persistence: persistence)
+            .sorted {
+                $0.displayOrder == $1.displayOrder
+                    ? $0.id.uuidString < $1.id.uuidString : $0.displayOrder < $1.displayOrder
+            }
+            .map(\.id)
+    }
+
+    private func allStoreStates(_ householdID: UUID, persistence: PersistenceController) throws
+        -> [StoreState]
+    {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Store.fetchRequest()
+            request.predicate = NSPredicate(format: "household.id == %@", householdID as CVarArg)
+            return try context.fetch(request).map {
+                StoreState(id: $0.id, name: $0.name, displayOrder: $0.displayOrder)
+            }
         }
     }
 
@@ -317,7 +573,8 @@ final class StoreManagementTests: XCTestCase {
             let request = Household.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", householdID as CVarArg)
             let household = try XCTUnwrap(context.fetch(request).first)
-            let store = NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
+            let store =
+                NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
             store.id = id
             store.name = name
             store.displayOrder = displayOrder
@@ -393,13 +650,17 @@ final class StoreManagementTests: XCTestCase {
     ) throws -> (householdID: UUID, storeID: UUID) {
         let context = persistence.simulationContext()
         return try context.performAndWait {
-            let secondary = try XCTUnwrap(persistence.container.persistentStoreCoordinator.persistentStores.last)
-            let household = NSEntityDescription.insertNewObject(forEntityName: "Household", into: context) as! Household
+            let secondary = try XCTUnwrap(
+                persistence.container.persistentStoreCoordinator.persistentStores.last)
+            let household =
+                NSEntityDescription.insertNewObject(forEntityName: "Household", into: context)
+                as! Household
             let householdID = UUID()
             household.id = householdID
             household.name = "Secondary household"
             context.assign(household, to: secondary)
-            let store = NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
+            let store =
+                NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
             let storeID = UUID()
             store.id = storeID
             store.name = "Secondary"
@@ -418,19 +679,26 @@ final class StoreManagementTests: XCTestCase {
         stores: [(UUID, String)],
         persistence: PersistenceController
     ) throws {
-        let secondary = try XCTUnwrap(persistence.container.persistentStoreCoordinator.persistentStores.last)
+        let secondary = try XCTUnwrap(
+            persistence.container.persistentStoreCoordinator.persistentStores.last)
         let context = persistence.simulationContext()
         try context.performAndWait {
-            let household = NSEntityDescription.insertNewObject(forEntityName: "Household", into: context) as! Household
+            let household =
+                NSEntityDescription.insertNewObject(forEntityName: "Household", into: context)
+                as! Household
             household.id = householdID
             household.name = "Imported duplicate"
             context.assign(household, to: secondary)
-            let list = NSEntityDescription.insertNewObject(forEntityName: "GroceryList", into: context) as! GroceryList
+            let list =
+                NSEntityDescription.insertNewObject(forEntityName: "GroceryList", into: context)
+                as! GroceryList
             list.id = listID
             context.assign(list, to: secondary)
             list.household = household
             for (id, name) in stores {
-                let store = NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
+                let store =
+                    NSEntityDescription.insertNewObject(forEntityName: "Store", into: context)
+                    as! Store
                 store.id = id
                 store.name = name
                 store.displayOrder = 0
@@ -448,14 +716,17 @@ final class StoreManagementTests: XCTestCase {
         householdID: UUID,
         persistence: PersistenceController
     ) throws {
-        let secondary = try XCTUnwrap(persistence.container.persistentStoreCoordinator.persistentStores.last)
+        let secondary = try XCTUnwrap(
+            persistence.container.persistentStoreCoordinator.persistentStores.last)
         let context = persistence.simulationContext()
         try context.performAndWait {
             let request = Household.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", householdID as CVarArg)
             let households = try context.fetch(request)
-            let household = try XCTUnwrap(households.first { $0.objectID.persistentStore == secondary })
-            let store = NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
+            let household = try XCTUnwrap(
+                households.first { $0.objectID.persistentStore == secondary })
+            let store =
+                NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
             store.id = id
             store.name = name
             store.displayOrder = 1
@@ -478,6 +749,29 @@ final class StoreManagementTests: XCTestCase {
             return PurchaseRulesStoreScope.validStores(
                 stores, lists: lists, householdID: householdID, listID: listID
             ).map(\.id)
+        }
+    }
+
+    private func settingsScopeState(
+        _ selection: (householdID: UUID, listID: UUID),
+        persistence: PersistenceController
+    ) throws -> SettingsScopeState {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let stores = try context.fetch(NavigationFetchRequests.stores())
+            let lists = try context.fetch(PurchaseRulesStoreScope.listsRequest())
+            let households = try context.fetch(NavigationFetchRequests.households())
+            let canonicalList = StoreManagementScope.canonicalList(
+                lists: lists, households: households,
+                selection: PersistenceSelection(
+                    householdID: selection.householdID, listID: selection.listID
+                )
+            )
+            return SettingsScopeState(
+                householdAvailable: canonicalList != nil,
+                storeIDs: StoreManagementScope.validStores(stores, canonicalList: canonicalList)
+                    .map(\.id)
+            )
         }
     }
 

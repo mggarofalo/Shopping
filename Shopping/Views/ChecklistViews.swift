@@ -1,5 +1,8 @@
 import CoreData
 import SwiftUI
+#if DEBUG
+import Darwin
+#endif
 
 private struct ClearCartedDraft: Identifiable {
     let preview: ClearCartedPreview
@@ -335,6 +338,13 @@ struct CartedGroceriesView: View {
         guard let service, selectionMatches(draft) else { return }
         do {
             let cleared = try service.clearCarted(using: draft.preview.token)
+#if DEBUG
+            // Exercise the committed-save / UI-acknowledgement boundary without graceful teardown.
+            if ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] != nil,
+                ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] == "1" {
+                _exit(0)
+            }
+#endif
             clearResult = ClearCartedResult(
                 operationID: draft.preview.token.id,
                 householdID: draft.householdID, listID: draft.listID,
