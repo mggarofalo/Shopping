@@ -173,7 +173,12 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         let quantity = app.steppers["shopping.grocery.quantity"]
         reveal(quantity, in: app)
-        quantity.buttons["Increment"].tap()
+        let increments = quantity.buttons.matching(NSPredicate(
+            format: "identifier == %@ OR label == %@",
+            "shopping.grocery.quantity-Increment", "Increment"
+        ))
+        XCTAssertEqual(increments.count, 1)
+        increments.firstMatch.tap()
         XCTAssertEqual(quantity.value as? String, "2")
         setSwitch(app.switches["shopping.grocery.urgency"], on: true, in: app)
         setPill(app.buttons["shopping.purchase.anyStore"], selected: true, in: app)
