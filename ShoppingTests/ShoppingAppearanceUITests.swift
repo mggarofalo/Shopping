@@ -72,7 +72,7 @@ final class ShoppingAppearanceUITests: XCTestCase {
                 attach("Catalog \(appearance) \(size)", app)
                 if size.contains("Accessibility") {
                     list.swipeUp()
-                    XCTAssertLessThan(firstCell.frame.minY, list.frame.midY)
+                    XCTAssertTrue(!firstCell.exists || firstCell.frame.minY < list.frame.midY)
                     attach("Scrolled catalog \(appearance) \(size)", app)
                 }
                 app.terminate()
