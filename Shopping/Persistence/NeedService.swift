@@ -152,12 +152,17 @@ final class NeedService {
     }
 
     @discardableResult
-    func createStore(name: String, householdID: UUID, displayOrder: Int64 = 0) throws -> UUID {
+    func createStore(
+        name: String,
+        householdID: UUID,
+        listID: UUID? = nil,
+        displayOrder: Int64 = 0
+    ) throws -> UUID {
         let name = try validatedName(name)
         return try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             let store: Store = self.insert("Store", in: context)
             store.id = UUID()
             store.name = name
@@ -170,12 +175,17 @@ final class NeedService {
     }
 
     @discardableResult
-    func createCategory(name: String, householdID: UUID, displayOrder: Int64 = 0) throws -> UUID {
+    func createCategory(
+        name: String,
+        householdID: UUID,
+        listID: UUID? = nil,
+        displayOrder: Int64 = 0
+    ) throws -> UUID {
         let name = try validatedName(name)
         return try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             let category: Category = self.insert("Category", in: context)
             category.id = UUID()
             category.name = name
@@ -186,12 +196,17 @@ final class NeedService {
         }
     }
 
-    func renameCategory(name: String, categoryID: UUID, householdID: UUID) throws {
+    func renameCategory(
+        name: String,
+        categoryID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         let name = try validatedName(name)
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let category = try self.category(id: categoryID, in: context) else {
                 throw NeedServiceError.categoryNotFound
             }
@@ -203,11 +218,15 @@ final class NeedService {
         }
     }
 
-    func reorderCategories(_ orderedCategoryIDs: [UUID], householdID: UUID) throws {
+    func reorderCategories(
+        _ orderedCategoryIDs: [UUID],
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             let request = Category.fetchRequest()
             let owned = try context.fetch(request).filter {
                 $0.household == household &&
@@ -232,9 +251,16 @@ final class NeedService {
         }
     }
 
-    func setStoreArchived(_ archived: Bool, storeID: UUID, householdID: UUID) throws {
+    func setStoreArchived(
+        _ archived: Bool,
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let store = try self.store(id: storeID, in: context) else {
                 throw NeedServiceError.storeNotFound
             }
@@ -246,10 +272,17 @@ final class NeedService {
         }
     }
 
-    func renameStore(name: String, storeID: UUID, householdID: UUID) throws {
+    func renameStore(
+        name: String,
+        storeID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         let name = try validatedName(name)
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let store = try self.store(id: storeID, in: context) else { throw NeedServiceError.storeNotFound }
             guard store.household == household,
                   store.objectID.persistentStore == household.objectID.persistentStore else { throw NeedServiceError.scopeChanged }
@@ -257,9 +290,15 @@ final class NeedService {
         }
     }
 
-    func reorderStores(_ orderedStoreIDs: [UUID], householdID: UUID) throws {
+    func reorderStores(
+        _ orderedStoreIDs: [UUID],
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else { throw NeedServiceError.householdNotFound }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             let request = Store.fetchRequest()
             let owned = try context.fetch(request).filter {
                 $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
@@ -302,11 +341,15 @@ final class NeedService {
         }
     }
 
-    func removeCategory(categoryID: UUID, householdID: UUID) throws {
+    func removeCategory(
+        categoryID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let category = try self.category(id: categoryID, in: context) else {
                 throw NeedServiceError.categoryNotFound
             }
@@ -318,7 +361,9 @@ final class NeedService {
             for need in category.oneTimeNeeds ?? [] {
                 need.oneTimeCategory = nil
                 if !need.archived {
-                    need.revision += 1
+                    let (revision, overflow) = need.revision.addingReportingOverflow(1)
+                    guard !overflow else { throw NeedServiceError.scopeChanged }
+                    need.revision = revision
                     need.clearOperationID = nil
                 }
             }
@@ -365,12 +410,13 @@ final class NeedService {
     func createCatalogItem(
         values: CatalogItemValues,
         householdID: UUID,
+        listID: UUID? = nil,
         allowingNameCollision: Bool = false
     ) throws -> UUID {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             let validated = try self.validatedCatalogValues(values, household: household, in: context)
             let collisions = try self.catalogNameCollisions(
                 name: validated.name,
@@ -389,13 +435,14 @@ final class NeedService {
     func saveCatalogItem(
         itemID: UUID,
         householdID: UUID,
+        listID: UUID? = nil,
         values: CatalogItemValues,
         allowingNameCollision: Bool = false
     ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }
@@ -422,11 +469,16 @@ final class NeedService {
         }
     }
 
-    func setCatalogItemArchived(itemID: UUID, householdID: UUID, archived: Bool) throws {
+    func setCatalogItemArchived(
+        itemID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil,
+        archived: Bool
+    ) throws {
         try write { context in
-            guard let household = try self.household(id: householdID, in: context) else {
-                throw NeedServiceError.householdNotFound
-            }
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }
@@ -1480,6 +1532,22 @@ final class NeedService {
               list.objectID.persistentStore == household.objectID.persistentStore else {
             throw NeedServiceError.scopeChanged
         }
+    }
+
+    private func validatedCommandHousehold(
+        householdID: UUID,
+        listID: UUID?,
+        in context: NSManagedObjectContext
+    ) throws -> Household {
+        guard let household = try household(id: householdID, in: context) else {
+            throw NeedServiceError.householdNotFound
+        }
+        guard let listID else { return household }
+        guard let list = try list(id: listID, in: context) else {
+            throw NeedServiceError.scopeChanged
+        }
+        try validate(list: list, belongsTo: household)
+        return household
     }
 
     private func validatedActiveNeed(
