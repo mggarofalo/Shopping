@@ -86,6 +86,7 @@ enum StoreManagementScope {
 
 private struct StoreManagementView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores:
         FetchedResults<Store>
@@ -225,6 +226,7 @@ private struct StoreManagementView: View {
                 _ = try service.createStore(
                     name: editorName, householdID: session.scope.householdID, listID: session.scope.listID)
             }
+            hapticFeedback.play(.success)
             editor = nil
         } catch { self.error = error }
     }
@@ -248,6 +250,7 @@ private struct StoreManagementView: View {
             _ = try service.removeStore(
                 storeID: store.id, householdID: scope.householdID, listID: scope.listID
             )
+            hapticFeedback.play(.warning)
             clearRemoval()
         } catch { self.error = error }
     }

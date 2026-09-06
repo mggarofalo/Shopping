@@ -22,6 +22,7 @@ private struct ClearCartedResult {
 
 struct CartedGroceriesView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
@@ -290,11 +291,11 @@ struct CartedGroceriesView: View {
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {
-        mutate(need) { service, needID, householdID, listID in
+        if mutate(need, command: { service, needID, householdID, listID in
             try service.setNeedCarted(
                 needID: needID, householdID: householdID, listID: listID, carted: carted)
             if !carted { onUncarted?(needID, householdID, listID) }
-        }
+        }) { hapticFeedback.play(.lightImpact) }
     }
 
     private func setQuantity(_ need: Need, _ quantity: Int64?) {
@@ -303,15 +304,23 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private func mutate(_ need: Need, command: (NeedService, UUID, UUID, UUID) throws -> Void) {
+    @discardableResult
+    private func mutate(
+        _ need: Need,
+        command: (NeedService, UUID, UUID, UUID) throws -> Void
+    ) -> Bool {
         guard let service, let list = canonicalList, let householdID = list.household?.id,
             GroceryRowScope.validNeeds(Array(needs), canonicalList: list).contains(need)
-        else { return }
+        else { return false }
         let needID = need.id
         do {
             try command(service, needID, householdID, list.id)
             refreshProjection()
-        } catch { self.error = error }
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func prepareClear(_ rows: [Need]) {

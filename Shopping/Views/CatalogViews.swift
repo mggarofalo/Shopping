@@ -322,6 +322,7 @@ private struct CatalogFiltersView: View {
 private struct CatalogEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
@@ -466,6 +467,7 @@ private struct CatalogEditorView: View {
                     allowingNameCollision: allowingNameCollision
                 )
             }
+            hapticFeedback.play(.success)
             onSaved()
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }

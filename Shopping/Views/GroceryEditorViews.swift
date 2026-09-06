@@ -30,6 +30,7 @@ private enum OneTimePromotionChoice: String, CaseIterable {
 struct GroceryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
@@ -533,6 +534,7 @@ struct GroceryEditorView: View {
                     categoryID: categoryID, storeIDs: storeIDs, anyStore: anyStore,
                     quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
             }
+            hapticFeedback.play(.success)
             onSaved(savedID)
             dismiss()
         } catch { self.error = error }
@@ -579,6 +581,7 @@ struct GroceryEditorView: View {
                     existingItemID: item.id, need: values()
                 )
             }
+            hapticFeedback.play(.success)
             onSaved(needID)
             dismiss()
         } catch {

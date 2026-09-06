@@ -47,6 +47,7 @@ enum NavigationFetchRequests {
 
 struct GroceriesView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -612,6 +613,7 @@ struct GroceriesView: View {
                 listID: canonicalList.id,
                 carted: carted
             )
+            hapticFeedback.play(.lightImpact)
             refreshProjection()
         } catch { self.error = error }
     }
