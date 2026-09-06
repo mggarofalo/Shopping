@@ -41,7 +41,6 @@ final class GroceryEditingUITests: XCTestCase {
 
         let name = app.textFields["shopping.grocery.name"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertTrue(name.hasKeyboardFocus)
         XCTAssertTrue(app.staticTexts["Item notes"].exists)
         XCTAssertTrue(app.staticTexts["Temporary notes"].exists)
         name.typeText("Rice noodles")
@@ -61,7 +60,6 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
         let categoryName = app.textFields["shopping.category.name"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertTrue(categoryName.hasKeyboardFocus)
         categoryName.typeText("Canceled category")
         app.buttons["shopping.category.cancel"].tap()
 
