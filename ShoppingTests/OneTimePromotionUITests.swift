@@ -30,8 +30,7 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Edit grocery"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
-        let quantity = app.steppers["shopping.grocery.quantity"]
-        reveal(quantity, in: app)
+        let quantity = quantityControls(in: app).value
         XCTAssertEqual(quantity.value as? String, "2")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
         screenshot("Explicitly remembered grocery", app: app)
@@ -63,8 +62,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
         reveal(purchaseNotes, in: app)
         XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")
-        let quantity = app.steppers["shopping.grocery.quantity"]
-        reveal(quantity, in: app)
+        let quantity = quantityControls(in: app).value
         XCTAssertEqual(quantity.value as? String, "2")
         let urgency = app.switches["shopping.grocery.urgency"]
         reveal(urgency, in: app)
@@ -171,15 +169,9 @@ final class OneTimePromotionUITests: XCTestCase {
         field.typeText(name)
         field.typeText("\n")
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
-        let quantity = app.steppers["shopping.grocery.quantity"]
-        reveal(quantity, in: app)
-        let increments = quantity.buttons.matching(NSPredicate(
-            format: "identifier == %@ OR label == %@",
-            "shopping.grocery.quantity-Increment", "Increment"
-        ))
-        XCTAssertEqual(increments.count, 1)
-        increments.firstMatch.tap()
-        XCTAssertEqual(quantity.value as? String, "2")
+        let quantity = quantityControls(in: app)
+        quantity.increment.tap()
+        XCTAssertEqual(quantity.value.value as? String, "2")
         setSwitch(app.switches["shopping.grocery.urgency"], on: true, in: app)
         setPill(app.buttons["shopping.purchase.anyStore"], selected: true, in: app)
         let notes = app.textFields["shopping.grocery.purchaseNotes"]
@@ -253,6 +245,21 @@ final class OneTimePromotionUITests: XCTestCase {
         app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label == %@", "shopping.purchase.store.", name
         )).firstMatch
+    }
+
+    private func quantityControls(in app: XCUIApplication) -> (value: XCUIElement, increment: XCUIElement) {
+        let quantity = app.steppers["shopping.grocery.quantity"]
+        let increments = quantity.buttons.matching(NSPredicate(
+            format: "identifier == %@ OR label == %@",
+            "shopping.grocery.quantity-Increment", "Increment"
+        ))
+        // iOS 18 exposes the Stepper's actionable children as hittable, while
+        // the fully visible value container itself is not a tap target.
+        let increment = increments.firstMatch
+        reveal(increment, in: app)
+        XCTAssertEqual(increments.count, 1)
+        XCTAssertTrue(quantity.exists)
+        return (quantity, increment)
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {

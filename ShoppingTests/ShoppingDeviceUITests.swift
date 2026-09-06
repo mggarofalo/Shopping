@@ -170,7 +170,14 @@ final class ShoppingDeviceUITests: XCTestCase {
             }
             return true
         }
-        for candidate in candidates {
+        var candidateIndex = 0
+        while candidateIndex < candidates.count {
+            guard candidates.count <= 20 else {
+                XCTFail("Accessibility remeasurement did not converge")
+                return
+            }
+            let candidate = candidates[candidateIndex]
+            candidateIndex += 1
             let matches = app.staticTexts.matching(NSPredicate(
                 format: "identifier == %@ AND label == %@", candidate.identifier, candidate.label
             ))
@@ -179,19 +186,31 @@ final class ShoppingDeviceUITests: XCTestCase {
                 return
             }
             let element = matches.firstMatch
+            let cells = containingCells(candidate, in: app)
+            guard cells.count == 1 else {
+                XCTFail("Cannot uniquely reveal the containing row for \(candidate.label)")
+                return
+            }
+            // Reveal the whole containing row so that measuring one scope label
+            // does not leave its neighboring label partly under the navigation bar.
+            reveal(cells.firstMatch, in: app, towardTop: true)
             reveal(element, in: app, towardTop: true)
             XCTAssertEqual(matches.count, 1)
             XCTAssertTrue(element.isHittable)
             XCTAssertTrue(usable(element.frame))
+            XCTAssertGreaterThanOrEqual(cells.firstMatch.frame.minY, app.navigationBars["Groceries"].frame.maxY)
+            XCTAssertLessThanOrEqual(cells.firstMatch.frame.maxY, app.tabBars.firstMatch.frame.minY)
             XCTAssertGreaterThanOrEqual(element.frame.minY, app.navigationBars["Groceries"].frame.maxY)
             XCTAssertLessThanOrEqual(element.frame.maxY, app.tabBars.firstMatch.frame.minY)
             screenshot("Remeasuring \(candidate.label) fully visible", app: app)
             try app.performAccessibilityAudit(for: candidate.type) { issue in
                 self.attachAudit(issue, phase: "Remeasuring \(candidate.label)")
-                // A different original candidate may still be at the edge; it
-                // must pass its own visible remeasurement. All new findings fail.
-                if let edge = self.edgeCandidate(issue, in: app), edge != candidate,
-                    candidates.contains(edge) { return true }
+                // Moving one row into view can move another behind system chrome.
+                // Every newly reported edge candidate must pass its own remeasurement.
+                if let edge = self.edgeCandidate(issue, in: app), edge != candidate {
+                    if !candidates.contains(edge) { candidates.append(edge) }
+                    return true
+                }
                 failures.append("\(issue.compactDescription): \(issue.element?.label ?? "unidentified element")")
                 return true
             }
@@ -214,12 +233,26 @@ final class ShoppingDeviceUITests: XCTestCase {
             let element = issue.element, element.elementType == .staticText, element.exists
         else { return nil }
         let bar = app.navigationBars["Groceries"]
-        guard bar.exists, usable(bar.frame), usable(element.frame),
-            element.frame.minY < bar.frame.maxY,
-            !contains(element, in: bar),
-            contains(element, in: app.collectionViews.firstMatch)
+        let tabBar = app.tabBars.firstMatch
+        let candidate = EdgeAuditCandidate(
+            type: issue.auditType, identifier: element.identifier, label: element.label
+        )
+        let cells = containingCells(candidate, in: app)
+        guard bar.exists, tabBar.exists, usable(bar.frame), usable(tabBar.frame), usable(element.frame),
+            !contains(element, in: bar), !contains(element, in: tabBar),
+            contains(element, in: app.collectionViews.firstMatch), cells.count == 1,
+            usable(cells.firstMatch.frame)
         else { return nil }
-        return EdgeAuditCandidate(type: issue.auditType, identifier: element.identifier, label: element.label)
+        let frame = cells.firstMatch.frame
+        guard frame.minY < bar.frame.maxY || frame.maxY > tabBar.frame.minY else { return nil }
+        return candidate
+    }
+
+    private func containingCells(_ candidate: EdgeAuditCandidate, in app: XCUIApplication) -> XCUIElementQuery {
+        app.cells.containing(NSPredicate(
+            format: "elementType == %d AND identifier == %@ AND label == %@",
+            XCUIElement.ElementType.staticText.rawValue, candidate.identifier, candidate.label
+        ))
     }
 
     private func launch(
@@ -268,11 +301,14 @@ final class ShoppingDeviceUITests: XCTestCase {
             let overflow = frame.isNull
                 ? (bottom - top) * 0.4
                 : (movingDown ? top - frame.minY : frame.maxY - bottom) + 12
-            let distance = max(24, min(overflow, (bottom - top) * 0.4)) / window.height
-            let startY: CGFloat = movingDown ? 0.35 : 0.65
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
-            let end = app.coordinate(withNormalizedOffset: CGVector(
-                dx: 0.5, dy: startY + (movingDown ? distance : -distance)
+            let viewport = bottom - top
+            let maximumTravel = viewport / 2
+            let distance = min(max(overflow, min(60, maximumTravel)), maximumTravel)
+            let startY = top + viewport * (movingDown ? 0.25 : 0.75)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: window.midX, dy: startY))
+            let end = origin.withOffset(CGVector(
+                dx: window.midX, dy: startY + (movingDown ? distance : -distance)
             ))
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
