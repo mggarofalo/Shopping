@@ -225,17 +225,25 @@ final class OneTimePromotionUITests: XCTestCase {
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<10 {
-            let top = app.navigationBars.firstMatch.frame.maxY
+            // A dismissed sheet can briefly leave a null navigation-bar frame in AX.
+            // Wait for usable geometry before constructing a drag coordinate.
+            let appFrame = app.frame
+            let navigationFrame = app.navigationBars.firstMatch.frame
+            guard usable(appFrame), usable(navigationFrame) else { continue }
+            let top = navigationFrame.maxY
             let keyboard = app.keyboards.firstMatch
             let editing =
                 app.navigationBars["Edit grocery"].exists || app.navigationBars["Add grocery"].exists
-            let bottom = keyboard.exists ? keyboard.frame.minY - 60 : app.frame.maxY - (editing ? 30 : 90)
+            let keyboardFrame = keyboard.exists ? keyboard.frame : nil
+            if let keyboardFrame, !usable(keyboardFrame) { continue }
+            let bottom = keyboardFrame.map { $0.minY - 60 } ?? appFrame.maxY - (editing ? 30 : 90)
+            guard bottom - top > 48 else { continue }
             if element.exists && element.isHittable && element.frame.minY >= top
                 && element.frame.maxY <= bottom
             {
                 return
             }
-            let x = app.frame.midX
+            let x = appFrame.midX
             let lower = app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: x, dy: bottom - 24))
             let upper = app.coordinate(withNormalizedOffset: .zero)
@@ -247,6 +255,12 @@ final class OneTimePromotionUITests: XCTestCase {
             }
         }
         XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
     private func screenshot(_ name: String, app: XCUIApplication) {
