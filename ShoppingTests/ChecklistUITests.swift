@@ -126,6 +126,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(quantity, app: app)
         XCTAssertGreaterThanOrEqual(quantity.frame.height, 44 - 0.01)
         attachScreenshot("Checklist at accessibility text size", app: app)
+        reveal(granola, app: app)
         fullSwipeLeft(granola, app: app)
         XCTAssertFalse(granola.exists)
         cartedLink(count: 2, app: app).tap()

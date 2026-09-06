@@ -420,7 +420,7 @@ final class ShoppingDeviceUITests: XCTestCase {
                 return
             }
             let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-            let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5))
+            let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
             start.press(forDuration: 0.1, thenDragTo: end)
             if action.waitForExistence(timeout: 1), action.isHittable {
                 return
