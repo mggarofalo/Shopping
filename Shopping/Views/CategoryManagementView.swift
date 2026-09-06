@@ -169,11 +169,13 @@ struct CategoryManagementView: View {
                     HStack {
                         Text(category.name)
                         Spacer()
-                        Button { beginRename(category) } label: { Label("Rename", systemImage: "pencil") }
+                        Button { beginRename(category) } label: { Image(systemName: "pencil") }
+                            .accessibilityLabel("Rename \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)
-                        Button(role: .destructive) { removingCategory = category } label: { Label("Remove", systemImage: "trash") }
+                        Button(role: .destructive) { removingCategory = category } label: { Image(systemName: "trash") }
+                            .accessibilityLabel("Remove \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)

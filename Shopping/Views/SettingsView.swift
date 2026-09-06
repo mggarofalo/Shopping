@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         NavigationStack {
@@ -16,7 +17,7 @@ struct SettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("shopping.appearance")
-                    .pickerStyle(.segmented)
+                    .pickerStyle(dynamicTypeSize.isAccessibilitySize ? .menu : .segmented)
                 }
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
@@ -146,9 +147,11 @@ private struct StoreManagementView: View {
                         Text(store.name)
                         Spacer()
                         if store.isArchived { Text("Archived").foregroundStyle(.secondary) }
-                        Button { beginRename(store) } label: { Label("Rename", systemImage: "pencil") }.buttonStyle(.borderless)
+                        Button { beginRename(store) } label: { Image(systemName: "pencil") }
+                            .accessibilityLabel("Rename \(store.name)").buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
-                        Button { archive(store) } label: { Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox") }
+                        Button { archive(store) } label: { Image(systemName: store.isArchived ? "arrow.uturn.backward" : "archivebox") }
+                            .accessibilityLabel("\(store.isArchived ? "Restore" : "Archive") \(store.name)")
                             .buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
                     }
