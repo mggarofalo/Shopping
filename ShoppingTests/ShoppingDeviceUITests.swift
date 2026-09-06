@@ -112,7 +112,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertTrue(value.contains("Urgent"))
         XCTAssertFalse(value.contains("Only buy at Costco"))
         XCTAssertTrue(value.contains("Low sugar"))
-        let header = app.staticTexts["Only buy here"]
+        let header = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Only buy here")).firstMatch
         XCTAssertTrue(header.exists)
         XCTAssertTrue(header.isHittable)
     }

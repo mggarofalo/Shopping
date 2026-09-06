@@ -29,10 +29,10 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(app.staticTexts["Only buy here"].waitForExistence(timeout: 2))
+        XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
-        let flexibleSection = app.staticTexts["Can buy here"]
+        let flexibleSection = shoppingHeading("Can buy here", in: app)
         for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
             app.swipeUp()
         }
@@ -44,13 +44,13 @@ final class ShoppingLaunchTests: XCTestCase {
     func testCompactStoreGroupsOmitRepeatedPurchaseRulesInBothAppearances() {
         for appearance in ["light", "dark"] {
             let app = launchApp(fixture: "populated", appearance: appearance)
-            XCTAssertFalse(app.staticTexts["Only buy here"].exists)
-            XCTAssertFalse(app.staticTexts["Can buy here"].exists)
+            XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
+            XCTAssertFalse(shoppingHeading("Can buy here", in: app).exists)
             XCTAssertFalse(app.staticTexts["Needs store"].exists)
             app.buttons["shopping.store.menu"].tap()
             app.buttons["Costco"].tap()
-            XCTAssertTrue(app.staticTexts["Only buy here"].waitForExistence(timeout: 2))
-            let canBuy = app.staticTexts["Can buy here"]
+            XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
+            let canBuy = shoppingHeading("Can buy here", in: app)
             reveal(canBuy, in: app)
             XCTAssertTrue(canBuy.isHittable)
             XCTAssertFalse(app.staticTexts["Pantry"].exists)
@@ -471,6 +471,11 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(pill.isHittable)
         if (pill.value as? String == "Selected") != on { pill.tap() }
         XCTAssertEqual(pill.value as? String, on ? "Selected" : "Not selected")
+    }
+
+    private func shoppingHeading(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        // iOS 18 uppercases native section headers; iOS 26 keeps sentence case.
+        app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
     }
 
     private func revealGrocery(named name: String, in app: XCUIApplication, towardTop: Bool = false) {
