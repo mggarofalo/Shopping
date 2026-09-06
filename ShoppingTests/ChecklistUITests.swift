@@ -79,10 +79,23 @@ final class ChecklistUITests: XCTestCase {
     func testQuickQuantityAndUncartPreserveUrgencyNotesAndPersist() {
         let app = launchApp(fixture: "populated")
         selectStore("Costco", app: app)
-        let quantity = app.buttons["Increase quantity for Granola"]
-        reveal(quantity, app: app)
-        XCTAssertGreaterThanOrEqual(quantity.frame.height, 44 - 0.01)
-        quantity.tap()
+        let granola = row("Granola", app: app)
+        reveal(granola, app: app)
+        granola.tap()
+        let addQuantity = app.buttons["shopping.grocery.quantity.add"]
+        XCTAssertTrue(addQuantity.waitForExistence(timeout: 2))
+        addQuantity.tap()
+        let quantity = app.steppers["shopping.grocery.quantity"]
+        XCTAssertEqual(quantity.value as? String, "1")
+        let increment = quantity.buttons.matching(NSPredicate(
+            format: "identifier == %@ OR label == %@",
+            "shopping.grocery.quantity-Increment", "Increment"
+        )).firstMatch
+        reveal(increment, app: app)
+        increment.tap()
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["shopping.grocery.save"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 2))
         cart("Granola", app: app)
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
@@ -109,7 +122,7 @@ final class ChecklistUITests: XCTestCase {
         let granola = row("Granola", app: app)
         reveal(granola, app: app)
         XCTAssertGreaterThanOrEqual(granola.frame.height, 44 - 0.01)
-        let quantity = app.buttons["Increase quantity for Granola"]
+        let quantity = app.buttons["Increase quantity for Bananas"]
         reveal(quantity, app: app)
         XCTAssertGreaterThanOrEqual(quantity.frame.height, 44 - 0.01)
         attachScreenshot("Checklist at accessibility text size", app: app)

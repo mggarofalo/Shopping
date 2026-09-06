@@ -21,7 +21,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         increase.tap()
         XCTAssertTrue(app.staticTexts["Quantity 7"].exists)
         screenshot("Quantity control and swipe affordance at largest text", app: app)
-        row.swipeLeft()
+        revealSwipeAction("In cart", for: row, in: app)
         app.buttons["In cart"].tap()
         XCTAssertFalse(row.exists)
 
@@ -33,7 +33,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 3))
         let cartedRow = app.buttons["Edit \(longName)"]
         reveal(cartedRow, in: app, fullyVisible: false)
-        cartedRow.swipeLeft()
+        revealSwipeAction("Remove from cart", for: cartedRow, in: app)
         app.buttons["Remove from cart"].tap()
         XCTAssertFalse(cartedRow.exists)
         app.navigationBars["In cart"].buttons.firstMatch.tap()
@@ -101,16 +101,23 @@ final class ShoppingDeviceUITests: XCTestCase {
         let cell = app.cells.containing(.button, identifier: row.identifier).firstMatch
         reveal(cell, in: app)
         alignRowNearTop(cell, in: app)
-        let quantity = quantity(for: row, in: app)
-        XCTAssertTrue(quantity.exists)
-        XCTAssertGreaterThan(quantity.frame.width, 0)
         screenshot("Fully visible grocery at largest text", app: app)
         try audit(app, groceryViewport: true)
     }
 
-    func testDefaultQuantityIsVisibleAndFilterChipsCanBeRemoved() {
+    func testExplicitQuantityIsVisibleAndFilterChipsCanBeRemoved() {
         let app = launch(fixture: "populated")
         selectCostco(in: app)
+        let granola = app.buttons["Edit Granola"]
+        reveal(granola, in: app)
+        granola.tap()
+        let addQuantity = app.buttons["shopping.grocery.quantity.add"]
+        XCTAssertTrue(addQuantity.waitForExistence(timeout: 2))
+        addQuantity.tap()
+        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
+        app.buttons["shopping.grocery.save"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 2))
+
         app.buttons["shopping.filters"].tap()
         XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 3))
         let urgent = app.switches["Urgent only"]
@@ -132,7 +139,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         reveal(quantity, in: app)
         XCTAssertGreaterThan(quantity.frame.width, 0)
         XCTAssertGreaterThan(quantity.frame.height, 0)
-        screenshot("Default text with quantity and active filters", app: app)
+        screenshot("Explicit quantity with active filters", app: app)
         removeUrgent.tap()
         XCTAssertFalse(removeUrgent.exists)
         XCTAssertTrue(app.buttons["Remove Pantry filter"].exists)
@@ -159,12 +166,14 @@ final class ShoppingDeviceUITests: XCTestCase {
             let notes = app.staticTexts["Low sugar"]
             XCTAssertGreaterThan(notes.frame.height, previousNotesHeight)
             previousNotesHeight = notes.frame.height
-            let quantity = quantity(for: app.buttons["Edit Granola"], in: app)
+            let bananas = app.buttons["Edit Bananas"]
+            reveal(bananas, in: app)
+            let quantity = quantity(for: bananas, in: app)
             reveal(quantity, in: app)
             XCTAssertGreaterThan(quantity.frame.width, 0)
             XCTAssertGreaterThan(quantity.frame.height, previousQuantityHeight)
             previousQuantityHeight = quantity.frame.height
-            assertTouchSize(app.buttons["Increase quantity for Granola"])
+            assertTouchSize(app.buttons["Increase quantity for Bananas"])
             screenshot("Grocery text sizing - \(size)", app: app)
             app.terminate()
         }
@@ -401,6 +410,23 @@ final class ShoppingDeviceUITests: XCTestCase {
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         XCTFail("Could not position the complete grocery row clear of the navigation overlay")
+    }
+
+    private func revealSwipeAction(_ label: String, for row: XCUIElement, in app: XCUIApplication) {
+        let action = app.buttons[label]
+        reveal(row, in: app, fullyVisible: false)
+        for _ in 0..<3 {
+            if action.exists && action.isHittable {
+                return
+            }
+            let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+            let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            if action.waitForExistence(timeout: 1), action.isHittable {
+                return
+            }
+        }
+        XCTFail("Could not reveal the \(label) swipe action")
     }
 
     private func quantity(for row: XCUIElement, in app: XCUIApplication) -> XCUIElement {
