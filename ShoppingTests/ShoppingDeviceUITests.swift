@@ -208,13 +208,19 @@ final class ShoppingDeviceUITests: XCTestCase {
     private func alignRowNearTop(_ cell: XCUIElement, in app: XCUIApplication) {
         // Keep the entire audited row visible and its preceding section header out
         // of the navigation-bar overlay, where the audit can sample obscured text.
+        var previousTop: CGFloat?
         for _ in 0..<6 {
             let top = app.navigationBars.firstMatch.frame.maxY
             let bottom = app.tabBars.firstMatch.frame.minY
             let frame = cell.frame
             let target = top + 24
             let offset = frame.minY - target
-            if abs(offset) <= 12 && frame.minY >= top && frame.maxY <= bottom { return }
+            let fullyVisible = frame.minY >= top && frame.maxY <= bottom
+            if fullyVisible && abs(offset) <= 12 { return }
+            // A larger screen can reach the natural end of the list first.
+            // The full audit still runs; only the target's complete visibility is required.
+            if let previousTop, fullyVisible && abs(frame.minY - previousTop) < 1 { return }
+            previousTop = frame.minY
             let viewport = bottom - top
             guard offset.isFinite, viewport.isFinite, viewport > 48 else { continue }
             let distance = min(abs(offset), viewport * 0.4)
