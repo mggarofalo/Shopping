@@ -436,9 +436,11 @@ final class ShoppingDeviceUITests: XCTestCase {
             if action.exists && action.isHittable {
                 return
             }
-            let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-            let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
-            start.press(forDuration: 0.1, thenDragTo: end)
+            // XCTest clips its native swipe to the visible portion of an
+            // element. That matters when accessibility text makes a row taller
+            // than the viewport; a normalized-coordinate drag can otherwise
+            // begin outside the screen on iOS 18.
+            row.swipeLeft()
             if action.waitForExistence(timeout: 1), action.isHittable {
                 return
             }
