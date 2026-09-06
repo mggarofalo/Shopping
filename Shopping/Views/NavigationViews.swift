@@ -340,10 +340,14 @@ struct GroceriesView: View {
     private var storeMenu: some View {
         HStack(spacing: 0) {
             Button { showingStorePicker = true } label: {
-                Label(selectedStoreName, systemImage: "storefront")
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "storefront").accessibilityHidden(true)
+                    Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel(selectedStoreName)
             .accessibilityIdentifier("shopping.store.menu")
             if navigation.selectedStoreID != nil {
                 Button { navigation.selectAll() } label: {
@@ -360,9 +364,14 @@ struct GroceriesView: View {
 
     private var filtersButton: some View {
         Button { showingFilters = true } label: {
-            Label(filterLabel, systemImage: "line.3.horizontal.decrease.circle")
-                .frame(minHeight: 44)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle").accessibilityHidden(true)
+                Text(filterLabel).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .accessibilityLabel(filterLabel)
         .accessibilityIdentifier("shopping.filters")
     }
 
