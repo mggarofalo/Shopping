@@ -169,12 +169,12 @@ struct CategoryManagementView: View {
                     HStack {
                         Text(category.name)
                         Spacer()
-                        Button { beginRename(category) } label: { Image(systemName: "pencil") }
+                        Button { beginRename(category) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
                             .accessibilityLabel("Rename \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
                             .disabled(!selectionAvailable)
-                        Button(role: .destructive) { removingCategory = category } label: { Image(systemName: "trash") }
+                        Button(role: .destructive) { removingCategory = category } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
                             .accessibilityLabel("Remove \(category.name)")
                             .buttonStyle(.borderless)
                             .frame(minHeight: 44)
@@ -206,7 +206,7 @@ struct CategoryManagementView: View {
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCategory = nil } }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") { rename(category) }
+                            Button { rename(category) } label: { Label("Save", systemImage: "checkmark") }
                                 .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                     !selectionAvailable)
                         }

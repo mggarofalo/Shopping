@@ -147,10 +147,10 @@ private struct StoreManagementView: View {
                         Text(store.name)
                         Spacer()
                         if store.isArchived { Text("Archived").foregroundStyle(.secondary) }
-                        Button { beginRename(store) } label: { Image(systemName: "pencil") }
+                        Button { beginRename(store) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
                             .accessibilityLabel("Rename \(store.name)").buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
-                        Button { archive(store) } label: { Image(systemName: store.isArchived ? "arrow.uturn.backward" : "archivebox") }
+                        Button { archive(store) } label: { Image(systemName: store.isArchived ? "arrow.uturn.backward" : "archivebox").frame(minWidth: 44, minHeight: 44) }
                             .accessibilityLabel("\(store.isArchived ? "Restore" : "Archive") \(store.name)")
                             .buttonStyle(.borderless)
                             .disabled(!selectionAvailable)
@@ -198,7 +198,7 @@ private struct StoreManagementView: View {
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") { rename(store) }
+                            Button { rename(store) } label: { Label("Save", systemImage: "checkmark") }
                                 .disabled(
                                     renameName.trimmingCharacters(in: .whitespacesAndNewlines)
                                         .isEmpty || !renameAvailable)
