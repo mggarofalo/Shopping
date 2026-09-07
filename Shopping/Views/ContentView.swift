@@ -15,7 +15,7 @@ struct ContentView: View {
             GroceriesView(navigation: navigation)
                 .tabItem { Label("Groceries", systemImage: "cart") }
                 .tag(GroceryNavigationState.Tab.groceries)
-            CatalogView()
+            CatalogView(navigation: navigation)
                 .tabItem { Label("Catalog", systemImage: "books.vertical") }
                 .tag(GroceryNavigationState.Tab.catalog)
             SettingsView()
