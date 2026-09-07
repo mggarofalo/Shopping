@@ -28,4 +28,14 @@ The `com.mggarofalo.shopping` points-of-interest log marks Catalog projection, G
 
 ## Physical-device evidence
 
-Physical-device results for the connected iPhone 16 Pro are recorded here after the final signed build and three-pass route complete.
+Three benchmark passes ran on an iPhone 16 Pro with iOS 27.0 (24A5430a) using the 1,000-item stress fixture. The benchmark operations run off the app's main thread so the measurement loop itself does not stall the UI. All three passes completed without a Hang Detection event.
+
+| Operation | p50 range across runs | Worst across runs |
+| --- | ---: | ---: |
+| Catalog, all items | 9.013–9.234 ms | 10.288 ms |
+| Catalog, filtered | 7.786–7.853 ms | 8.060 ms |
+| Groceries, all needs | 20.765–21.066 ms | 21.903 ms |
+| Groceries, filtered | 19.487–19.887 ms | 20.517 ms |
+| Catalog batch preview, 1,000 items | 11.606–11.614 ms | 16.883 ms |
+
+The signed Shopping 1.2.0 (5) build was installed and verified on the device. A 40 MB Time Profiler trace captured the stress workload and the Shopping points-of-interest intervals.

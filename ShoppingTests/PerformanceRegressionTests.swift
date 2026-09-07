@@ -2,6 +2,15 @@ import XCTest
 @testable import Shopping
 
 final class PerformanceRegressionTests: XCTestCase {
+    private final class MeasurementBox: @unchecked Sendable {
+        let operation: () throws -> Void
+        var result: Result<[TimeInterval], Error>?
+
+        init(operation: @escaping () throws -> Void) {
+            self.operation = operation
+        }
+    }
+
     private var fixture: ShoppingPreviewEnvironment!
 
     override func setUpWithError() throws {
@@ -66,15 +75,25 @@ final class PerformanceRegressionTests: XCTestCase {
         name: String,
         limit: TimeInterval,
         iterations: Int = 20,
-        operation: () throws -> Void
+        operation: @escaping () throws -> Void
     ) throws {
-        try operation()
-        var durations: [TimeInterval] = []
-        for _ in 0..<iterations {
-            let start = ProcessInfo.processInfo.systemUptime
-            try operation()
-            durations.append(ProcessInfo.processInfo.systemUptime - start)
+        let finished = expectation(description: "Measure \(name) off the main thread")
+        let measurement = MeasurementBox(operation: operation)
+        DispatchQueue.global(qos: .userInitiated).async {
+            measurement.result = Result {
+                try measurement.operation()
+                var durations: [TimeInterval] = []
+                for _ in 0..<iterations {
+                    let start = ProcessInfo.processInfo.systemUptime
+                    try measurement.operation()
+                    durations.append(ProcessInfo.processInfo.systemUptime - start)
+                }
+                return durations
+            }
+            finished.fulfill()
         }
+        wait(for: [finished], timeout: 30)
+        var durations = try XCTUnwrap(measurement.result).get()
         durations.sort()
         let p50 = durations[durations.count / 2]
         let p95Index = min(durations.count - 1, max(0, Int(ceil(Double(durations.count) * 0.95)) - 1))
