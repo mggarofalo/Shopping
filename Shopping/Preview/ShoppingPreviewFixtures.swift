@@ -224,23 +224,21 @@ enum ShoppingPreviewFixtures {
                             ? [stores[index % stores.count], stores[(index + 3) % stores.count]]
                             : [stores[index % stores.count]]
                     }
-                    if index < 200 {
-                        let need = NSEntityDescription.insertNewObject(forEntityName: "Need", into: context) as! Need
-                        need.id = UUID()
-                        need.kind = NeedKind.remembered.rawValue
-                        need.title = item.name
-                        need.notes = index.isMultiple(of: 13) ? "Load fixture note" : ""
-                        need.quantity = Int64((index % 4) + 1)
-                        need.carted = index.isMultiple(of: 9)
-                        need.urgency = index.isMultiple(of: 10) ? NeedUrgency.urgent.rawValue : NeedUrgency.normal.rawValue
-                        need.revision = 0
-                        need.archived = false
-                        need.clearOperationID = nil
-                        need.oneTimeAnyStore = false
-                        need.list = list
-                        need.item = item
-                        needIDs["need-\(index)"] = need.id
-                    }
+                    let need = NSEntityDescription.insertNewObject(forEntityName: "Need", into: context) as! Need
+                    need.id = UUID()
+                    need.kind = NeedKind.remembered.rawValue
+                    need.title = item.name
+                    need.notes = index.isMultiple(of: 13) ? "Load fixture note" : ""
+                    need.quantity = Int64((index % 4) + 1)
+                    need.carted = index.isMultiple(of: 9)
+                    need.urgency = index.isMultiple(of: 10) ? NeedUrgency.urgent.rawValue : NeedUrgency.normal.rawValue
+                    need.revision = 0
+                    need.archived = false
+                    need.clearOperationID = nil
+                    need.oneTimeAnyStore = false
+                    need.list = list
+                    need.item = item
+                    needIDs["need-\(index)"] = need.id
                     itemIDs["item-\(index)"] = item.id
                 }
                 try persistence.prepareForSave(context)

@@ -449,7 +449,10 @@ final class NeedService {
         listID: UUID,
         selectedStoreID: UUID?
     ) throws -> CatalogAddPreview {
-        try readOnWriter { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add preview", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog add preview", signpostID: signpostID) }
+        return try readOnWriter { context in
             let household = try self.validatedCommandHousehold(
                 householdID: householdID, listID: listID, in: context
             )
@@ -517,7 +520,10 @@ final class NeedService {
     }
 
     func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) throws -> CatalogAddResult {
-        try write { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID) }
+        return try write { context in
             let household = try self.validatedCommandHousehold(
                 householdID: token.householdID, listID: token.listID, in: context
             )

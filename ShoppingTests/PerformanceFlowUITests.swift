@@ -24,6 +24,12 @@ final class PerformanceFlowUITests: XCTestCase {
         }
     }
 
+    func testCatalogTraceFlow() {
+        let app = launchPerformanceFixture()
+        Thread.sleep(forTimeInterval: 8)
+        exerciseCatalog(in: app)
+    }
+
     private func launchPerformanceFixture() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_PERFORMANCE_FIXTURE"] = "performance"
@@ -62,6 +68,35 @@ final class PerformanceFlowUITests: XCTestCase {
         app.buttons["Store 04"].tap()
         app.buttons["shopping.catalog.available"].tap()
         app.buttons["All items"].tap()
+
+        enterSelectionMode(in: app)
+        app.buttons["shopping.catalog.batchActions"].tap()
+        app.buttons["Select All"].tap()
+        app.buttons["shopping.catalog.batchActions"].tap()
+        app.buttons["Add to list"].tap()
+        let confirmation = app.sheets["Add selected items to list?"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.buttons["Add to list"].tap()
+        let result = app.alerts["Catalog update complete"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        result.buttons["OK"].tap()
+        if app.buttons["Done"].exists {
+            app.buttons["Done"].tap()
+        }
+
+        let firstRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).firstMatch
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 3))
+        firstRow.tap()
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 3))
+        let notes = app.textFields["shopping.catalog.notes"]
+        XCTAssertTrue(notes.waitForExistence(timeout: 3))
+        notes.tap()
+        notes.typeKey("a", modifierFlags: .command)
+        notes.typeText("Performance note")
+        app.buttons["shopping.catalog.save"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
 
         list.swipeUp()
         list.swipeUp()
@@ -107,5 +142,15 @@ final class PerformanceFlowUITests: XCTestCase {
         } else {
             tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
+    }
+
+    private func enterSelectionMode(in app: XCUIApplication) {
+        let select = app.buttons["shopping.catalog.select"]
+        if !select.exists {
+            app.navigationBars["Catalog"].buttons["More"].tap()
+        }
+        let visibleSelect = select.exists ? select : app.buttons["Select"]
+        XCTAssertTrue(visibleSelect.waitForExistence(timeout: 2))
+        visibleSelect.tap()
     }
 }
