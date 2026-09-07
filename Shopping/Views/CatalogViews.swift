@@ -1,4 +1,5 @@
 import CoreData
+import os
 import SwiftUI
 
 struct CatalogFilterState: Equatable {
@@ -157,6 +158,9 @@ struct CatalogView: View {
         scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
     }
     private var visibleGroups: [CatalogItemGroup] {
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID) }
         let sortedItems = visibleItems.sorted(by: catalogItemComesFirst)
         switch grouping {
         case .none:

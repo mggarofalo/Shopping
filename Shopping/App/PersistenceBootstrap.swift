@@ -62,6 +62,26 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
+        if let fixtureName = processInfo.environment["SHOPPING_PERFORMANCE_FIXTURE"],
+           let fixture = ShoppingPreviewCase(rawValue: fixtureName),
+           fixture == .performance || fixture == .stress {
+            do {
+                let storeURL = try performanceStoreURL(for: fixture)
+                if processInfo.environment["SHOPPING_PERFORMANCE_RESET"] == "1" {
+                    removeSQLiteStore(at: storeURL)
+                }
+                if FileManager.default.fileExists(atPath: storeURL.path) {
+                    return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+                }
+                let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
+                return PersistenceBootstrap(
+                    configuration: { .local(storeURL: storeURL) },
+                    preloadedPreviewEnvironment: environment
+                )
+            } catch {
+                return PersistenceBootstrap(configuration: { throw error })
+            }
+        }
         if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
             let storeURL = URL(fileURLWithPath: path)
             if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
@@ -79,6 +99,23 @@ final class PersistenceBootstrap: ObservableObject {
             return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
         }
         return PersistenceBootstrap()
+    }
+
+    private static func performanceStoreURL(for fixture: ShoppingPreviewCase) throws -> URL {
+        let directory = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appendingPathComponent("PerformanceFixtures", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("shopping-\(fixture.rawValue).sqlite")
+    }
+
+    private static func removeSQLiteStore(at url: URL) {
+        for suffix in ["", "-shm", "-wal"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix))
+        }
     }
 
     deinit {
