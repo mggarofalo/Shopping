@@ -175,34 +175,46 @@ struct CategoryManagementView: View {
             }
         }
         .environment(\.editMode, $editMode)
-        .navigationTitle("Categories")
+        .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Categories")
         .toolbar {
             if editMode.isEditing {
                 ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu("Actions", systemImage: "ellipsis.circle") {
-                        Button(selectedIDs == Set(householdCategories.map(\.id)) ? "Deselect All" : "Select All") {
-                            let visible = Set(householdCategories.map(\.id))
-                            selectedIDs = selectedIDs == visible ? [] : visible
-                        }
-                        Divider()
-                        if !selectedIDs.isEmpty {
-                            Button("Delete", systemImage: "trash", role: .destructive) { prepareBatchDelete() }
-                        }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(selectedIDs == Set(householdCategories.map(\.id)) ? "Deselect All" : "Select All") {
+                        let visible = Set(householdCategories.map(\.id))
+                        selectedIDs = selectedIDs == visible ? [] : visible
                     }
-                    .accessibilityIdentifier("shopping.categories.batchActions")
+                    .accessibilityIdentifier("shopping.categories.selectAll")
                 }
             } else {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Select") { editMode = .active }
+                        .disabled(!selectionAvailable || householdCategories.isEmpty)
+                        .accessibilityIdentifier("shopping.categories.select")
                     Button { beginCreate() } label: { Label("Add category", systemImage: "plus") }
                         .disabled(!selectionAvailable)
                         .accessibilityIdentifier("shopping.categories.add")
                 }
-                ToolbarItem(placement: .secondaryAction) {
-                    Button("Select") { editMode = .active }
-                        .disabled(!selectionAvailable)
-                        .accessibilityIdentifier("shopping.categories.select")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if editMode.isEditing {
+                Divider()
+                HStack(spacing: 4) {
+                    Button("Edit", systemImage: "pencil", action: editSelectedCategory)
+                        .disabled(selectedCategories.count != 1)
+                        .accessibilityIdentifier("shopping.categories.batchEdit")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatchDelete() }
+                        .tint(.red)
+                        .disabled(selectedIDs.isEmpty)
+                        .accessibilityIdentifier("shopping.categories.batchDelete")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.bar)
             }
         }
         .sheet(item: $editor) { session in
@@ -258,6 +270,7 @@ struct CategoryManagementView: View {
         .onChange(of: householdCategories.map(\.id)) { _, ids in
             selectedIDs.formIntersection(Set(ids))
         }
+        .onDisappear(perform: clearSelection)
     }
 
     @ViewBuilder
@@ -281,6 +294,16 @@ struct CategoryManagementView: View {
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
             }
+            .contextMenu {
+                if !editMode.isEditing {
+                    Button("Select", systemImage: "checkmark.circle") { beginSelection(with: category.id) }
+                        .accessibilityIdentifier("shopping.categories.contextSelect.\(category.id.uuidString)")
+                    Button("Edit", systemImage: "pencil") { beginRename(category) }
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        removingCategory = category
+                    }
+                }
+            }
             .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
             .accessibilityAction(named: Text("Delete \(category.name)")) {
                 removingCategory = category
@@ -291,6 +314,23 @@ struct CategoryManagementView: View {
         guard let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
         editorName = ""
         editor = CategoryEditorSession(category: nil, scope: scope)
+    }
+
+    private var selectedCategories: [Category] {
+        householdCategories.filter { selectedIDs.contains($0.id) }
+    }
+
+    private func beginSelection(with categoryID: UUID) {
+        guard !editMode.isEditing, selectionAvailable,
+              householdCategories.contains(where: { $0.id == categoryID }) else { return }
+        selectedIDs = [categoryID]
+        editMode = .active
+    }
+
+    private func editSelectedCategory() {
+        guard selectedCategories.count == 1, let category = selectedCategories.first else { return }
+        clearSelection()
+        beginRename(category)
     }
 
     private func beginRename(_ category: Category) {

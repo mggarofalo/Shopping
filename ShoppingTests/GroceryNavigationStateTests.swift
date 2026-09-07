@@ -136,7 +136,7 @@ final class GroceryNavigationStateTests: XCTestCase {
         XCTAssertEqual(try service.allActiveNeedIDs(householdID: selection.householdID), before)
     }
 
-    func testPurchaseRuleLabelsShowLiteralActiveTagsWithoutArchivedContradictions() throws {
+    func testPurchaseRuleLabelsShowExplicitActiveStoresWithoutArchivedContradictions() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -174,12 +174,12 @@ final class GroceryNavigationStateTests: XCTestCase {
                 anyStore: remembered.item!.anyStore,
                 stores: remembered.item!.stores ?? [],
                 activeStores: Array(remembered.item!.stores ?? []).filter { !$0.isArchived }
-            ), "Buy at any store · Tagged: Costco")
+            ), "Buy at any store · Also: Costco")
             XCTAssertEqual(GroceryPurchaseRuleLabel.text(
                 anyStore: oneTime.oneTimeAnyStore,
                 stores: oneTime.oneTimeStores ?? [],
                 activeStores: Array(oneTime.oneTimeStores ?? []).filter { !$0.isArchived }
-            ), "Buy at any store · Tagged: Costco")
+            ), "Buy at any store · Also: Costco")
             XCTAssertNil(GroceryPurchaseRuleLabel.text(
                 anyStore: archived.item!.anyStore,
                 stores: archived.item!.stores ?? [],

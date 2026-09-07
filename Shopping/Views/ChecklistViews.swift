@@ -276,12 +276,12 @@ struct CartedGroceriesView: View {
         if let id = filter.purchase.selectedStoreID { parts.append("Available at \(storeName(id))") }
         if !filter.purchase.includedStoreIDs.isEmpty {
             parts.append(
-                "tagged " + filter.purchase.includedStoreIDs.map(storeName).sorted().joined(separator: ", ")
+                "including " + filter.purchase.includedStoreIDs.map(storeName).sorted().joined(separator: ", ")
             )
         }
         if !filter.purchase.excludedStoreIDs.isEmpty {
             parts.append(
-                "excluding tags "
+                "excluding stores "
                     + filter.purchase.excludedStoreIDs.map(storeName).sorted().joined(separator: ", "))
         }
         if !filter.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

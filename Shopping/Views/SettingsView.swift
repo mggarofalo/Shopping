@@ -178,39 +178,53 @@ private struct StoreManagementView: View {
             if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores, allowsMove: false) }
         }
         .environment(\.editMode, $editMode)
-        .navigationTitle("Stores")
+        .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Stores")
         .toolbar {
             if editMode.isEditing {
                 ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu("Actions", systemImage: "ellipsis.circle") {
-                        Button(selectedIDs == Set(householdStores.map(\.id)) ? "Deselect All" : "Select All") {
-                            toggleAll()
-                        }
-                        Divider()
-                        if selectedStores.contains(where: { !$0.isArchived }) {
-                            Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
-                        }
-                        if selectedStores.contains(where: \.isArchived) {
-                            Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
-                        }
-                        if !selectedIDs.isEmpty {
-                            Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
-                        }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(selectedIDs == Set(householdStores.map(\.id)) ? "Deselect All" : "Select All") {
+                        toggleAll()
                     }
-                    .accessibilityIdentifier("shopping.stores.batchActions")
+                    .accessibilityIdentifier("shopping.stores.selectAll")
                 }
             } else {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Select") { editMode = .active }
+                        .disabled(!selectionAvailable || householdStores.isEmpty)
+                        .accessibilityIdentifier("shopping.stores.select")
                     Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
                         .disabled(!selectionAvailable)
                         .accessibilityIdentifier("shopping.stores.add")
                 }
-                ToolbarItem(placement: .secondaryAction) {
-                    Button("Select") { editMode = .active }
-                        .disabled(!selectionAvailable)
-                        .accessibilityIdentifier("shopping.stores.select")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if editMode.isEditing {
+                Divider()
+                HStack(spacing: 4) {
+                    Button("Edit", systemImage: "pencil", action: editSelectedStore)
+                        .disabled(selectedStores.count != 1)
+                        .accessibilityIdentifier("shopping.stores.batchEdit")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
+                        .disabled(!selectedStores.contains(where: { !$0.isArchived }))
+                        .accessibilityIdentifier("shopping.stores.batchArchive")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
+                        .disabled(!selectedStores.contains(where: \.isArchived))
+                        .accessibilityIdentifier("shopping.stores.batchRestore")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                        .tint(.red)
+                        .disabled(selectedIDs.isEmpty)
+                        .accessibilityIdentifier("shopping.stores.batchDelete")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.bar)
             }
         }
         .sheet(item: $editor) { session in
@@ -243,9 +257,9 @@ private struct StoreManagementView: View {
             Button("Cancel", role: .cancel, action: clearRemoval)
         } message: {
             if requestedDeletion && removalAction == .archive {
-                Text("This store is still used by saved items or groceries, so it cannot be permanently deleted. You can archive it instead and keep those purchase tags recoverable.")
+                Text("This store is still used by saved items or groceries, so it cannot be permanently deleted. You can archive it instead and keep those purchase rules recoverable.")
             } else if removalAction == .archive {
-                Text("Archiving hides this store from active choices and preserves any saved purchase tags for recovery.")
+                Text("Archiving hides this store from active choices and preserves saved purchase rules for recovery.")
             } else {
                 Text("This store has no catalog or one-time grocery references and will be removed.")
             }
@@ -284,6 +298,7 @@ private struct StoreManagementView: View {
         .onChange(of: householdStores.map(\.id)) { _, ids in
             selectedIDs.formIntersection(Set(ids))
         }
+        .onDisappear(perform: clearSelection)
     }
 
     private var selectedStores: [Store] { householdStores.filter { selectedIDs.contains($0.id) } }
@@ -292,7 +307,9 @@ private struct StoreManagementView: View {
     private func storeSection(_ title: String, stores: [Store], allowsMove: Bool) -> some View {
         Section(title) {
             ForEach(stores, id: \.objectID) { store in
-                storeRow(store).shoppingListRowInsets().tag(store.id)
+                storeRow(store)
+                    .shoppingListRowInsets()
+                    .tag(store.id)
             }
             .onMove(perform: allowsMove ? reorder : nil)
         }
@@ -329,6 +346,18 @@ private struct StoreManagementView: View {
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
             }
+            .contextMenu {
+                if !editMode.isEditing {
+                    Button("Select", systemImage: "checkmark.circle") { beginSelection(with: store.id) }
+                        .accessibilityIdentifier("shopping.stores.contextSelect.\(store.id.uuidString)")
+                    Button("Edit", systemImage: "pencil") { beginRename(store) }
+                    Button(store.isArchived ? "Restore" : "Archive",
+                           systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox") {
+                        if store.isArchived { restore(store) } else { beginArchive(store) }
+                    }
+                    Button("Delete", systemImage: "trash", role: .destructive) { beginDeletion(store) }
+                }
+            }
             .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
             .accessibilityAction(named: Text("\(store.isArchived ? "Restore" : "Archive") \(store.name)")) {
                 if store.isArchived { restore(store) } else { beginArchive(store) }
@@ -340,6 +369,19 @@ private struct StoreManagementView: View {
         guard let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
         editorName = ""
         editor = StoreEditorSession(store: nil, scope: scope)
+    }
+
+    private func beginSelection(with storeID: UUID) {
+        guard !editMode.isEditing, selectionAvailable,
+              householdStores.contains(where: { $0.id == storeID }) else { return }
+        selectedIDs = [storeID]
+        editMode = .active
+    }
+
+    private func editSelectedStore() {
+        guard selectedStores.count == 1, let store = selectedStores.first else { return }
+        clearSelection()
+        beginRename(store)
     }
 
     private func beginRename(_ store: Store) {

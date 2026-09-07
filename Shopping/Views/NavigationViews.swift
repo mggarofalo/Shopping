@@ -310,10 +310,10 @@ struct GroceriesView: View {
                         filterChip(category.name) { navigation.categoryID = nil }
                     }
                     ForEach(activeStores.filter { navigation.includedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                        filterChip("Tagged \(store.name)") { navigation.setIncluded(false, storeID: store.id) }
+                        filterChip("Includes \(store.name)") { navigation.setIncluded(false, storeID: store.id) }
                     }
                     ForEach(activeStores.filter { navigation.excludedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                        filterChip("Not tagged \(store.name)") { navigation.setExcluded(false, storeID: store.id) }
+                        filterChip("Excludes \(store.name)") { navigation.setExcluded(false, storeID: store.id) }
                     }
                 }
             }
@@ -752,7 +752,7 @@ enum GroceryPurchaseRuleLabel {
     static func text(anyStore: Bool, stores: Set<Store>, activeStores: [Store]) -> String? {
         let names = activeStores.filter { stores.contains($0) }.map(\.name).sorted()
         if anyStore {
-            return names.isEmpty ? "Buy at any store" : "Buy at any store · Tagged: \(names.joined(separator: ", "))"
+            return names.isEmpty ? "Buy at any store" : "Buy at any store · Also: \(names.joined(separator: ", "))"
         }
         guard !names.isEmpty else { return nil }
         return names.count == 1 ? "Only buy at \(names[0])" : "Buy at \(names.joined(separator: ", "))"
@@ -989,7 +989,7 @@ struct GroceryFiltersView: View {
                         }
                     }
                 }
-                Section("Include a store tag") {
+                Section("Include stores") {
                     PillFlowLayout {
                         ForEach(stores, id: \.objectID) { store in
                             SelectionPill(
@@ -1000,7 +1000,7 @@ struct GroceryFiltersView: View {
                         }
                     }
                 }
-                Section("Exclude a store tag") {
+                Section("Exclude stores") {
                     PillFlowLayout {
                         ForEach(stores, id: \.objectID) { store in
                             SelectionPill(

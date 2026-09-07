@@ -165,7 +165,7 @@ final class ShoppingLaunchTests: XCTestCase {
 
     func testSavingInlineStoreSelectsItButParentCancelCreatesNoNeed() {
         let app = launchApp()
-        openOneTimeAdd(in: app, groceryName: "Canceled tagged grocery")
+        openOneTimeAdd(in: app, groceryName: "Canceled assigned grocery")
         revealInlineAddStore(in: app).tap()
         XCTAssertTrue(app.navigationBars["Add store"].waitForExistence(timeout: 2))
         let storeName = app.textFields["shopping.tags.storeName"]
@@ -213,25 +213,25 @@ final class ShoppingLaunchTests: XCTestCase {
         revealGrocery(named: "Granola", in: app, towardTop: true)
     }
 
-    func testIncludedAndExcludedLiteralTagChipsGiveExclusionPrecedence() {
+    func testIncludedAndExcludedStoreChipsGiveExclusionPrecedence() {
         let app = launchApp(fixture: "populated")
         XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
 
         app.buttons["shopping.filters"].tap()
         XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 2))
-        setStoreTag(named: "Costco", in: .include, on: true, app: app)
-        setStoreTag(named: "Costco", in: .exclude, on: true, app: app)
+        setStoreFilter(named: "Costco", in: .include, on: true, app: app)
+        setStoreFilter(named: "Costco", in: .exclude, on: true, app: app)
         dismissGroceryFilters(in: app)
 
-        XCTAssertTrue(app.buttons["Remove Tagged Costco filter"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Remove Not tagged Costco filter"].exists)
+        XCTAssertTrue(app.buttons["Remove Includes Costco filter"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Remove Excludes Costco filter"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["No matching groceries"].exists)
 
-        app.buttons["Remove Not tagged Costco filter"].tap()
+        app.buttons["Remove Excludes Costco filter"].tap()
         XCTAssertFalse(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Remove Tagged Costco filter"].exists)
+        XCTAssertTrue(app.buttons["Remove Includes Costco filter"].exists)
     }
 
     func testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries() {
@@ -514,14 +514,14 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
     }
 
-    private enum StoreTagSection {
+    private enum StoreFilterSection {
         case include
         case exclude
 
         var header: String {
             switch self {
-            case .include: "Include a store tag"
-            case .exclude: "Exclude a store tag"
+            case .include: "Include stores"
+            case .exclude: "Exclude stores"
             }
         }
 
@@ -557,9 +557,9 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, on ? "1" : "0")
     }
 
-    private func setStoreTag(
+    private func setStoreFilter(
         named name: String,
-        in section: StoreTagSection,
+        in section: StoreFilterSection,
         on: Bool,
         app: XCUIApplication
     ) {
@@ -569,12 +569,12 @@ final class ShoppingLaunchTests: XCTestCase {
         ).firstMatch
         reveal(header, in: app)
         XCTAssertTrue(header.exists)
-        let tags = app.buttons.matching(NSPredicate(
+        let choices = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label == %@", section.identifierPrefix, name
         ))
-        let pill = tags.firstMatch
+        let pill = choices.firstMatch
         reveal(pill, in: app)
-        XCTAssertEqual(tags.count, 1)
+        XCTAssertEqual(choices.count, 1)
         XCTAssertTrue(pill.isHittable)
         if (pill.value as? String == "Selected") != on { pill.tap() }
         XCTAssertEqual(pill.value as? String, on ? "Selected" : "Not selected")

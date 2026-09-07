@@ -213,43 +213,54 @@ struct CatalogView: View {
             .contentMargins(.top, 0, for: .scrollContent)
             .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationTitle("Catalog")
+            .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
                 if editMode.isEditing {
                     ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu("Actions", systemImage: "ellipsis.circle") {
-                            Button(selectedIDs == visibleItemIDs ? "Deselect All" : "Select All") {
-                                selectedIDs = selectedIDs == visibleItemIDs ? [] : visibleItemIDs
-                            }
-                            Divider()
-                            if selectedItems.contains(where: { !$0.isArchived }) {
-                                Button("Add to list", systemImage: "cart.badge.plus") { prepareBatchAdd() }
-                            }
-                            if selectedItems.contains(where: { !$0.isArchived }) {
-                                Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
-                            }
-                            if selectedItems.contains(where: \.isArchived) {
-                                Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
-                            }
-                            if !selectedIDs.isEmpty {
-                                Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
-                            }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(selectedIDs == visibleItemIDs ? "Deselect All" : "Select All") {
+                            selectedIDs = selectedIDs == visibleItemIDs ? [] : visibleItemIDs
                         }
-                        .accessibilityIdentifier("shopping.catalog.batchActions")
+                        .accessibilityIdentifier("shopping.catalog.selectAll")
                     }
                 } else {
-                    ToolbarItem(placement: .primaryAction) {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        Button("Select") { editMode = .active }
+                            .disabled(household == nil || service == nil || visibleItems.isEmpty)
+                            .accessibilityIdentifier("shopping.catalog.select")
                         Button("New catalog item", systemImage: "plus", action: create)
                             .accessibilityIdentifier("shopping.catalog.add")
                             .disabled(household == nil || service == nil)
                     }
-                    ToolbarItem(placement: .secondaryAction) {
-                        Button("Select") { editMode = .active }
-                            .disabled(household == nil || service == nil || visibleItems.isEmpty)
-                            .accessibilityIdentifier("shopping.catalog.select")
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if editMode.isEditing {
+                    Divider()
+                    HStack(spacing: 4) {
+                        Button("Add", systemImage: "cart.badge.plus") { prepareBatchAdd() }
+                            .disabled(!selectedItems.contains(where: { !$0.isArchived }))
+                            .accessibilityIdentifier("shopping.catalog.batchAdd")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
+                        .disabled(!selectedItems.contains(where: { !$0.isArchived }))
+                        .accessibilityIdentifier("shopping.catalog.batchArchive")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
+                            .disabled(!selectedItems.contains(where: \.isArchived))
+                            .accessibilityIdentifier("shopping.catalog.batchRestore")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                            .tint(.red)
+                            .disabled(selectedIDs.isEmpty)
+                            .accessibilityIdentifier("shopping.catalog.batchDelete")
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.bar)
                 }
             }
             .confirmationDialog("Available at store", isPresented: $showingStores, titleVisibility: .visible) {
@@ -332,6 +343,7 @@ struct CatalogView: View {
                 sanitizeFilters()
                 refreshAndSanitizeSelection()
             }
+            .onDisappear(perform: clearSelection)
         }
     }
 
@@ -347,7 +359,7 @@ struct CatalogView: View {
                 ContentUnavailableView {
                     Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
                 } description: {
-                    Text(hasNarrowing ? "Your filters may hide saved items." : "Save items here to reuse their purchase tags.")
+                    Text(hasNarrowing ? "Your filters may hide saved items." : "Save items here to reuse their purchase rules.")
                 } actions: {
                     if hasNarrowing { Button("Reset filters", action: resetFilters) }
                     else { Button("New catalog item", action: create).disabled(household == nil) }
@@ -357,7 +369,19 @@ struct CatalogView: View {
         } else {
             ForEach(visibleGroups) { group in
                 Section {
-                    ForEach(group.items, id: \.objectID) { item in catalogRow(item) }
+                    ForEach(group.items, id: \.objectID) { item in
+                        if editMode.isEditing {
+                            CatalogItemRow(item: item)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .shoppingListRowInsets()
+                                .tag(item.id)
+                                .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                        } else {
+                            catalogRow(item)
+                                .tag(item.id)
+                        }
+                    }
                 } header: {
                     if let title = group.title { Text(title) }
                 }
@@ -395,10 +419,10 @@ struct CatalogView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(activeStores.filter { filters.includedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                            chip("Tagged: \(store.name)") { filters.includedStoreIDs.remove(store.id) }
+                            chip("Includes: \(store.name)") { filters.includedStoreIDs.remove(store.id) }
                         }
                         ForEach(activeStores.filter { filters.excludedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                            chip("Not tagged: \(store.name)") { filters.excludedStoreIDs.remove(store.id) }
+                            chip("Excludes: \(store.name)") { filters.excludedStoreIDs.remove(store.id) }
                         }
                         if let category = scopedCategories.first(where: { $0.id == filters.categoryID }) {
                             chip(category.name) { filters.categoryID = nil }
@@ -413,18 +437,16 @@ struct CatalogView: View {
         .padding(.bottom, 8)
     }
 
-    private func catalogRow(_ item: Item) -> AnyView {
-        AnyView(HStack(spacing: 8) {
-            Button {
-                if !editMode.isEditing { edit(item) }
-            } label: {
+    private func catalogRow(_ item: Item) -> some View {
+        HStack(spacing: 8) {
+            Button { edit(item) } label: {
                 CatalogItemRow(item: item)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-            if !editMode.isEditing && !item.isArchived {
+            if !item.isArchived {
                 Button { prepareIndividualAdd(item) } label: {
                     Label("Add \(item.name) to list", systemImage: "cart.badge.plus")
                         .labelStyle(.iconOnly)
@@ -436,7 +458,6 @@ struct CatalogView: View {
             }
         }
         .shoppingListRowInsets()
-        .tag(item.id)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { prepareArchive(item) } label: {
                 Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
@@ -452,6 +473,19 @@ struct CatalogView: View {
             .accessibilityLabel("Delete")
             .accessibilityIdentifier("shopping.catalog.swipeDelete.\(item.id.uuidString)")
         }
+        .contextMenu {
+            Button("Select", systemImage: "checkmark.circle") { beginSelection(with: item.id) }
+                .accessibilityIdentifier("shopping.catalog.contextSelect.\(item.id.uuidString)")
+            Button("Edit", systemImage: "pencil") { edit(item) }
+            if !item.isArchived {
+                Button("Add to List", systemImage: "cart.badge.plus") { prepareIndividualAdd(item) }
+            }
+            Button(item.isArchived ? "Restore" : "Archive",
+                   systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox") {
+                prepareArchive(item)
+            }
+            Button("Delete", systemImage: "trash", role: .destructive) { prepareRemoval(item) }
+        }
         .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
             prepareArchive(item)
         }
@@ -461,13 +495,20 @@ struct CatalogView: View {
         ) { prepareIndividualAdd(item) }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
             prepareRemoval(item)
-        })
+        }
     }
 
     private func catalogItemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
         if alphabetically(lhs.name, rhs.name) { return true }
         if alphabetically(rhs.name, lhs.name) { return false }
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func beginSelection(with itemID: UUID) {
+        guard !editMode.isEditing, household != nil, service != nil,
+              visibleItemIDs.contains(itemID) else { return }
+        selectedIDs = [itemID]
+        editMode = .active
     }
 
     private func alphabetically(_ lhs: String, _ rhs: String) -> Bool {
@@ -490,12 +531,12 @@ struct CatalogView: View {
         if item.anyStore || (item.stores ?? []).isEmpty {
             return [CatalogGroupKey(id: "store:any", title: "Any store")]
         }
-        let tagged = item.stores ?? []
+        let assignedStores = item.stores ?? []
         let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
-        var keys = validStores.filter { tagged.contains($0) }.map {
+        var keys = validStores.filter { assignedStores.contains($0) }.map {
             CatalogGroupKey(id: "store:\($0.id.uuidString)", title: $0.name)
         }
-        if keys.count < tagged.count {
+        if keys.count < assignedStores.count {
             keys.append(CatalogGroupKey(id: "store:unavailable", title: "Unavailable stores"))
         }
         return keys.isEmpty
@@ -849,8 +890,8 @@ private struct CatalogFiltersView: View {
                             ) { toggle(store.id, in: $filters.includedStoreIDs) }
                         }
                     }
-                } header: { Text("Tagged (any selected)") } footer: {
-                    Text("Match at least one explicit tag. Any store does not add tags.")
+                } header: { Text("Include stores (any selected)") } footer: {
+                    Text("Match items with at least one selected store in their purchase rules.")
                 }
                 Section {
                     PillFlowLayout {
@@ -862,8 +903,8 @@ private struct CatalogFiltersView: View {
                             ) { toggle(store.id, in: $filters.excludedStoreIDs) }
                         }
                     }
-                } header: { Text("Not tagged (none selected)") } footer: {
-                    Text("Exclude every selected tag. Exclusions win over included tags.")
+                } header: { Text("Exclude stores (none selected)") } footer: {
+                    Text("Exclude items assigned to any selected store. Exclusions take priority.")
                 }
                 Section("Category") {
                     PillFlowLayout {
@@ -1042,7 +1083,7 @@ private struct CatalogEditorView: View {
                     .accessibilityIdentifier("shopping.catalog.confirmArchiveState")
                 Button("Keep editing", role: .cancel) {}
             } message: {
-                Text("Current groceries and saved tags are preserved. Unsaved edits in this form will be discarded.")
+                Text("Current groceries and saved purchase rules are preserved. Unsaved edits in this form will be discarded.")
             }
             .sheet(isPresented: $showingCategoryCreation) {
                 CategoryCreationView(
@@ -1109,7 +1150,7 @@ private enum CatalogErrorCopy {
     static func message(_ error: Error) -> String {
         switch error as? NeedServiceError {
         case .invalidName: return "Enter an item name."
-        case .storeNotFound: return "Choose an active store or turn on Any store. Check for unavailable tags."
+        case .storeNotFound: return "Choose an active store or turn on Any store. Check for unavailable stores."
         case .categoryNotFound: return "Choose an available category or Uncategorized."
         case .catalogNameCollision: return "An item with this name already exists. Choose it or confirm a distinct item."
         case .scopeChanged, .householdNotFound, .listNotFound: return "The household or selected details changed. Review your draft and try again."

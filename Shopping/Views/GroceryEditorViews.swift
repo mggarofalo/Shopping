@@ -626,7 +626,7 @@ struct GroceryEditorView: View {
             let names = validStores.filter { !$0.isArchived && (item.stores ?? []).contains($0) }
                 .map(\.name)
                 .sorted()
-            purchaseRule = names.isEmpty ? "Archived store tags" : names.joined(separator: ", ")
+            purchaseRule = names.isEmpty ? "Archived stores" : names.joined(separator: ", ")
         }
         return "\(category) · \(purchaseRule)"
     }

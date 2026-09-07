@@ -8,7 +8,7 @@
 - **Design review:** [SHOPPING-26](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/work-items/dc144997-592d-4da6-9b3f-b6b8a5e034f7)
 - **Architecture spike:** [SHOPPING-27](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/work-items/5e924f74-ae8e-49b0-ab02-1653ffa7ecbb)
 
-SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with compact two-group store shopping and an implicit Any store default for untagged items. These replace the original per-store trip and SwiftData-sharing sketches.
+SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with compact two-group store shopping and an implicit Any store default for items without a store restriction. These replace the original per-store trip and SwiftData-sharing sketches.
 
 ## Modules and roadmap
 
@@ -41,11 +41,11 @@ An obsolete SHOPPING-27 blocked-by-SHOPPING-10 relation was identified during th
 
 ## Product contract
 
-The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit purchase tags or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
+The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
 
-For selected store `S`, availability is `Any store OR explicitly tagged S`. No explicit tags means Any store, including older saved records. `Only buy here` means `S` is the only explicit active tag and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings; All has none. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit tag membership, exclusions win, and cannot widen availability. Tags express household buying rules, not retailer stock.
+For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. `Only buy here` means `S` is the only explicit active store and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings; All has none. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
 
-Ordinary re-add reuses the catalog item and its tags, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
+Ordinary re-add reuses the catalog item's purchase rules, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
 
 Clear-carted operations must be confirmed and recoverable. They target exact captured occurrence IDs and revisions, skip rows changed since capture, and do not delete catalog knowledge or overwrite a later uncart/re-add.
 

@@ -31,7 +31,7 @@ No physical devices were connected during this validation. Before release, verif
 - Default-size and larger-text typography, including compact-device truncation, pinned header/footer visibility, long names, long notes, and purchase-rule labels.
 - Offline creation, carting, scoped clear/Undo, recovery after force-quit/relaunch, and reconnect behavior.
 - Reduce Motion behavior during cart, clear, recovery, navigation, and confirmation.
-- Real two-account household sharing: invitation acceptance, owner/participant writes, concurrent edits, store tags, recovery, revocation, and convergence.
+- Real two-account household sharing: invitation acceptance, owner/participant writes, concurrent edits, store purchase rules, recovery, revocation, and convergence.
 
 Simulator checks do not validate VoiceOver behavior on hardware, airplane-mode persistence, or live CloudKit sharing.
 

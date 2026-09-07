@@ -252,14 +252,14 @@ struct PurchaseRulesPicker: View {
                     }
                 }
                 if anyStore && !storeIDs.isEmpty {
-                    Text("Can buy at any store, even when tagged.")
+                    Text("Can buy at any store; the saved stores remain available if you turn this off.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 let unavailable = storeIDs.subtracting(Set(validStores.map(\.id)))
                 if !unavailable.isEmpty {
-                    Text("Remove unavailable tags, then choose where to buy.")
+                    Text("Remove unavailable stores, then choose where to buy.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Button("Remove unavailable tags", systemImage: "xmark.circle") {
+                    Button("Remove unavailable stores", systemImage: "xmark.circle") {
                         storeIDs.subtract(unavailable)
                     }
                 }
@@ -388,7 +388,7 @@ private struct PurchaseRulesPreview: View {
     }
 }
 
-#Preview("Purchase tags") { ShoppingPreviewHost(.populated) { PurchaseRulesPreview() } }
+#Preview("Purchase rules") { ShoppingPreviewHost(.populated) { PurchaseRulesPreview() } }
 #Preview("Add store") {
     let fixture = try! ShoppingPreviewFixtures.make(.populated)
     NavigationStack { StoreCreationView(householdID: fixture.ids.householdID, listID: fixture.ids.listID, onSelected: { _ in })
