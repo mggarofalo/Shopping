@@ -458,6 +458,139 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertTrue(try itemSnapshot(itemID, persistence: persistence).isArchived)
     }
 
+    func testBatchCatalogDeleteArchivesReferencedDeletesUnreferencedAndIsSafeToRetry() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let referenced = try service.createItem(name: "Milk", householdID: selection.householdID)
+        let disposable = try service.createItem(name: "Old spice", householdID: selection.householdID)
+        _ = try service.addRememberedNeed(itemID: referenced, listID: selection.listID)
+
+        let preview = try service.captureManagementBatch(
+            entity: .catalogItem, action: .delete, ids: [referenced, disposable],
+            householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.archiveCount, 1)
+        XCTAssertEqual(preview.deleteCount, 1)
+
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.archivedCount, 1)
+        XCTAssertEqual(result.deletedCount, 1)
+        XCTAssertTrue(try itemSnapshot(referenced, persistence: persistence).isArchived)
+        XCTAssertFalse(try itemExists(disposable, persistence: persistence))
+
+        let retry = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(retry.deletedCount, 0)
+        XCTAssertEqual(retry.archivedCount, 0)
+        XCTAssertEqual(retry.changedCount, 1)
+        XCTAssertEqual(retry.missingCount, 1)
+    }
+
+    func testBatchCategoryDeleteSkipsNewerEditAndAppliesUnaffectedEntry() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let changed = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let unchanged = try service.createCategory(name: "Bakery", householdID: selection.householdID)
+        let preview = try service.captureManagementBatch(
+            entity: .category, action: .delete, ids: [changed, unchanged],
+            householdID: selection.householdID, listID: selection.listID
+        )
+
+        try service.renameCategory(
+            name: "Fresh produce", categoryID: changed,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.deletedCount, 1)
+        XCTAssertEqual(result.changedCount, 1)
+
+        let context = persistence.simulationContext()
+        let remaining = try context.performAndWait { () -> [(UUID, String)] in
+            try context.fetch(Shopping.Category.fetchRequest()).map { ($0.id, $0.name) }
+        }
+        XCTAssertEqual(remaining.map(\.0), [changed])
+        XCTAssertEqual(remaining.first?.1, "Fresh produce")
+    }
+
+    func testBatchCategoryDeleteSkipsNewerItemAndOneTimeNeedAssignments() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let categoryID = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let itemID = try service.createItem(name: "Apples", householdID: selection.householdID)
+        let preview = try service.captureManagementBatch(
+            entity: .category, action: .delete, ids: [categoryID],
+            householdID: selection.householdID, listID: selection.listID
+        )
+
+        try service.setCategory(itemID: itemID, categoryID: categoryID)
+        let needID = try service.addOneTimeNeed(
+            title: "Bananas", categoryID: categoryID, listID: selection.listID
+        )
+        let result = try service.applyManagementBatch(preview.token)
+
+        XCTAssertEqual(result.deletedCount, 0)
+        XCTAssertEqual(result.changedCount, 1)
+        XCTAssertEqual(try itemSnapshot(itemID, persistence: persistence).categoryID, categoryID)
+        let context = persistence.simulationContext()
+        XCTAssertTrue(try context.performAndWait {
+            let categoryExists = try context.fetch(Category.fetchRequest()).contains { $0.id == categoryID }
+            let needKeptCategory = try context.fetch(Need.fetchRequest()).first { $0.id == needID }?.oneTimeCategory?.id == categoryID
+            return categoryExists && needKeptCategory
+        })
+    }
+
+    func testBatchStoreDeleteArchivesReferencedAndDeletesSafeStore() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let referenced = try service.createStore(name: "Market", householdID: selection.householdID)
+        let disposable = try service.createStore(name: "Closed kiosk", householdID: selection.householdID)
+        _ = try service.createItem(
+            name: "Tea", storeIDs: [referenced], householdID: selection.householdID, anyStore: false
+        )
+        let preview = try service.captureManagementBatch(
+            entity: .store, action: .delete, ids: [referenced, disposable],
+            householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.archiveCount, 1)
+        XCTAssertEqual(preview.deleteCount, 1)
+
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.archivedCount, 1)
+        XCTAssertEqual(result.deletedCount, 1)
+        let context = persistence.simulationContext()
+        let states = try context.performAndWait { () -> [UUID: Bool] in
+            Dictionary(uniqueKeysWithValues: try context.fetch(Store.fetchRequest()).map { ($0.id, $0.isArchived) })
+        }
+        XCTAssertEqual(states, [referenced: true])
+
+        let restore = try service.captureManagementBatch(
+            entity: .store, action: .restore, ids: [referenced],
+            householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(restore.restoreCount, 1)
+        XCTAssertEqual(try service.applyManagementBatch(restore.token).restoredCount, 1)
+        let restored = try context.performAndWait { () -> Bool in
+            context.reset()
+            let request = Store.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", referenced as CVarArg)
+            return try XCTUnwrap(context.fetch(request).first).isArchived
+        }
+        XCTAssertFalse(restored)
+    }
+
+    func testBatchTokenCodablePreservesScopeRevisionsAndIntent() throws {
+        let token = ManagementBatchToken(
+            id: UUID(), householdID: UUID(), listID: UUID(), entity: .store,
+            action: .delete, entries: [ManagementBatchEntry(id: UUID(), revision: 7)]
+        )
+        XCTAssertEqual(try JSONDecoder().decode(
+            ManagementBatchToken.self, from: JSONEncoder().encode(token)
+        ), token)
+    }
+
     private enum SaveFailure: CaseIterable, CustomStringConvertible {
         case permission
         case preSave

@@ -52,6 +52,90 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
     }
 
+    func testCategoryBatchSelectAllPresentsOneRedDeleteConfirmation() {
+        let app = launchPopulated()
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Categories"].tap()
+        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
+        app.buttons["shopping.categories.batchActions"].tap()
+        XCTAssertTrue(app.buttons["Select All"].waitForExistence(timeout: 2))
+        app.buttons["Select All"].tap()
+        app.buttons["shopping.categories.batchActions"].tap()
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.isEnabled)
+        delete.tap()
+        let confirmation = app.sheets["Delete selected categories?"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
+        XCTAssertTrue(confirmation.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "will be permanently deleted")
+        ).firstMatch.exists)
+        XCTAssertTrue(confirmation.buttons["Delete"].exists)
+        confirmation.buttons["Delete"].tap()
+        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
+        app.alerts.buttons["OK"].tap()
+    }
+
+    func testStoreAndCatalogBatchActionsReflectSelectedState() {
+        let app = launchPopulated()
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Stores"].tap()
+        XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 3))
+        enterSelectionMode(app, navigationTitle: "Stores", identifier: "shopping.stores.select")
+        app.buttons["shopping.stores.batchActions"].tap()
+        app.buttons["Select All"].tap()
+        app.buttons["shopping.stores.batchActions"].tap()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Delete"].exists)
+        app.buttons["Archive"].tap()
+        XCTAssertTrue(app.sheets["Archive selected stores?"].waitForExistence(timeout: 2))
+        app.sheets.buttons["Archive"].tap()
+        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
+        app.alerts.buttons["OK"].tap()
+
+        enterSelectionMode(app, navigationTitle: "Stores", identifier: "shopping.stores.select")
+        app.buttons["shopping.stores.batchActions"].tap()
+        app.buttons["Select All"].tap()
+        app.buttons["shopping.stores.batchActions"].tap()
+        XCTAssertTrue(app.buttons["Restore"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["Archive"].exists)
+        app.buttons["Restore"].tap()
+        XCTAssertTrue(app.sheets["Restore selected stores?"].waitForExistence(timeout: 2))
+        app.sheets.buttons["Restore"].tap()
+        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
+        app.alerts.buttons["OK"].tap()
+
+        app.navigationBars["Stores"].buttons.firstMatch.tap()
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        enterSelectionMode(app, navigationTitle: "Catalog", identifier: "shopping.catalog.select")
+        app.buttons["shopping.catalog.batchActions"].tap()
+        app.buttons["Select All"].tap()
+        app.buttons["shopping.catalog.batchActions"].tap()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Delete"].exists)
+    }
+
+    private func launchPopulated() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingBatchUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    private func enterSelectionMode(_ app: XCUIApplication, navigationTitle: String, identifier: String) {
+        let select = app.buttons[identifier]
+        if !select.exists {
+            app.navigationBars[navigationTitle].buttons["More"].tap()
+        }
+        let visibleSelect = select.exists ? select : app.buttons["Select"]
+        XCTAssertTrue(visibleSelect.waitForExistence(timeout: 2))
+        visibleSelect.tap()
+    }
+
     private func replaceText(in field: XCUIElement, with text: String) {
         field.tap()
         field.typeKey("a", modifierFlags: .command)
