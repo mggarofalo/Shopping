@@ -3,6 +3,9 @@ import Foundation
 struct PurchaseRuleValue: Equatable {
     let explicitStoreIDs: Set<UUID>
     let anyStore: Bool
+    var hasResolvedIdentity: Bool = true
+
+    var allowsAnyStore: Bool { hasResolvedIdentity && (anyStore || explicitStoreIDs.isEmpty) }
 }
 
 enum PurchaseAvailability: Equatable {
@@ -34,11 +37,11 @@ struct PurchaseFilter: Equatable {
         let tags = value.explicitStoreIDs.intersection(activeStoreIDs)
         if let selectedStoreID {
             guard activeStoreIDs.contains(selectedStoreID),
-                  value.anyStore || tags.contains(selectedStoreID) else { return false }
+                  value.allowsAnyStore || tags.contains(selectedStoreID) else { return false }
         }
         guard includedStoreIDs.isEmpty || !tags.isDisjoint(with: includedStoreIDs),
               tags.isDisjoint(with: excludedStoreIDs) else { return false }
-        if let requiresAnyStore, value.anyStore != requiresAnyStore { return false }
+        if let requiresAnyStore, value.allowsAnyStore != requiresAnyStore { return false }
         return true
     }
 
@@ -49,11 +52,11 @@ struct PurchaseFilter: Equatable {
     ) -> PurchaseAvailability {
         let tags = value.explicitStoreIDs.intersection(activeStoreIDs)
         guard let selectedStoreID else {
-            return !value.anyStore && tags.isEmpty ? .needsStore : .unavailable
+            return !value.allowsAnyStore && tags.isEmpty ? .needsStore : .unavailable
         }
         guard activeStoreIDs.contains(selectedStoreID),
-              value.anyStore || tags.contains(selectedStoreID) else { return .unavailable }
-        return !value.anyStore && tags == [selectedStoreID] ? .mustBuyHere : .flexibleHere
+              value.allowsAnyStore || tags.contains(selectedStoreID) else { return .unavailable }
+        return !value.allowsAnyStore && tags == [selectedStoreID] ? .mustBuyHere : .flexibleHere
     }
 }
 

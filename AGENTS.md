@@ -28,7 +28,7 @@ main
 
 The MVP has one shared household grocery-demand list, projected through store filters. It does not create per-store trip lists or use a Finish/Reopen workflow.
 
-Catalog store tags are saved purchase constraints, not retailer inventory. A store view first applies `Any store OR tagged for the selected store`; text, category, urgency, and advanced tag filters can only narrow that eligible set. Urgent never makes an ineligible item available at a store.
+Catalog store tags are saved purchase constraints, not retailer inventory. No explicit store tags means Any store. A store view first applies `Any store OR tagged for the selected store`; text, category, urgency, and advanced tag filters can only narrow that eligible set. Urgent never makes an ineligible item available at a store. Store shopping has only `Only buy here` and `Can buy here` groups; All has no group headings. Do not repeat purchase rules or show `Needs store` on list rows. Archived restrictions and unresolved catalog identities must not silently become unrestricted.
 
 Reusable catalog items retain their tags when re-added. A normal flow maintains one active remembered need per catalog item. One-time needs have independent identities, stay available for sync and recovery, and never seed catalog suggestions or templates without explicit user action. Current-need urgency is `Normal` or `Urgent` and is never remembered on the catalog item.
 

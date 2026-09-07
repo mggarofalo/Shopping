@@ -56,6 +56,14 @@ private struct CatalogEditSession: Identifiable {
     let values: CatalogItemValues
 }
 
+private struct CatalogArchiveTarget {
+    let itemID: UUID
+    let householdID: UUID
+    let listID: UUID
+    let name: String
+    let archived: Bool
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
@@ -71,6 +79,7 @@ struct CatalogView: View {
     @State private var showingFilters = false
     @State private var showingStores = false
     @State private var editor: CatalogEditSession?
+    @State private var archiveTarget: CatalogArchiveTarget?
     @State private var errorMessage: String?
 
     private var canonicalList: GroceryList? {
@@ -94,21 +103,33 @@ struct CatalogView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                filterHeader
-                List {
+            List {
+                Section {
+                    filterHeader
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+                Section {
                     ForEach(visibleItems, id: \.objectID) { item in
                         Button { edit(item) } label: {
                             CatalogItemRow(item: item)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button { prepareArchive(item) } label: {
+                                Label(item.isArchived ? "Restore" : "Archive",
+                                      systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox")
+                            }
+                            .tint(item.isArchived ? .green : .orange)
+                            .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
+                        }
+                        .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
+                            prepareArchive(item)
+                        }
                     }
-                }
-                .contentMargins(.top, 0, for: .scrollContent)
-                .overlay {
                     if visibleItems.isEmpty {
                         ContentUnavailableView {
                             Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
@@ -118,9 +139,14 @@ struct CatalogView: View {
                             if hasNarrowing { Button("Reset filters", action: resetFilters) }
                             else { Button("New catalog item", action: create).disabled(household == nil) }
                         }
+                        .listRowBackground(Color.clear)
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(12)
+            .contentMargins(.top, 0, for: .scrollContent)
+            .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle("Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
@@ -142,6 +168,18 @@ struct CatalogView: View {
             }
             .sheet(item: $editor) { session in
                 CatalogEditorView(session: session) { refresh() }
+            }
+            .alert(archiveTarget?.archived == true ? "Archive catalog item?" : "Restore catalog item?",
+                   isPresented: Binding(
+                    get: { archiveTarget != nil }, set: { if !$0 { archiveTarget = nil } }
+                   ), presenting: archiveTarget) { target in
+                Button(target.archived ? "Archive" : "Restore") { applyArchive(target) }
+                    .accessibilityIdentifier("shopping.catalog.confirmSwipeArchive")
+                Button("Cancel", role: .cancel) {}
+            } message: { target in
+                Text(target.archived
+                     ? "Hide \(target.name) from the catalog? Current groceries and saved details are kept. Restore it with the Archived items filter."
+                     : "Show \(target.name) in the active catalog again?")
             }
             .alert("Couldn’t load catalog", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
@@ -224,12 +262,36 @@ struct CatalogView: View {
         guard household != nil else { return }
         editor = CatalogEditSession(selection: selection, itemID: nil, values: CatalogItemValues(
             name: searchText, notes: "", categoryID: nil,
-            anyStore: false, storeIDs: filters.selectedStoreID.map { [$0] } ?? []
+            anyStore: filters.selectedStoreID == nil, storeIDs: filters.selectedStoreID.map { [$0] } ?? []
         ))
     }
 
     private func edit(_ item: Item) {
         editor = CatalogEditSession(selection: selection, itemID: item.id, values: item.catalogValues)
+    }
+
+    private func prepareArchive(_ item: Item) {
+        guard let list = canonicalList, let householdID = list.household?.id,
+              scopedItems.contains(item), service != nil else { return }
+        archiveTarget = CatalogArchiveTarget(
+            itemID: item.id, householdID: householdID, listID: list.id,
+            name: item.name, archived: !item.isArchived
+        )
+    }
+
+    private func applyArchive(_ target: CatalogArchiveTarget) {
+        guard let service, selection.householdID == target.householdID,
+              selection.listID == target.listID, canonicalList != nil else {
+            errorMessage = "Return to the household where you started this change."
+            return
+        }
+        do {
+            try service.setCatalogItemArchived(
+                itemID: target.itemID, householdID: target.householdID,
+                listID: target.listID, archived: target.archived
+            )
+            refresh()
+        } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 }
 
@@ -239,7 +301,6 @@ private struct CatalogItemRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.name).foregroundStyle(.primary)
-            Text(item.purchaseDescription).font(.caption).foregroundStyle(Color.grocerySecondary)
             if let category = item.category { Text(category.name).font(.caption).foregroundStyle(Color.grocerySecondary) }
             if !item.notes.isEmpty { Text(item.notes).font(.subheadline).foregroundStyle(Color.grocerySecondary) }
             if item.isArchived { Text("Archived").font(.caption).foregroundStyle(Color.grocerySecondary) }
@@ -363,7 +424,6 @@ private struct CatalogEditorView: View {
     }
     private var canSave: Bool {
         scopeAvailable && !CatalogProjection.normalizedName(values.name).isEmpty &&
-            (values.anyStore || !values.storeIDs.isEmpty) &&
             (itemID == nil || currentItem != nil) && (!hasExactMatch || allowingNameCollision)
     }
 
@@ -493,15 +553,6 @@ private extension Item {
             anyStore: anyStore, storeIDs: Set(stores?.map(\.id) ?? []))
     }
 
-    var purchaseDescription: String {
-        let names = (stores ?? []).filter {
-            !$0.isArchived && $0.id != PersistenceModel.unsetID && $0.household != nil &&
-                $0.household == household && $0.objectID.persistentStore == objectID.persistentStore
-        }.sorted(by: NeedService.storeDisplayOrder).map(\.name)
-        if anyStore { return names.isEmpty ? "Any store" : "Any store · Tagged: \(names.joined(separator: ", "))" }
-        if names.isEmpty { return "Needs store" }
-        return "\(names.count == 1 ? "Only buy at" : "Buy at") \(names.joined(separator: ", "))"
-    }
 }
 
 private enum CatalogErrorCopy {

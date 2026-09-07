@@ -3,6 +3,100 @@ import XCTest
 final class ChecklistUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testSwipeRemovalConfirmsAndSupportsUndoAndRelaunchRecovery() {
+        let app = launchApp(fixture: "populated")
+        let grocery = row("Granola", app: app)
+        reveal(grocery, app: app)
+        revealSwipeAction("Remove", for: grocery, app: app)
+        app.buttons["Remove"].tap()
+        XCTAssertTrue(app.alerts.buttons["shopping.checklist.confirmRemove"].waitForExistence(timeout: 2))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(grocery.exists)
+        revealSwipeAction("Remove", for: grocery, app: app)
+        app.buttons["Remove"].tap()
+        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
+        XCTAssertFalse(grocery.exists)
+        app.buttons["shopping.grocery.undoRemove"].tap()
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+        reveal(grocery, app: app)
+        revealSwipeAction("Remove", for: grocery, app: app)
+        app.buttons["Remove"].tap()
+        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertFalse(grocery.exists)
+        XCTAssertTrue(app.buttons["Recently cleared"].waitForExistence(timeout: 3))
+        app.buttons["Recently cleared"].tap()
+        let restore = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.recovery.restore."
+        )).firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 3))
+        restore.tap()
+        app.navigationBars["Recently cleared"].buttons.firstMatch.tap()
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Granola"
+        )).firstMatch.waitForExistence(timeout: 3))
+    }
+
+    func testSwipeRemovalInCartSupportsImmediateUndo() {
+        let app = launchApp(fixture: "populated")
+        cartedLink(count: 1, app: app).tap()
+        let grocery = row("Strawberries", app: app)
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+        revealSwipeAction("Remove", for: grocery, app: app)
+        app.buttons["Remove"].tap()
+        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["shopping.checkout.undo"].waitForExistence(timeout: 3))
+        XCTAssertFalse(grocery.exists)
+        app.buttons["shopping.checkout.undo"].tap()
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+    }
+
+    func testCatalogSwipeArchiveAndRestorePreserveCurrentGrocery() {
+        let app = launchApp(fixture: "populated")
+        app.tabBars.buttons["Catalog"].tap()
+        let item = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Bananas"
+        )).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 3))
+        revealSwipeAction("Archive", for: item, app: app)
+        app.buttons["Archive"].tap()
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(item.exists)
+        revealSwipeAction("Archive", for: item, app: app)
+        app.buttons["Archive"].tap()
+        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
+        XCTAssertFalse(item.exists)
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(row("Bananas", app: app).exists)
+        app.tabBars.buttons["Catalog"].tap()
+        app.buttons["shopping.catalog.filters"].tap()
+        let archived = app.buttons["shopping.catalog.archived"]
+        for _ in 0..<3 where !archived.exists || !archived.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(archived.waitForExistence(timeout: 2))
+        XCTAssertTrue(archived.isHittable)
+        archived.tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(item.waitForExistence(timeout: 3))
+        revealSwipeAction("Restore", for: item, app: app)
+        app.buttons["Restore"].tap()
+        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
+        XCTAssertFalse(item.exists)
+        app.buttons["Remove filter: Archived"].tap()
+        XCTAssertTrue(item.waitForExistence(timeout: 3))
+        XCTAssertFalse(item.label.contains("Any store"))
+    }
+
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
         let app = launchApp(fixture: "populated")
         selectStore("Publix", app: app)

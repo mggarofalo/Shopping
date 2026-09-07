@@ -4,7 +4,7 @@
 
 `ShoppingPreviewHost` supplies the same managed-object context, command service and household/list selection environment as the app. Use it around a view's `#Preview` rather than opening the application's normal store. Cases cover empty and populated lists, long names, accessibility text sizes, store archival and a remembered need whose catalog relationship has not arrived.
 
-The populated fixture includes Any-store bananas, Costco-only granola and strawberries, Publix chipotles, Costco/Walmart dinner rolls, a Needs store item, urgent needs, carted groceries and recoverable one-time groceries. One-time rows remain independent from the catalog. The archived-store case preserves the original tags so All can show needs that no longer have an active shopping destination.
+The populated fixture includes Any-store bananas, Costco-only granola and strawberries, Publix chipotles, Costco/Walmart dinner rolls, an archived-store-only item, urgent needs, carted groceries and recoverable one-time groceries. One-time rows remain independent from the catalog. Archived tags stay restricted and recoverable in All, without a Needs store label. CatalogFilterTests separately covers legacy untagged records as implicit Any store.
 
 `LocalTwoContextHarness` provides two independent Core Data contexts over an isolated SQLite store. Tests stage both edits before choosing a save order; automatic context merging is disabled and registered objects are retained so stale-state behavior is intentional. This is a local persistence simulation. It does not simulate network delivery, share permissions or CloudKit's scheduler, and it cannot establish two-account convergence.
 

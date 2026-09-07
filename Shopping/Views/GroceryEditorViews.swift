@@ -95,7 +95,7 @@ struct GroceryEditorView: View {
         } else {
             _categoryID = State(initialValue: nil)
             _storeIDs = State(initialValue: Set(target.scope.selectedStoreID.map { [$0] } ?? []))
-            _anyStore = State(initialValue: false)
+            _anyStore = State(initialValue: target.scope.selectedStoreID == nil)
         }
     }
 
@@ -131,7 +131,7 @@ struct GroceryEditorView: View {
         if isPromotingOneTime && promotionChoice == .existing {
             return selectedCatalogItem != nil
         }
-        return !CatalogProjection.normalizedName(name).isEmpty && (anyStore || !storeIDs.isEmpty)
+        return !CatalogProjection.normalizedName(name).isEmpty
     }
     private var scopedCategories: [Category] {
         GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList)
@@ -609,14 +609,14 @@ struct GroceryEditorView: View {
             category = "Uncategorized"
         }
         let purchaseRule: String
-        if item.anyStore {
+        if item.anyStore || (item.stores ?? []).isEmpty {
             purchaseRule = "Any store"
         } else {
             let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
             let names = validStores.filter { !$0.isArchived && (item.stores ?? []).contains($0) }
                 .map(\.name)
                 .sorted()
-            purchaseRule = names.isEmpty ? "Needs store" : names.joined(separator: ", ")
+            purchaseRule = names.isEmpty ? "Archived store tags" : names.joined(separator: ", ")
         }
         return "\(category) · \(purchaseRule)"
     }

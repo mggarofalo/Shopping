@@ -8,7 +8,7 @@ A household owns its grocery list, reusable catalog, stores, and optional catego
 
 Stores and categories have stable UUIDs, trimmed nonblank names, and explicit display order. Ordering uses the UUID as a final tie-breaker so equal positions do not jump between fetches. A display name is not identity; similarly named stores or categories are not silently merged.
 
-Archiving a store preserves its catalog memberships and every grocery occurrence. Only active stores count when determining current purchase availability. A Costco-only grocery whose store is archived has no active eligible store: it belongs in All with Needs store, and must not become available at another retailer. Restoring Costco restores the remembered purchase eligibility without recreating tags. Any store continues to mean eligible at any active selected store.
+Archiving a store preserves its catalog memberships and every grocery occurrence. Only active stores count when determining current purchase availability. A Costco-only grocery whose store is archived has no active eligible store: it remains in All without a warning label, and must not become available at another retailer. Restoring Costco restores the remembered purchase eligibility without recreating tags. Any store continues to mean eligible at any active selected store. An empty explicit tag set implies Any store, even when the stored Boolean is false; an archived-only nonempty set does not.
 
 Removing a category uncategorizes its catalog items and one-time needs. It does not remove the items, their store tags, or their grocery needs. No category setup is required, and there are no cascading deletes from metadata into groceries.
 
@@ -23,17 +23,17 @@ For an active selected store S and the explicit active store-tag set T:
 | Rule | Match |
 |---|---|
 | Available at S | Any store, or S is in T. |
-| Must buy here | Not Any store, and T contains only S. |
-| Flexible here | Available, but not Must buy here. |
-| Needs store | Not Any store, and T is empty. Remains visible in All. |
+| Only buy here | Not Any store, and T contains only S. |
+| Can buy here | Available, but not Only buy here. |
+| No active destination | Explicit restrictions exist but T is empty. Remains visible in All without a warning label. |
 | Tagged with I | I is empty, or at least one included tag is in T. |
 | Not tagged with E | None of the excluded tags is in T. |
 
 Apply selected-store eligibility first. Tagged, Not tagged, text, category and other optional filters combine with AND and can only narrow the result. Exclusion wins if the same tag is included and excluded. Any store establishes availability without inventing explicit memberships: an untagged Any-store item can match Not tagged Costco while still being available at Costco. Archived store memberships remain stored but are excluded from T, and an archived selected store is not a shopping destination.
 
-Both catalog rows and one-time grocery rows use the same purchase-rule inputs. A missing catalog reference never means Any store. All catalog contains non-archived reusable items; All groceries contains active needs, including one-time and Needs store rows. Suggestions only use reusable catalog data.
+Both catalog rows and one-time grocery rows use the same purchase-rule inputs. A missing catalog reference never means Any store. All catalog contains non-archived reusable items; All groceries contains active needs, including one-time and unresolved rows. Suggestions only use reusable catalog data.
 
-New catalog entry commands require at least one active store or Any store. Needs store remains a supported recovery state after a store is archived or relationships arrive incompletely. Restoring an archived store revives the same saved tag; it does not create new buying preferences.
+New catalog and one-time commands accept no store tags as Any store. Adding the first tag in the editor restricts the item; removing the last returns to Any store. Explicit Any store may coexist with saved tags. An archived-only restriction remains recoverable without becoming unrestricted. Restoring an archived store revives the same saved tag; it does not create new buying preferences.
 
 ## Current grocery needs — SHOPPING-21
 

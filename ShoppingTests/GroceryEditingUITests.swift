@@ -22,7 +22,11 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(groceryRow(named: "Coconut yogurt", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["Coconut yogurt"].waitForExistence(timeout: 2))
+        let catalogRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.catalog.item.", "Coconut yogurt"
+        )).firstMatch
+        XCTAssertTrue(catalogRow.waitForExistence(timeout: 2))
 
         app.terminate()
         app.launch()

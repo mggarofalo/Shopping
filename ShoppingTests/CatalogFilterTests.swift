@@ -20,7 +20,10 @@ final class CatalogFilterTests: XCTestCase {
             Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
             Case(value: .init(explicitStoreIDs: [], anyStore: true), selected: c, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
             Case(value: .init(explicitStoreIDs: [a], anyStore: true), selected: b, include: [a], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: nil, include: [], exclude: [], expectedAvailability: .needsStore, expectedMatch: true),
+            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: nil, include: [], exclude: [], expectedAvailability: .unavailable, expectedMatch: true),
+            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
+            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [a], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
+            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [], exclude: [a], expectedAvailability: .flexibleHere, expectedMatch: true),
             Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [b], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
             Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [c], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
             Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [], exclude: [b], expectedAvailability: .flexibleHere, expectedMatch: false),
@@ -56,7 +59,10 @@ final class CatalogFilterTests: XCTestCase {
         let oneTime = PurchaseRuleValue(explicitStoreIDs: [a], anyStore: false)
         XCTAssertEqual(PurchaseFilter().availability(of: oneTime, selectedStoreID: a, activeStoreIDs: [a, b]), .mustBuyHere)
         XCTAssertFalse(PurchaseFilter(selectedStoreID: b).matches(oneTime, activeStoreIDs: [a, b]))
-        XCTAssertEqual(PurchaseFilter().availability(of: .init(explicitStoreIDs: [], anyStore: false), selectedStoreID: nil, activeStoreIDs: [a, b]), .needsStore)
+        let untagged = PurchaseRuleValue(explicitStoreIDs: [], anyStore: false)
+        XCTAssertEqual(PurchaseFilter().availability(of: untagged, selectedStoreID: a, activeStoreIDs: [a, b]), .flexibleHere)
+        XCTAssertTrue(PurchaseFilter(requiresAnyStore: true).matches(untagged, activeStoreIDs: [a, b]))
+        XCTAssertFalse(PurchaseFilter(requiresAnyStore: false).matches(untagged, activeStoreIDs: [a, b]))
     }
 
     func testGroceryFilterSanitizationDropsInactiveScopeAndPreservesOtherCriteria() {
@@ -209,7 +215,7 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertTrue(try service.allActiveNeedIDs(householdID: ids.householdID).isEmpty)
     }
 
-    func testAtomicCatalogCreationRejectsMissingActiveRuleAndForeignMetadata() throws {
+    func testAtomicCatalogCreationDefaultsToAnyStoreAndRejectsInvalidMetadata() throws {
         let persistence = try PersistenceController(storeURL: temporaryStoreURL())
         let service = NeedService(persistence: persistence)
         let local = try service.createHousehold()
@@ -220,11 +226,56 @@ final class CatalogFilterTests: XCTestCase {
         let foreignCategory = try service.createCategory(name: "Foreign", householdID: foreign.householdID)
 
         XCTAssertThrowsError(try service.createItem(name: " ", householdID: local.householdID))
-        XCTAssertThrowsError(try service.createItem(name: "Rice", storeIDs: [], householdID: local.householdID, anyStore: false))
+        let untagged = try service.createItem(name: "Rice", storeIDs: [], householdID: local.householdID, anyStore: false)
+        XCTAssertEqual(try service.storeEligibility(itemID: untagged), .anyStore)
         XCTAssertThrowsError(try service.createItem(name: "Rice", storeIDs: [archivedStore], householdID: local.householdID, anyStore: false))
         XCTAssertThrowsError(try service.createItem(name: "Rice", storeIDs: [foreignStore], householdID: local.householdID, anyStore: false))
         XCTAssertThrowsError(try service.createItem(name: "Rice", categoryID: foreignCategory, householdID: local.householdID))
-        XCTAssertEqual(try service.allCatalogItemIDs(householdID: local.householdID), [])
+        XCTAssertEqual(try service.allCatalogItemIDs(householdID: local.householdID), [untagged])
+    }
+
+    func testUntaggedRulesSurviveRelaunchAndNeverInventLiteralTagsOrOrphanEligibility() throws {
+        let url = temporaryStoreURL()
+        let persistence = try PersistenceController(storeURL: url)
+        let service = NeedService(persistence: persistence)
+        let scope = try service.createHousehold()
+        let store = try service.createStore(name: "Market", householdID: scope.householdID)
+        let item = try service.createItem(name: "Rice", householdID: scope.householdID)
+        let remembered = try service.addRememberedNeed(itemID: item, listID: scope.listID)
+        let oneTime = try service.addOneTimeNeed(title: "Basil", anyStore: false, listID: scope.listID)
+        let orphanItem = try service.createItem(name: "Pending", householdID: scope.householdID)
+        let orphan = try service.addRememberedNeed(itemID: orphanItem, listID: scope.listID)
+        for need in [remembered, oneTime, orphan] {
+            try service.setCarted(true, needID: need)
+        }
+        let unresolvedItem = try service.createItem(name: "Unresolved", householdID: scope.householdID)
+        let unresolved = try service.addRememberedNeed(itemID: unresolvedItem, listID: scope.listID)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            // Legacy/imported rows can have false plus an empty tag relationship.
+            try fetchItem(item, context: context).anyStore = false
+            try fetchNeed(orphan, context: context).item = nil
+            let unresolvedObject = try fetchItem(unresolvedItem, context: context)
+            unresolvedObject.id = PersistenceModel.unsetID
+            unresolvedObject.anyStore = false
+            try context.save()
+        }
+        let relaunched = try PersistenceController(storeURL: url)
+        let reloaded = NeedService(persistence: relaunched)
+        let selected = GroceryNeedFilter(purchase: PurchaseFilter(selectedStoreID: store))
+        XCTAssertEqual(Set(try reloaded.filteredActiveNeedIDs(householdID: scope.householdID, filter: selected)), [remembered, oneTime])
+        XCTAssertTrue(try reloaded.filteredActiveNeedIDs(householdID: scope.householdID, filter: GroceryNeedFilter()).contains(orphan))
+        XCTAssertTrue(try reloaded.filteredActiveNeedIDs(householdID: scope.householdID, filter: GroceryNeedFilter()).contains(unresolved))
+        XCTAssertTrue(try reloaded.filteredActiveNeedIDs(householdID: scope.householdID, filter: GroceryNeedFilter(purchase: PurchaseFilter(selectedStoreID: store, includedStoreIDs: [store]))).isEmpty)
+        XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .anyStore)
+        let preview = try reloaded.prepareClearCarted(householdID: scope.householdID, listID: scope.listID, filter: selected)
+        XCTAssertEqual(Set(preview.rows.map(\.needID)), [remembered, oneTime])
+        let allPreview = try reloaded.prepareClearCarted(householdID: scope.householdID, listID: scope.listID, filter: GroceryNeedFilter())
+        XCTAssertEqual(Set(allPreview.rows.map(\.needID)), [remembered, oneTime, orphan])
+        try reloaded.setPurchaseRules(itemID: item, anyStore: false, storeIDs: [store])
+        XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .activeStores([store]))
+        try reloaded.setPurchaseRules(itemID: item, anyStore: false, storeIDs: [])
+        XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .anyStore)
     }
 
     private func fetchItem(_ id: UUID, context: NSManagedObjectContext) throws -> Item {

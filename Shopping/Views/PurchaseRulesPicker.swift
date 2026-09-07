@@ -155,7 +155,7 @@ struct CategoryPills: View {
         } header: {
             Text("Category")
         } footer: {
-            Text("Categories group groceries across all stores.")
+            Text("Categories help filter groceries across all stores.")
         }
     }
 }
@@ -216,21 +216,26 @@ struct PurchaseRulesPicker: View {
             PillFlowLayout {
                 SelectionPill(
                     title: "Any store",
-                    isSelected: anyStore,
+                    isSelected: anyStore || storeIDs.isEmpty,
                     identifier: "shopping.purchase.anyStore"
-                ) { anyStore.toggle() }
+                ) { anyStore = storeIDs.isEmpty ? false : !anyStore }
                 ForEach(validStores.filter { !$0.isArchived || storeIDs.contains($0.id) }, id: \.objectID) { store in
                     SelectionPill(
                         title: store.isArchived ? "\(store.name) · Archived" : store.name,
                         isSelected: storeIDs.contains(store.id),
                         identifier: "shopping.purchase.store.\(store.id.uuidString)"
                     ) {
-                        if storeIDs.contains(store.id) { storeIDs.remove(store.id) }
-                        else { storeIDs.insert(store.id) }
+                        if storeIDs.contains(store.id) {
+                            storeIDs.remove(store.id)
+                            if storeIDs.isEmpty { anyStore = false }
+                        } else {
+                            if storeIDs.isEmpty { anyStore = false }
+                            storeIDs.insert(store.id)
+                        }
                     }
                 }
             }
-            if anyStore {
+            if anyStore && !storeIDs.isEmpty {
                 Text("Can buy at any store, even when tagged.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -242,15 +247,13 @@ struct PurchaseRulesPicker: View {
                     storeIDs.subtract(unavailable)
                 }
             }
-            if !anyStore && storeIDs.isEmpty {
-                Text("Choose a store or turn on Any store.").font(.footnote).foregroundStyle(.secondary)
-            }
             if !anyStore && !storeIDs.isEmpty &&
                 !validStores.contains(where: { !$0.isArchived && storeIDs.contains($0.id) }) {
                 Text("Choose an active store or turn on Any store.").font(.footnote).foregroundStyle(.secondary)
             }
             NavigationLink {
                 StoreCreationView(householdID: householdID, listID: scopedListID) { id in
+                    if storeIDs.isEmpty { anyStore = false }
                     storeIDs.insert(id)
                 }
             } label: { Label("Add store", systemImage: "plus") }
