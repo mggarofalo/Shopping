@@ -113,6 +113,8 @@ private struct StoreManagementView: View {
     @State private var removingStore: Store?
     @State private var removalScope: StoreManagementCommandScope?
     @State private var removalAction: StoreRemovalAction?
+    @State private var requestedDeletion = false
+    @State private var removalNotice: String?
     @State private var error: Error?
 
     private var canonicalList: GroceryList? {
@@ -157,6 +159,7 @@ private struct StoreManagementView: View {
                 fieldTitle: "Store name",
                 fieldIdentifier: "shopping.stores.name",
                 saveLabel: "Save store",
+                initiallyFocused: session.store == nil,
                 unavailableMessage: session.store == nil
                     ? "This household is unavailable. Your draft is still here."
                     : "This store is no longer available. Your draft is still here.",
@@ -167,8 +170,7 @@ private struct StoreManagementView: View {
             )
         }
         .confirmationDialog(
-            removalAction == .archive ? "Archive \(removingStore?.name ?? "store")?" :
-                "Delete \(removingStore?.name ?? "store")?",
+            removalTitle,
             isPresented: Binding(get: { removingStore != nil }, set: { if !$0 { clearRemoval() } }),
             titleVisibility: .visible
         ) {
@@ -179,11 +181,20 @@ private struct StoreManagementView: View {
             }
             Button("Cancel", role: .cancel, action: clearRemoval)
         } message: {
-            if removalAction == .archive {
-                Text("Catalog items or one-time groceries still use this store. Archiving keeps their purchase tags recoverable and hides the store from active choices.")
+            if requestedDeletion && removalAction == .archive {
+                Text("This store is still used by saved items or groceries, so it cannot be permanently deleted. You can archive it instead and keep those purchase tags recoverable.")
+            } else if removalAction == .archive {
+                Text("Archiving hides this store from active choices and preserves any saved purchase tags for recovery.")
             } else {
                 Text("This store has no catalog or one-time grocery references and will be removed.")
             }
+        }
+        .alert("Store archived", isPresented: Binding(
+            get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) { removalNotice = nil }
+        } message: {
+            Text(removalNotice ?? "")
         }
         .alert(
             "Couldn’t update stores",
@@ -207,16 +218,24 @@ private struct StoreManagementView: View {
                 .tint(.blue)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.edit.\(store.id.uuidString)")
+                Button { beginArchive(store) } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .tint(.orange)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                Button(role: .destructive) { beginRemoval(store) } label: {
+                Button(role: .destructive) { beginDeletion(store) } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .tint(.red)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
             }
             .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
-            .accessibilityAction(named: Text("Delete \(store.name)")) { beginRemoval(store) }
+            .accessibilityAction(named: Text("Archive \(store.name)")) { beginArchive(store) }
+            .accessibilityAction(named: Text("Delete \(store.name)")) { beginDeletion(store) }
     }
 
     private func beginCreate() {
@@ -249,10 +268,26 @@ private struct StoreManagementView: View {
         } catch { self.error = error }
     }
 
-    private func beginRemoval(_ store: Store) {
+    private var removalTitle: String {
+        let name = removingStore?.name ?? "store"
+        if requestedDeletion && removalAction == .archive { return "Can’t delete \(name)" }
+        return removalAction == .archive ? "Archive \(name)?" : "Delete \(name)?"
+    }
+
+    private func beginArchive(_ store: Store) {
+        guard selectionAvailable, householdStores.contains(store),
+              let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        requestedDeletion = false
+        removalAction = .archive
+        removalScope = scope
+        removingStore = store
+    }
+
+    private func beginDeletion(_ store: Store) {
         guard selectionAvailable, householdStores.contains(store), let service,
               let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
         do {
+            requestedDeletion = true
             removalAction = try service.storeRemovalAction(
                 storeID: store.id, householdID: scope.householdID, listID: scope.listID
             )
@@ -265,12 +300,15 @@ private struct StoreManagementView: View {
         guard let store = removingStore, let scope = removalScope, let removalAction,
               StoreManagementScope.permits(scope, canonicalList: canonicalList), let service else { return }
         do {
-            _ = try service.removeStore(
+            let appliedAction = try service.removeStore(
                 storeID: store.id, householdID: scope.householdID, listID: scope.listID,
                 confirmedAction: removalAction
             )
             hapticFeedback.play(.warning)
             clearRemoval()
+            if removalAction == .delete, appliedAction == .archive {
+                removalNotice = "A saved item or grocery began using \(store.name), so it was archived instead of permanently deleted."
+            }
         } catch { self.error = error }
     }
 
@@ -278,6 +316,7 @@ private struct StoreManagementView: View {
         removingStore = nil
         removalScope = nil
         removalAction = nil
+        requestedDeletion = false
     }
     private func reorder(from offsets: IndexSet, to destination: Int) {
         guard selectionAvailable, let service, let canonicalList,
@@ -305,6 +344,7 @@ struct ManagementNameEditor: View {
     let fieldTitle: String
     let fieldIdentifier: String
     let saveLabel: String
+    let initiallyFocused: Bool
     let unavailableMessage: String
     @FocusState private var nameFocused: Bool
     let available: Bool
@@ -328,7 +368,10 @@ struct ManagementNameEditor: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .onAppear { nameFocused = true }
+            .onAppear {
+                guard initiallyFocused else { return }
+                DispatchQueue.main.async { nameFocused = true }
+            }
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }

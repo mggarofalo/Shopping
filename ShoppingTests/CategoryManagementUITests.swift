@@ -15,7 +15,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.buttons["shopping.categories.add"].tap()
         XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
         let name = app.textFields["shopping.categories.name"]
-        name.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         name.typeText("Pantry")
         app.buttons["Save category"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
@@ -23,6 +23,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.staticTexts["Pantry"].swipeLeft()
         app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.categories.name"], with: "Canceled category")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))

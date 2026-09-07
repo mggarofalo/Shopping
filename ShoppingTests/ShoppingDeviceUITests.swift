@@ -83,7 +83,8 @@ final class ShoppingDeviceUITests: XCTestCase {
         try app.performAccessibilityAudit(for: .contrast) { issue in
             self.attachAudit(issue, phase: "Catalog row contrast")
             guard let element = issue.element else { return false }
-            return !self.contains(element, in: row)
+            guard self.usable(element.frame), self.usable(row.frame) else { return false }
+            return !row.frame.intersects(element.frame)
         }
     }
 
@@ -436,16 +437,27 @@ final class ShoppingDeviceUITests: XCTestCase {
             if action.exists && action.isHittable {
                 return
             }
-            // XCTest clips its native swipe to the visible portion of an
-            // element. That matters when accessibility text makes a row taller
-            // than the viewport; a normalized-coordinate drag can otherwise
-            // begin outside the screen on iOS 18.
-            row.swipeLeft()
+            swipeLeftThroughVisibleSlice(of: row, in: app)
             if action.waitForExistence(timeout: 1), action.isHittable {
                 return
             }
         }
         XCTFail("Could not reveal the \(label) swipe action")
+    }
+
+    private func swipeLeftThroughVisibleSlice(of row: XCUIElement, in app: XCUIApplication) {
+        let top = app.navigationBars.firstMatch.frame.maxY
+        let tabBar = app.tabBars.firstMatch
+        let bottom = tabBar.exists ? tabBar.frame.minY : app.frame.maxY
+        let visibleTop = max(row.frame.minY, top) + 8
+        let visibleBottom = min(row.frame.maxY, bottom) - 8
+        let y = visibleTop < visibleBottom ? (visibleTop + visibleBottom) / 2 : (top + bottom) / 2
+        let startX = min(row.frame.maxX - 24, app.frame.maxX - 24)
+        let endX = max(row.frame.minX + 44, startX - 120)
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: startX, dy: y))
+        let end = origin.withOffset(CGVector(dx: endX, dy: y))
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     private func quantity(for row: XCUIElement, in app: XCUIApplication) -> XCUIElement {
