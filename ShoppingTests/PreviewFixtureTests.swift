@@ -60,6 +60,16 @@ final class PreviewFixtureTests: XCTestCase {
         XCTAssertTrue(pendingSnapshots.values.contains { $0.kind == NeedKind.remembered.rawValue && !$0.hasItem })
     }
 
+    func testPerformanceFixturesHaveStableRepresentativeCounts() throws {
+        for (fixtureCase, itemCount) in [(ShoppingPreviewCase.performance, 500), (.stress, 1_000)] {
+            let fixture = try ShoppingPreviewFixtures.make(fixtureCase)
+            XCTAssertEqual(fixture.ids.itemIDs.count, itemCount)
+            XCTAssertEqual(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).count, itemCount)
+            XCTAssertEqual(fixture.ids.storeIDs.count, 20)
+            XCTAssertEqual(fixture.ids.categoryIDs.count, 100)
+        }
+    }
+
     func testDiskBackedFixtureRetainsRecoveryAndOneTimeDoesNotPolluteCatalogAfterReopen() throws {
         let url = temporaryURL("fixture.sqlite")
         var ids: ShoppingPreviewIDs!

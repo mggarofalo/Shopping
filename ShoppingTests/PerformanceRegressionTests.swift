@@ -77,7 +77,8 @@ final class PerformanceRegressionTests: XCTestCase {
         }
         durations.sort()
         let p50 = durations[durations.count / 2]
-        let p95 = durations[min(durations.count - 1, Int(Double(durations.count) * 0.95))]
+        let p95Index = min(durations.count - 1, max(0, Int(ceil(Double(durations.count) * 0.95)) - 1))
+        let p95 = durations[p95Index]
         let worst = try XCTUnwrap(durations.last)
         print(String(
             format: "SHOPPING_PERF %@ p50=%.3fms p95=%.3fms worst=%.3fms iterations=%d",

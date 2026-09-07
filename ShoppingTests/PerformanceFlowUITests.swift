@@ -9,15 +9,18 @@ final class PerformanceFlowUITests: XCTestCase {
         let runCount = Int(ProcessInfo.processInfo.environment["SHOPPING_PERFORMANCE_RUNS"] ?? "") ?? 3
         for run in 1...runCount {
             XCTContext.runActivity(named: "Loaded device run \(run)") { _ in
-                let groceries = launchPerformanceFixture()
+                let runID = "representative-\(run)"
+                seedPerformanceFixture(runID: runID)
+
+                let groceries = launchPerformanceFixture(runID: runID)
                 exerciseGroceries(in: groceries)
                 groceries.terminate()
 
-                let catalog = launchPerformanceFixture()
+                let catalog = launchPerformanceFixture(runID: runID)
                 exerciseCatalog(in: catalog)
                 catalog.terminate()
 
-                let management = launchPerformanceFixture()
+                let management = launchPerformanceFixture(runID: runID)
                 exerciseManagement(in: management)
                 management.terminate()
             }
@@ -25,14 +28,25 @@ final class PerformanceFlowUITests: XCTestCase {
     }
 
     func testCatalogTraceFlow() {
-        let app = launchPerformanceFixture()
+        let runID = "trace-catalog"
+        seedPerformanceFixture(runID: runID)
+        let app = launchPerformanceFixture(runID: runID)
         Thread.sleep(forTimeInterval: 8)
         exerciseCatalog(in: app)
     }
 
-    private func launchPerformanceFixture() -> XCUIApplication {
+    private func seedPerformanceFixture(runID: String) {
+        let app = launchPerformanceFixture(runID: runID, reset: true)
+        app.terminate()
+    }
+
+    private func launchPerformanceFixture(runID: String, reset: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_PERFORMANCE_FIXTURE"] = "performance"
+        app.launchEnvironment["SHOPPING_PERFORMANCE_RUN_ID"] = runID
+        if reset {
+            app.launchEnvironment["SHOPPING_PERFORMANCE_RESET"] = "1"
+        }
         app.launch()
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 15))
         return app

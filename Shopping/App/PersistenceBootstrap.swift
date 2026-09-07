@@ -29,6 +29,8 @@ extension EnvironmentValues {
 
 @MainActor
 final class PersistenceBootstrap: ObservableObject {
+    private static let performanceFixtureVersion = 2
+
     struct ReadyState {
         let persistence: PersistenceController
         let service: NeedService
@@ -66,7 +68,10 @@ final class PersistenceBootstrap: ObservableObject {
            let fixture = ShoppingPreviewCase(rawValue: fixtureName),
            fixture == .performance || fixture == .stress {
             do {
-                let storeURL = try performanceStoreURL(for: fixture)
+                let storeURL = try performanceStoreURL(
+                    for: fixture,
+                    runID: processInfo.environment["SHOPPING_PERFORMANCE_RUN_ID"]
+                )
                 if processInfo.environment["SHOPPING_PERFORMANCE_RESET"] == "1" {
                     removeSQLiteStore(at: storeURL)
                 }
@@ -101,7 +106,10 @@ final class PersistenceBootstrap: ObservableObject {
         return PersistenceBootstrap()
     }
 
-    private static func performanceStoreURL(for fixture: ShoppingPreviewCase) throws -> URL {
+    private static func performanceStoreURL(
+        for fixture: ShoppingPreviewCase,
+        runID: String?
+    ) throws -> URL {
         let directory = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -109,7 +117,17 @@ final class PersistenceBootstrap: ObservableObject {
             create: true
         ).appendingPathComponent("PerformanceFixtures", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("shopping-\(fixture.rawValue).sqlite")
+        let normalizedRunID = runID?.lowercased().filter { character in
+            character.isLetter || character.isNumber || character == "-"
+        }
+        let effectiveRunID = normalizedRunID.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+        let storeName = [
+            "shopping",
+            fixture.rawValue,
+            "v\(performanceFixtureVersion)",
+            effectiveRunID
+        ].joined(separator: "-")
+        return directory.appendingPathComponent("\(storeName).sqlite")
     }
 
     private static func removeSQLiteStore(at url: URL) {
