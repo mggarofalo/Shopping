@@ -125,15 +125,21 @@ enum CategoryManagementScope {
 
 struct CategoryManagementView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
-    @State private var draftName = ""
-    @State private var renameName = ""
-    @State private var editingCategory: Category?
+    @State private var editor: CategoryEditorSession?
+    @State private var editorName = ""
     @State private var removingCategory: Category?
     @State private var error: Error?
+
+    private var canonicalList: GroceryList? {
+        GroceryRowScope.canonicalList(
+            Array(lists), households: Array(households), selection: selection
+        )
+    }
 
     private var householdCategories: [Category] {
         CategoryManagementScope.validCategories(
@@ -151,35 +157,10 @@ struct CategoryManagementView: View {
 
     var body: some View {
         List {
-            Section("Add category") {
-                TextField("Category name", text: $draftName)
-                    .accessibilityIdentifier("shopping.categories.createName")
-                Button(action: create) { Label("Save category", systemImage: "checkmark") }
-                    .frame(minHeight: 44)
-                    .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                        !selectionAvailable)
-                if !selectionAvailable {
-                    Text("This household is unavailable. Your draft is still here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
             Section {
                 ForEach(householdCategories, id: \.objectID) { category in
-                    HStack {
-                        Text(category.name)
-                        Spacer()
-                        Button { beginRename(category) } label: { Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44) }
-                            .accessibilityLabel("Rename \(category.name)")
-                            .buttonStyle(.borderless)
-                            .frame(minHeight: 44)
-                            .disabled(!selectionAvailable)
-                        Button(role: .destructive) { removingCategory = category } label: { Image(systemName: "trash").frame(minWidth: 44, minHeight: 44) }
-                            .accessibilityLabel("Remove \(category.name)")
-                            .buttonStyle(.borderless)
-                            .frame(minHeight: 44)
-                            .disabled(!selectionAvailable)
-                    }
+                    categoryRow(category)
+                        .shoppingListRowInsets()
                 }
                 .onMove(perform: reorder)
             } header: {
@@ -189,38 +170,39 @@ struct CategoryManagementView: View {
             }
         }
         .navigationTitle("Categories")
-        .toolbar { EditButton().disabled(!selectionAvailable) }
-        .sheet(isPresented: Binding(get: { editingCategory != nil }, set: { if !$0 { editingCategory = nil } })) {
-            if let category = editingCategory {
-                NavigationStack {
-                    Form {
-                        TextField("Category name", text: $renameName)
-                            .accessibilityIdentifier("shopping.categories.renameName")
-                        if !selectionAvailable {
-                            Text("This household is unavailable. Your draft is still here.")
-                                .foregroundStyle(.secondary)
-                        }
-                        if let error { Text(error.localizedDescription).foregroundStyle(.red) }
-                    }
-                    .navigationTitle("Rename category")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCategory = nil } }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { rename(category) } label: { Label("Save", systemImage: "checkmark") }
-                                .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                    !selectionAvailable)
-                        }
-                    }
-                }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { beginCreate() } label: { Label("Add category", systemImage: "plus") }
+                    .disabled(!selectionAvailable)
+                    .accessibilityIdentifier("shopping.categories.add")
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                EditButton().disabled(!selectionAvailable)
             }
         }
+        .sheet(item: $editor) { session in
+            ManagementNameEditor(
+                title: session.category == nil ? "Add category" : "Rename category",
+                name: $editorName,
+                fieldTitle: "Category name",
+                fieldIdentifier: "shopping.categories.name",
+                saveLabel: "Save category",
+                unavailableMessage: session.category == nil
+                    ? "This household is unavailable. Your draft is still here."
+                    : "This category is no longer available. Your draft is still here.",
+                available: session.scope.matches(canonicalList: canonicalList)
+                    && (session.category.map(householdCategories.contains) ?? true),
+                onSave: { save(session) },
+                onCancel: { editor = nil }
+            )
+        }
         .confirmationDialog(
-            "Remove category?",
+            "Delete \(removingCategory?.name ?? "category")?",
             isPresented: Binding(get: { removingCategory != nil }, set: { if !$0 { removingCategory = nil } }),
             titleVisibility: .visible
         ) {
             if let category = removingCategory {
-                Button("Remove \(category.name)", role: .destructive) { remove(category) }
+                Button("Delete category", role: .destructive) { remove(category) }
             }
             Button("Cancel", role: .cancel) { removingCategory = nil }
         } message: {
@@ -231,36 +213,62 @@ struct CategoryManagementView: View {
         } message: { Text(error?.localizedDescription ?? "Unknown error") }
     }
 
-    private func create() {
-        guard selectionAvailable, let service, let householdID = selection.householdID,
-              let listID = selection.listID else { return }
-        do {
-            let currentMaximum = householdCategories.map(\.displayOrder).max() ?? -1
-            let nextOrder = currentMaximum == Int64.max ? Int64.max : currentMaximum + 1
-            _ = try service.createCategory(
-                name: draftName, householdID: householdID, listID: listID,
-                displayOrder: nextOrder
-            )
-            draftName = ""
-        } catch { self.error = error }
+    @ViewBuilder
+    private func categoryRow(_ category: Category) -> some View {
+        Text(category.name)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button { beginRename(category) } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(.blue)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.edit.\(category.id.uuidString)")
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button(role: .destructive) { removingCategory = category } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
+            }
+            .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
+            .accessibilityAction(named: Text("Delete \(category.name)")) {
+                removingCategory = category
+            }
+    }
+
+    private func beginCreate() {
+        guard let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        editorName = ""
+        editor = CategoryEditorSession(category: nil, scope: scope)
     }
 
     private func beginRename(_ category: Category) {
-        guard selectionAvailable else { return }
-        renameName = category.name
+        guard selectionAvailable, householdCategories.contains(category),
+              let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        editorName = category.name
         error = nil
-        editingCategory = category
+        editor = CategoryEditorSession(category: category, scope: scope)
     }
 
-    private func rename(_ category: Category) {
-        guard selectionAvailable, let service, let householdID = selection.householdID,
-              let listID = selection.listID else { return }
+    private func save(_ session: CategoryEditorSession) {
+        guard session.scope.matches(canonicalList: canonicalList), let service else { return }
         do {
-            try service.renameCategory(
-                name: renameName, categoryID: category.id, householdID: householdID,
-                listID: listID
-            )
-            editingCategory = nil
+            if let category = session.category {
+                try service.renameCategory(
+                    name: editorName, categoryID: category.id,
+                    householdID: session.scope.householdID, listID: session.scope.listID
+                )
+            } else {
+                _ = try service.createCategory(
+                    name: editorName, householdID: session.scope.householdID,
+                    listID: session.scope.listID
+                )
+            }
+            hapticFeedback.play(.success)
+            editor = nil
         } catch { self.error = error }
     }
 
@@ -271,6 +279,7 @@ struct CategoryManagementView: View {
             try service.removeCategory(
                 categoryID: category.id, householdID: householdID, listID: listID
             )
+            hapticFeedback.play(.warning)
             removingCategory = nil
         } catch { self.error = error }
     }
@@ -284,6 +293,12 @@ struct CategoryManagementView: View {
             try service.reorderCategories(ids, householdID: householdID, listID: listID)
         } catch { self.error = error }
     }
+}
+
+private struct CategoryEditorSession: Identifiable {
+    let id = UUID()
+    let category: Category?
+    let scope: StoreManagementCommandScope
 }
 
 #Preview("Categories · populated") {

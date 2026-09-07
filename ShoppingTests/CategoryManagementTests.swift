@@ -3,6 +3,27 @@ import XCTest
 @testable import Shopping
 
 final class CategoryManagementTests: XCTestCase {
+    func testCategoryCreationAppendsByDefaultAndPreservesExplicitOrder() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+
+        let produce = try service.createCategory(
+            name: "Produce", householdID: selection.householdID, displayOrder: 3
+        )
+        let pantry = try service.createCategory(
+            name: "  Pantry \n", householdID: selection.householdID
+        )
+        let bakery = try service.createCategory(
+            name: "Bakery", householdID: selection.householdID
+        )
+
+        let states = try categoryStates(selection.householdID, persistence: persistence)
+        XCTAssertEqual(states.map(\.id), [produce, pantry, bakery])
+        XCTAssertEqual(states.map(\.name), ["Produce", "Pantry", "Bakery"])
+        XCTAssertEqual(states.map(\.order), [3, 4, 5])
+    }
+
     func testRenameAndExactReorderAreAtomicAndHouseholdScoped() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)

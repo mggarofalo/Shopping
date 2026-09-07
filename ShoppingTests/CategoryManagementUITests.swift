@@ -12,34 +12,39 @@ final class CategoryManagementUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         app.buttons["Categories"].tap()
         XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
-        let name = app.textFields["shopping.categories.createName"]
+        app.buttons["shopping.categories.add"].tap()
+        XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
+        let name = app.textFields["shopping.categories.name"]
         name.tap()
         name.typeText("Pantry")
         app.buttons["Save category"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
 
-        app.buttons["Rename Pantry"].tap()
+        app.staticTexts["Pantry"].swipeLeft()
+        app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
-        replaceText(in: app.textFields["shopping.categories.renameName"], with: "Canceled category")
+        replaceText(in: app.textFields["shopping.categories.name"], with: "Canceled category")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled category"].exists)
 
-        app.buttons["Rename Pantry"].tap()
-        replaceText(in: app.textFields["shopping.categories.renameName"], with: "Dry goods")
-        app.buttons["Save"].tap()
+        app.staticTexts["Pantry"].swipeLeft()
+        app.buttons["Edit"].tap()
+        replaceText(in: app.textFields["shopping.categories.name"], with: "Dry goods")
+        app.buttons["Save category"].tap()
         XCTAssertTrue(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Category management"
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.buttons["Remove Dry goods"].tap()
-        let confirmation = app.sheets["Remove category?"]
+        app.staticTexts["Dry goods"].swipeRight()
+        app.buttons["Delete"].tap()
+        let confirmation = app.sheets["Delete Dry goods?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
             "Groceries and catalog items will remain and become Uncategorized.")).firstMatch.exists)
-        confirmation.buttons["Remove Dry goods"].firstMatch.tap()
+        confirmation.buttons["Delete category"].firstMatch.tap()
         XCTAssertFalse(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
         app.navigationBars["Categories"].buttons.firstMatch.tap()
         app.tabBars.buttons["Groceries"].tap()

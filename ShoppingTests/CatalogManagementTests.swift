@@ -44,8 +44,8 @@ final class CatalogManagementTests: XCTestCase {
                 itemID: itemID,
                 householdID: householdID,
                 values: CatalogItemValues(
-                    name: "Organic strawberries",
-                    notes: "Frozen aisle",
+                    name: "  Organic strawberries \n",
+                    notes: " \n Frozen aisle \t",
                     categoryID: categoryID,
                     anyStore: false,
                     storeIDs: [publixID]
@@ -344,6 +344,120 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertEqual(try NeedService(persistence: reopened).allActiveNeedIDs(householdID: householdID), [needID])
     }
 
+    func testCatalogRemovalDeletesOnlyUnreferencedItemsAndArchivesReferencedItems() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let unused = try service.createItem(
+            name: "Unused", householdID: selection.householdID
+        )
+        let referenced = try service.createItem(
+            name: "Referenced", householdID: selection.householdID
+        )
+        let needID = try service.addRememberedNeed(
+            itemID: referenced, listID: selection.listID
+        )
+
+        let unusedPreview = try service.catalogItemRemovalPreview(
+            itemID: unused, householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(unusedPreview.action, .delete)
+        XCTAssertEqual(
+            try service.removeCatalogItem(
+                itemID: unused, householdID: selection.householdID, listID: selection.listID,
+                preview: unusedPreview
+            ),
+            .delete
+        )
+        XCTAssertFalse(try itemExists(unused, persistence: persistence))
+
+        let referencedPreview = try service.catalogItemRemovalPreview(
+            itemID: referenced, householdID: selection.householdID,
+            listID: selection.listID
+        )
+        XCTAssertEqual(referencedPreview.action, .archive)
+        XCTAssertEqual(
+            try service.removeCatalogItem(
+                itemID: referenced, householdID: selection.householdID,
+                listID: selection.listID, preview: referencedPreview
+            ),
+            .archive
+        )
+        XCTAssertTrue(try itemSnapshot(referenced, persistence: persistence).isArchived)
+        XCTAssertEqual(try needSnapshot(needID, persistence: persistence).itemID, referenced)
+    }
+
+    func testCatalogDeleteConfirmationFallsBackToArchiveWhenANeedAppears() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let itemID = try service.createItem(name: "Rice", householdID: selection.householdID)
+
+        let preview = try service.catalogItemRemovalPreview(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.action, .delete)
+        let needID = try service.addRememberedNeed(itemID: itemID, listID: selection.listID)
+        XCTAssertEqual(
+            try service.removeCatalogItem(
+                itemID: itemID, householdID: selection.householdID,
+                listID: selection.listID, preview: preview
+            ),
+            .archive
+        )
+        XCTAssertTrue(try itemSnapshot(itemID, persistence: persistence).isArchived)
+        XCTAssertEqual(try needSnapshot(needID, persistence: persistence).itemID, itemID)
+    }
+
+    func testCatalogDeleteConfirmationRejectsNewerCatalogEdits() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let itemID = try service.createItem(name: "Rice", householdID: selection.householdID)
+        let preview = try service.catalogItemRemovalPreview(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID
+        )
+
+        try service.saveCatalogItem(
+            itemID: itemID,
+            householdID: selection.householdID,
+            listID: selection.listID,
+            values: CatalogItemValues(
+                name: "Brown rice", notes: "New edit", categoryID: nil,
+                anyStore: true, storeIDs: []
+            )
+        )
+
+        XCTAssertThrowsError(
+            try service.removeCatalogItem(
+                itemID: itemID, householdID: selection.householdID,
+                listID: selection.listID, preview: preview
+            )
+        ) { error in
+            XCTAssertEqual(error as? NeedServiceError, .scopeChanged)
+        }
+        XCTAssertEqual(try itemSnapshot(itemID, persistence: persistence).name, "Brown rice")
+        XCTAssertEqual(try itemSnapshot(itemID, persistence: persistence).notes, "New edit")
+    }
+
+    func testReferencedArchivedCatalogItemCannotBeDeleted() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let itemID = try service.createItem(name: "Rice", householdID: selection.householdID)
+        _ = try service.addRememberedNeed(itemID: itemID, listID: selection.listID)
+        try service.setCatalogItemArchived(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID,
+            archived: true
+        )
+
+        let preview = try service.catalogItemRemovalPreview(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.action, .keepArchived)
+        XCTAssertTrue(try itemSnapshot(itemID, persistence: persistence).isArchived)
+    }
+
     private enum SaveFailure: CaseIterable, CustomStringConvertible {
         case permission
         case preSave
@@ -394,6 +508,15 @@ final class CatalogManagementTests: XCTestCase {
                 storeIDs: Set(item.stores?.map(\.id) ?? []),
                 isArchived: item.isArchived
             )
+        }
+    }
+
+    private func itemExists(_ itemID: UUID, persistence: PersistenceController) throws -> Bool {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", itemID as CVarArg)
+            return try context.count(for: request) == 1
         }
     }
 

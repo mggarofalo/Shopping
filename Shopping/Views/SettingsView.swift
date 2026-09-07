@@ -1,6 +1,16 @@
 import CoreData
 import SwiftUI
 
+enum ShoppingListMetrics {
+    static let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 8)
+}
+
+extension View {
+    func shoppingListRowInsets() -> some View {
+        listRowInsets(ShoppingListMetrics.rowInsets)
+    }
+}
+
 struct SettingsView: View {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -9,18 +19,22 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
+                    .shoppingListRowInsets()
                 NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
+                    .shoppingListRowInsets()
                 Section("Appearance") {
                     if dynamicTypeSize.isAccessibilitySize {
-                        appearancePicker.pickerStyle(.menu)
+                        appearancePicker.pickerStyle(.menu).shoppingListRowInsets()
                     } else {
-                        appearancePicker.pickerStyle(.segmented)
+                        appearancePicker.pickerStyle(.segmented).shoppingListRowInsets()
                     }
                 }
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
+                        .shoppingListRowInsets()
                     Text("Groceries are available in this app’s current local household store.")
                         .font(.footnote).foregroundStyle(.secondary)
+                        .shoppingListRowInsets()
                 }
             }
             .navigationTitle("Settings")
@@ -94,7 +108,6 @@ private struct StoreManagementView: View {
         FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
         FetchedResults<Household>
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var editor: StoreEditorSession?
     @State private var editorName = ""
     @State private var removingStore: Store?
@@ -121,7 +134,7 @@ private struct StoreManagementView: View {
             Section("Stores") {
                 ForEach(householdStores, id: \.objectID) { store in
                     storeRow(store)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 8))
+                        .shoppingListRowInsets()
                 }
                 .onMove(perform: reorder)
             }
@@ -138,10 +151,17 @@ private struct StoreManagementView: View {
             }
         }
         .sheet(item: $editor) { session in
-            StoreEditorView(
+            ManagementNameEditor(
                 title: session.store == nil ? "Add store" : "Rename store",
                 name: $editorName,
-                available: StoreManagementScope.permits(session.scope, canonicalList: canonicalList),
+                fieldTitle: "Store name",
+                fieldIdentifier: "shopping.stores.name",
+                saveLabel: "Save store",
+                unavailableMessage: session.store == nil
+                    ? "This household is unavailable. Your draft is still here."
+                    : "This store is no longer available. Your draft is still here.",
+                available: StoreManagementScope.permits(session.scope, canonicalList: canonicalList)
+                    && (session.store.map(householdStores.contains) ?? true),
                 onSave: { save(session) },
                 onCancel: { editor = nil }
             )
@@ -177,28 +197,26 @@ private struct StoreManagementView: View {
 
     @ViewBuilder
     private func storeRow(_ store: Store) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
-            : AnyLayout(HStackLayout(spacing: 8))
-        layout {
-            Text(store.name)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            HStack(spacing: 0) {
+        Text(store.name)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button { beginRename(store) } label: {
-                    Image(systemName: "pencil").frame(minWidth: 44, minHeight: 44)
+                    Label("Edit", systemImage: "pencil")
                 }
-                .accessibilityLabel("Rename \(store.name)")
-                .buttonStyle(.borderless)
+                .tint(.blue)
                 .disabled(!selectionAvailable)
-                Button { beginRemoval(store) } label: {
-                    Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
-                }
-                .accessibilityLabel("Delete \(store.name)")
-                .buttonStyle(.borderless)
-                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.stores.edit.\(store.id.uuidString)")
             }
-        }
-        .frame(minHeight: 44)
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button(role: .destructive) { beginRemoval(store) } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
+            }
+            .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
+            .accessibilityAction(named: Text("Delete \(store.name)")) { beginRemoval(store) }
     }
 
     private func beginCreate() {
@@ -281,9 +299,13 @@ private struct StoreEditorSession: Identifiable {
     let scope: StoreManagementCommandScope
 }
 
-private struct StoreEditorView: View {
+struct ManagementNameEditor: View {
     let title: String
     @Binding var name: String
+    let fieldTitle: String
+    let fieldIdentifier: String
+    let saveLabel: String
+    let unavailableMessage: String
     @FocusState private var nameFocused: Bool
     let available: Bool
     let onSave: () -> Void
@@ -296,13 +318,13 @@ private struct StoreEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Store name", text: $name)
-                    .accessibilityIdentifier("shopping.stores.name")
+                TextField(fieldTitle, text: $name)
+                    .accessibilityIdentifier(fieldIdentifier)
                     .focused($nameFocused)
                     .submitLabel(.done)
                     .onSubmit { if canSave { onSave() } }
                 if !available {
-                    Text("This household is unavailable. Your draft is still here.")
+                    Text(unavailableMessage)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -312,7 +334,7 @@ private struct StoreEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onSave) { Image(systemName: "checkmark") }
-                        .accessibilityLabel("Save store")
+                        .accessibilityLabel(saveLabel)
                         .disabled(!canSave)
                 }
             }
