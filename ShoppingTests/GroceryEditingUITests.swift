@@ -35,6 +35,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
         attachScreenshot(named: "Remembered item editor", app: app)
     }

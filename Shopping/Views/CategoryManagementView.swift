@@ -187,6 +187,7 @@ struct CategoryManagementView: View {
                 fieldTitle: "Category name",
                 fieldIdentifier: "shopping.categories.name",
                 saveLabel: "Save category",
+                initiallyFocused: session.category == nil,
                 unavailableMessage: session.category == nil
                     ? "This household is unavailable. Your draft is still here."
                     : "This category is no longer available. Your draft is still here.",
@@ -230,6 +231,7 @@ struct CategoryManagementView: View {
                 Button(role: .destructive) { removingCategory = category } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .tint(.red)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
             }

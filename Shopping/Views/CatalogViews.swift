@@ -21,6 +21,32 @@ struct CatalogFilterState: Equatable {
     }
 }
 
+enum CatalogGrouping: String, CaseIterable, Identifiable {
+    case category
+    case store
+    case none
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .category: "Category"
+        case .store: "Store"
+        case .none: "None"
+        }
+    }
+}
+
+private struct CatalogItemGroup: Identifiable {
+    let id: String
+    let title: String?
+    let items: [Item]
+}
+
+private struct CatalogGroupKey: Hashable {
+    let id: String
+    let title: String
+}
+
 enum CatalogScope {
     static func canonicalList(
         lists: [GroceryList],
@@ -87,6 +113,8 @@ struct CatalogView: View {
     @State private var projectedIDs: Set<UUID> = []
     @State private var showingFilters = false
     @State private var showingStores = false
+    @State private var showingGrouping = false
+    @State private var grouping = CatalogGrouping.category
     @State private var editor: CatalogEditSession?
     @State private var archiveTarget: CatalogArchiveTarget?
     @State private var removalTarget: CatalogRemovalTarget?
@@ -108,6 +136,40 @@ struct CatalogView: View {
     private var visibleItems: [Item] {
         scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
     }
+    private var visibleGroups: [CatalogItemGroup] {
+        let sortedItems = visibleItems.sorted(by: catalogItemComesFirst)
+        switch grouping {
+        case .none:
+            return [CatalogItemGroup(id: "all", title: nil, items: sortedItems)]
+        case .category:
+            return groups(items: sortedItems) { categoryGroupKey(for: $0) }
+        case .store:
+            var grouped: [CatalogGroupKey: [Item]] = [:]
+            for item in sortedItems {
+                for key in storeGroupKeys(for: item) {
+                    grouped[key, default: []].append(item)
+                }
+            }
+            return catalogGroups(from: grouped)
+        }
+    }
+
+    private func groups(items: [Item], key: (Item) -> CatalogGroupKey) -> [CatalogItemGroup] {
+        catalogGroups(from: Dictionary(grouping: items, by: key))
+    }
+
+    private func catalogGroups(from grouped: [CatalogGroupKey: [Item]]) -> [CatalogItemGroup] {
+        grouped.keys.sorted(by: groupComesFirst).map { key in
+            CatalogItemGroup(id: key.id, title: key.title, items: grouped[key] ?? [])
+        }
+    }
+
+    private func groupComesFirst(_ lhs: CatalogGroupKey, _ rhs: CatalogGroupKey) -> Bool {
+        if alphabetically(lhs.title, rhs.title) { return true }
+        if alphabetically(rhs.title, lhs.title) { return false }
+        return lhs.id < rhs.id
+    }
+
     private var hasNarrowing: Bool {
         !searchText.isEmpty || filters.selectedStoreID != nil || filters.count > 0
     }
@@ -142,43 +204,18 @@ struct CatalogView: View {
                         .listRowBackground(Color.clear)
                     }
                 } else {
-                    ForEach(visibleItems, id: \.objectID) { item in
+                    ForEach(visibleGroups) { group in
                         Section {
-                            Button { edit(item) } label: {
-                                CatalogItemRow(item: item)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
+                            ForEach(group.items, id: \.objectID) { item in
+                                catalogRow(item)
                             }
-                            .buttonStyle(.plain)
-                            .shoppingListRowInsets()
-                            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button { prepareArchive(item) } label: {
-                                    Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
-                                        .font(.caption2)
-                                }
-                                .tint(item.isArchived ? .green : .orange)
-                                .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
-                                .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
-                                Button(role: .destructive) { prepareRemoval(item) } label: {
-                                    Image(systemName: "trash").font(.caption2)
-                                }
-                                .tint(.red)
-                                .accessibilityLabel("Delete")
-                                .accessibilityIdentifier("shopping.catalog.swipeDelete.\(item.id.uuidString)")
-                            }
-                            .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
-                                prepareArchive(item)
-                            }
-                            .accessibilityAction(named: Text("Delete \(item.name)")) {
-                                prepareRemoval(item)
-                            }
+                        } header: {
+                            if let title = group.title { Text(title) }
                         }
                     }
                 }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(4)
             .contentMargins(.top, 0, for: .scrollContent)
             .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
@@ -195,6 +232,11 @@ struct CatalogView: View {
                 Button("All items") { filters.selectedStoreID = nil }
                 ForEach(activeStores, id: \.objectID) { store in
                     Button(store.name) { filters.selectedStoreID = store.id }
+                }
+            }
+            .confirmationDialog("Group catalog", isPresented: $showingGrouping, titleVisibility: .visible) {
+                ForEach(CatalogGrouping.allCases) { choice in
+                    Button(choice.title) { grouping = choice }
                 }
             }
             .sheet(isPresented: $showingFilters) {
@@ -276,6 +318,12 @@ struct CatalogView: View {
                     systemImage: "line.3.horizontal.decrease.circle",
                     identifier: "shopping.catalog.filters"
                 ) { showingFilters = true }
+                SelectionPill(
+                    title: "Group: \(grouping.title)",
+                    isSelected: grouping != .none,
+                    systemImage: "rectangle.3.group",
+                    identifier: "shopping.catalog.grouping"
+                ) { showingGrouping = true }
             }
             if filters.count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -297,6 +345,77 @@ struct CatalogView: View {
         .padding(.horizontal)
         .padding(.top, 8)
         .padding(.bottom, 8)
+    }
+
+    private func catalogRow(_ item: Item) -> some View {
+        Button { edit(item) } label: {
+            CatalogItemRow(item: item)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .shoppingListRowInsets()
+        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button { prepareArchive(item) } label: {
+                Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
+                    .font(.caption2)
+            }
+            .tint(item.isArchived ? .green : .orange)
+            .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
+            .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
+            Button(role: .destructive) { prepareRemoval(item) } label: {
+                Image(systemName: "trash").font(.caption2)
+            }
+            .tint(.red)
+            .accessibilityLabel("Delete")
+            .accessibilityIdentifier("shopping.catalog.swipeDelete.\(item.id.uuidString)")
+        }
+        .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
+            prepareArchive(item)
+        }
+        .accessibilityAction(named: Text("Delete \(item.name)")) {
+            prepareRemoval(item)
+        }
+    }
+
+    private func catalogItemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
+        if alphabetically(lhs.name, rhs.name) { return true }
+        if alphabetically(rhs.name, lhs.name) { return false }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func alphabetically(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.compare(
+            rhs, options: [.caseInsensitive, .diacriticInsensitive, .numeric], locale: .current
+        ) == .orderedAscending
+    }
+
+    private func categoryGroupKey(for item: Item) -> CatalogGroupKey {
+        guard let category = item.category else {
+            return CatalogGroupKey(id: "category:none", title: "Uncategorized")
+        }
+        guard scopedCategories.contains(category) else {
+            return CatalogGroupKey(id: "category:unavailable", title: "Unavailable category")
+        }
+        return CatalogGroupKey(id: "category:\(category.id.uuidString)", title: category.name)
+    }
+
+    private func storeGroupKeys(for item: Item) -> [CatalogGroupKey] {
+        if item.anyStore || (item.stores ?? []).isEmpty {
+            return [CatalogGroupKey(id: "store:any", title: "Any store")]
+        }
+        let tagged = item.stores ?? []
+        let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+        var keys = validStores.filter { tagged.contains($0) }.map {
+            CatalogGroupKey(id: "store:\($0.id.uuidString)", title: $0.name)
+        }
+        if keys.count < tagged.count {
+            keys.append(CatalogGroupKey(id: "store:unavailable", title: "Unavailable stores"))
+        }
+        return keys.isEmpty
+            ? [CatalogGroupKey(id: "store:unavailable", title: "Unavailable stores")]
+            : keys
     }
 
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View {
@@ -503,7 +622,9 @@ private struct CatalogEditorView: View {
     @State private var errorMessage: String?
     @State private var showingArchiveConfirmation = false
     @State private var showingCategoryCreation = false
+    @State private var showingStoreCreation = false
     @State private var requestedArchived = true
+    @FocusState private var nameIsFocused: Bool
     let session: CatalogEditSession
     let onSaved: () -> Void
 
@@ -540,7 +661,11 @@ private struct CatalogEditorView: View {
         NavigationStack {
             Form {
                 Section("Remembered item") {
-                    TextField("Item name", text: $values.name).accessibilityIdentifier("shopping.catalog.name")
+                    TextField("Item name", text: $values.name)
+                        .accessibilityIdentifier("shopping.catalog.name")
+                        .focused($nameIsFocused)
+                        .submitLabel(.done)
+                        .onSubmit { nameIsFocused = false }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Item notes").font(.subheadline).fontWeight(.semibold)
                         TextField("Add reusable details", text: $values.notes, axis: .vertical)
@@ -557,6 +682,7 @@ private struct CatalogEditorView: View {
                                 "Edit \(item.name)\(item.isArchived ? " (archived)" : "")",
                                 systemImage: "pencil"
                             ) {
+                                nameIsFocused = false
                                 itemID = item.id
                                 values = item.catalogValues
                                 allowingNameCollision = false
@@ -580,7 +706,8 @@ private struct CatalogEditorView: View {
                     storeIDs: $values.storeIDs,
                     anyStore: $values.anyStore,
                     householdID: session.selection.householdID,
-                    listID: session.selection.listID
+                    listID: session.selection.listID,
+                    onAddStore: { showingStoreCreation = true }
                 )
                 if let item = currentItem {
                     Section {
@@ -603,6 +730,10 @@ private struct CatalogEditorView: View {
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle(itemID == nil ? "New catalog item" : "Edit catalog item")
+            .onAppear {
+                guard session.itemID == nil else { return }
+                DispatchQueue.main.async { nameIsFocused = true }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -624,6 +755,15 @@ private struct CatalogEditorView: View {
                     householdID: session.selection.householdID,
                     listID: session.selection.listID
                 ) { values.categoryID = $0 }
+            }
+            .sheet(isPresented: $showingStoreCreation) {
+                StoreCreationView(
+                    householdID: session.selection.householdID,
+                    listID: session.selection.listID
+                ) { id in
+                    if values.storeIDs.isEmpty { values.anyStore = false }
+                    values.storeIDs.insert(id)
+                }
             }
         }
     }

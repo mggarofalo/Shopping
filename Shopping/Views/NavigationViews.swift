@@ -1014,6 +1014,8 @@ struct OneTimeGrocerySheet: View {
     @State private var selectedStoreIDs: Set<UUID>
     @State private var anyStore: Bool
     @State private var error: Error?
+    @State private var showingStoreCreation = false
+    @FocusState private var nameIsFocused: Bool
     let scope: GroceryAddScope
     let onSaved: () -> Void
 
@@ -1035,12 +1037,17 @@ struct OneTimeGrocerySheet: View {
             Form {
                 Section("One-time item") {
                     TextField("Item name", text: $name)
+                        .accessibilityIdentifier("shopping.oneTime.name")
+                        .focused($nameIsFocused)
+                        .submitLabel(.done)
+                        .onSubmit { nameIsFocused = false }
                     Text("This item won’t be remembered in Catalog.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 PurchaseRulesPicker(
                     storeIDs: $selectedStoreIDs, anyStore: $anyStore,
-                    householdID: scope.householdID, listID: scope.listID
+                    householdID: scope.householdID, listID: scope.listID,
+                    onAddStore: { showingStoreCreation = true }
                 )
                 if service == nil || scope.listID == nil || scope.householdID == nil {
                     Text("This household is still loading. Your draft will remain here.")
@@ -1052,6 +1059,13 @@ struct OneTimeGrocerySheet: View {
                 if let error { Text(error.localizedDescription).foregroundStyle(.red).font(.footnote) }
             }
             .navigationTitle("Add one-time item")
+            .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
+            .sheet(isPresented: $showingStoreCreation) {
+                StoreCreationView(householdID: scope.householdID, listID: scope.listID) { id in
+                    if selectedStoreIDs.isEmpty { anyStore = false }
+                    selectedStoreIDs.insert(id)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

@@ -59,6 +59,7 @@ struct GroceryEditorView: View {
     @State private var selectedCatalogItemID: UUID?
     @State private var conflictingNeedID: UUID?
     @State private var showingCategoryCreation = false
+    @State private var showingStoreCreation = false
     @State private var didRequestInitialFocus = false
     @FocusState private var nameIsFocused: Bool
     let target: GroceryEditorTarget
@@ -261,7 +262,7 @@ struct GroceryEditorView: View {
                     )
                     PurchaseRulesPicker(
                         storeIDs: $storeIDs, anyStore: $anyStore, householdID: target.scope.householdID,
-                        listID: target.scope.listID)
+                        listID: target.scope.listID, onAddStore: { showingStoreCreation = true })
                 }
                 if !scopeValid {
                     Text(
@@ -324,6 +325,15 @@ struct GroceryEditorView: View {
                     householdID: target.scope.householdID,
                     listID: target.scope.listID
                 ) { categoryID = $0 }
+            }
+            .sheet(isPresented: $showingStoreCreation) {
+                StoreCreationView(
+                    householdID: target.scope.householdID,
+                    listID: target.scope.listID
+                ) { id in
+                    if storeIDs.isEmpty { anyStore = false }
+                    storeIDs.insert(id)
+                }
             }
             .onAppear {
                 guard !isEditing, !didRequestInitialFocus else { return }
