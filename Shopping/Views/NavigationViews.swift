@@ -572,6 +572,7 @@ struct GroceriesView: View {
                     ))
                 }
             )
+            .shoppingListRowInsets()
         }
     }
 
@@ -1100,6 +1101,7 @@ struct RecentlyClearedView: View {
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("shopping.recovery.restore.\(operation.id.uuidString)")
                 }
+                .shoppingListRowInsets()
             }
         }
         .overlay { if scopedOperations.isEmpty { ContentUnavailableView("Nothing recently cleared", systemImage: "clock.arrow.circlepath") } }

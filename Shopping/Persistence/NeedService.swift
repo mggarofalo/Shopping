@@ -76,12 +76,24 @@ enum StoreRemovalAction: Equatable {
     case archive
 }
 
+enum CatalogRemovalAction: Equatable {
+    case delete
+    case archive
+    case keepArchived
+}
+
 struct CatalogItemValues: Equatable {
     var name: String
     var notes: String
     var categoryID: UUID?
     var anyStore: Bool
     var storeIDs: Set<UUID>
+}
+
+struct CatalogRemovalPreview: Equatable {
+    let action: CatalogRemovalAction
+    let values: CatalogItemValues
+    let isArchived: Bool
 }
 
 struct RememberedNeedValues: Equatable {
@@ -141,6 +153,7 @@ final class NeedService {
 
     @discardableResult
     func createHousehold(name: String = "Household") throws -> (householdID: UUID, listID: UUID) {
+        let name = try validatedName(name)
         return try write { context in
             let household: Household = self.insert("Household", in: context)
             household.id = UUID()
@@ -184,7 +197,7 @@ final class NeedService {
         name: String,
         householdID: UUID,
         listID: UUID? = nil,
-        displayOrder: Int64 = 0
+        displayOrder: Int64? = nil
     ) throws -> UUID {
         let name = try validatedName(name)
         return try write { context in
@@ -194,7 +207,12 @@ final class NeedService {
             let category: Category = self.insert("Category", in: context)
             category.id = UUID()
             category.name = name
-            category.displayOrder = displayOrder
+            if let displayOrder {
+                category.displayOrder = displayOrder
+            } else {
+                let currentMaximum = household.categories?.map(\.displayOrder).max() ?? -1
+                category.displayOrder = currentMaximum == Int64.max ? Int64.max : currentMaximum + 1
+            }
             self.route(category, with: household, in: context)
             category.household = household
             return category.id
@@ -440,7 +458,7 @@ final class NeedService {
             let item: Item = self.insert("Item", in: context)
             item.id = UUID()
             item.name = name
-            item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.notes = self.trimmedNotes(notes)
             item.anyStore = anyStore
             item.isArchived = false
             self.route(item, with: household, in: context)
@@ -529,6 +547,60 @@ final class NeedService {
             }
             try self.validate(item: item, belongsTo: household)
             item.isArchived = archived
+        }
+    }
+
+    func catalogItemRemovalPreview(
+        itemID: UUID,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> CatalogRemovalPreview {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            try self.validate(item: item, belongsTo: household)
+            let hasReferences = self.catalogItemHasReferences(item)
+            let action: CatalogRemovalAction = hasReferences
+                ? (item.isArchived ? .keepArchived : .archive)
+                : .delete
+            return CatalogRemovalPreview(
+                action: action,
+                values: self.catalogValues(for: item),
+                isArchived: item.isArchived
+            )
+        }
+    }
+
+    @discardableResult
+    func removeCatalogItem(
+        itemID: UUID,
+        householdID: UUID,
+        listID: UUID,
+        preview: CatalogRemovalPreview
+    ) throws -> CatalogRemovalAction {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            try self.validate(item: item, belongsTo: household)
+            guard self.catalogValues(for: item) == preview.values,
+                  item.isArchived == preview.isArchived else {
+                throw NeedServiceError.scopeChanged
+            }
+            if preview.action == .archive || self.catalogItemHasReferences(item) {
+                item.isArchived = true
+                return .archive
+            }
+            guard preview.action == .delete else { return .keepArchived }
+            context.delete(item)
+            return .delete
         }
     }
 
@@ -746,7 +818,7 @@ final class NeedService {
                 throw NeedServiceError.scopeChanged
             }
             item.name = name
-            item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.notes = self.trimmedNotes(notes)
             item.category = try self.validatedCategory(id: categoryID, household: household, in: context)
             item.isArchived = isArchived
         }
@@ -936,7 +1008,7 @@ final class NeedService {
                 let (nextRevision, overflow) = existing.revision.addingReportingOverflow(1)
                 guard !overflow else { throw NeedServiceError.scopeChanged }
                 if let quantity { existing.quantity = quantity }
-                if let notes { existing.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let notes { existing.notes = self.trimmedNotes(notes) }
                 existing.carted = false
                 existing.urgency = urgency.rawValue
                 existing.clearOperationID = nil
@@ -950,7 +1022,7 @@ final class NeedService {
             need.kind = NeedKind.remembered.rawValue
             need.item = item
             need.quantity = quantity
-            need.notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            need.notes = notes.map(self.trimmedNotes) ?? ""
             need.urgency = urgency.rawValue
             return need.id
         }
@@ -990,7 +1062,7 @@ final class NeedService {
             let category = try self.validatedCategory(id: categoryID, household: household, in: context)
             let need = self.makeNeed(title: title, list: list, context: context)
             need.kind = NeedKind.oneTime.rawValue
-            need.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            need.notes = self.trimmedNotes(notes)
             need.quantity = quantity
             need.urgency = urgency.rawValue
             need.oneTimeAnyStore = anyStore
@@ -1062,7 +1134,7 @@ final class NeedService {
     }
 
     func setPurchaseNote(_ notes: String, needID: UUID) throws {
-        try editNeed(id: needID) { $0.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+        try editNeed(id: needID) { $0.notes = self.trimmedNotes(notes) }
     }
 
     func updateOneTimeNeed(
@@ -1083,7 +1155,7 @@ final class NeedService {
             )
             let category = try self.validatedCategory(id: categoryID, household: household, in: context)
             need.title = title
-            need.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            need.notes = self.trimmedNotes(notes)
             need.oneTimeCategory = category
             need.oneTimeStores = stores
             need.oneTimeAnyStore = anyStore
@@ -1195,7 +1267,7 @@ final class NeedService {
             let item: Item = self.insert("Item", in: context)
             item.id = UUID()
             item.name = name
-            item.notes = itemNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            item.notes = self.trimmedNotes(itemNotes)
             item.anyStore = need.oneTimeAnyStore
             item.isArchived = false
             self.route(item, with: household, in: context)
@@ -1543,7 +1615,7 @@ final class NeedService {
         }
         return ValidatedCatalogItemValues(
             name: name,
-            notes: values.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            notes: trimmedNotes(values.notes),
             category: category,
             stores: stores,
             anyStore: values.anyStore || stores.isEmpty
@@ -1568,6 +1640,16 @@ final class NeedService {
         return item
     }
 
+    private func catalogValues(for item: Item) -> CatalogItemValues {
+        CatalogItemValues(
+            name: item.name,
+            notes: item.notes,
+            categoryID: item.category?.id,
+            anyStore: item.anyStore,
+            storeIDs: Set(item.stores?.map(\.id) ?? [])
+        )
+    }
+
     private func insertRememberedNeed(
         item: Item,
         list: GroceryList,
@@ -1578,7 +1660,7 @@ final class NeedService {
         need.kind = NeedKind.remembered.rawValue
         need.item = item
         need.quantity = values.quantity
-        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.notes = trimmedNotes(values.purchaseNotes)
         need.urgency = values.urgency.rawValue
         return need
     }
@@ -1629,6 +1711,10 @@ final class NeedService {
 
     private func storeHasReferences(_ store: Store) -> Bool {
         !(store.items?.isEmpty ?? true) || !(store.oneTimeNeeds?.isEmpty ?? true)
+    }
+
+    private func catalogItemHasReferences(_ item: Item) -> Bool {
+        !(item.needs?.isEmpty ?? true)
     }
 
     private func validatedActiveNeed(
@@ -1683,7 +1769,7 @@ final class NeedService {
         let (nextRevision, overflow) = need.revision.addingReportingOverflow(1)
         guard !overflow else { throw NeedServiceError.scopeChanged }
         need.quantity = values.quantity
-        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.notes = trimmedNotes(values.purchaseNotes)
         need.urgency = values.urgency.rawValue
         need.clearOperationID = nil
         need.revision = nextRevision
@@ -1699,7 +1785,7 @@ final class NeedService {
         need.oneTimeStores = []
         need.oneTimeAnyStore = false
         need.quantity = values.quantity
-        need.notes = values.purchaseNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        need.notes = trimmedNotes(values.purchaseNotes)
         need.urgency = values.urgency.rawValue
         need.clearOperationID = nil
         need.revision = revision
@@ -1784,6 +1870,10 @@ final class NeedService {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NeedServiceError.invalidName }
         return trimmed
+    }
+
+    private func trimmedNotes(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func clearOperation(id: UUID, in context: NSManagedObjectContext) throws -> ClearOperation? {

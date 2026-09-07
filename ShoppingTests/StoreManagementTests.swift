@@ -305,7 +305,8 @@ final class StoreManagementTests: XCTestCase {
         let service = NeedService(persistence: persistence)
         let local = try service.createHousehold(name: "Local")
         let foreign = try service.createHousehold(name: "Foreign")
-        let storeID = try service.createStore(name: "Costco", householdID: local.householdID)
+        let storeID = try service.createStore(name: "  Costco \n", householdID: local.householdID)
+        XCTAssertEqual(try storeState(storeID, persistence: persistence).name, "Costco")
 
         try service.renameStore(
             name: "  Costco Wholesale  ", storeID: storeID, householdID: local.householdID)
