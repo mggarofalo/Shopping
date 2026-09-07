@@ -581,6 +581,101 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertFalse(restored)
     }
 
+    func testCatalogAddCopiesSavedDetailsWithNormalUrgencyAndSurvivesRelaunch() throws {
+        let storeURL = temporaryStoreURL()
+        var needID: UUID!
+        var itemID: UUID!
+        var categoryID: UUID!
+        var storeID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: storeURL)
+            let service = NeedService(persistence: persistence)
+            let selection = try service.createHousehold()
+            categoryID = try service.createCategory(name: "Pantry", householdID: selection.householdID)
+            storeID = try service.createStore(name: "Market", householdID: selection.householdID)
+            itemID = try service.createCatalogItem(
+                values: CatalogItemValues(
+                    name: "Coffee", notes: "Whole bean", categoryID: categoryID,
+                    anyStore: false, storeIDs: [storeID]
+                ),
+                householdID: selection.householdID
+            )
+            let preview = try service.captureCatalogAdd(
+                itemIDs: [itemID], householdID: selection.householdID,
+                listID: selection.listID, selectedStoreID: storeID
+            )
+            XCTAssertEqual(preview.addCount, 1)
+            let result = try service.applyCatalogAdd(preview.token, renewCarted: false)
+            needID = try XCTUnwrap(result.addedNeedIDs.first)
+        }
+
+        let reopened = try PersistenceController(storeURL: storeURL)
+        let need = try needSnapshot(needID, persistence: reopened)
+        XCTAssertEqual(need.itemID, itemID)
+        XCTAssertEqual(need.title, "Coffee")
+        XCTAssertEqual(need.notes, "Whole bean")
+        XCTAssertEqual(need.urgency, NeedUrgency.normal.rawValue)
+        XCTAssertFalse(need.carted)
+        let item = try itemSnapshot(itemID, persistence: reopened)
+        XCTAssertEqual(item.categoryID, categoryID)
+        XCTAssertEqual(item.storeIDs, [storeID])
+        XCTAssertFalse(item.anyStore)
+    }
+
+    func testCatalogBatchAddHandlesExistingCartedArchivedIneligibleAndChangedItems() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let selectedStore = try service.createStore(name: "Selected", householdID: selection.householdID)
+        let otherStore = try service.createStore(name: "Other", householdID: selection.householdID)
+        let fresh = try service.createItem(name: "Fresh", storeIDs: [selectedStore], householdID: selection.householdID, anyStore: false)
+        let existing = try service.createItem(name: "Existing", householdID: selection.householdID)
+        let carted = try service.createItem(name: "Carted", householdID: selection.householdID)
+        let ineligible = try service.createItem(name: "Elsewhere", storeIDs: [otherStore], householdID: selection.householdID, anyStore: false)
+        let unresolved = try service.createItem(name: "Unresolved", householdID: selection.householdID, anyStore: false)
+        let archived = try service.createItem(name: "Archived", householdID: selection.householdID)
+        let changed = try service.createItem(name: "Changed", householdID: selection.householdID)
+        let existingNeed = try service.addRememberedNeed(itemID: existing, listID: selection.listID, urgency: .urgent)
+        let cartedNeed = try service.addRememberedNeed(itemID: carted, listID: selection.listID, urgency: .urgent)
+        try service.setCarted(true, needID: cartedNeed)
+        try service.setCatalogItemArchived(
+            itemID: archived, householdID: selection.householdID, listID: selection.listID, archived: true
+        )
+        let projected = try service.filteredCatalogItemIDs(
+            householdID: selection.householdID,
+            filter: CatalogItemFilter(purchase: PurchaseFilter(selectedStoreID: selectedStore))
+        )
+        XCTAssertTrue(projected.contains(fresh))
+        XCTAssertFalse(projected.contains(ineligible))
+        XCTAssertFalse(projected.contains(unresolved))
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [fresh, existing, carted, ineligible, unresolved, archived, changed],
+            householdID: selection.householdID, listID: selection.listID,
+            selectedStoreID: selectedStore
+        )
+        XCTAssertEqual(preview.addCount, 2)
+        XCTAssertEqual(preview.existingCount, 1)
+        XCTAssertEqual(preview.needAgainCount, 1)
+        XCTAssertEqual(preview.ineligibleCount, 2)
+        XCTAssertEqual(preview.archivedCount, 1)
+
+        try service.saveCatalogItem(
+            itemID: changed, householdID: selection.householdID,
+            values: CatalogItemValues(name: "Changed later", notes: "", categoryID: nil, anyStore: true, storeIDs: [])
+        )
+        let result = try service.applyCatalogAdd(preview.token, renewCarted: true)
+        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.existingNeedIDs, [existingNeed])
+        XCTAssertEqual(result.renewedNeedIDs, [cartedNeed])
+        XCTAssertEqual(result.ineligibleCount, 2)
+        XCTAssertEqual(result.archivedCount, 1)
+        XCTAssertEqual(result.changedCount, 1)
+        XCTAssertFalse(try needSnapshot(cartedNeed, persistence: persistence).carted)
+        XCTAssertEqual(try needSnapshot(cartedNeed, persistence: persistence).urgency, NeedUrgency.normal.rawValue)
+        XCTAssertNil(try service.activeRememberedNeedID(itemID: changed, listID: selection.listID))
+        XCTAssertNil(try service.activeRememberedNeedID(itemID: unresolved, listID: selection.listID))
+    }
+
     func testBatchTokenCodablePreservesScopeRevisionsAndIntent() throws {
         let token = ManagementBatchToken(
             id: UUID(), householdID: UUID(), listID: UUID(), entity: .store,
@@ -589,6 +684,17 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(
             ManagementBatchToken.self, from: JSONEncoder().encode(token)
         ), token)
+
+        let addToken = CatalogAddToken(
+            id: UUID(), householdID: UUID(), listID: UUID(), selectedStoreID: UUID(),
+            entries: [CatalogAddEntry(
+                itemID: UUID(), itemRevision: 4, needID: UUID(), needRevision: 9,
+                disposition: .needAgain
+            )]
+        )
+        XCTAssertEqual(try JSONDecoder().decode(
+            CatalogAddToken.self, from: JSONEncoder().encode(addToken)
+        ), addToken)
     }
 
     private enum SaveFailure: CaseIterable, CustomStringConvertible {

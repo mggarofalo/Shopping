@@ -193,7 +193,10 @@ struct GroceriesView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("shopping.grocery.feedback")
             }
-            .onAppear(perform: completeSaveFeedback)
+            .onAppear {
+                completeSaveFeedback()
+                focusRequestedNeed()
+            }
             .task(id: "\(selection.householdID?.uuidString ?? "nil")-\(selection.listID?.uuidString ?? "nil")") {
                 configureAndRefresh()
             }
@@ -204,12 +207,14 @@ struct GroceriesView: View {
             .onChange(of: navigation.urgentOnly) { _, _ in refreshProjection() }
             .onChange(of: navigation.categoryID) { _, _ in refreshProjection() }
             .onChange(of: needs.count) { _, _ in refreshProjection() }
+            .onChange(of: navigation.pendingNeedFocusID) { _, _ in focusRequestedNeed() }
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
                 object: viewContext
             )) { _ in
                 configureAndRefresh()
                 completeSaveFeedback()
+                focusRequestedNeed()
             }
         }
     }
@@ -427,6 +432,14 @@ struct GroceriesView: View {
             householdID: canonicalList.household?.id, listID: canonicalList.id,
             selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
         ), need: need)
+    }
+
+    private func focusRequestedNeed() {
+        guard let id = navigation.pendingNeedFocusID,
+              let need = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+                .first(where: { $0.id == id && !$0.archived }) else { return }
+        navigation.consumeNeedFocus(id)
+        focus(need)
     }
 
     private func saved(_ id: UUID) {

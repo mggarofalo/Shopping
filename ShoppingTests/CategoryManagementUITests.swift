@@ -109,11 +109,47 @@ final class CategoryManagementUITests: XCTestCase {
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Catalog", identifier: "shopping.catalog.select")
+        XCTAssertFalse(app.buttons["Add Bananas to list"].exists)
         app.buttons["shopping.catalog.batchActions"].tap()
         app.buttons["Select All"].tap()
         app.buttons["shopping.catalog.batchActions"].tap()
+        XCTAssertTrue(app.buttons["Add to list"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Delete"].exists)
+        app.buttons["Add to list"].tap()
+        let addConfirmation = app.sheets["Add selected items to list?"]
+        XCTAssertTrue(addConfirmation.waitForExistence(timeout: 2))
+        XCTAssertTrue(addConfirmation.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "in the cart will be needed again")
+        ).firstMatch.exists)
+        addConfirmation.buttons["Add to list"].tap()
+        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
+        app.alerts.buttons["OK"].tap()
+    }
+
+    func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {
+        let app = launchPopulated()
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+
+        let existing = app.buttons["Add Bananas to list"]
+        XCTAssertTrue(existing.waitForExistence(timeout: 3))
+        existing.tap()
+        XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        app.buttons["shopping.grocery.cancel"].tap()
+
+        app.tabBars.buttons["Catalog"].tap()
+        let carted = app.buttons["Add Strawberries to list"]
+        XCTAssertTrue(carted.waitForExistence(timeout: 3))
+        carted.tap()
+        let confirmation = app.sheets["Need Strawberries again?"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
+        confirmation.buttons["Need again"].tap()
+        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
+        app.alerts.buttons["View in groceries"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
     }
 
     private func launchPopulated() -> XCUIApplication {

@@ -158,6 +158,49 @@ struct ManagementBatchResult: Equatable {
     let missingCount: Int
 }
 
+enum CatalogAddDisposition: String, Codable, Equatable {
+    case add
+    case focusExisting
+    case needAgain
+    case archived
+    case ineligible
+}
+
+struct CatalogAddEntry: Codable, Equatable {
+    let itemID: UUID
+    let itemRevision: Int64
+    let needID: UUID?
+    let needRevision: Int64?
+    let disposition: CatalogAddDisposition
+}
+
+struct CatalogAddToken: Codable, Equatable {
+    let id: UUID
+    let householdID: UUID
+    let listID: UUID
+    let selectedStoreID: UUID?
+    let entries: [CatalogAddEntry]
+}
+
+struct CatalogAddPreview: Equatable {
+    let token: CatalogAddToken
+    let addCount: Int
+    let existingCount: Int
+    let needAgainCount: Int
+    let archivedCount: Int
+    let ineligibleCount: Int
+}
+
+struct CatalogAddResult: Equatable {
+    let addedNeedIDs: [UUID]
+    let existingNeedIDs: [UUID]
+    let renewedNeedIDs: [UUID]
+    let archivedCount: Int
+    let ineligibleCount: Int
+    let changedCount: Int
+    let missingCount: Int
+}
+
 struct RememberedNeedValues: Equatable {
     var quantity: Int64? = nil
     var purchaseNotes: String = ""
@@ -388,6 +431,164 @@ final class NeedService {
             return ManagementBatchResult(
                 archivedCount: archived, restoredCount: restored, deletedCount: deleted,
                 retainedCount: retained, changedCount: changed, missingCount: missing
+            )
+        }
+    }
+
+    func captureCatalogAdd(
+        itemIDs: Set<UUID>,
+        householdID: UUID,
+        listID: UUID,
+        selectedStoreID: UUID?
+    ) throws -> CatalogAddPreview {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let selectedStore = try self.validatedCatalogAddStore(
+                id: selectedStoreID, household: household, in: context
+            )
+            let itemRequest = Item.fetchRequest()
+            itemRequest.relationshipKeyPathsForPrefetching = ["stores"]
+            let itemsByID = try self.fetchBatch(
+                ids: itemIDs, request: itemRequest, id: \.id, in: context,
+                identityError: .invalidCatalogIdentity
+            )
+            let needsByItemID = try self.activeRememberedNeeds(
+                itemIDs: itemIDs, listID: listID, in: context
+            )
+            var entries: [CatalogAddEntry] = []
+            var addCount = 0
+            var existingCount = 0
+            var needAgainCount = 0
+            var archivedCount = 0
+            var ineligibleCount = 0
+            for itemID in itemIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+                guard let item = itemsByID[itemID] else { continue }
+                do { try self.validate(item: item, belongsTo: household) } catch { continue }
+                let needs = needsByItemID[itemID] ?? []
+                guard needs.count < 2 else {
+                    throw NeedServiceError.activeRememberedNeedDuplicates(
+                        try self.duplicateGroup(itemID: itemID, needs: needs)
+                    )
+                }
+                let need = needs.first
+                let disposition: CatalogAddDisposition
+                if item.isArchived {
+                    disposition = .archived
+                    archivedCount += 1
+                } else if !self.catalogItem(item, isEligibleFor: selectedStore) {
+                    disposition = .ineligible
+                    ineligibleCount += 1
+                } else if let need, need.carted {
+                    disposition = .needAgain
+                    needAgainCount += 1
+                } else if need != nil {
+                    disposition = .focusExisting
+                    existingCount += 1
+                } else {
+                    disposition = .add
+                    addCount += 1
+                }
+                entries.append(CatalogAddEntry(
+                    itemID: itemID, itemRevision: item.revision,
+                    needID: need?.id, needRevision: need?.revision,
+                    disposition: disposition
+                ))
+            }
+            return CatalogAddPreview(
+                token: CatalogAddToken(
+                    id: UUID(), householdID: householdID, listID: listID,
+                    selectedStoreID: selectedStoreID, entries: entries
+                ),
+                addCount: addCount, existingCount: existingCount,
+                needAgainCount: needAgainCount, archivedCount: archivedCount,
+                ineligibleCount: ineligibleCount
+            )
+        }
+    }
+
+    func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) throws -> CatalogAddResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: token.householdID, listID: token.listID, in: context
+            )
+            let list = try self.list(id: token.listID, in: context)
+            guard let list, list.household == household else { throw NeedServiceError.scopeChanged }
+            let selectedStore = try self.validatedCatalogAddStore(
+                id: token.selectedStoreID, household: household, in: context
+            )
+            let entryIDs = token.entries.map(\.itemID)
+            guard Set(entryIDs).count == entryIDs.count else { throw NeedServiceError.scopeChanged }
+            let itemIDs = Set(entryIDs)
+            let itemRequest = Item.fetchRequest()
+            itemRequest.relationshipKeyPathsForPrefetching = ["stores"]
+            let itemsByID = try self.fetchBatch(
+                ids: itemIDs, request: itemRequest, id: \.id, in: context,
+                identityError: .invalidCatalogIdentity
+            )
+            let needsByItemID = try self.activeRememberedNeeds(
+                itemIDs: itemIDs, listID: token.listID, in: context
+            )
+            var added: [UUID] = []
+            var existing: [UUID] = []
+            var renewed: [UUID] = []
+            var archived = 0
+            var ineligible = 0
+            var changed = 0
+            var missing = 0
+            for entry in token.entries {
+                guard let item = itemsByID[entry.itemID] else { missing += 1; continue }
+                do { try self.validate(item: item, belongsTo: household) } catch {
+                    changed += 1; continue
+                }
+                let needs = needsByItemID[entry.itemID] ?? []
+                guard needs.count < 2 else { changed += 1; continue }
+                let need = needs.first
+                guard item.revision == entry.itemRevision,
+                      need?.id == entry.needID,
+                      need?.revision == entry.needRevision else {
+                    changed += 1; continue
+                }
+                if item.isArchived { archived += 1; continue }
+                guard self.catalogItem(item, isEligibleFor: selectedStore) else {
+                    ineligible += 1; continue
+                }
+                switch entry.disposition {
+                case .add:
+                    guard need == nil else { changed += 1; continue }
+                    let created = self.makeNeed(title: item.name, list: list, context: context)
+                    created.kind = NeedKind.remembered.rawValue
+                    created.item = item
+                    created.notes = item.notes
+                    created.urgency = NeedUrgency.normal.rawValue
+                    added.append(created.id)
+                case .focusExisting:
+                    guard let need, !need.carted else { changed += 1; continue }
+                    existing.append(need.id)
+                case .needAgain:
+                    guard let need, need.carted else { changed += 1; continue }
+                    if renewCarted {
+                        let (revision, overflow) = need.revision.addingReportingOverflow(1)
+                        guard !overflow else { throw NeedServiceError.scopeChanged }
+                        need.carted = false
+                        need.urgency = NeedUrgency.normal.rawValue
+                        need.clearOperationID = nil
+                        need.revision = revision
+                        renewed.append(need.id)
+                    } else {
+                        existing.append(need.id)
+                    }
+                case .archived:
+                    archived += 1
+                case .ineligible:
+                    ineligible += 1
+                }
+            }
+            return CatalogAddResult(
+                addedNeedIDs: added, existingNeedIDs: existing, renewedNeedIDs: renewed,
+                archivedCount: archived, ineligibleCount: ineligible,
+                changedCount: changed, missingCount: missing
             )
         }
     }
@@ -1166,9 +1367,11 @@ final class NeedService {
             }
             return items.filter { item in
                 guard includeArchived || !item.isArchived else { return false }
+                let storeIDs = Set(item.stores?.map(\.id) ?? [])
                 let value = PurchaseRuleValue(
-                    explicitStoreIDs: Set(item.stores?.map(\.id) ?? []),
-                    anyStore: item.anyStore
+                    explicitStoreIDs: storeIDs,
+                    anyStore: item.anyStore,
+                    hasResolvedIdentity: item.anyStore || !storeIDs.isEmpty
                 )
                 return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item.name, query: filter.text) &&
@@ -1855,6 +2058,27 @@ final class NeedService {
         return category
     }
 
+    private func validatedCatalogAddStore(
+        id: UUID?,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> Store? {
+        guard let id else { return nil }
+        guard let store = try store(id: id, in: context),
+              belongs(store, to: household), !store.isArchived else {
+            throw NeedServiceError.scopeChanged
+        }
+        return store
+    }
+
+    private func catalogItem(_ item: Item, isEligibleFor selectedStore: Store?) -> Bool {
+        let stores = item.stores ?? []
+        if item.anyStore { return true }
+        guard !stores.isEmpty else { return false }
+        guard let selectedStore else { return true }
+        return stores.contains(selectedStore)
+    }
+
     private func validatedStores(
         ids: Set<UUID>,
         household: Household,
@@ -2302,6 +2526,33 @@ final class NeedService {
         let needs = try context.fetch(request)
         try validateOccurrenceIdentities(needs)
         return needs.sorted { $0.id.uuidString < $1.id.uuidString }
+    }
+
+    private func activeRememberedNeeds(
+        itemIDs: Set<UUID>,
+        listID: UUID,
+        in context: NSManagedObjectContext
+    ) throws -> [UUID: [Need]] {
+        guard !itemIDs.contains(PersistenceModel.unsetID), listID != PersistenceModel.unsetID else {
+            throw NeedServiceError.scopeChanged
+        }
+        guard !itemIDs.isEmpty else { return [:] }
+        let request = Need.fetchRequest()
+        request.relationshipKeyPathsForPrefetching = ["item"]
+        request.predicate = NSPredicate(
+            format: "item.id IN %@ AND list.id == %@ AND archived == NO",
+            Array(itemIDs), listID as CVarArg
+        )
+        let needs = try context.fetch(request)
+        try validateOccurrenceIdentities(needs)
+        var grouped: [UUID: [Need]] = [:]
+        for need in needs {
+            guard let itemID = need.item?.id, itemIDs.contains(itemID) else {
+                throw NeedServiceError.scopeChanged
+            }
+            grouped[itemID, default: []].append(need)
+        }
+        return grouped.mapValues { $0.sorted { $0.id.uuidString < $1.id.uuidString } }
     }
 
     private func duplicateGroup(itemID: UUID, needs: [Need]) throws -> RememberedDuplicateGroup {

@@ -28,6 +28,8 @@ Clear recovery remains part of the stored household graph. Reopening SQLite reta
 
 Batch management confirmations capture the exact household and list scope, entity kind, intended action, selected IDs, and current entity revisions. Confirmation refetches only those captured IDs, skips newer or unavailable records, and rechecks Store and Catalog references before permanent deletion. Retried tokens cannot repeat successful writes because successful rows either no longer exist or have advanced revisions.
 
+Adding from Catalog uses the same captured-command pattern. A `CatalogAddToken` records the exact item and active-need revisions plus household, list, and selected-store scope. Apply creates a normal-urgency remembered need with the catalog notes, focuses an existing uncarted need without duplicating it, and renews a carted need only after the explicit Need again review. Archived, store-ineligible, missing, or newer records are reported and skipped.
+
 The ID accessor follows Apple’s [custom managed-object storage access guidance](https://developer.apple.com/documentation/coredata/nsmanagedobject/primitivevalue(forkey:)).
 
 See [ADR 0001](architecture/0001-managed-household-persistence.md) for the architecture and live validation boundary. The store roles, permission APIs and per-store history design follow [Apple's sharing sample](https://developer.apple.com/documentation/coredata/sharing-core-data-objects-between-icloud-users); model evolution follows [Apple's migration guidance](https://developer.apple.com/documentation/coredata/migrating-your-data-model-automatically).

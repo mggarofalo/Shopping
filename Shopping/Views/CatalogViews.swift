@@ -98,6 +98,18 @@ private struct CatalogRemovalTarget {
     let preview: CatalogRemovalPreview
 }
 
+private struct CatalogAddConfirmation: Identifiable {
+    let id = UUID()
+    let preview: CatalogAddPreview
+    let itemName: String?
+}
+
+private struct CatalogAddNotice: Identifiable {
+    let id = UUID()
+    let message: String
+    let needID: UUID?
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -106,6 +118,7 @@ struct CatalogView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var searchText = ""
@@ -124,6 +137,9 @@ struct CatalogView: View {
     @State private var editMode: EditMode = .inactive
     @State private var batchPreview: ManagementBatchPreview?
     @State private var batchNotice: String?
+    @State private var addConfirmation: CatalogAddConfirmation?
+    @State private var addNotice: CatalogAddNotice?
+    @ObservedObject var navigation: GroceryNavigationState
 
     private var canonicalList: GroceryList? {
         CatalogScope.canonicalList(
@@ -208,6 +224,9 @@ struct CatalogView: View {
                                 selectedIDs = selectedIDs == visibleItemIDs ? [] : visibleItemIDs
                             }
                             Divider()
+                            if selectedItems.contains(where: { !$0.isArchived }) {
+                                Button("Add to list", systemImage: "cart.badge.plus") { prepareBatchAdd() }
+                            }
                             if selectedItems.contains(where: { !$0.isArchived }) {
                                 Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                             }
@@ -299,6 +318,12 @@ struct CatalogView: View {
             .modifier(CatalogBatchDialogs(
                 preview: $batchPreview, notice: $batchNotice, apply: applyBatch
             ))
+            .modifier(CatalogAddDialogs(
+                confirmation: $addConfirmation,
+                notice: $addNotice,
+                apply: applyCatalogAdd,
+                viewNeed: viewNeed
+            ))
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
@@ -389,17 +414,29 @@ struct CatalogView: View {
     }
 
     private func catalogRow(_ item: Item) -> AnyView {
-        AnyView(Button {
-            if !editMode.isEditing { edit(item) }
-        } label: {
-            CatalogItemRow(item: item)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+        AnyView(HStack(spacing: 8) {
+            Button {
+                if !editMode.isEditing { edit(item) }
+            } label: {
+                CatalogItemRow(item: item)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+            if !editMode.isEditing && !item.isArchived {
+                Button { prepareIndividualAdd(item) } label: {
+                    Label("Add \(item.name) to list", systemImage: "cart.badge.plus")
+                        .labelStyle(.iconOnly)
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
+            }
         }
-        .buttonStyle(.plain)
         .shoppingListRowInsets()
         .tag(item.id)
-        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { prepareArchive(item) } label: {
                 Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
@@ -418,6 +455,10 @@ struct CatalogView: View {
         .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
             prepareArchive(item)
         }
+        .catalogAddAccessibilityAction(
+            enabled: !editMode.isEditing && !item.isArchived,
+            name: item.name
+        ) { prepareIndividualAdd(item) }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
             prepareRemoval(item)
         })
@@ -580,6 +621,81 @@ struct CatalogView: View {
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
+    private func prepareIndividualAdd(_ item: Item) {
+        guard let preview = captureCatalogAdd(ids: [item.id]) else { return }
+        guard let entry = preview.token.entries.first else {
+            addNotice = CatalogAddNotice(message: "This catalog item is no longer available.", needID: nil)
+            return
+        }
+        switch entry.disposition {
+        case .add:
+            applyCatalogAdd(preview.token, renewCarted: false)
+        case .focusExisting:
+            let result = applyCatalogAddResult(preview.token, renewCarted: false)
+            if let id = result?.existingNeedIDs.first { viewNeed(id) }
+        case .needAgain:
+            addConfirmation = CatalogAddConfirmation(preview: preview, itemName: item.name)
+        case .archived:
+            addNotice = CatalogAddNotice(message: "Restore this catalog item before adding it.", needID: nil)
+        case .ineligible:
+            addNotice = CatalogAddNotice(message: "This item is not available for the selected store.", needID: nil)
+        }
+    }
+
+    private func prepareBatchAdd() {
+        guard let preview = captureCatalogAdd(ids: selectedIDs) else { return }
+        addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
+    }
+
+    private func captureCatalogAdd(ids: Set<UUID>) -> CatalogAddPreview? {
+        guard let service, let list = canonicalList, let householdID = list.household?.id else { return nil }
+        do {
+            return try service.captureCatalogAdd(
+                itemIDs: ids, householdID: householdID, listID: list.id,
+                selectedStoreID: filters.selectedStoreID
+            )
+        } catch {
+            errorMessage = CatalogErrorCopy.message(error)
+            return nil
+        }
+    }
+
+    private func applyCatalogAdd(_ token: CatalogAddToken) {
+        _ = applyCatalogAddResult(token, renewCarted: true)
+    }
+
+    private func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) {
+        _ = applyCatalogAddResult(token, renewCarted: renewCarted)
+    }
+
+    private func applyCatalogAddResult(_ token: CatalogAddToken, renewCarted: Bool) -> CatalogAddResult? {
+        guard let service, selection.householdID == token.householdID,
+              selection.listID == token.listID else {
+            addConfirmation = nil
+            clearSelection()
+            addNotice = CatalogAddNotice(message: "The household changed. Select the items again.", needID: nil)
+            return nil
+        }
+        do {
+            let result = try service.applyCatalogAdd(token, renewCarted: renewCarted)
+            addConfirmation = nil
+            clearSelection()
+            let visibleNeedID = result.addedNeedIDs.first ?? result.renewedNeedIDs.first
+            addNotice = CatalogAddNotice(message: CatalogAddCopy.result(result), needID: visibleNeedID)
+            hapticFeedback.play(result.addedNeedIDs.isEmpty && result.renewedNeedIDs.isEmpty ? .lightImpact : .success)
+            return result
+        } catch {
+            addConfirmation = nil
+            errorMessage = CatalogErrorCopy.message(error)
+            return nil
+        }
+    }
+
+    private func viewNeed(_ id: UUID) {
+        addNotice = nil
+        navigation.requestNeedFocus(id)
+    }
+
     private func applyBatch(_ token: ManagementBatchToken) {
         guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
             batchPreview = nil; clearSelection(); return
@@ -596,6 +712,21 @@ struct CatalogView: View {
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }
 
+}
+
+private extension View {
+    @ViewBuilder
+    func catalogAddAccessibilityAction(
+        enabled: Bool,
+        name: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        if enabled {
+            accessibilityAction(named: Text("Add \(name) to list"), action)
+        } else {
+            self
+        }
+    }
 }
 
 private struct CatalogBatchDialogs: ViewModifier {
@@ -624,6 +755,64 @@ private struct CatalogBatchDialogs: ViewModifier {
             .alert("Batch update complete", isPresented: Binding(
                 get: { notice != nil }, set: { if !$0 { notice = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(notice ?? "") }
+    }
+}
+
+private enum CatalogAddCopy {
+    static func preview(_ value: CatalogAddPreview) -> String {
+        var parts: [String] = []
+        if value.addCount > 0 { parts.append("\(value.addCount) will be added") }
+        if value.existingCount > 0 { parts.append("\(value.existingCount) already on the list will be kept") }
+        if value.needAgainCount > 0 { parts.append("\(value.needAgainCount) in the cart will be needed again") }
+        if value.archivedCount > 0 { parts.append("\(value.archivedCount) archived will be skipped") }
+        if value.ineligibleCount > 0 { parts.append("\(value.ineligibleCount) unavailable at this store will be skipped") }
+        return (parts.isEmpty ? "No selected items are available" : parts.joined(separator: ". "))
+            + ". Changes made after this review will be skipped."
+    }
+
+    static func result(_ value: CatalogAddResult) -> String {
+        var parts: [String] = []
+        if !value.addedNeedIDs.isEmpty { parts.append("Added \(value.addedNeedIDs.count)") }
+        if !value.renewedNeedIDs.isEmpty { parts.append("Needed again \(value.renewedNeedIDs.count)") }
+        if !value.existingNeedIDs.isEmpty { parts.append("Already on list \(value.existingNeedIDs.count)") }
+        if value.archivedCount > 0 { parts.append("Skipped \(value.archivedCount) archived") }
+        if value.ineligibleCount > 0 { parts.append("Skipped \(value.ineligibleCount) unavailable at this store") }
+        if value.changedCount > 0 { parts.append("Skipped \(value.changedCount) changed") }
+        if value.missingCount > 0 { parts.append("Skipped \(value.missingCount) unavailable") }
+        return parts.isEmpty ? "No catalog items were added." : parts.joined(separator: ". ") + "."
+    }
+}
+
+private struct CatalogAddDialogs: ViewModifier {
+    @Binding var confirmation: CatalogAddConfirmation?
+    @Binding var notice: CatalogAddNotice?
+    let apply: (CatalogAddToken) -> Void
+    let viewNeed: (UUID) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                confirmation?.itemName.map { "Need \($0) again?" } ?? "Add selected items to list?",
+                isPresented: Binding(
+                    get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let confirmation {
+                    Button(confirmation.itemName == nil ? "Add to list" : "Need again") {
+                        apply(confirmation.preview.token)
+                    }
+                }
+                Button("Cancel", role: .cancel) { confirmation = nil }
+            } message: {
+                if let confirmation { Text(CatalogAddCopy.preview(confirmation.preview)) }
+            }
+            .alert("Catalog update complete", isPresented: Binding(
+                get: { notice != nil }, set: { if !$0 { notice = nil } }
+            )) {
+                if let id = notice?.needID { Button("View in groceries") { viewNeed(id) } }
+                Button("OK", role: .cancel) { notice = nil }
+            } message: { Text(notice?.message ?? "") }
     }
 }
 
@@ -931,8 +1120,10 @@ private enum CatalogErrorCopy {
     }
 }
 
-#Preview("Catalog · populated") { ShoppingPreviewHost(.populated) { CatalogView() } }
-#Preview("Catalog · empty") { ShoppingPreviewHost(.empty) { CatalogView() } }
+#Preview("Catalog · populated") { ShoppingPreviewHost(.populated) { CatalogView(navigation: GroceryNavigationState()) } }
+#Preview("Catalog · empty") { ShoppingPreviewHost(.empty) { CatalogView(navigation: GroceryNavigationState()) } }
 #Preview("Catalog · large text") {
-    ShoppingPreviewHost(.largeText) { CatalogView().environment(\.dynamicTypeSize, .accessibility3) }
+    ShoppingPreviewHost(.largeText) {
+        CatalogView(navigation: GroceryNavigationState()).environment(\.dynamicTypeSize, .accessibility3)
+    }
 }

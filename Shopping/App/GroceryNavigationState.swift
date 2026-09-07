@@ -10,6 +10,7 @@ final class GroceryNavigationState: ObservableObject {
     @Published var excludedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var urgentOnly: Bool { didSet { persist() } }
     @Published var categoryID: UUID? { didSet { persist() } }
+    @Published private(set) var pendingNeedFocusID: UUID?
 
     private struct SavedFilter: Codable, Equatable {
         var selectedStoreID: UUID?
@@ -32,6 +33,7 @@ final class GroceryNavigationState: ObservableObject {
         excludedStoreIDs = []
         urgentOnly = false
         categoryID = nil
+        pendingNeedFocusID = nil
     }
 
     var activeFilterCount: Int {
@@ -93,6 +95,15 @@ final class GroceryNavigationState: ObservableObject {
         excludedStoreIDs = []
         urgentOnly = false
         categoryID = nil
+    }
+
+    func requestNeedFocus(_ id: UUID) {
+        pendingNeedFocusID = id
+        selectedTab = .groceries
+    }
+
+    func consumeNeedFocus(_ id: UUID) {
+        if pendingNeedFocusID == id { pendingNeedFocusID = nil }
     }
 
     func sanitize(activeStoreIDs: Set<UUID>, activeCategoryIDs: Set<UUID> = []) {
