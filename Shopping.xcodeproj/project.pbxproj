@@ -92,6 +92,7 @@
 		B00000000000000000000107 /* SchemaVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersionTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000301 /* ShoppingV1.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ShoppingV1.xcdatamodel; sourceTree = "<group>"; };
 		B46000000000000000000302 /* ShoppingV2.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ShoppingV2.xcdatamodel; sourceTree = "<group>"; };
+		B57000000000000000000303 /* ShoppingV3.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ShoppingV3.xcdatamodel; sourceTree = "<group>"; };
 		B00000000000000000000303 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fixtures; sourceTree = "<group>"; };
 		C19000000000000000000011 /* ShoppingPreviewFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingPreviewFixtures.swift; sourceTree = "<group>"; };
 		C19000000000000000000012 /* LocalTwoContextHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTwoContextHarness.swift; sourceTree = "<group>"; };
@@ -171,7 +172,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCVersionGroup section */
-		B00000000000000000000300 /* Shopping.xcdatamodeld */ = {isa = XCVersionGroup; children = (B00000000000000000000301 /* ShoppingV1.xcdatamodel */, B46000000000000000000302 /* ShoppingV2.xcdatamodel */); currentVersion = B46000000000000000000302 /* ShoppingV2.xcdatamodel */; path = Shopping.xcdatamodeld; sourceTree = "<group>"; versionGroupType = wrapper.xcdatamodel; };
+		B00000000000000000000300 /* Shopping.xcdatamodeld */ = {isa = XCVersionGroup; children = (B00000000000000000000301 /* ShoppingV1.xcdatamodel */, B46000000000000000000302 /* ShoppingV2.xcdatamodel */, B57000000000000000000303 /* ShoppingV3.xcdatamodel */); currentVersion = B57000000000000000000303 /* ShoppingV3.xcdatamodel */; path = Shopping.xcdatamodeld; sourceTree = "<group>"; versionGroupType = wrapper.xcdatamodel; };
 /* End XCVersionGroup section */
 
 /* Begin XCBuildConfiguration section */

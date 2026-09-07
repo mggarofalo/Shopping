@@ -120,6 +120,10 @@ struct CatalogView: View {
     @State private var removalTarget: CatalogRemovalTarget?
     @State private var removalNotice: String?
     @State private var errorMessage: String?
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var editMode: EditMode = .inactive
+    @State private var batchPreview: ManagementBatchPreview?
+    @State private var batchNotice: String?
 
     private var canonicalList: GroceryList? {
         CatalogScope.canonicalList(
@@ -185,36 +189,10 @@ struct CatalogView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    filterHeader
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
-                if visibleItems.isEmpty {
-                    Section {
-                        ContentUnavailableView {
-                            Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
-                        } description: {
-                            Text(hasNarrowing ? "Your filters may hide saved items." : "Save items here to reuse their purchase tags.")
-                        } actions: {
-                            if hasNarrowing { Button("Reset filters", action: resetFilters) }
-                            else { Button("New catalog item", action: create).disabled(household == nil) }
-                        }
-                        .listRowBackground(Color.clear)
-                    }
-                } else {
-                    ForEach(visibleGroups) { group in
-                        Section {
-                            ForEach(group.items, id: \.objectID) { item in
-                                catalogRow(item)
-                            }
-                        } header: {
-                            if let title = group.title { Text(title) }
-                        }
-                    }
-                }
+            List(selection: $selectedIDs) {
+                catalogListRows
             }
+            .environment(\.editMode, $editMode)
             .listStyle(.insetGrouped)
             .contentMargins(.top, 0, for: .scrollContent)
             .accessibilityIdentifier("shopping.catalog.list")
@@ -222,10 +200,37 @@ struct CatalogView: View {
             .navigationTitle("Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("New catalog item", systemImage: "plus", action: create)
-                        .accessibilityIdentifier("shopping.catalog.add")
-                        .disabled(household == nil || service == nil)
+                if editMode.isEditing {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu("Actions", systemImage: "ellipsis.circle") {
+                            Button(selectedIDs == visibleItemIDs ? "Deselect All" : "Select All") {
+                                selectedIDs = selectedIDs == visibleItemIDs ? [] : visibleItemIDs
+                            }
+                            Divider()
+                            if selectedItems.contains(where: { !$0.isArchived }) {
+                                Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
+                            }
+                            if selectedItems.contains(where: \.isArchived) {
+                                Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
+                            }
+                            if !selectedIDs.isEmpty {
+                                Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                            }
+                        }
+                        .accessibilityIdentifier("shopping.catalog.batchActions")
+                    }
+                } else {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("New catalog item", systemImage: "plus", action: create)
+                            .accessibilityIdentifier("shopping.catalog.add")
+                            .disabled(household == nil || service == nil)
+                    }
+                    ToolbarItem(placement: .secondaryAction) {
+                        Button("Select") { editMode = .active }
+                            .disabled(household == nil || service == nil || visibleItems.isEmpty)
+                            .accessibilityIdentifier("shopping.catalog.select")
+                    }
                 }
             }
             .confirmationDialog("Available at store", isPresented: $showingStores, titleVisibility: .visible) {
@@ -265,7 +270,7 @@ struct CatalogView: View {
                 titleVisibility: .visible
             ) {
                 if removalAction == .archive {
-                    Button("Archive item", role: .destructive, action: applyRemoval)
+                    Button("Archive item", action: applyRemoval)
                 } else if removalAction == .delete {
                     Button("Delete item", role: .destructive, action: applyRemoval)
                 }
@@ -291,16 +296,52 @@ struct CatalogView: View {
             .alert("Couldn’t load catalog", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+            .modifier(CatalogBatchDialogs(
+                preview: $batchPreview, notice: $batchNotice, apply: applyBatch
+            ))
             .onAppear(perform: refresh)
-            .onChange(of: searchText) { _, _ in refresh() }
-            .onChange(of: filters) { _, _ in refresh() }
-            .onChange(of: selection) { _, _ in resetFilters() }
+            .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
+            .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
+            .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
                 sanitizeFilters()
-                refresh()
+                refreshAndSanitizeSelection()
             }
         }
     }
+
+    @ViewBuilder
+    private var catalogListRows: some View {
+        Section {
+            filterHeader
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+        }
+        if visibleItems.isEmpty {
+            Section {
+                ContentUnavailableView {
+                    Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
+                } description: {
+                    Text(hasNarrowing ? "Your filters may hide saved items." : "Save items here to reuse their purchase tags.")
+                } actions: {
+                    if hasNarrowing { Button("Reset filters", action: resetFilters) }
+                    else { Button("New catalog item", action: create).disabled(household == nil) }
+                }
+                .listRowBackground(Color.clear)
+            }
+        } else {
+            ForEach(visibleGroups) { group in
+                Section {
+                    ForEach(group.items, id: \.objectID) { item in catalogRow(item) }
+                } header: {
+                    if let title = group.title { Text(title) }
+                }
+            }
+        }
+    }
+
+    private var visibleItemIDs: Set<UUID> { Set(visibleItems.map(\.id)) }
+    private var selectedItems: [Item] { visibleItems.filter { selectedIDs.contains($0.id) } }
 
     private var filterHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -347,14 +388,17 @@ struct CatalogView: View {
         .padding(.bottom, 8)
     }
 
-    private func catalogRow(_ item: Item) -> some View {
-        Button { edit(item) } label: {
+    private func catalogRow(_ item: Item) -> AnyView {
+        AnyView(Button {
+            if !editMode.isEditing { edit(item) }
+        } label: {
             CatalogItemRow(item: item)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .shoppingListRowInsets()
+        .tag(item.id)
         .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { prepareArchive(item) } label: {
@@ -376,7 +420,7 @@ struct CatalogView: View {
         }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
             prepareRemoval(item)
-        }
+        })
     }
 
     private func catalogItemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
@@ -438,6 +482,11 @@ struct CatalogView: View {
                 householdID: householdID, filter: filters.query(text: searchText), includeArchived: filters.showArchived
             ))
         } catch { projectedIDs = []; errorMessage = CatalogErrorCopy.message(error) }
+    }
+
+    private func refreshAndSanitizeSelection() {
+        refresh()
+        selectedIDs.formIntersection(visibleItemIDs)
     }
 
     private func resetFilters() { searchText = ""; filters = CatalogFilterState(); refresh() }
@@ -519,6 +568,62 @@ struct CatalogView: View {
             removalTarget = nil
             errorMessage = CatalogErrorCopy.message(error)
         }
+    }
+
+    private func prepareBatch(_ action: ManagementBatchAction) {
+        guard let service, let list = canonicalList, let householdID = list.household?.id else { return }
+        do {
+            batchPreview = try service.captureManagementBatch(
+                entity: .catalogItem, action: action, ids: selectedIDs,
+                householdID: householdID, listID: list.id
+            )
+        } catch { errorMessage = CatalogErrorCopy.message(error) }
+    }
+
+    private func applyBatch(_ token: ManagementBatchToken) {
+        guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
+            batchPreview = nil; clearSelection(); return
+        }
+        do {
+            let result = try service.applyManagementBatch(token)
+            batchPreview = nil
+            clearSelection()
+            refresh()
+            batchNotice = ManagementBatchCopy.result(result)
+            hapticFeedback.play(token.action == .delete ? .warning : .success)
+        } catch { batchPreview = nil; errorMessage = CatalogErrorCopy.message(error) }
+    }
+
+    private func clearSelection() { selectedIDs = []; editMode = .inactive }
+
+}
+
+private struct CatalogBatchDialogs: ViewModifier {
+    @Binding var preview: ManagementBatchPreview?
+    @Binding var notice: String?
+    let apply: (ManagementBatchToken) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                preview.map(ManagementBatchCopy.title) ?? "Update selected catalog items?",
+                isPresented: Binding(get: { preview != nil }, set: { if !$0 { preview = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let preview {
+                    switch preview.token.action {
+                    case .archive: Button("Archive") { apply(preview.token) }
+                    case .restore: Button("Restore") { apply(preview.token) }
+                    case .delete: Button("Delete", role: .destructive) { apply(preview.token) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { preview = nil }
+            } message: {
+                if let preview { Text(ManagementBatchCopy.message(preview)) }
+            }
+            .alert("Batch update complete", isPresented: Binding(
+                get: { notice != nil }, set: { if !$0 { notice = nil } }
+            )) { Button("OK", role: .cancel) {} } message: { Text(notice ?? "") }
     }
 }
 

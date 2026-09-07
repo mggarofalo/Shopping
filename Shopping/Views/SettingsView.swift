@@ -11,6 +11,43 @@ extension View {
     }
 }
 
+enum ManagementBatchCopy {
+    static func title(_ preview: ManagementBatchPreview) -> String {
+        let noun: String
+        switch preview.token.entity {
+        case .store: noun = "stores"
+        case .category: noun = "categories"
+        case .catalogItem: noun = "catalog items"
+        }
+        switch preview.token.action {
+        case .archive: return "Archive selected \(noun)?"
+        case .restore: return "Restore selected \(noun)?"
+        case .delete: return "Delete selected \(noun)?"
+        }
+    }
+
+    static func message(_ preview: ManagementBatchPreview) -> String {
+        var parts: [String] = []
+        if preview.deleteCount > 0 { parts.append("\(preview.deleteCount) will be permanently deleted") }
+        if preview.archiveCount > 0 { parts.append("\(preview.archiveCount) will be archived") }
+        if preview.restoreCount > 0 { parts.append("\(preview.restoreCount) will be restored") }
+        if preview.retainedCount > 0 { parts.append("\(preview.retainedCount) will be retained because it is already in that state or must remain recoverable") }
+        let summary = parts.isEmpty ? "No selected records are still available" : parts.joined(separator: ". ")
+        return summary + ". Changes made after this review will be skipped."
+    }
+
+    static func result(_ result: ManagementBatchResult) -> String {
+        var parts: [String] = []
+        if result.deletedCount > 0 { parts.append("Deleted \(result.deletedCount)") }
+        if result.archivedCount > 0 { parts.append("Archived \(result.archivedCount)") }
+        if result.restoredCount > 0 { parts.append("Restored \(result.restoredCount)") }
+        if result.retainedCount > 0 { parts.append("Retained \(result.retainedCount)") }
+        if result.changedCount > 0 { parts.append("Skipped \(result.changedCount) changed") }
+        if result.missingCount > 0 { parts.append("Skipped \(result.missingCount) unavailable") }
+        return parts.isEmpty ? "No items needed changes." : parts.joined(separator: ". ") + "."
+    }
+}
+
 struct SettingsView: View {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -116,6 +153,10 @@ private struct StoreManagementView: View {
     @State private var requestedDeletion = false
     @State private var removalNotice: String?
     @State private var error: Error?
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var editMode: EditMode = .inactive
+    @State private var batchPreview: ManagementBatchPreview?
+    @State private var batchNotice: String?
 
     private var canonicalList: GroceryList? {
         StoreManagementScope.canonicalList(
@@ -123,33 +164,53 @@ private struct StoreManagementView: View {
         )
     }
 
-    private var householdStores: [Store] {
-        StoreManagementScope.activeStores(Array(stores), canonicalList: canonicalList)
-    }
+    private var householdStores: [Store] { StoreManagementScope.validStores(Array(stores), canonicalList: canonicalList) }
+    private var activeStores: [Store] { householdStores.filter { !$0.isArchived } }
+    private var archivedStores: [Store] { householdStores.filter(\.isArchived) }
 
     private var selectionAvailable: Bool {
         service != nil && canonicalList != nil
     }
 
     var body: some View {
-        List {
-            Section("Stores") {
-                ForEach(householdStores, id: \.objectID) { store in
-                    storeRow(store)
-                        .shoppingListRowInsets()
-                }
-                .onMove(perform: reorder)
-            }
+        List(selection: $selectedIDs) {
+            storeSection("Stores", stores: activeStores, allowsMove: true)
+            if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores, allowsMove: false) }
         }
+        .environment(\.editMode, $editMode)
         .navigationTitle("Stores")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
-                    .disabled(!selectionAvailable)
-                    .accessibilityIdentifier("shopping.stores.add")
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                EditButton().disabled(!selectionAvailable)
+            if editMode.isEditing {
+                ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Actions", systemImage: "ellipsis.circle") {
+                        Button(selectedIDs == Set(householdStores.map(\.id)) ? "Deselect All" : "Select All") {
+                            toggleAll()
+                        }
+                        Divider()
+                        if selectedStores.contains(where: { !$0.isArchived }) {
+                            Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
+                        }
+                        if selectedStores.contains(where: \.isArchived) {
+                            Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
+                        }
+                        if !selectedIDs.isEmpty {
+                            Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                        }
+                    }
+                    .accessibilityIdentifier("shopping.stores.batchActions")
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
+                        .disabled(!selectionAvailable)
+                        .accessibilityIdentifier("shopping.stores.add")
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Select") { editMode = .active }
+                        .disabled(!selectionAvailable)
+                        .accessibilityIdentifier("shopping.stores.select")
+                }
             }
         }
         .sheet(item: $editor) { session in
@@ -175,7 +236,7 @@ private struct StoreManagementView: View {
             titleVisibility: .visible
         ) {
             if removalAction == .archive {
-                Button("Archive store", role: .destructive, action: remove)
+                Button("Archive store", action: remove)
             } else {
                 Button("Delete store", role: .destructive, action: remove)
             }
@@ -204,11 +265,46 @@ private struct StoreManagementView: View {
         } message: {
             Text(error?.localizedDescription ?? "Unknown error")
         }
+        .confirmationDialog(
+            batchPreview.map(ManagementBatchCopy.title) ?? "Update selected stores?",
+            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let preview = batchPreview {
+                Button(batchActionLabel(preview.token.action), role: preview.token.action == .delete ? .destructive : nil) {
+                    applyBatch(preview.token)
+                }
+            }
+            Button("Cancel", role: .cancel) { batchPreview = nil }
+        } message: { if let preview = batchPreview { Text(ManagementBatchCopy.message(preview)) } }
+        .alert("Batch update complete", isPresented: Binding(
+            get: { batchNotice != nil }, set: { if !$0 { batchNotice = nil } }
+        )) { Button("OK", role: .cancel) {} } message: { Text(batchNotice ?? "") }
+        .onChange(of: selection) { _, _ in clearSelection() }
+        .onChange(of: householdStores.map(\.id)) { _, ids in
+            selectedIDs.formIntersection(Set(ids))
+        }
+    }
+
+    private var selectedStores: [Store] { householdStores.filter { selectedIDs.contains($0.id) } }
+
+    @ViewBuilder
+    private func storeSection(_ title: String, stores: [Store], allowsMove: Bool) -> some View {
+        Section(title) {
+            ForEach(stores, id: \.objectID) { store in
+                storeRow(store).shoppingListRowInsets().tag(store.id)
+            }
+            .onMove(perform: allowsMove ? reorder : nil)
+        }
     }
 
     @ViewBuilder
     private func storeRow(_ store: Store) -> some View {
-        Text(store.name)
+        HStack {
+            Text(store.name)
+            Spacer()
+            if store.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
+        }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -218,10 +314,10 @@ private struct StoreManagementView: View {
                 .tint(.blue)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.edit.\(store.id.uuidString)")
-                Button { beginArchive(store) } label: {
-                    Label("Archive", systemImage: "archivebox")
+                Button { store.isArchived ? restore(store) : beginArchive(store) } label: {
+                    Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox")
                 }
-                .tint(.orange)
+                .tint(store.isArchived ? .green : .orange)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
             }
@@ -234,7 +330,9 @@ private struct StoreManagementView: View {
                 .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
             }
             .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
-            .accessibilityAction(named: Text("Archive \(store.name)")) { beginArchive(store) }
+            .accessibilityAction(named: Text("\(store.isArchived ? "Restore" : "Archive") \(store.name)")) {
+                if store.isArchived { restore(store) } else { beginArchive(store) }
+            }
             .accessibilityAction(named: Text("Delete \(store.name)")) { beginDeletion(store) }
     }
 
@@ -283,6 +381,14 @@ private struct StoreManagementView: View {
         removingStore = store
     }
 
+    private func restore(_ store: Store) {
+        guard let service, let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        do {
+            try service.setStoreArchived(false, storeID: store.id, householdID: scope.householdID, listID: scope.listID)
+            hapticFeedback.play(.success)
+        } catch { self.error = error }
+    }
+
     private func beginDeletion(_ store: Store) {
         guard selectionAvailable, householdStores.contains(store), let service,
               let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
@@ -324,11 +430,45 @@ private struct StoreManagementView: View {
         else {
             return
         }
-        var ids = householdStores.map(\.id)
+        var ids = activeStores.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
         do {
             try service.reorderStores(ids, householdID: householdID, listID: canonicalList.id)
         } catch { self.error = error }
+    }
+
+    private func toggleAll() {
+        let visible = Set(householdStores.map(\.id))
+        selectedIDs = selectedIDs == visible ? [] : visible
+    }
+
+    private func prepareBatch(_ action: ManagementBatchAction) {
+        guard let service, let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        do {
+            batchPreview = try service.captureManagementBatch(
+                entity: .store, action: action, ids: selectedIDs,
+                householdID: scope.householdID, listID: scope.listID
+            )
+        } catch { self.error = error }
+    }
+
+    private func applyBatch(_ token: ManagementBatchToken) {
+        guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
+            batchPreview = nil; clearSelection(); return
+        }
+        do {
+            let result = try service.applyManagementBatch(token)
+            batchPreview = nil
+            clearSelection()
+            batchNotice = ManagementBatchCopy.result(result)
+            hapticFeedback.play(token.action == .delete ? .warning : .success)
+        } catch { batchPreview = nil; self.error = error }
+    }
+
+    private func clearSelection() { selectedIDs = []; editMode = .inactive }
+
+    private func batchActionLabel(_ action: ManagementBatchAction) -> String {
+        switch action { case .archive: "Archive"; case .restore: "Restore"; case .delete: "Delete" }
     }
 }
 

@@ -134,6 +134,10 @@ struct CategoryManagementView: View {
     @State private var editorName = ""
     @State private var removingCategory: Category?
     @State private var error: Error?
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var editMode: EditMode = .inactive
+    @State private var batchPreview: ManagementBatchPreview?
+    @State private var batchNotice: String?
 
     private var canonicalList: GroceryList? {
         GroceryRowScope.canonicalList(
@@ -156,11 +160,12 @@ struct CategoryManagementView: View {
     }
 
     var body: some View {
-        List {
+        List(selection: $selectedIDs) {
             Section {
                 ForEach(householdCategories, id: \.objectID) { category in
                     categoryRow(category)
                         .shoppingListRowInsets()
+                        .tag(category.id)
                 }
                 .onMove(perform: reorder)
             } header: {
@@ -169,15 +174,35 @@ struct CategoryManagementView: View {
                 Text("Categories group groceries across every store. They do not define aisle order.")
             }
         }
+        .environment(\.editMode, $editMode)
         .navigationTitle("Categories")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { beginCreate() } label: { Label("Add category", systemImage: "plus") }
-                    .disabled(!selectionAvailable)
-                    .accessibilityIdentifier("shopping.categories.add")
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                EditButton().disabled(!selectionAvailable)
+            if editMode.isEditing {
+                ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu("Actions", systemImage: "ellipsis.circle") {
+                        Button(selectedIDs == Set(householdCategories.map(\.id)) ? "Deselect All" : "Select All") {
+                            let visible = Set(householdCategories.map(\.id))
+                            selectedIDs = selectedIDs == visible ? [] : visible
+                        }
+                        Divider()
+                        if !selectedIDs.isEmpty {
+                            Button("Delete", systemImage: "trash", role: .destructive) { prepareBatchDelete() }
+                        }
+                    }
+                    .accessibilityIdentifier("shopping.categories.batchActions")
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { beginCreate() } label: { Label("Add category", systemImage: "plus") }
+                        .disabled(!selectionAvailable)
+                        .accessibilityIdentifier("shopping.categories.add")
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Select") { editMode = .active }
+                        .disabled(!selectionAvailable)
+                        .accessibilityIdentifier("shopping.categories.select")
+                }
             }
         }
         .sheet(item: $editor) { session in
@@ -212,6 +237,27 @@ struct CategoryManagementView: View {
         .alert("Couldn’t update categories", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error?.localizedDescription ?? "Unknown error") }
+        .confirmationDialog(
+            batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected categories?",
+            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let preview = batchPreview {
+                Button("Delete", role: .destructive) { applyBatch(preview.token) }
+            }
+            Button("Cancel", role: .cancel) { batchPreview = nil }
+        } message: {
+            if let preview = batchPreview {
+                Text(ManagementBatchCopy.message(preview) + " Groceries and catalog items remain Uncategorized.")
+            }
+        }
+        .alert("Batch update complete", isPresented: Binding(
+            get: { batchNotice != nil }, set: { if !$0 { batchNotice = nil } }
+        )) { Button("OK", role: .cancel) {} } message: { Text(batchNotice ?? "") }
+        .onChange(of: selection) { _, _ in clearSelection() }
+        .onChange(of: householdCategories.map(\.id)) { _, ids in
+            selectedIDs.formIntersection(Set(ids))
+        }
     }
 
     @ViewBuilder
@@ -295,6 +341,31 @@ struct CategoryManagementView: View {
             try service.reorderCategories(ids, householdID: householdID, listID: listID)
         } catch { self.error = error }
     }
+
+    private func prepareBatchDelete() {
+        guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
+        do {
+            batchPreview = try service.captureManagementBatch(
+                entity: .category, action: .delete, ids: selectedIDs,
+                householdID: householdID, listID: listID
+            )
+        } catch { self.error = error }
+    }
+
+    private func applyBatch(_ token: ManagementBatchToken) {
+        guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
+            batchPreview = nil; clearSelection(); return
+        }
+        do {
+            let result = try service.applyManagementBatch(token)
+            batchPreview = nil
+            clearSelection()
+            batchNotice = ManagementBatchCopy.result(result)
+            hapticFeedback.play(.warning)
+        } catch { batchPreview = nil; self.error = error }
+    }
+
+    private func clearSelection() { selectedIDs = []; editMode = .inactive }
 }
 
 private struct CategoryEditorSession: Identifiable {

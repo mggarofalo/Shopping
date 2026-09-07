@@ -127,14 +127,15 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.store.clear"].waitForExistence(timeout: 2))
 
         openStoreManagement(in: app)
-        XCTAssertFalse(app.staticTexts["Neighborhood Market (closed)"].exists)
+        XCTAssertTrue(app.staticTexts["Neighborhood Market (closed)"].exists)
         app.staticTexts["Costco"].swipeLeft()
         XCTAssertTrue(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         app.buttons["Archive"].tap()
         XCTAssertTrue(app.staticTexts["Archive Costco?"].waitForExistence(timeout: 2))
         app.buttons["Archive store"].tap()
-        XCTAssertFalse(app.staticTexts["Costco"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Costco"].exists)
 
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.buttons["shopping.store.all"].waitForExistence(timeout: 2))

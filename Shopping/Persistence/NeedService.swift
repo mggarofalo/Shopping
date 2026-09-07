@@ -94,6 +94,68 @@ struct CatalogRemovalPreview: Equatable {
     let action: CatalogRemovalAction
     let values: CatalogItemValues
     let isArchived: Bool
+    let revision: Int64
+}
+
+enum ManagementEntityKind: String, Codable, Equatable {
+    case store
+    case category
+    case catalogItem
+}
+
+enum ManagementBatchAction: String, Codable, Equatable {
+    case archive
+    case restore
+    case delete
+}
+
+struct ManagementBatchEntry: Codable, Equatable, Hashable {
+    let id: UUID
+    let revision: Int64
+    let references: [ManagementBatchReference]
+
+    init(id: UUID, revision: Int64, references: [ManagementBatchReference] = []) {
+        self.id = id
+        self.revision = revision
+        self.references = references
+    }
+}
+
+struct ManagementBatchReference: Codable, Equatable, Hashable {
+    enum Kind: String, Codable {
+        case catalogItem
+        case oneTimeNeed
+    }
+
+    let kind: Kind
+    let id: UUID
+    let revision: Int64
+}
+
+struct ManagementBatchToken: Codable, Equatable {
+    let id: UUID
+    let householdID: UUID
+    let listID: UUID
+    let entity: ManagementEntityKind
+    let action: ManagementBatchAction
+    let entries: [ManagementBatchEntry]
+}
+
+struct ManagementBatchPreview: Equatable {
+    let token: ManagementBatchToken
+    let archiveCount: Int
+    let restoreCount: Int
+    let deleteCount: Int
+    let retainedCount: Int
+}
+
+struct ManagementBatchResult: Equatable {
+    let archivedCount: Int
+    let restoredCount: Int
+    let deletedCount: Int
+    let retainedCount: Int
+    let changedCount: Int
+    let missingCount: Int
 }
 
 struct RememberedNeedValues: Equatable {
@@ -123,6 +185,211 @@ final class NeedService {
 
     init(persistence: PersistenceController) {
         self.persistence = persistence
+    }
+
+    func captureManagementBatch(
+        entity: ManagementEntityKind,
+        action: ManagementBatchAction,
+        ids: Set<UUID>,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> ManagementBatchPreview {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            var entries: [ManagementBatchEntry] = []
+            var archiveCount = 0
+            var restoreCount = 0
+            var deleteCount = 0
+            var retainedCount = 0
+            let sortedIDs = ids.sorted(by: { $0.uuidString < $1.uuidString })
+            let storeRequest = Store.fetchRequest()
+            let categoryRequest = Category.fetchRequest()
+            let itemRequest = Item.fetchRequest()
+            if action == .delete {
+                storeRequest.relationshipKeyPathsForPrefetching = ["items", "oneTimeNeeds"]
+                itemRequest.relationshipKeyPathsForPrefetching = ["needs"]
+            }
+            categoryRequest.relationshipKeyPathsForPrefetching = ["items", "oneTimeNeeds"]
+            let storesByID = entity == .store ? try self.fetchBatch(
+                ids: ids, request: storeRequest, id: \.id, in: context, identityError: .invalidStoreIdentity
+            ) : [:]
+            let categoriesByID = entity == .category ? try self.fetchBatch(
+                ids: ids, request: categoryRequest, id: \.id, in: context
+            ) : [:]
+            let itemsByID = entity == .catalogItem ? try self.fetchBatch(
+                ids: ids, request: itemRequest, id: \.id, in: context, identityError: .invalidCatalogIdentity
+            ) : [:]
+            for id in sortedIDs {
+                switch entity {
+                case .store:
+                    guard let store = storesByID[id],
+                          self.belongs(store, to: household) else { continue }
+                    entries.append(ManagementBatchEntry(id: id, revision: store.revision))
+                    switch action {
+                    case .archive:
+                        if store.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                    case .restore:
+                        if store.isArchived { restoreCount += 1 } else { retainedCount += 1 }
+                    case .delete:
+                        if self.storeHasReferences(store) { archiveCount += 1 } else { deleteCount += 1 }
+                    }
+                case .category:
+                    guard action == .delete,
+                          let category = categoriesByID[id],
+                          self.belongs(category, to: household) else { continue }
+                    entries.append(ManagementBatchEntry(
+                        id: id,
+                        revision: category.revision,
+                        references: self.categoryReferences(category)
+                    ))
+                    deleteCount += 1
+                case .catalogItem:
+                    guard let item = itemsByID[id] else { continue }
+                    do { try self.validate(item: item, belongsTo: household) } catch { continue }
+                    entries.append(ManagementBatchEntry(id: id, revision: item.revision))
+                    switch action {
+                    case .archive:
+                        if item.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                    case .restore:
+                        if item.isArchived { restoreCount += 1 } else { retainedCount += 1 }
+                    case .delete:
+                        if self.catalogItemHasReferences(item) {
+                            if item.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                        } else {
+                            deleteCount += 1
+                        }
+                    }
+                }
+            }
+            return ManagementBatchPreview(
+                token: ManagementBatchToken(
+                    id: UUID(), householdID: householdID, listID: listID,
+                    entity: entity, action: action, entries: entries
+                ),
+                archiveCount: archiveCount, restoreCount: restoreCount,
+                deleteCount: deleteCount, retainedCount: retainedCount
+            )
+        }
+    }
+
+    func applyManagementBatch(_ token: ManagementBatchToken) throws -> ManagementBatchResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: token.householdID, listID: token.listID, in: context
+            )
+            var archived = 0
+            var restored = 0
+            var deleted = 0
+            var retained = 0
+            var changed = 0
+            var missing = 0
+            let entryIDs = token.entries.map(\.id)
+            guard Set(entryIDs).count == entryIDs.count else { throw NeedServiceError.scopeChanged }
+            let ids = Set(entryIDs)
+            let storeRequest = Store.fetchRequest()
+            let categoryRequest = Category.fetchRequest()
+            let itemRequest = Item.fetchRequest()
+            if token.action == .delete {
+                storeRequest.relationshipKeyPathsForPrefetching = ["items", "oneTimeNeeds"]
+                itemRequest.relationshipKeyPathsForPrefetching = ["needs"]
+            }
+            categoryRequest.relationshipKeyPathsForPrefetching = ["items", "oneTimeNeeds"]
+            let storesByID = token.entity == .store ? try self.fetchBatch(
+                ids: ids, request: storeRequest, id: \.id, in: context, identityError: .invalidStoreIdentity
+            ) : [:]
+            let categoriesByID = token.entity == .category ? try self.fetchBatch(
+                ids: ids, request: categoryRequest, id: \.id, in: context
+            ) : [:]
+            let itemsByID = token.entity == .catalogItem ? try self.fetchBatch(
+                ids: ids, request: itemRequest, id: \.id, in: context, identityError: .invalidCatalogIdentity
+            ) : [:]
+            for entry in token.entries {
+                switch token.entity {
+                case .store:
+                    guard let store = storesByID[entry.id] else {
+                        missing += 1; continue
+                    }
+                    guard self.belongs(store, to: household), store.revision == entry.revision else {
+                        changed += 1; continue
+                    }
+                    switch token.action {
+                    case .archive:
+                        if store.isArchived { retained += 1 } else {
+                            store.isArchived = true
+                            try self.advanceRevision(of: store)
+                            archived += 1
+                        }
+                    case .restore:
+                        if !store.isArchived { retained += 1 } else {
+                            store.isArchived = false
+                            try self.advanceRevision(of: store)
+                            restored += 1
+                        }
+                    case .delete:
+                        if self.storeHasReferences(store) {
+                            if store.isArchived { retained += 1 } else {
+                                store.isArchived = true
+                                try self.advanceRevision(of: store)
+                                archived += 1
+                            }
+                        } else {
+                            context.delete(store)
+                            deleted += 1
+                        }
+                    }
+                case .category:
+                    guard let category = categoriesByID[entry.id] else {
+                        missing += 1; continue
+                    }
+                    guard token.action == .delete, self.belongs(category, to: household),
+                          category.revision == entry.revision,
+                          self.categoryReferences(category) == entry.references else {
+                        changed += 1; continue
+                    }
+                    try self.detachAndDelete(category, in: context)
+                    deleted += 1
+                case .catalogItem:
+                    guard let item = itemsByID[entry.id] else {
+                        missing += 1; continue
+                    }
+                    do { try self.validate(item: item, belongsTo: household) } catch {
+                        changed += 1; continue
+                    }
+                    guard item.revision == entry.revision else { changed += 1; continue }
+                    switch token.action {
+                    case .archive:
+                        if item.isArchived { retained += 1 } else {
+                            item.isArchived = true
+                            try self.advanceRevision(of: item)
+                            archived += 1
+                        }
+                    case .restore:
+                        if !item.isArchived { retained += 1 } else {
+                            item.isArchived = false
+                            try self.advanceRevision(of: item)
+                            restored += 1
+                        }
+                    case .delete:
+                        if self.catalogItemHasReferences(item) {
+                            if item.isArchived { retained += 1 } else {
+                                item.isArchived = true
+                                try self.advanceRevision(of: item)
+                                archived += 1
+                            }
+                        } else {
+                            context.delete(item)
+                            deleted += 1
+                        }
+                    }
+                }
+            }
+            return ManagementBatchResult(
+                archivedCount: archived, restoredCount: restored, deletedCount: deleted,
+                retainedCount: retained, changedCount: changed, missingCount: missing
+            )
+        }
     }
 
     func firstHouseholdSelection() throws -> (householdID: UUID, listID: UUID)? {
@@ -238,6 +505,7 @@ final class NeedService {
                 throw NeedServiceError.scopeChanged
             }
             category.name = name
+            try self.advanceRevision(of: category)
         }
     }
 
@@ -269,7 +537,12 @@ final class NeedService {
             }
             let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
             for (index, id) in orderedCategoryIDs.enumerated() {
-                byID[id]?.displayOrder = Int64(index)
+                guard let category = byID[id] else { continue }
+                let order = Int64(index)
+                if category.displayOrder != order {
+                    category.displayOrder = order
+                    try self.advanceRevision(of: category)
+                }
             }
         }
     }
@@ -292,6 +565,7 @@ final class NeedService {
                 throw NeedServiceError.scopeChanged
             }
             store.isArchived = archived
+            try self.advanceRevision(of: store)
         }
     }
 
@@ -310,6 +584,7 @@ final class NeedService {
             guard store.household == household,
                   store.objectID.persistentStore == household.objectID.persistentStore else { throw NeedServiceError.scopeChanged }
             store.name = name
+            try self.advanceRevision(of: store)
         }
     }
 
@@ -338,7 +613,14 @@ final class NeedService {
                 }
             }
             let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
-            for (index, id) in orderedStoreIDs.enumerated() { byID[id]?.displayOrder = Int64(index) }
+            for (index, id) in orderedStoreIDs.enumerated() {
+                guard let store = byID[id] else { continue }
+                let order = Int64(index)
+                if store.displayOrder != order {
+                    store.displayOrder = order
+                    try self.advanceRevision(of: store)
+                }
+            }
         }
     }
 
@@ -374,6 +656,7 @@ final class NeedService {
             )
             if confirmedAction == .archive || self.storeHasReferences(store) {
                 store.isArchived = true
+                try self.advanceRevision(of: store)
                 return .archive
             }
             context.delete(store)
@@ -391,6 +674,7 @@ final class NeedService {
             }
             guard let categoryID else {
                 item.category = nil
+                try self.advanceRevision(of: item)
                 return
             }
             guard let category = try self.category(id: categoryID, in: context) else {
@@ -401,6 +685,7 @@ final class NeedService {
                 throw NeedServiceError.scopeChanged
             }
             item.category = category
+            try self.advanceRevision(of: item)
         }
     }
 
@@ -420,17 +705,7 @@ final class NeedService {
                   category.objectID.persistentStore == household.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
             }
-            for item in category.items ?? [] { item.category = nil }
-            for need in category.oneTimeNeeds ?? [] {
-                need.oneTimeCategory = nil
-                if !need.archived {
-                    let (revision, overflow) = need.revision.addingReportingOverflow(1)
-                    guard !overflow else { throw NeedServiceError.scopeChanged }
-                    need.revision = revision
-                    need.clearOperationID = nil
-                }
-            }
-            context.delete(category)
+            try self.detachAndDelete(category, in: context)
         }
     }
 
@@ -529,6 +804,7 @@ final class NeedService {
             item.category = validated.category
             item.anyStore = values.anyStore
             item.stores = validated.stores
+            try self.advanceRevision(of: item)
         }
     }
 
@@ -547,6 +823,7 @@ final class NeedService {
             }
             try self.validate(item: item, belongsTo: household)
             item.isArchived = archived
+            try self.advanceRevision(of: item)
         }
     }
 
@@ -570,7 +847,8 @@ final class NeedService {
             return CatalogRemovalPreview(
                 action: action,
                 values: self.catalogValues(for: item),
-                isArchived: item.isArchived
+                isArchived: item.isArchived,
+                revision: item.revision
             )
         }
     }
@@ -591,11 +869,13 @@ final class NeedService {
             }
             try self.validate(item: item, belongsTo: household)
             guard self.catalogValues(for: item) == preview.values,
-                  item.isArchived == preview.isArchived else {
+                  item.isArchived == preview.isArchived,
+                  item.revision == preview.revision else {
                 throw NeedServiceError.scopeChanged
             }
             if preview.action == .archive || self.catalogItemHasReferences(item) {
                 item.isArchived = true
+                try self.advanceRevision(of: item)
                 return .archive
             }
             guard preview.action == .delete else { return .keepArchived }
@@ -684,6 +964,7 @@ final class NeedService {
             item.category = validatedCatalog.category
             item.anyStore = validatedCatalog.anyStore
             item.stores = validatedCatalog.stores
+            try self.advanceRevision(of: item)
             resolved.need.title = validatedCatalog.name
             try self.apply(values, to: resolved.need)
         }
@@ -798,6 +1079,7 @@ final class NeedService {
             )
             item.anyStore = resolvedAnyStore
             item.stores = stores
+            try self.advanceRevision(of: item)
         }
     }
 
@@ -821,6 +1103,7 @@ final class NeedService {
             item.notes = self.trimmedNotes(notes)
             item.category = try self.validatedCategory(id: categoryID, household: household, in: context)
             item.isArchived = isArchived
+            try self.advanceRevision(of: item)
         }
     }
 
@@ -1592,6 +1875,64 @@ final class NeedService {
         return Set(stores)
     }
 
+    private func belongs(_ store: Store, to household: Household) -> Bool {
+        store.household == household &&
+            store.objectID.persistentStore == household.objectID.persistentStore
+    }
+
+    private func belongs(_ category: Category, to household: Household) -> Bool {
+        category.household == household &&
+            category.objectID.persistentStore == household.objectID.persistentStore
+    }
+
+    private func categoryReferences(_ category: Category) -> [ManagementBatchReference] {
+        let items = (category.items ?? []).map {
+            ManagementBatchReference(kind: .catalogItem, id: $0.id, revision: $0.revision)
+        }
+        let needs = (category.oneTimeNeeds ?? []).map {
+            ManagementBatchReference(kind: .oneTimeNeed, id: $0.id, revision: $0.revision)
+        }
+        return (items + needs).sorted {
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
+    private func advanceRevision(of store: Store) throws {
+        let (revision, overflow) = store.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        store.revision = revision
+    }
+
+    private func advanceRevision(of category: Category) throws {
+        let (revision, overflow) = category.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        category.revision = revision
+    }
+
+    private func advanceRevision(of item: Item) throws {
+        let (revision, overflow) = item.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        item.revision = revision
+    }
+
+    private func detachAndDelete(_ category: Category, in context: NSManagedObjectContext) throws {
+        for item in category.items ?? [] {
+            item.category = nil
+            try advanceRevision(of: item)
+        }
+        for need in category.oneTimeNeeds ?? [] {
+            need.oneTimeCategory = nil
+            if !need.archived {
+                let (revision, overflow) = need.revision.addingReportingOverflow(1)
+                guard !overflow else { throw NeedServiceError.scopeChanged }
+                need.revision = revision
+                need.clearOperationID = nil
+            }
+        }
+        context.delete(category)
+    }
+
     private func validatedCatalogValues(
         _ values: CatalogItemValues,
         household: Household,
@@ -1907,6 +2248,27 @@ final class NeedService {
         let matches = try context.fetch(request)
         guard matches.count < 2 else { throw identityError }
         return matches.first
+    }
+
+    private func fetchBatch<T: NSManagedObject>(
+        ids: Set<UUID>,
+        request: NSFetchRequest<T>,
+        id idKeyPath: KeyPath<T, UUID>,
+        in context: NSManagedObjectContext,
+        identityError: NeedServiceError = .scopeChanged
+    ) throws -> [UUID: T] {
+        guard !ids.contains(PersistenceModel.unsetID) else { throw identityError }
+        guard !ids.isEmpty else { return [:] }
+        request.predicate = NSPredicate(format: "id IN %@", Array(ids))
+        let matches = try context.fetch(request)
+        var byID: [UUID: T] = [:]
+        for match in matches {
+            let id = match[keyPath: idKeyPath]
+            guard ids.contains(id), byID.updateValue(match, forKey: id) == nil else {
+                throw identityError
+            }
+        }
+        return byID
     }
 
     private func hasActiveRememberedNeed(
