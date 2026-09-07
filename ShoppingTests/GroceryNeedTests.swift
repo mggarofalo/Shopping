@@ -53,7 +53,7 @@ final class GroceryNeedTests: XCTestCase {
             storeID = try service.createStore(name: "Costco", householdID: householdID)
             categoryID = try service.createCategory(name: "Party", householdID: householdID)
             needID = try service.addOneTimeNeed(
-                title: "  Party ice  ", notes: "Two bags", categoryID: categoryID,
+                title: "  Party ice  ", notes: " \n Two bags \t", categoryID: categoryID,
                 storeIDs: [storeID], anyStore: false, quantity: 2, urgency: .urgent, listID: ids.listID
             )
         }

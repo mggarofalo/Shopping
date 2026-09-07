@@ -64,8 +64,17 @@ private struct CatalogArchiveTarget {
     let archived: Bool
 }
 
+private struct CatalogRemovalTarget {
+    let itemID: UUID
+    let householdID: UUID
+    let listID: UUID
+    let name: String
+    let preview: CatalogRemovalPreview
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
+    @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
@@ -80,6 +89,8 @@ struct CatalogView: View {
     @State private var showingStores = false
     @State private var editor: CatalogEditSession?
     @State private var archiveTarget: CatalogArchiveTarget?
+    @State private var removalTarget: CatalogRemovalTarget?
+    @State private var removalNotice: String?
     @State private var errorMessage: String?
 
     private var canonicalList: GroceryList? {
@@ -100,6 +111,15 @@ struct CatalogView: View {
     private var hasNarrowing: Bool {
         !searchText.isEmpty || filters.selectedStoreID != nil || filters.count > 0
     }
+    private var removalAction: CatalogRemovalAction? { removalTarget?.preview.action }
+    private var removalDialogTitle: String {
+        guard let target = removalTarget else { return "Remove catalog item?" }
+        switch target.preview.action {
+        case .archive: return "Archive \(target.name)?"
+        case .keepArchived: return "Can’t delete \(target.name)"
+        case .delete: return "Delete \(target.name)?"
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -109,28 +129,8 @@ struct CatalogView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         .listRowBackground(Color.clear)
                 }
-                Section {
-                    ForEach(visibleItems, id: \.objectID) { item in
-                        Button { edit(item) } label: {
-                            CatalogItemRow(item: item)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button { prepareArchive(item) } label: {
-                                Label(item.isArchived ? "Restore" : "Archive",
-                                      systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox")
-                            }
-                            .tint(item.isArchived ? .green : .orange)
-                            .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
-                        }
-                        .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
-                            prepareArchive(item)
-                        }
-                    }
-                    if visibleItems.isEmpty {
+                if visibleItems.isEmpty {
+                    Section {
                         ContentUnavailableView {
                             Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
                         } description: {
@@ -141,10 +141,44 @@ struct CatalogView: View {
                         }
                         .listRowBackground(Color.clear)
                     }
+                } else {
+                    ForEach(visibleItems, id: \.objectID) { item in
+                        Section {
+                            Button { edit(item) } label: {
+                                CatalogItemRow(item: item)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .shoppingListRowInsets()
+                            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button { prepareArchive(item) } label: {
+                                    Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
+                                        .font(.caption2)
+                                }
+                                .tint(item.isArchived ? .green : .orange)
+                                .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
+                                .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
+                                Button(role: .destructive) { prepareRemoval(item) } label: {
+                                    Image(systemName: "trash").font(.caption2)
+                                }
+                                .tint(.red)
+                                .accessibilityLabel("Delete")
+                                .accessibilityIdentifier("shopping.catalog.swipeDelete.\(item.id.uuidString)")
+                            }
+                            .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
+                                prepareArchive(item)
+                            }
+                            .accessibilityAction(named: Text("Delete \(item.name)")) {
+                                prepareRemoval(item)
+                            }
+                        }
+                    }
                 }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(12)
+            .listSectionSpacing(4)
             .contentMargins(.top, 0, for: .scrollContent)
             .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
@@ -180,6 +214,37 @@ struct CatalogView: View {
                 Text(target.archived
                      ? "Hide \(target.name) from the catalog? Current groceries and saved details are kept. Restore it with the Archived items filter."
                      : "Show \(target.name) in the active catalog again?")
+            }
+            .confirmationDialog(
+                removalDialogTitle,
+                isPresented: Binding(
+                    get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if removalAction == .archive {
+                    Button("Archive item", role: .destructive, action: applyRemoval)
+                } else if removalAction == .delete {
+                    Button("Delete item", role: .destructive, action: applyRemoval)
+                }
+                Button(removalAction == .keepArchived ? "OK" : "Cancel", role: .cancel) {
+                    removalTarget = nil
+                }
+            } message: {
+                if removalAction == .archive {
+                    Text("A grocery still uses this catalog item. Archiving keeps that grocery and its saved details available for recovery.")
+                } else if removalAction == .keepArchived {
+                    Text("A grocery still uses this archived item, so its saved details must remain available for recovery.")
+                } else {
+                    Text("This item has no grocery history and will be permanently removed from Catalog.")
+                }
+            }
+            .alert("Catalog item archived", isPresented: Binding(
+                get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } }
+            )) {
+                Button("OK", role: .cancel) { removalNotice = nil }
+            } message: {
+                Text(removalNotice ?? "")
             }
             .alert("Couldn’t load catalog", isPresented: Binding(
                 get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
@@ -293,6 +358,49 @@ struct CatalogView: View {
             refresh()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
+
+    private func prepareRemoval(_ item: Item) {
+        guard let service, let list = canonicalList, let householdID = list.household?.id,
+              scopedItems.contains(item) else { return }
+        do {
+            let preview = try service.catalogItemRemovalPreview(
+                itemID: item.id, householdID: householdID, listID: list.id
+            )
+            removalTarget = CatalogRemovalTarget(
+                itemID: item.id, householdID: householdID, listID: list.id,
+                name: item.name, preview: preview
+            )
+        } catch { errorMessage = CatalogErrorCopy.message(error) }
+    }
+
+    private func applyRemoval() {
+        guard let target = removalTarget, let service,
+              selection.householdID == target.householdID,
+              selection.listID == target.listID, canonicalList != nil else {
+            removalTarget = nil
+            errorMessage = "Return to the household where you started this change."
+            return
+        }
+        do {
+            guard target.preview.action != .keepArchived else {
+                removalTarget = nil
+                return
+            }
+            let appliedAction = try service.removeCatalogItem(
+                itemID: target.itemID, householdID: target.householdID,
+                listID: target.listID, preview: target.preview
+            )
+            hapticFeedback.play(.warning)
+            removalTarget = nil
+            refresh()
+            if target.preview.action == .delete, appliedAction == .archive {
+                removalNotice = "A grocery began using this item, so it was archived instead of permanently deleted."
+            }
+        } catch {
+            removalTarget = nil
+            errorMessage = CatalogErrorCopy.message(error)
+        }
+    }
 }
 
 private struct CatalogItemRow: View {
@@ -394,6 +502,7 @@ private struct CatalogEditorView: View {
     @State private var allowingNameCollision = false
     @State private var errorMessage: String?
     @State private var showingArchiveConfirmation = false
+    @State private var showingCategoryCreation = false
     @State private var requestedArchived = true
     let session: CatalogEditSession
     let onSaved: () -> Void
@@ -464,7 +573,8 @@ private struct CatalogEditorView: View {
                 CategoryPills(
                     selection: $values.categoryID,
                     categories: scopedCategories,
-                    includeUnavailable: true
+                    includeUnavailable: true,
+                    onAddCategory: { showingCategoryCreation = true }
                 )
                 PurchaseRulesPicker(
                     storeIDs: $values.storeIDs,
@@ -508,6 +618,12 @@ private struct CatalogEditorView: View {
                 Button("Keep editing", role: .cancel) {}
             } message: {
                 Text("Current groceries and saved tags are preserved. Unsaved edits in this form will be discarded.")
+            }
+            .sheet(isPresented: $showingCategoryCreation) {
+                CategoryCreationView(
+                    householdID: session.selection.householdID,
+                    listID: session.selection.listID
+                ) { values.categoryID = $0 }
             }
         }
     }

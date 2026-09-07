@@ -89,21 +89,24 @@ final class ShoppingLaunchTests: XCTestCase {
         app.buttons["Save store"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
 
-        app.buttons["Rename Neighborhood Market"].tap()
+        app.staticTexts["Neighborhood Market"].swipeLeft()
+        app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Canceled Market")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
 
-        app.buttons["Rename Neighborhood Market"].tap()
+        app.staticTexts["Neighborhood Market"].swipeLeft()
+        app.buttons["Edit"].tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Local Market")
         app.buttons["Save store"].tap()
         XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
 
-        app.buttons["Delete Local Market"].tap()
+        app.staticTexts["Local Market"].swipeRight()
+        app.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
         app.buttons["Delete store"].tap()
         XCTAssertFalse(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
@@ -119,10 +122,11 @@ final class ShoppingLaunchTests: XCTestCase {
 
         openStoreManagement(in: app)
         XCTAssertFalse(app.staticTexts["Neighborhood Market (closed)"].exists)
-        app.buttons["Delete Costco"].tap()
+        app.staticTexts["Costco"].swipeRight()
+        app.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Archive Costco?"].waitForExistence(timeout: 2))
         app.buttons["Archive store"].tap()
-        XCTAssertFalse(app.buttons["Delete Costco"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Costco"].waitForExistence(timeout: 2))
 
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.buttons["shopping.store.all"].waitForExistence(timeout: 2))
@@ -235,7 +239,23 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.catalog.name"], with: "Reusable coffee")
         replaceText(in: app.textFields["shopping.catalog.notes"], with: "Whole bean")
+        let addCategory = app.buttons["shopping.category.add"]
+        reveal(addCategory, in: app)
+        addCategory.tap()
+        XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
+        let categoryName = app.textFields["shopping.category.name"]
+        XCTAssertTrue(categoryName.waitForExistence(timeout: 2))
+        categoryName.typeText("Coffee")
+        app.buttons["shopping.category.save"].tap()
+        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        let coffeeCategory = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.category.", "Coffee"
+        )).firstMatch
+        reveal(coffeeCategory, in: app)
+        XCTAssertEqual(coffeeCategory.value as? String, "Selected")
         let anyStore = app.buttons["shopping.purchase.anyStore"]
+        reveal(anyStore, in: app)
         XCTAssertTrue(anyStore.waitForExistence(timeout: 2))
         let anyStoreControl = anyStore.switches.firstMatch
         (anyStoreControl.exists ? anyStoreControl : anyStore).tap()
@@ -261,6 +281,25 @@ final class ShoppingLaunchTests: XCTestCase {
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Saved coffee edit"].exists)
+
+        openCatalog(in: app)
+        let savedCoffee = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Saved coffee edit"
+        )).firstMatch
+        XCTAssertTrue(savedCoffee.waitForExistence(timeout: 2))
+        savedCoffee.swipeLeft()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.swipeArchive."
+        )).firstMatch.waitForExistence(timeout: 2))
+        let delete = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.swipeDelete."
+        )).firstMatch
+        XCTAssertTrue(delete.exists)
+        delete.tap()
+        XCTAssertTrue(app.staticTexts["Delete Saved coffee edit?"].waitForExistence(timeout: 2))
+        app.buttons["Delete item"].tap()
+        XCTAssertFalse(app.staticTexts["Saved coffee edit"].waitForExistence(timeout: 2))
     }
 
     func testCatalogArchiveFilterAndRestorePreservesActiveGrocery() {

@@ -24,10 +24,10 @@ final class GroceryEditingTests: XCTestCase {
             householdID: selection.householdID,
             listID: selection.listID,
             catalog: CatalogItemValues(
-                name: "Brown rice", notes: "Whole grain", categoryID: nil,
+                name: "  Brown rice \n", notes: " \n Whole grain \t", categoryID: nil,
                 anyStore: true, storeIDs: [costco]
             ),
-            need: RememberedNeedValues(quantity: 4, purchaseNotes: "One bag", urgency: .normal)
+            need: RememberedNeedValues(quantity: 4, purchaseNotes: " \n One bag \t", urgency: .normal)
         )
 
         let state = try snapshot(created.needID, persistence: persistence)

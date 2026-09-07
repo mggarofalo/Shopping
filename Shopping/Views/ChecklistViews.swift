@@ -75,6 +75,7 @@ struct CartedGroceriesView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
+                    .shoppingListRowInsets()
                     .accessibilityHint("Includes all items in cart, even when this view is filtered")
                     .accessibilityIdentifier("shopping.checkout.start")
                 }
@@ -82,7 +83,9 @@ struct CartedGroceriesView: View {
             Section {
                 Button("All in cart", action: showAllCarted)
                     .accessibilityIdentifier("shopping.carted.all")
+                    .shoppingListRowInsets()
                 Text(scopeDescription).font(.footnote).foregroundStyle(.secondary)
+                    .shoppingListRowInsets()
             }
             if let storeID = filter.purchase.selectedStoreID {
                 let onlyHere = carted.filter { availability($0, storeID: storeID) == .mustBuyHere }
@@ -146,6 +149,7 @@ struct CartedGroceriesView: View {
                         .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
                 }
             }
+            .shoppingListRowInsets()
         }
     }
 
@@ -154,6 +158,7 @@ struct CartedGroceriesView: View {
             List {
                 Section {
                     Text("Checkout removes only these captured items from the active list. Items changed after this confirmation opened will be skipped.")
+                        .shoppingListRowInsets()
                 }
                 Section("Items (\(draft.preview.rows.count))") {
                     ForEach(draft.preview.rows, id: \.needID) { row in
@@ -169,19 +174,23 @@ struct CartedGroceriesView: View {
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("shopping.checkout.row.\(row.needID.uuidString)")
+                        .shoppingListRowInsets()
                     }
                 }
                 if let clearErrorMessage {
                     Section("Couldn’t checkout") {
                         Text(clearErrorMessage).foregroundStyle(.red)
+                            .shoppingListRowInsets()
                         Button("Retry") { confirmCheckout(draft) }
                             .disabled(!selectionMatches(draft))
                             .accessibilityIdentifier("shopping.checkout.retry")
+                            .shoppingListRowInsets()
                     }
                 } else if !selectionMatches(draft) {
                     Section {
                         Text("Return to the household and list where this preview was created to continue.")
                             .foregroundStyle(.secondary)
+                            .shoppingListRowInsets()
                     }
                 }
             }

@@ -660,7 +660,7 @@ struct GroceryEditorView: View {
 
 }
 
-private struct CategoryCreationView: View {
+struct CategoryCreationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
     @State private var name = ""
