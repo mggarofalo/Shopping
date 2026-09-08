@@ -89,6 +89,20 @@ jobs:
           echo "$((finished_at - started_at))" > ExhaustiveTestSeconds.txt
           exit "$exit_code"
 
+      - name: Export full-plan coverage
+        if: always() && env.TEST_PLAN == 'ShoppingFull' && hashFiles('ExhaustiveResults.xcresult/**') != ''
+        run: |
+          set +e
+          .github/scripts/check-coverage.sh \
+            ExhaustiveResults.xcresult \
+            .github/coverage-baseline.json \
+            ExhaustiveCoverage.json \
+            ExhaustiveCoverage.md
+          exit_code="$?"
+          set -e
+          cat ExhaustiveCoverage.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$exit_code"
+
       - name: Publish exhaustive test summary
         if: always()
         run: |
@@ -111,6 +125,9 @@ jobs:
           path: |
             ExhaustiveSummary.md
             ExhaustiveSummary.json
+            ExhaustiveCoverage.md
+            ExhaustiveCoverage.json
+            ExhaustiveCoverage.raw.json
           if-no-files-found: error
           retention-days: 30
 
