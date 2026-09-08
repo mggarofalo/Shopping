@@ -1,4 +1,5 @@
 import CoreData
+import os
 import SwiftUI
 
 struct CatalogFilterState: Equatable {
@@ -128,6 +129,7 @@ struct CatalogView: View {
     @State private var showingStores = false
     @State private var showingGrouping = false
     @State private var grouping = CatalogGrouping.category
+    @State private var renderedGroups: [CatalogItemGroup] = []
     @State private var editor: CatalogEditSession?
     @State private var archiveTarget: CatalogArchiveTarget?
     @State private var removalTarget: CatalogRemovalTarget?
@@ -156,17 +158,24 @@ struct CatalogView: View {
     private var visibleItems: [Item] {
         scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
     }
-    private var visibleGroups: [CatalogItemGroup] {
-        let sortedItems = visibleItems.sorted(by: catalogItemComesFirst)
+    private func makeVisibleGroups(from items: [Item]) -> [CatalogItemGroup] {
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID) }
+        let sortedItems = items.sorted(by: catalogItemComesFirst)
         switch grouping {
         case .none:
             return [CatalogItemGroup(id: "all", title: nil, items: sortedItems)]
         case .category:
-            return groups(items: sortedItems) { categoryGroupKey(for: $0) }
+            let validCategoryIDs = Set(scopedCategories.map(\.id))
+            return groups(items: sortedItems) {
+                categoryGroupKey(for: $0, validCategoryIDs: validCategoryIDs)
+            }
         case .store:
+            let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
             var grouped: [CatalogGroupKey: [Item]] = [:]
             for item in sortedItems {
-                for key in storeGroupKeys(for: item) {
+                for key in storeGroupKeys(for: item, validStores: validStores) {
                     grouped[key, default: []].append(item)
                 }
             }
@@ -338,6 +347,7 @@ struct CatalogView: View {
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
+            .onChange(of: grouping) { _, _ in rebuildRenderedGroups() }
             .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
                 sanitizeFilters()
@@ -367,7 +377,7 @@ struct CatalogView: View {
                 .listRowBackground(Color.clear)
             }
         } else {
-            ForEach(visibleGroups) { group in
+            ForEach(renderedGroups) { group in
                 Section {
                     ForEach(group.items, id: \.objectID) { item in
                         if editMode.isEditing {
@@ -517,22 +527,24 @@ struct CatalogView: View {
         ) == .orderedAscending
     }
 
-    private func categoryGroupKey(for item: Item) -> CatalogGroupKey {
+    private func categoryGroupKey(
+        for item: Item,
+        validCategoryIDs: Set<UUID>
+    ) -> CatalogGroupKey {
         guard let category = item.category else {
             return CatalogGroupKey(id: "category:none", title: "Uncategorized")
         }
-        guard scopedCategories.contains(category) else {
+        guard validCategoryIDs.contains(category.id) else {
             return CatalogGroupKey(id: "category:unavailable", title: "Unavailable category")
         }
         return CatalogGroupKey(id: "category:\(category.id.uuidString)", title: category.name)
     }
 
-    private func storeGroupKeys(for item: Item) -> [CatalogGroupKey] {
+    private func storeGroupKeys(for item: Item, validStores: [Store]) -> [CatalogGroupKey] {
         if item.anyStore || (item.stores ?? []).isEmpty {
             return [CatalogGroupKey(id: "store:any", title: "Any store")]
         }
         let assignedStores = item.stores ?? []
-        let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
         var keys = validStores.filter { assignedStores.contains($0) }.map {
             CatalogGroupKey(id: "store:\($0.id.uuidString)", title: $0.name)
         }
@@ -558,12 +570,30 @@ struct CatalogView: View {
     }
 
     private func refresh() {
-        guard let service, let householdID = selection.householdID else { projectedIDs = []; return }
+        guard let service, let householdID = selection.householdID else {
+            projectedIDs = []
+            renderedGroups = []
+            return
+        }
         do {
-            projectedIDs = Set(try service.filteredCatalogItemIDs(
+            let refreshedIDs = Set(try service.filteredCatalogItemIDs(
                 householdID: householdID, filter: filters.query(text: searchText), includeArchived: filters.showArchived
             ))
-        } catch { projectedIDs = []; errorMessage = CatalogErrorCopy.message(error) }
+            projectedIDs = refreshedIDs
+            rebuildRenderedGroups(projectedIDs: refreshedIDs)
+        } catch {
+            projectedIDs = []
+            renderedGroups = []
+            errorMessage = CatalogErrorCopy.message(error)
+        }
+    }
+
+    private func rebuildRenderedGroups(projectedIDs ids: Set<UUID>? = nil) {
+        let ids = ids ?? projectedIDs
+        let items = scopedItems.filter {
+            ids.contains($0.id) && $0.isArchived == filters.showArchived
+        }
+        renderedGroups = makeVisibleGroups(from: items)
     }
 
     private func refreshAndSanitizeSelection() {

@@ -1,4 +1,9 @@
 import CoreData
+import os
+
+enum ShoppingPerformanceTrace {
+    static let log = OSLog(subsystem: "com.mggarofalo.shopping", category: .pointsOfInterest)
+}
 
 struct ClearCartedToken: Codable, Equatable {
     let id: UUID
@@ -237,7 +242,10 @@ final class NeedService {
         householdID: UUID,
         listID: UUID
     ) throws -> ManagementBatchPreview {
-        try readOnWriter { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Management batch preview", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Management batch preview", signpostID: signpostID) }
+        return try readOnWriter { context in
             let household = try self.validatedCommandHousehold(
                 householdID: householdID, listID: listID, in: context
             )
@@ -441,7 +449,10 @@ final class NeedService {
         listID: UUID,
         selectedStoreID: UUID?
     ) throws -> CatalogAddPreview {
-        try readOnWriter { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add preview", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog add preview", signpostID: signpostID) }
+        return try readOnWriter { context in
             let household = try self.validatedCommandHousehold(
                 householdID: householdID, listID: listID, in: context
             )
@@ -509,7 +520,10 @@ final class NeedService {
     }
 
     func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) throws -> CatalogAddResult {
-        try write { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID) }
+        return try write { context in
             let household = try self.validatedCommandHousehold(
                 householdID: token.householdID, listID: token.listID, in: context
             )
@@ -594,7 +608,7 @@ final class NeedService {
     }
 
     func firstHouseholdSelection() throws -> (householdID: UUID, listID: UUID)? {
-        try readOnWriter { context in
+        return try readOnWriter { context in
             let request = Household.fetchRequest()
             request.sortDescriptors = [NSSortDescriptor(key: "id", ascending: true)]
             for household in try context.fetch(request) {
@@ -609,7 +623,7 @@ final class NeedService {
     }
 
     func isPersistentStoreEmpty() throws -> Bool {
-        try readOnWriter { context in
+        return try readOnWriter { context in
             for entityName in ["Household", "Store", "Category", "Item", "GroceryList", "Need", "ClearOperation"] {
                 let request = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
                 request.fetchLimit = 1
@@ -1351,7 +1365,10 @@ final class NeedService {
         filter: CatalogItemFilter,
         includeArchived: Bool = false
     ) throws -> [UUID] {
-        try readOnWriter { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog projection", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog projection", signpostID: signpostID) }
+        return try readOnWriter { context in
             guard let household = try self.household(id: householdID, in: context) else {
                 throw NeedServiceError.householdNotFound
             }
@@ -1381,15 +1398,33 @@ final class NeedService {
     }
 
     func filteredActiveNeedIDs(householdID: UUID, filter: GroceryNeedFilter) throws -> [UUID] {
-        try readOnWriter { context in
+        let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Grocery projection", signpostID: signpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Grocery projection", signpostID: signpostID) }
+        return try readOnWriter { context in
             let activeStores = try self.activeStoreIDs(householdID: householdID, in: context)
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(
                 format: "list.household.id == %@ AND archived == NO",
                 householdID as CVarArg
             )
+            request.relationshipKeyPathsForPrefetching = [
+                "list", "list.household", "item", "item.household", "item.stores", "item.category",
+                "oneTimeStores", "oneTimeCategory"
+            ]
             let activeNeeds = try context.fetch(request)
             try self.validateOccurrenceIdentities(activeNeeds)
+            let candidateItemIDs = Set(activeNeeds.compactMap { need -> UUID? in
+                guard let item = need.item, item.id != PersistenceModel.unsetID else { return nil }
+                return item.id
+            })
+            let resolvedItems = try self.fetchBatch(
+                ids: candidateItemIDs,
+                request: Item.fetchRequest(),
+                id: \.id,
+                in: context,
+                identityError: .invalidCatalogIdentity
+            )
             return activeNeeds.filter { need in
                 let item = need.item
                 let isOneTime = need.kind == NeedKind.oneTime.rawValue
@@ -1397,7 +1432,7 @@ final class NeedService {
                     guard candidate.id != PersistenceModel.unsetID,
                           candidate.household == need.list?.household,
                           candidate.objectID.persistentStore == need.objectID.persistentStore,
-                          (try? self.item(id: candidate.id, in: context)) === candidate else { return nil }
+                          resolvedItems[candidate.id] === candidate else { return nil }
                     return candidate
                 }
                 let value = PurchaseRuleValue(
@@ -2598,6 +2633,9 @@ final class NeedService {
     }
 
     private func write<T>(_ body: @escaping (NSManagedObjectContext) throws -> T) throws -> T {
+        let commandSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Persistence command", signpostID: commandSignpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Persistence command", signpostID: commandSignpostID) }
         var result: Result<T, Error>!
         persistence.writer.performAndWait {
             self.persistence.writer.reset()
@@ -2605,6 +2643,9 @@ final class NeedService {
                 do {
                     let value = try body(self.persistence.writer)
                     if self.persistence.writer.hasChanges {
+                        let saveSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+                        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID)
+                        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID) }
                         try self.persistence.prepareForSave(self.persistence.writer)
                         try self.persistence.writer.save()
                         if self.persistence.shareAssociationJournal != nil {
