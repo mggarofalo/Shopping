@@ -40,7 +40,7 @@ Post-fix physical acceptance passed September 8 on an iPhone 16 Pro running iOS 
 
 ## Physical-device and live-sharing gates
 
-No physical devices were connected during this validation. Before release, verify on both household phones:
+No physical devices were connected during the initial simulator validation above. The later sections record the available-iPhone checks; before release, verify the remaining two-phone behaviors:
 
 - VoiceOver order, labels, traits, focus movement, and 44pt controls on Groceries, In cart, recovery, add/edit, filters, and promotion.
 - Default-size and larger-text typography, including compact-device truncation, pinned header/footer visibility, long names, long notes, and purchase-rule labels.

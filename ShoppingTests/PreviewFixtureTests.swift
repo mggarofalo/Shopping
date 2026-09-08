@@ -132,7 +132,7 @@ final class PreviewFixtureTests: XCTestCase {
 
         let currentName = "current.sqlite"
         let resolvedURL = try PersistenceBootstrap.uiTestStoreURL(
-            for: "runner-sandbox/\(currentName)",
+            for: "/runner-sandbox/\(currentName)",
             applicationSupportDirectory: supportDirectory
         )
         try Data().write(to: resolvedURL)
