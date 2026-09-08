@@ -52,6 +52,21 @@ final class PersistenceContainerTests: XCTestCase {
         XCTAssertNil(local[0].cloudKitContainerOptions)
     }
 
+    @MainActor
+    func testBootstrapConsumesHistoryOnlyForManagedCloudKitStores() {
+        let privateURL = temporaryURL("private-history.sqlite")
+        XCTAssertFalse(PersistenceBootstrap.consumesPersistentHistory(
+            for: .local(storeURL: privateURL)
+        ))
+        XCTAssertTrue(PersistenceBootstrap.consumesPersistentHistory(
+            for: .managed(
+                privateURL: privateURL,
+                sharedURL: temporaryURL("shared-history.sqlite"),
+                containerIdentifier: "iCloud.com.example.shopping"
+            )
+        ))
+    }
+
     func testPermissionAndJournalFailuresRollbackWholeCommand() throws {
         let denied = try PersistenceController(
             configuration: .local(storeURL: temporaryURL("denied.sqlite")),

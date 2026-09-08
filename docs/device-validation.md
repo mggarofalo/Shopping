@@ -23,6 +23,21 @@ Small catalog captions initially failed the contrast threshold while fully visib
 
 Primary-screen control audits cover element detection, hit regions, descriptions and traits. Separate tests measure title, caption and quantity growth across four text sizes, exercise long names at accessibility XXXL, and run the full grocery-row audit with the visible remeasurement described above. SHOPPING-9 remains In Progress until physical checks are recorded.
 
+## SHOPPING-65 offline edit latency
+
+On September 8, an iPhone 16 Pro running iOS 27.0 beta found that saving an item quantity edit in Airplane Mode appeared to hang for approximately 15–20 seconds. The save eventually completed, and the new quantity was still present after force-quit and relaunch. The exact retained-Wi-Fi state and originating build identifier were not recorded.
+
+The local app configuration does not use CloudKit, so network unavailability should not make its SQLite save slow. The pre-fix lifecycle nevertheless started a persistent-history pass whenever the app returned to the foreground, including after closing Control Center. That pass could fetch history and refresh the main context while the editor synchronously waited on the serial writer. The fix removes history consumption and remote-change observation from local-only stores; managed private/shared CloudKit stores retain both. Editor updates now await the serial writer without blocking the main actor.
+
+Automated regression evidence covers two separate requirements:
+
+- A disk-backed composite edit completes in under one second and preserves its quantity and both note fields after the store is closed and reopened.
+- When the serial writer is deliberately unavailable, the main actor remains responsive and the queued edit completes durably after the writer becomes available.
+
+The foreground/history overlap is the strongest code-level explanation for the physical delay, but the original 15–20-second event was not captured with signposts, so it is not claimed as a proven root cause. Existing `Persistence command` and `Core Data save` signposts distinguish queue/history contention from SQLite save time if it recurs.
+
+Post-fix physical acceptance passed September 8 on an iPhone 16 Pro running iOS 27.0 beta with build 1.2.0 (5). In the requested Airplane Mode checks, including with Wi-Fi unavailable, item-edit dismissal felt immediate (observed under one second) and the updated values remained correct across app restarts. Reconnection produced no reported loss, duplicate need, or second blocking pause.
+
 ## Physical-device and live-sharing gates
 
 No physical devices were connected during this validation. Before release, verify on both household phones:
