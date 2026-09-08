@@ -89,6 +89,19 @@ final class PersistenceBootstrap: ObservableObject {
                 return PersistenceBootstrap(configuration: { throw error })
             }
         }
+#if DEBUG
+        if processInfo.environment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] == "1" {
+            let error = NSError(
+                domain: "ShoppingUITest",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The saved household grocery store could not be opened. Its data was left unchanged so you can retry safely."
+                ]
+            )
+            return PersistenceBootstrap(configuration: { throw error })
+        }
+#endif
         if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
             do {
                 let storeURL = try uiTestStoreURL(for: path)

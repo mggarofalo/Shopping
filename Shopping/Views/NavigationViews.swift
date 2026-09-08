@@ -165,29 +165,22 @@ struct GroceriesView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     if savedWhileFiltered {
-                        HStack {
-                            Text("Saved to groceries. Current filters hide this item.")
-                                .font(.subheadline)
-                            Spacer()
+                        ShoppingFeedbackBar(
+                            message: "Saved to groceries. Current filters hide this item."
+                        ) {
                             Button("Show all") { resetView(); savedWhileFiltered = false }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("shopping.grocery.showAll")
                         }
-                        .padding()
-                        .background(.bar)
                     }
                     if let removedOperationID {
-                        HStack {
-                            Text("Item removed")
-                            Spacer()
+                        ShoppingFeedbackBar(message: "Item removed") {
                             Button("Undo") { undo(removedOperationID) }
                                 .frame(minHeight: 44)
                                 .disabled(removedScope?.householdID != selection.householdID ||
                                     removedScope?.listID != selection.listID || canonicalList == nil)
                                 .accessibilityIdentifier("shopping.grocery.undoRemove")
                         }
-                        .padding()
-                        .background(.bar)
                     }
                 }
                 .accessibilityElement(children: .contain)
@@ -261,13 +254,20 @@ struct GroceriesView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(
-                emptyTitle,
-                systemImage: !hasActiveUncartedNeeds ? "cart" : "line.3.horizontal.decrease.circle")
-        } description: {
+        VStack(spacing: 16) {
+            Image(systemName: !hasActiveUncartedNeeds ? "cart" : "line.3.horizontal.decrease.circle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(emptyTitle)
+                .font(.title2.bold())
+                .shoppingMultilineText()
             Text(emptyDescription)
-        } actions: {
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .shoppingMultilineText()
+                .accessibilityIdentifier("shopping.emptyState.description")
             if !hasActiveUncartedNeeds {
                 Button("Add item") { presentAdd() }
                     .buttonStyle(.borderedProminent)
@@ -276,6 +276,7 @@ struct GroceriesView: View {
                 Button("Reset filters", action: resetView)
             }
         }
+        .padding()
         .accessibilityIdentifier("shopping.emptyState")
     }
 
@@ -1135,8 +1136,7 @@ struct RecentlyClearedView: View {
         .navigationTitle("Recently cleared")
         .safeAreaInset(edge: .bottom) {
             if let restoreMessage {
-                Text(restoreMessage).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
-                    .padding().background(.bar)
+                ShoppingFeedbackBar(message: restoreMessage)
             }
         }
         .alert("Couldn’t restore groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {

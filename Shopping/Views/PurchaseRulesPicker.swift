@@ -156,6 +156,7 @@ struct CategoryPills: View {
             Text("Category")
         } footer: {
             Text("Categories help filter groceries across all stores.")
+                .shoppingMultilineText()
         }
     }
 }

@@ -85,6 +85,7 @@ struct CartedGroceriesView: View {
                     .accessibilityIdentifier("shopping.carted.all")
                     .shoppingListRowInsets()
                 Text(scopeDescription).font(.footnote).foregroundStyle(.secondary)
+                    .shoppingMultilineText()
                     .shoppingListRowInsets()
             }
             if let storeID = filter.purchase.selectedStoreID {
@@ -158,18 +159,33 @@ struct CartedGroceriesView: View {
             List {
                 Section {
                     Text("Checkout removes only these captured items from the active list. Items changed after this confirmation opened will be skipped.")
+                        .shoppingMultilineText()
+                        .accessibilityIdentifier("shopping.checkout.explanation")
                         .shoppingListRowInsets()
                 }
                 Section("Items (\(draft.preview.rows.count))") {
                     ForEach(draft.preview.rows, id: \.needID) { row in
-                        HStack {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(row.title)
+                                    if row.oneTime {
+                                        Text("One-time").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                                if let quantity = row.quantity {
+                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
+                                }
+                            }
                             VStack(alignment: .leading) {
                                 Text(row.title)
-                                if row.oneTime { Text("One-time").font(.caption).foregroundStyle(.secondary) }
-                            }
-                            Spacer()
-                            if let quantity = row.quantity {
-                                Text("Quantity \(quantity)").foregroundStyle(.secondary)
+                                if row.oneTime {
+                                    Text("One-time").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let quantity = row.quantity {
+                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
+                                }
                             }
                         }
                         .accessibilityElement(children: .combine)
@@ -180,6 +196,7 @@ struct CartedGroceriesView: View {
                 if let clearErrorMessage {
                     Section("Couldn’t checkout") {
                         Text(clearErrorMessage).foregroundStyle(.red)
+                            .shoppingMultilineText()
                             .shoppingListRowInsets()
                         Button("Retry") { confirmCheckout(draft) }
                             .disabled(!selectionMatches(draft))
@@ -190,6 +207,7 @@ struct CartedGroceriesView: View {
                     Section {
                         Text("Return to the household and list where this preview was created to continue.")
                             .foregroundStyle(.secondary)
+                            .shoppingMultilineText()
                             .shoppingListRowInsets()
                     }
                 }
@@ -213,22 +231,15 @@ struct CartedGroceriesView: View {
 
     @ViewBuilder private var resultBar: some View {
         if let resultNotice {
-            HStack {
-                Text(resultNotice).font(.subheadline)
-                Spacer()
-            }
-            .padding().background(.bar)
+            ShoppingFeedbackBar(message: resultNotice)
         } else if let checkoutResult {
-            HStack {
-                Text(
-                    checkoutResult.isIndividualRemoval
-                        ? "Item removed"
-                        : checkoutResult.skipped == 0
-                        ? "Checked out \(checkoutResult.cleared) items"
-                        : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
-                )
-                .font(.subheadline)
-                Spacer()
+            ShoppingFeedbackBar(
+                message: checkoutResult.isIndividualRemoval
+                    ? "Item removed"
+                    : checkoutResult.skipped == 0
+                    ? "Checked out \(checkoutResult.cleared) items"
+                    : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
+            ) {
                 Button("Undo") { undo(checkoutResult) }
                     .frame(minHeight: 44)
                     .disabled(
@@ -237,7 +248,6 @@ struct CartedGroceriesView: View {
                     )
                     .accessibilityIdentifier("shopping.checkout.undo")
             }
-            .padding().background(.bar)
         }
     }
 

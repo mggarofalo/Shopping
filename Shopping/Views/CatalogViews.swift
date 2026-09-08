@@ -1032,12 +1032,16 @@ private struct CatalogEditorView: View {
                         .submitLabel(.done)
                         .onSubmit { nameIsFocused = false }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Item notes").font(.subheadline).fontWeight(.semibold)
+                        Text("Item notes")
+                            .font(.subheadline).fontWeight(.semibold)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.catalog.notesHeading")
                         TextField("Add reusable details", text: $values.notes, axis: .vertical)
                             .accessibilityIdentifier("shopping.catalog.notes")
                         Text("Reused whenever you add this item.")
                             .font(.footnote).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.catalog.notesDescription")
                     }
                 }
                 if !matches.isEmpty {
@@ -1058,6 +1062,7 @@ private struct CatalogEditorView: View {
                             Toggle("Create a distinct item", isOn: $allowingNameCollision)
                             Text("Use this for an intentional brand or size variant. Existing items stay separate.")
                                 .font(.footnote).foregroundStyle(.secondary)
+                                .shoppingMultilineText()
                         }
                     }
                 }
