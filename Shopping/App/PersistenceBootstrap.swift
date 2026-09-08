@@ -108,7 +108,10 @@ final class PersistenceBootstrap: ObservableObject {
         return PersistenceBootstrap()
     }
 
-    private static func uiTestStoreURL(for path: String) throws -> URL {
+    static func uiTestStoreURL(
+        for path: String,
+        applicationSupportDirectory: URL? = nil
+    ) throws -> URL {
         let requestedURL = URL(fileURLWithPath: path)
         if path.hasPrefix("/"), FileManager.default.isWritableFile(
             atPath: requestedURL.deletingLastPathComponent().path
@@ -116,12 +119,13 @@ final class PersistenceBootstrap: ObservableObject {
             return requestedURL
         }
         let fileName = requestedURL.lastPathComponent
-        let directory = try FileManager.default.url(
+        let supportDirectory = try applicationSupportDirectory ?? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        ).appendingPathComponent("UITestStores", isDirectory: true)
+        )
+        let directory = supportDirectory.appendingPathComponent("UITestStores", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         pruneUITestStores(in: directory, keeping: fileName)
         return directory.appendingPathComponent(fileName)
