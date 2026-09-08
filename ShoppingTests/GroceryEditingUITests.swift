@@ -359,6 +359,82 @@ final class GroceryEditingUITests: XCTestCase {
 }
 
 extension GroceryEditingUITests {
+    func testNotesAndInlineQuantityAdaptAtDefaultAndAccessibilityTextSizes() {
+        let contentSizes: [String?] = [nil, "UICTContentSizeCategoryAccessibilityXXXL"]
+        for contentSize in contentSizes {
+            let app = launchApp(contentSize: contentSize)
+            openAdd(in: app)
+            let name = app.textFields["shopping.grocery.name"]
+            name.typeText("\n")
+
+            let reusableNotes = app.textFields["shopping.grocery.catalogNotes"]
+            let currentNotes = app.textFields["shopping.grocery.purchaseNotes"]
+            XCTAssertTrue(reusableNotes.waitForExistence(timeout: 2))
+            XCTAssertEqual(reusableNotes.value as? String, "Saved for future needs")
+            XCTAssertGreaterThan(reusableNotes.frame.height, name.frame.height)
+            reveal(currentNotes, in: app)
+            XCTAssertEqual(currentNotes.value as? String, "Only for this need")
+            XCTAssertGreaterThan(currentNotes.frame.height, name.frame.height)
+
+            reusableNotes.tap()
+            reusableNotes.typeText("A longer reusable note that remains editable across future needs")
+            XCTAssertEqual(
+                reusableNotes.value as? String,
+                "A longer reusable note that remains editable across future needs"
+            )
+            setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
+            reveal(currentNotes, in: app)
+            XCTAssertEqual(currentNotes.value as? String, "Notes for this one-time need")
+            XCTAssertGreaterThan(currentNotes.frame.height, name.frame.height)
+            currentNotes.tap()
+            currentNotes.typeText("A longer temporary note that remains editable for this need")
+            XCTAssertEqual(
+                currentNotes.value as? String,
+                "A longer temporary note that remains editable for this need"
+            )
+            revealAbove(name, in: app)
+            name.tap()
+            name.typeText("\n")
+
+            let addQuantity = app.buttons["shopping.grocery.quantity.add"]
+            reveal(addQuantity, in: app)
+            addQuantity.tap()
+            let quantity = app.steppers["shopping.grocery.quantity"]
+            let clear = app.buttons["shopping.grocery.quantity.clear"]
+            XCTAssertTrue(quantity.waitForExistence(timeout: 2))
+            XCTAssertTrue(clear.exists)
+            XCTAssertGreaterThanOrEqual(clear.frame.width, 44 - 0.01)
+            XCTAssertGreaterThanOrEqual(clear.frame.height, 44 - 0.01)
+            XCTAssertLessThan(abs(clear.frame.midY - quantity.frame.midY), 22)
+            attachScreenshot(
+                named: "Two-line notes and inline quantity - \(contentSize ?? "default")",
+                app: app
+            )
+
+            app.buttons["shopping.grocery.cancel"].tap()
+            app.tabBars.buttons["Catalog"].tap()
+            app.buttons["shopping.catalog.add"].tap()
+            XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+            let catalogName = app.textFields["shopping.catalog.name"]
+            catalogName.typeText("\n")
+            let catalogNotes = app.textFields["shopping.catalog.notes"]
+            XCTAssertTrue(catalogNotes.waitForExistence(timeout: 2))
+            XCTAssertEqual(catalogNotes.value as? String, "Saved for future needs")
+            XCTAssertGreaterThan(catalogNotes.frame.height, catalogName.frame.height)
+            catalogNotes.tap()
+            catalogNotes.typeText("A longer catalog note that remains editable across future needs")
+            XCTAssertEqual(
+                catalogNotes.value as? String,
+                "A longer catalog note that remains editable across future needs"
+            )
+            attachScreenshot(
+                named: "Two-line catalog notes - \(contentSize ?? "default")",
+                app: app
+            )
+            app.terminate()
+        }
+    }
+
     func testQuantityStartsUnsetAndCanBeAddedThenCleared() {
         let app = launchApp()
         openAdd(in: app)
@@ -367,7 +443,10 @@ extension GroceryEditingUITests {
 
         app.buttons["shopping.grocery.quantity.add"].tap()
         XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
-        app.buttons["shopping.grocery.quantity.clear"].tap()
+        let clear = app.buttons["shopping.grocery.quantity.clear"]
+        XCTAssertGreaterThanOrEqual(clear.frame.width, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(clear.frame.height, 44 - 0.01)
+        clear.tap()
         XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.steppers["shopping.grocery.quantity"].exists)
     }

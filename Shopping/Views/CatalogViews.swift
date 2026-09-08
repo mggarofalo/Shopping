@@ -1036,12 +1036,13 @@ private struct CatalogEditorView: View {
                             .font(.subheadline).fontWeight(.semibold)
                             .shoppingMultilineText()
                             .accessibilityIdentifier("shopping.catalog.notesHeading")
-                        TextField("Add reusable details", text: $values.notes, axis: .vertical)
-                            .accessibilityIdentifier("shopping.catalog.notes")
-                        Text("Reused whenever you add this item.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .shoppingMultilineText()
-                            .accessibilityIdentifier("shopping.catalog.notesDescription")
+                        TextField(
+                            "Saved for future needs",
+                            text: $values.notes,
+                            axis: .vertical
+                        )
+                        .lineLimit(2...4)
+                        .accessibilityIdentifier("shopping.catalog.notes")
                     }
                 }
                 if !matches.isEmpty {

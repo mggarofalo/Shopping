@@ -213,12 +213,13 @@ struct GroceryEditorView: View {
                                 .font(.subheadline).fontWeight(.semibold)
                                 .shoppingMultilineText()
                                 .accessibilityIdentifier("shopping.grocery.catalogNotesHeading")
-                            TextField("Add reusable details", text: $catalogNotes, axis: .vertical)
-                                .accessibilityIdentifier("shopping.grocery.catalogNotes")
-                            Text("Reused whenever you add this item.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                                .shoppingMultilineText()
-                                .accessibilityIdentifier("shopping.grocery.catalogNotesDescription")
+                            TextField(
+                                "Saved for future needs",
+                                text: $catalogNotes,
+                                axis: .vertical
+                            )
+                            .lineLimit(2...4)
+                            .accessibilityIdentifier("shopping.grocery.catalogNotes")
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
@@ -226,12 +227,13 @@ struct GroceryEditorView: View {
                             .font(.subheadline).fontWeight(.semibold)
                             .shoppingMultilineText()
                             .accessibilityIdentifier("shopping.grocery.purchaseNotesHeading")
-                        TextField("Add notes for this item", text: $purchaseNotes, axis: .vertical)
-                            .accessibilityIdentifier("shopping.grocery.purchaseNotes")
-                        Text(remembered ? "Only for this item on the current list." : "Only for this item.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .shoppingMultilineText()
-                            .accessibilityIdentifier("shopping.grocery.purchaseNotesDescription")
+                        TextField(
+                            remembered ? "Only for this need" : "Notes for this one-time need",
+                            text: $purchaseNotes,
+                            axis: .vertical
+                        )
+                        .lineLimit(2...4)
+                        .accessibilityIdentifier("shopping.grocery.purchaseNotes")
                     }
                 }
                 if isEditing, !remembered {
@@ -239,20 +241,27 @@ struct GroceryEditorView: View {
                 }
                 Section {
                     if let quantity {
-                        Stepper(
-                            value: Binding(
-                                get: { self.quantity ?? 1 },
-                                set: { self.quantity = $0 }
-                            ),
-                            in: 1...99
-                        ) {
-                            LabeledContent("Quantity") { Text("\(quantity)") }
-                        }
-                        .accessibilityValue("\(quantity)")
-                        .accessibilityIdentifier("shopping.grocery.quantity")
-                        Button("Clear quantity") { self.quantity = nil }
-                            .frame(minHeight: 44)
+                        HStack(spacing: 8) {
+                            Stepper(
+                                value: Binding(
+                                    get: { self.quantity ?? 1 },
+                                    set: { self.quantity = $0 }
+                                ),
+                                in: 1...99
+                            ) {
+                                LabeledContent("Quantity") { Text("\(quantity)") }
+                            }
+                            .accessibilityValue("\(quantity)")
+                            .accessibilityIdentifier("shopping.grocery.quantity")
+                            Button { self.quantity = nil } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Clear quantity")
                             .accessibilityIdentifier("shopping.grocery.quantity.clear")
+                        }
                     } else {
                         Button("Add quantity") { quantity = 1 }
                             .frame(minHeight: 44)

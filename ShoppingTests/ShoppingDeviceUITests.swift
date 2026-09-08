@@ -219,14 +219,14 @@ final class ShoppingDeviceUITests: XCTestCase {
         granola.tap()
         let reusableHeading = app.staticTexts["shopping.grocery.catalogNotesHeading"]
         let temporaryHeading = app.staticTexts["shopping.grocery.purchaseNotesHeading"]
-        let reusableDescription = app.staticTexts["shopping.grocery.catalogNotesDescription"]
-        let temporaryDescription = app.staticTexts["shopping.grocery.purchaseNotesDescription"]
-        XCTAssertTrue(reusableDescription.waitForExistence(timeout: 3))
-        reveal(temporaryDescription, in: app)
+        let reusableNotes = app.textFields["shopping.grocery.catalogNotes"]
+        let temporaryNotes = app.textFields["shopping.grocery.purchaseNotes"]
+        XCTAssertTrue(reusableNotes.waitForExistence(timeout: 3))
+        reveal(temporaryNotes, in: app)
         XCTAssertGreaterThan(reusableHeading.frame.height, 0)
         XCTAssertGreaterThan(temporaryHeading.frame.height, 0)
-        XCTAssertGreaterThan(reusableDescription.frame.height, 0)
-        XCTAssertGreaterThan(temporaryDescription.frame.height, 0)
+        XCTAssertGreaterThanOrEqual(reusableNotes.frame.height, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(temporaryNotes.frame.height, 44 - 0.01)
         screenshot("Item editor supporting text at largest text", app: app)
         try audit(app, types: [.textClipped, .sufficientElementDescription])
         app.buttons["shopping.grocery.cancel"].tap()
