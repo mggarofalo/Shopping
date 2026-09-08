@@ -190,6 +190,7 @@ struct GroceryEditorView: View {
                             Text("The selected item’s name and saved Catalog details are read-only.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                                .shoppingMultilineText()
                         }
                         .accessibilityIdentifier("shopping.grocery.promotion.selectedName")
                     } else {
@@ -204,25 +205,33 @@ struct GroceryEditorView: View {
                         Text("This item won’t be remembered in Catalog.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .shoppingMultilineText()
                     }
                     if remembered || (isPromotingOneTime && promotionChoice == .create) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Item notes").font(.subheadline).fontWeight(.semibold)
+                            Text("Item notes")
+                                .font(.subheadline).fontWeight(.semibold)
+                                .shoppingMultilineText()
+                                .accessibilityIdentifier("shopping.grocery.catalogNotesHeading")
                             TextField("Add reusable details", text: $catalogNotes, axis: .vertical)
                                 .accessibilityIdentifier("shopping.grocery.catalogNotes")
                             Text("Reused whenever you add this item.")
                                 .font(.footnote).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .shoppingMultilineText()
+                                .accessibilityIdentifier("shopping.grocery.catalogNotesDescription")
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text(remembered ? "Temporary notes" : "Notes")
                             .font(.subheadline).fontWeight(.semibold)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.grocery.purchaseNotesHeading")
                         TextField("Add notes for this item", text: $purchaseNotes, axis: .vertical)
                             .accessibilityIdentifier("shopping.grocery.purchaseNotes")
                         Text(remembered ? "Only for this item on the current list." : "Only for this item.")
                             .font(.footnote).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.grocery.purchaseNotesDescription")
                     }
                 }
                 if isEditing, !remembered {
@@ -268,10 +277,14 @@ struct GroceryEditorView: View {
                 if !scopeValid {
                     Text(
                         "This item or household is no longer available. Your draft has been kept; close it and try again."
-                    ).foregroundStyle(.secondary)
+                    )
+                    .foregroundStyle(.secondary)
+                    .shoppingMultilineText()
                 }
                 if let error {
-                    Text(message(for: error)).foregroundStyle(.red)
+                    Text(message(for: error))
+                        .foregroundStyle(.red)
+                        .shoppingMultilineText()
                     if case NeedServiceError.catalogNameCollision = error {
                         if isPromotingOneTime { collisionChoices }
                         Button("Create distinct item") {

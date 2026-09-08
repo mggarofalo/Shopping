@@ -192,6 +192,76 @@ final class ShoppingDeviceUITests: XCTestCase {
         }
     }
 
+    func testMultilineCheckoutEditorAndSettingsAtLargestText() throws {
+        let app = launch(fixture: "populated", largestText: true)
+        let carted = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "In cart (1)")
+        ).firstMatch
+        reveal(carted, in: app, towardTop: true)
+        carted.tap()
+        let checkout = app.buttons["shopping.checkout.start"]
+        XCTAssertTrue(checkout.waitForExistence(timeout: 3))
+        checkout.tap()
+
+        let explanation = app.staticTexts["shopping.checkout.explanation"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(explanation.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(explanation.frame.minY, app.navigationBars["Checkout?"].frame.maxY)
+        XCTAssertGreaterThanOrEqual(explanation.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(explanation.frame.maxX, app.frame.maxX)
+        screenshot("Checkout explanation at largest text", app: app)
+        try audit(app, types: [.textClipped, .sufficientElementDescription])
+
+        app.buttons["shopping.checkout.cancel"].tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
+        let granola = app.buttons["Edit Granola"]
+        reveal(granola, in: app)
+        granola.tap()
+        let reusableHeading = app.staticTexts["shopping.grocery.catalogNotesHeading"]
+        let temporaryHeading = app.staticTexts["shopping.grocery.purchaseNotesHeading"]
+        let reusableDescription = app.staticTexts["shopping.grocery.catalogNotesDescription"]
+        let temporaryDescription = app.staticTexts["shopping.grocery.purchaseNotesDescription"]
+        XCTAssertTrue(reusableDescription.waitForExistence(timeout: 3))
+        reveal(temporaryDescription, in: app)
+        XCTAssertGreaterThan(reusableHeading.frame.height, 0)
+        XCTAssertGreaterThan(temporaryHeading.frame.height, 0)
+        XCTAssertGreaterThan(reusableDescription.frame.height, 0)
+        XCTAssertGreaterThan(temporaryDescription.frame.height, 0)
+        screenshot("Item editor supporting text at largest text", app: app)
+        try audit(app, types: [.textClipped, .sufficientElementDescription])
+        app.buttons["shopping.grocery.cancel"].tap()
+
+        app.tabBars.buttons["Settings"].tap()
+        let householdDescription = app.staticTexts["shopping.settings.householdDescription"]
+        reveal(householdDescription, in: app)
+        XCTAssertGreaterThan(householdDescription.frame.height, 44)
+        screenshot("Settings multiline text at largest text", app: app)
+    }
+
+    func testEmptyAndPersistenceErrorCopyAtLargestText() throws {
+        let emptyApp = launch(fixture: "empty", largestText: true)
+        // Assert the user-facing copy as well as its layout; the empty-state
+        // container keeps a separate identifier for existing launch tests.
+        let emptyDescription = emptyApp.staticTexts["Add an item to get started."]
+        XCTAssertTrue(emptyDescription.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(emptyDescription.frame.height, 0)
+        screenshot("Empty state at largest text", app: emptyApp)
+        emptyApp.terminate()
+
+        let errorApp = XCUIApplication()
+        errorApp.launchEnvironment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] = "1"
+        errorApp.launchArguments = [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        errorApp.launch()
+        let errorState = errorApp.staticTexts["Groceries unavailable"]
+        XCTAssertTrue(errorState.waitForExistence(timeout: 5))
+        XCTAssertTrue(errorApp.staticTexts["Your saved data was left unchanged. Try opening it again."].exists)
+        assertTouchSize(errorApp.buttons["shopping.persistence.retry"])
+        screenshot("Persistence error at largest text", app: errorApp)
+        try audit(errorApp, types: [.textClipped, .sufficientElementDescription])
+    }
+
     private struct EdgeAuditCandidate: Equatable {
         let type: XCUIAccessibilityAuditType
         let identifier: String

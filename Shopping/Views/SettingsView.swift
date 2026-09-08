@@ -9,6 +9,51 @@ extension View {
     func shoppingListRowInsets() -> some View {
         listRowInsets(ShoppingListMetrics.rowInsets)
     }
+
+    func shoppingMultilineText() -> some View {
+        lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 2)
+    }
+}
+
+struct ShoppingFeedbackBar<Action: View>: View {
+    let message: String
+    private let action: Action
+
+    init(message: String, @ViewBuilder action: () -> Action) {
+        self.message = message
+        self.action = action()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                messageText
+                Spacer(minLength: 8)
+                action
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                messageText
+                action.frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding()
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var messageText: some View {
+        Text(message)
+            .font(.subheadline)
+            .shoppingMultilineText()
+    }
+}
+
+extension ShoppingFeedbackBar where Action == EmptyView {
+    init(message: String) {
+        self.init(message: message) { EmptyView() }
+    }
 }
 
 enum ManagementBatchCopy {
@@ -71,6 +116,8 @@ struct SettingsView: View {
                         .shoppingListRowInsets()
                     Text("Groceries are available in this app’s current local household store.")
                         .font(.footnote).foregroundStyle(.secondary)
+                        .shoppingMultilineText()
+                        .accessibilityIdentifier("shopping.settings.householdDescription")
                         .shoppingListRowInsets()
                 }
             }
