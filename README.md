@@ -20,13 +20,13 @@ The intended MVP baseline is SwiftUI with Core Data and `NSPersistentCloudKitCon
 
 The local architecture decision and persistence foundation are recorded in [ADR 0001](docs/architecture/0001-managed-household-persistence.md). The [domain model](docs/domain-model.md) records household metadata, catalog purchase filters, and current-need lifecycle contracts. The app opens a disk-backed local store with retryable error recovery. The delivered local interface includes Groceries, Catalog and Settings; household-scoped store filters; remembered and one-time grocery editing; carting, inline quantity, scoped clearing and durable recovery; catalog and category management; explicit one-time promotion; and a device-local System, Light or Dark appearance preference. Catalog rows open their staged editor across the full row. Grocery editors distinguish reusable item notes from instructions for the current grocery. The [UI direction](docs/ui-direction.md) records the native layout and accessibility choices. The [persistence guide](docs/persistence.md) describes the versioned model, store configuration and local history handling. [Preview fixtures and local context simulations](docs/previews.md) support interface work without a live cloud account. Simulator and local persistence evidence do not replace live two-phone proof in SHOPPING-30. Sharing is mandatory for release, but it is not yet proven. Enrollment work in SHOPPING-10 remains a gate for live CloudKit validation; local model, UI, and simulated-replica work can proceed before it.
 
-The available development environment has Xcode 26.6 (17F113) and an iOS 26.5 iPhone 17 Pro runtime. The app targets iOS 17. Local validation uses:
+The available development environment has Xcode 26.6 (17F113) and an iOS 26.5 iPhone 17 Pro runtime. The app targets iOS 17. Local validation uses the fast test plan:
 
 ```bash
-xcodebuild test -project Shopping.xcodeproj -scheme Shopping -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
+xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
 ```
 
-CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. See the CI workflow for its executable command.
+CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. [Continuous integration](docs/continuous-integration.md) records the test plans, triggers, commands, and timing baseline.
 
 ## Project guidance
 
