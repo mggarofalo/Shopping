@@ -6,11 +6,14 @@ struct GroceryEditorTarget: Identifiable {
     let scope: GroceryAddScope
     let need: Need?
     let needID: UUID?
+    let originalCategoryID: UUID?
 
     init(scope: GroceryAddScope, need: Need?) {
         self.scope = scope
         self.need = need
         self.needID = need?.id
+        self.originalCategoryID = need?.item?.category?.id
+            ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
     }
 }
 
@@ -25,6 +28,12 @@ private struct RemovalTarget {
 private enum OneTimePromotionChoice: String, CaseIterable {
     case create
     case existing
+}
+
+private enum GroceryEditorField: Hashable {
+    case name
+    case catalogNotes
+    case purchaseNotes
 }
 
 struct GroceryEditorView: View {
@@ -62,14 +71,14 @@ struct GroceryEditorView: View {
     @State private var showingStoreCreation = false
     @State private var didRequestInitialFocus = false
     @State private var isSaving = false
-    @FocusState private var nameIsFocused: Bool
+    @FocusState private var focusedField: GroceryEditorField?
     let target: GroceryEditorTarget
-    let onSaved: (UUID) -> Void
+    let onSaved: (UUID, UUID?) -> Void
     let onFocusNeed: (UUID) -> Void
     let onRemoved: (UUID, GroceryAddScope) -> Void
 
     init(
-        target: GroceryEditorTarget, onSaved: @escaping (UUID) -> Void, onFocusNeed: @escaping (UUID) -> Void,
+        target: GroceryEditorTarget, onSaved: @escaping (UUID, UUID?) -> Void, onFocusNeed: @escaping (UUID) -> Void,
         onRemoved: @escaping (UUID, GroceryAddScope) -> Void
     ) {
         self.target = target
@@ -238,9 +247,9 @@ struct GroceryEditorView: View {
                     } else {
                         TextField("Item name", text: $name)
                             .accessibilityIdentifier("shopping.grocery.name")
-                            .focused($nameIsFocused)
+                            .focused($focusedField, equals: .name)
                             .submitLabel(.done)
-                            .onSubmit { nameIsFocused = false }
+                            .onSubmit { focusedField = nil }
                     }
                     if !remembered && !isPromotingOneTime {
                         Text("This item won’t be remembered in Catalog.")
@@ -260,6 +269,7 @@ struct GroceryEditorView: View {
                                 axis: .vertical
                             )
                             .lineLimit(2...4)
+                            .focused($focusedField, equals: .catalogNotes)
                             .accessibilityIdentifier("shopping.grocery.catalogNotes")
                         }
                     }
@@ -274,6 +284,7 @@ struct GroceryEditorView: View {
                             axis: .vertical
                         )
                         .lineLimit(2...4)
+                        .focused($focusedField, equals: .purchaseNotes)
                         .accessibilityIdentifier("shopping.grocery.purchaseNotes")
                     }
                 }
@@ -358,6 +369,7 @@ struct GroceryEditorView: View {
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .disabled(isSaving)
             .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
@@ -378,6 +390,11 @@ struct GroceryEditorView: View {
                         .disabled(!canSave)
                         .accessibilityIdentifier("shopping.grocery.save")
                     }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
+                        .accessibilityIdentifier("shopping.grocery.keyboardDone")
                 }
             }
             .alert(
@@ -410,7 +427,7 @@ struct GroceryEditorView: View {
             .onAppear {
                 guard !isEditing, !didRequestInitialFocus else { return }
                 didRequestInitialFocus = true
-                DispatchQueue.main.async { nameIsFocused = true }
+                DispatchQueue.main.async { focusedField = .name }
             }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
             .onChange(of: promotionChoice) { _, _ in
@@ -656,7 +673,7 @@ struct GroceryEditorView: View {
                     quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
             }
             hapticFeedback.play(.success)
-            onSaved(savedID)
+            onSaved(savedID, categoryID)
             dismiss()
         } catch { self.error = error }
     }
@@ -685,6 +702,7 @@ struct GroceryEditorView: View {
         guard isPromotingOneTime, canSave, let service, let needID = target.needID,
               let householdID = target.scope.householdID, let listID = target.scope.listID else { return }
         do {
+            let savedCategoryID: UUID?
             switch promotionChoice {
             case .create:
                 let catalog = CatalogItemValues(
@@ -695,15 +713,17 @@ struct GroceryEditorView: View {
                     needID: needID, householdID: householdID, listID: listID,
                     catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
                 )
+                savedCategoryID = categoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
                 _ = try service.rememberOneTimeGrocery(
                     needID: needID, householdID: householdID, listID: listID,
                     existingItemID: item.id, need: values()
                 )
+                savedCategoryID = item.category?.id
             }
             hapticFeedback.play(.success)
-            onSaved(needID)
+            onSaved(needID, savedCategoryID)
             dismiss()
         } catch {
             self.error = error
@@ -774,7 +794,7 @@ struct GroceryEditorView: View {
                 renewCarted: renewCarted
             ) {
             case .added(let needID), .renewed(let needID):
-                onSaved(needID)
+                onSaved(needID, item.category?.id)
                 dismiss()
             case .focusExisting(let needID):
                 onFocusNeed(needID)
@@ -870,7 +890,7 @@ private struct GroceryEditorPreview: View {
                 scope: GroceryAddScope(
                     householdID: selection.householdID, listID: selection.listID, selectedStoreID: nil,
                     selectedStoreName: nil), need: nil),
-            onSaved: { _ in }, onFocusNeed: { _ in }, onRemoved: { _, _ in }
+            onSaved: { _, _ in }, onFocusNeed: { _ in }, onRemoved: { _, _ in }
         )
     }
 }

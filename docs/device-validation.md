@@ -103,3 +103,11 @@ A Debug device build from the SHOPPING-62 worktree was signed, installed, and in
 ## SHOPPING-64 editor controls
 
 The grocery and catalog editors now give empty reusable and temporary note fields two visible lines, allow longer input to expand without clipping, and place their scope guidance in placeholders that disappear as text is entered. When quantity is set, its clear action is inline with the 1–99 Stepper, has its own accessible label and 44-point target, and disappears when quantity is unset. Focused grocery-editor UI coverage exercises both default and accessibility text sizes; existing persistence and recovery suites continue to cover optional quantity and retained notes across save, relaunch, re-add, and recovery paths.
+
+## SHOPPING-6 interaction polish
+
+The All-store grocery view retains one compact, ungrouped urgency-then-name list; store-specific views retain their purchase-availability grouping. Editing a saved grocery's category keeps the draft in the editor until Save, then presents a short category-move acknowledgement, including when a category filter makes the row leave the view. Carting similarly presents a short “moved to In cart” acknowledgement after the row leaves. Both messages are posted as VoiceOver announcements. Their brief transition is disabled when Reduce Motion is active, while the existing system haptic setting continues to govern tactile feedback.
+
+Multiline notes in both grocery and catalog editors now dismiss interactively with the form and expose a keyboard Done action. Focused UI coverage exercises the filtered category move, both acknowledgements, the ungrouped All-store contract, and both editor Done controls. The September 7 hardware pass remains the physical VoiceOver and Reduce Motion evidence; the implementation does not claim a new signed device-automation run.
+
+On September 8, the prescribed iPhone 17 Pro simulator passed all 166 `ShoppingFast` tests, all 8 `ShoppingDevice` tests, the 11-test grocery-editing coverage (10 together plus the repaired suggestion flow in a final focused rerun), and the primary-screen appearance flow at default and Accessibility XXXL sizes in both light and dark appearances. The coverage gate passed at 42.40% whole-app line coverage and 96.27% deterministic-scope line coverage.
