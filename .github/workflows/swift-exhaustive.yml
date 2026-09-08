@@ -1,28 +1,36 @@
-name: Swift CI
+name: Swift exhaustive tests
 
 on:
+  schedule:
+    - cron: "0 7 * * *"
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Test suite to run
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - performance
   push:
     branches:
-      - main
-      - "milestone/**"
-  pull_request:
-    branches:
-      - main
       - "milestone/**"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.suite || 'full' }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build & Test
+  exhaustive:
+    name: Full UI or performance suite
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 60
+    env:
+      TEST_PLAN: ${{ github.event_name == 'workflow_dispatch' && inputs.suite == 'performance' && 'ShoppingPerformance' || 'ShoppingFull' }}
 
     steps:
       - uses: actions/checkout@v5
@@ -37,14 +45,14 @@ jobs:
           set -euo pipefail
           xcrun simctl list runtimes
           shopping_simulator_id="$(xcrun simctl create \
-            'Shopping CI iPhone 16 Pro' \
+            'Shopping exhaustive iPhone 16 Pro' \
             com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro \
             com.apple.CoreSimulator.SimRuntime.iOS-18-5)"
           xcrun simctl boot "$shopping_simulator_id"
           xcrun simctl bootstatus "$shopping_simulator_id" -b
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
 
-      - name: Build fast test products
+      - name: Build exhaustive test products
         run: |
           set -uo pipefail
           started_at="$(date +%s)"
@@ -52,17 +60,17 @@ jobs:
           xcodebuild build-for-testing \
             -project Shopping.xcodeproj \
             -scheme Shopping \
-            -testPlan ShoppingFast \
+            -testPlan "$TEST_PLAN" \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -quiet 2>&1 | tee FastBuild.log
+            -quiet 2>&1 | tee ExhaustiveBuild.log
           exit_code="${PIPESTATUS[0]}"
           set -e
           finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastBuildSeconds.txt
+          echo "$((finished_at - started_at))" > ExhaustiveBuildSeconds.txt
           exit "$exit_code"
 
-      - name: Run fast deterministic tests
+      - name: Run exhaustive tests
         run: |
           set -uo pipefail
           started_at="$(date +%s)"
@@ -70,50 +78,50 @@ jobs:
           xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
-            -testPlan ShoppingFast \
+            -testPlan "$TEST_PLAN" \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -resultBundlePath FastResults.xcresult \
-            -quiet 2>&1 | tee FastTest.log
+            -resultBundlePath ExhaustiveResults.xcresult \
+            -quiet 2>&1 | tee ExhaustiveTest.log
           exit_code="${PIPESTATUS[0]}"
           set -e
           finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastTestSeconds.txt
+          echo "$((finished_at - started_at))" > ExhaustiveTestSeconds.txt
           exit "$exit_code"
 
-      - name: Publish fast test summary
+      - name: Publish exhaustive test summary
         if: always()
         run: |
           .github/scripts/summarize-xcresult.sh \
-            "Fast deterministic tests" \
-            FastResults.xcresult \
-            FastBuild.log \
-            FastTest.log \
-            FastSummary.md \
-            FastSummary.json \
-            FastBuildSeconds.txt \
-            FastTestSeconds.txt
-          cat FastSummary.md >> "$GITHUB_STEP_SUMMARY"
+            "$TEST_PLAN" \
+            ExhaustiveResults.xcresult \
+            ExhaustiveBuild.log \
+            ExhaustiveTest.log \
+            ExhaustiveSummary.md \
+            ExhaustiveSummary.json \
+            ExhaustiveBuildSeconds.txt \
+            ExhaustiveTestSeconds.txt
+          cat ExhaustiveSummary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload fast summary
+      - name: Upload exhaustive summary
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: fast-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          name: exhaustive-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            FastSummary.md
-            FastSummary.json
+            ExhaustiveSummary.md
+            ExhaustiveSummary.json
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload fast failure results
+      - name: Upload exhaustive failure results
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: exhaustive-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            FastResults.xcresult
-            FastBuild.log
-            FastTest.log
+            ExhaustiveResults.xcresult
+            ExhaustiveBuild.log
+            ExhaustiveTest.log
           if-no-files-found: warn
           retention-days: 14
