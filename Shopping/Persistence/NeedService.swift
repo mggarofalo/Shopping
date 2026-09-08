@@ -225,7 +225,8 @@ private struct ValidatedCatalogItemValues {
     let anyStore: Bool
 }
 
-final class NeedService {
+// Core Data work and the JSON coders are accessed only from the serial writer context.
+final class NeedService: @unchecked Sendable {
     private static let unsetImportedID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     private let persistence: PersistenceController
     private let encoder = JSONEncoder()
@@ -1135,9 +1136,9 @@ final class NeedService {
         catalog: CatalogItemValues,
         need values: RememberedNeedValues,
         allowingCatalogNameCollision: Bool = false
-    ) throws {
+    ) async throws {
         try validate(needValues: values)
-        try write { context in
+        try await write { context in
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context
             )
@@ -1194,10 +1195,10 @@ final class NeedService {
         storeIDs: Set<UUID>,
         anyStore: Bool,
         need values: RememberedNeedValues
-    ) throws {
+    ) async throws {
         let title = try validatedName(title)
         try validate(needValues: values)
-        try write { context in
+        try await write { context in
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context
             )
@@ -2638,30 +2639,39 @@ final class NeedService {
         defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Persistence command", signpostID: commandSignpostID) }
         var result: Result<T, Error>!
         persistence.writer.performAndWait {
-            self.persistence.writer.reset()
-            result = Result {
-                do {
-                    let value = try body(self.persistence.writer)
-                    if self.persistence.writer.hasChanges {
-                        let saveSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
-                        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID)
-                        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID) }
-                        try self.persistence.prepareForSave(self.persistence.writer)
-                        try self.persistence.writer.save()
-                        if self.persistence.shareAssociationJournal != nil {
-                            NotificationCenter.default.post(
-                                name: PersistenceController.pendingShareAssociation,
-                                object: self.persistence
-                            )
-                        }
-                    }
-                    return value
-                } catch {
-                    self.persistence.writer.rollback()
-                    throw error
-                }
-            }
+            result = Result { try self.performWrite(body) }
         }
         return try result.get()
+    }
+
+    private func write<T>(_ body: @escaping (NSManagedObjectContext) throws -> T) async throws -> T {
+        let commandSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+        os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Persistence command", signpostID: commandSignpostID)
+        defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Persistence command", signpostID: commandSignpostID) }
+        return try await persistence.writer.perform { try self.performWrite(body) }
+    }
+
+    private func performWrite<T>(_ body: (NSManagedObjectContext) throws -> T) throws -> T {
+        persistence.writer.reset()
+        do {
+            let value = try body(persistence.writer)
+            if persistence.writer.hasChanges {
+                let saveSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
+                os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID)
+                defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID) }
+                try persistence.prepareForSave(persistence.writer)
+                try persistence.writer.save()
+                if persistence.shareAssociationJournal != nil {
+                    NotificationCenter.default.post(
+                        name: PersistenceController.pendingShareAssociation,
+                        object: persistence
+                    )
+                }
+            }
+            return value
+        } catch {
+            persistence.writer.rollback()
+            throw error
+        }
     }
 }

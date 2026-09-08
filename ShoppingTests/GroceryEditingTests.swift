@@ -3,7 +3,93 @@ import XCTest
 @testable import Shopping
 
 final class GroceryEditingTests: XCTestCase {
-    func testCreateRememberedGrocerySavesCatalogAndNeedTogetherThenCompositeEditPreservesCarted() throws {
+    func testLocalCompositeEditCompletesPromptlyAndSurvivesReopen() async throws {
+        let url = temporaryStoreURL()
+        var selection: (householdID: UUID, listID: UUID)!
+        var created: CreatedRememberedGrocery!
+        let elapsed: Duration
+        do {
+            let persistence = try PersistenceController(storeURL: url)
+            let service = NeedService(persistence: persistence)
+            selection = try service.createHousehold()
+            created = try service.createRememberedGrocery(
+                householdID: selection.householdID,
+                listID: selection.listID,
+                catalog: CatalogItemValues(
+                    name: "Oats", notes: "Old catalog note", categoryID: nil,
+                    anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(quantity: 1, purchaseNotes: "Old need note")
+            )
+
+            let clock = ContinuousClock()
+            let start = clock.now
+            try await service.saveRememberedGrocery(
+                needID: created.needID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                catalog: CatalogItemValues(
+                    name: "Oats", notes: "Steel cut", categoryID: nil,
+                    anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(quantity: 4, purchaseNotes: "Updated offline")
+            )
+            elapsed = start.duration(to: clock.now)
+        }
+
+        XCTAssertLessThan(elapsed, .seconds(1))
+        let reopened = try PersistenceController(storeURL: url)
+        let saved = try snapshot(created.needID, persistence: reopened)
+        XCTAssertEqual(saved.quantity, 4)
+        XCTAssertEqual(saved.notes, "Updated offline")
+        XCTAssertEqual(saved.itemNotes, "Steel cut")
+    }
+
+    func testCompositeEditYieldsMainActorWhileWriterQueueIsUnavailable() async throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let created = try service.createRememberedGrocery(
+            householdID: selection.householdID,
+            listID: selection.listID,
+            catalog: CatalogItemValues(
+                name: "Milk", notes: "", categoryID: nil, anyStore: true, storeIDs: []
+            )
+        )
+        let writerEntered = expectation(description: "Writer queue occupied")
+        let saveStarted = expectation(description: "Main-actor save started")
+        let mainActorAdvanced = expectation(description: "Main actor stayed responsive")
+        let releaseWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            persistence.writer.performAndWait {
+                writerEntered.fulfill()
+                releaseWriter.wait()
+            }
+        }
+        await fulfillment(of: [writerEntered], timeout: 1)
+
+        let saveTask = Task { @MainActor in
+            saveStarted.fulfill()
+            try await service.saveRememberedGrocery(
+                needID: created.needID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                catalog: CatalogItemValues(
+                    name: "Milk", notes: "", categoryID: nil, anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(quantity: 2)
+            )
+        }
+        await fulfillment(of: [saveStarted], timeout: 1)
+        Task { @MainActor in mainActorAdvanced.fulfill() }
+        await fulfillment(of: [mainActorAdvanced], timeout: 0.5)
+        releaseWriter.signal()
+        try await saveTask.value
+
+        XCTAssertEqual(try snapshot(created.needID, persistence: persistence).quantity, 2)
+    }
+
+    func testCreateRememberedGrocerySavesCatalogAndNeedTogetherThenCompositeEditPreservesCarted() async throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -19,7 +105,7 @@ final class GroceryEditingTests: XCTestCase {
             need: RememberedNeedValues(quantity: 3, purchaseNotes: "Two bags", urgency: .urgent)
         )
         try service.setCarted(true, needID: created.needID)
-        try service.saveRememberedGrocery(
+        try await service.saveRememberedGrocery(
             needID: created.needID,
             householdID: selection.householdID,
             listID: selection.listID,
@@ -137,7 +223,7 @@ final class GroceryEditingTests: XCTestCase {
         XCTAssertEqual(try snapshot(created.needID, persistence: persistence).itemID, created.itemID)
     }
 
-    func testOneTimeCompositeEditChangesOwnValuesWithoutCreatingCatalogItem() throws {
+    func testOneTimeCompositeEditChangesOwnValuesWithoutCreatingCatalogItem() async throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -146,7 +232,7 @@ final class GroceryEditingTests: XCTestCase {
         let needID = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
         try service.setCarted(true, needID: needID)
 
-        try service.saveOneTimeGrocery(
+        try await service.saveOneTimeGrocery(
             needID: needID,
             householdID: selection.householdID,
             listID: selection.listID,
@@ -168,7 +254,7 @@ final class GroceryEditingTests: XCTestCase {
         XCTAssertTrue(try service.allCatalogItemIDs(householdID: selection.householdID).isEmpty)
     }
 
-    func testDeniedCompositeSaveRollsBackCatalogAndNeedTogether() throws {
+    func testDeniedCompositeSaveRollsBackCatalogAndNeedTogether() async throws {
         let url = temporaryStoreURL()
         var selection: (householdID: UUID, listID: UUID)!
         var created: CreatedRememberedGrocery!
@@ -194,22 +280,25 @@ final class GroceryEditingTests: XCTestCase {
             permissionPolicy: DenyPersistencePermissionPolicy()
         )
         let deniedService = NeedService(persistence: denied)
-        XCTAssertThrowsError(try deniedService.saveRememberedGrocery(
-            needID: created.needID,
-            householdID: selection.householdID,
-            listID: selection.listID,
-            catalog: CatalogItemValues(
-                name: "Espresso", notes: "Fine grind", categoryID: nil,
-                anyStore: true, storeIDs: []
-            ),
-            need: RememberedNeedValues(quantity: 5, purchaseNotes: "Changed", urgency: .normal)
-        ))
+        do {
+            try await deniedService.saveRememberedGrocery(
+                needID: created.needID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                catalog: CatalogItemValues(
+                    name: "Espresso", notes: "Fine grind", categoryID: nil,
+                    anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(quantity: 5, purchaseNotes: "Changed", urgency: .normal)
+            )
+            XCTFail("A denied composite save must throw")
+        } catch {}
 
         let reopened = try PersistenceController(storeURL: url)
         XCTAssertEqual(try snapshot(created.needID, persistence: reopened), before)
     }
 
-    func testCompositeEditRejectsForeignPurchaseRulesWithoutChangingNeed() throws {
+    func testCompositeEditRejectsForeignPurchaseRulesWithoutChangingNeed() async throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selected = try service.createHousehold()
@@ -222,20 +311,25 @@ final class GroceryEditingTests: XCTestCase {
         )
         let before = try snapshot(needID, persistence: persistence)
 
-        XCTAssertThrowsError(try service.saveOneTimeGrocery(
-            needID: needID,
-            householdID: selected.householdID,
-            listID: selected.listID,
-            title: "Bouquet",
-            categoryID: nil,
-            storeIDs: [foreignStore],
-            anyStore: false,
-            need: RememberedNeedValues(quantity: 2, purchaseNotes: "Red", urgency: .urgent)
-        )) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+        do {
+            try await service.saveOneTimeGrocery(
+                needID: needID,
+                householdID: selected.householdID,
+                listID: selected.listID,
+                title: "Bouquet",
+                categoryID: nil,
+                storeIDs: [foreignStore],
+                anyStore: false,
+                need: RememberedNeedValues(quantity: 2, purchaseNotes: "Red", urgency: .urgent)
+            )
+            XCTFail("Foreign purchase rules must be rejected")
+        } catch {
+            XCTAssertEqual(error as? NeedServiceError, .scopeChanged)
+        }
         XCTAssertEqual(try snapshot(needID, persistence: persistence), before)
     }
 
-    func testRememberedEditRejectsZeroAndDuplicateCatalogIdentityWithoutMutation() throws {
+    func testRememberedEditRejectsZeroAndDuplicateCatalogIdentityWithoutMutation() async throws {
         for malformedIdentity in ["zero", "duplicate"] {
             let persistence = try makePersistence()
             let service = NeedService(persistence: persistence)
@@ -253,21 +347,26 @@ final class GroceryEditingTests: XCTestCase {
             }
             let before = try snapshot(needID, persistence: persistence)
 
-            XCTAssertThrowsError(try service.saveRememberedGrocery(
-                needID: needID,
-                householdID: selection.householdID,
-                listID: selection.listID,
-                catalog: CatalogItemValues(
-                    name: "Changed", notes: "Changed", categoryID: nil,
-                    anyStore: true, storeIDs: []
-                ),
-                need: RememberedNeedValues(quantity: 4, purchaseNotes: "Changed", urgency: .urgent)
-            )) { XCTAssertEqual($0 as? NeedServiceError, .invalidCatalogIdentity) }
+            do {
+                try await service.saveRememberedGrocery(
+                    needID: needID,
+                    householdID: selection.householdID,
+                    listID: selection.listID,
+                    catalog: CatalogItemValues(
+                        name: "Changed", notes: "Changed", categoryID: nil,
+                        anyStore: true, storeIDs: []
+                    ),
+                    need: RememberedNeedValues(quantity: 4, purchaseNotes: "Changed", urgency: .urgent)
+                )
+                XCTFail("Malformed catalog identity must be rejected")
+            } catch {
+                XCTAssertEqual(error as? NeedServiceError, .invalidCatalogIdentity)
+            }
             XCTAssertEqual(try snapshot(needID, persistence: persistence), before)
         }
     }
 
-    func testRevisionExhaustionRejectsEditAndRemovalWithoutPartialRecoveryData() throws {
+    func testRevisionExhaustionRejectsEditAndRemovalWithoutPartialRecoveryData() async throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -276,16 +375,21 @@ final class GroceryEditingTests: XCTestCase {
         )
         try setRevision(Int64.max, needID: needID, persistence: persistence)
         let beforeEdit = try snapshot(needID, persistence: persistence)
-        XCTAssertThrowsError(try service.saveOneTimeGrocery(
-            needID: needID,
-            householdID: selection.householdID,
-            listID: selection.listID,
-            title: "Changed",
-            categoryID: nil,
-            storeIDs: [],
-            anyStore: true,
-            need: RememberedNeedValues(quantity: 2)
-        )) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+        do {
+            try await service.saveOneTimeGrocery(
+                needID: needID,
+                householdID: selection.householdID,
+                listID: selection.listID,
+                title: "Changed",
+                categoryID: nil,
+                storeIDs: [],
+                anyStore: true,
+                need: RememberedNeedValues(quantity: 2)
+            )
+            XCTFail("Revision exhaustion must reject the edit")
+        } catch {
+            XCTAssertEqual(error as? NeedServiceError, .scopeChanged)
+        }
         XCTAssertEqual(try snapshot(needID, persistence: persistence), beforeEdit)
 
         try setRevision(Int64.max - 1, needID: needID, persistence: persistence)
