@@ -120,6 +120,127 @@ struct CatalogFilterUnitTests {
         #expect(sanitized.carted == true)
         #expect(sanitized.urgency == NeedUrgency.urgent.rawValue)
     }
+
+    @Test("Suggestion normalization folds case, spacing, width, and diacritics")
+    func suggestionNormalization() {
+        #expect(CatalogProjection.normalizedName("  CAFÉ\t au   lait  ") == "cafe au lait")
+        #expect(CatalogProjection.normalizedName("Ｍｉｌｋ") == "milk")
+        #expect(CatalogSuggestionPurchaseSummary.text(
+            anyStore: true, savedStoreLabels: ["Costco"]
+        ) == "Any store · Also: Costco")
+        #expect(CatalogSuggestionPurchaseSummary.text(
+            anyStore: true, savedStoreLabels: ["Publix"]
+        ) == "Any store · Also: Publix")
+        #expect(CatalogSuggestionPurchaseSummary.text(
+            anyStore: false, savedStoreLabels: [], hasSavedStores: false
+        ) == "Any store")
+    }
+
+    @Test("Suggestions rank exact, prefix, substring, then fuzzy matches")
+    func suggestionRankingAndExamples() {
+        let candidates = [
+            candidate(1, "Whole milk"),
+            candidate(2, "Milk chocolate"),
+            candidate(3, "Malk"),
+            candidate(4, "Milk"),
+            candidate(5, "Silk")
+        ]
+
+        let matches = CatalogSuggestionMatcher.suggestions(for: "milk", candidates: candidates)
+        #expect(matches.map(\.candidate.name) == ["Milk", "Milk chocolate", "Whole milk", "Malk"])
+        #expect(matches.map(\.matchKind) == [.exact, .prefix, .substring, .fuzzy])
+        #expect(CatalogSuggestionMatcher.suggestions(
+            for: "banan",
+            candidates: [candidate(6, "Bananas")]
+        ).map(\.candidate.name) == ["Bananas"])
+        #expect(CatalogSuggestionMatcher.suggestions(
+            for: "bananna",
+            candidates: [candidate(7, "Banana"), candidate(8, "Orange")]
+        ).map(\.candidate.name) == ["Banana"])
+    }
+
+    @Test("Short and empty queries do not perform fuzzy matching")
+    func suggestionQueryBoundaries() {
+        let candidates = [candidate(1, "Milk")]
+        #expect(CatalogSuggestionMatcher.suggestions(for: "   ", candidates: candidates).isEmpty)
+        #expect(CatalogSuggestionMatcher.suggestions(for: "mx", candidates: candidates).isEmpty)
+        #expect(CatalogSuggestionMatcher.suggestions(for: "m", candidates: candidates).count == 1)
+        #expect(CatalogSuggestionMatcher.jaroWinklerSimilarity("milk", "malk") >=
+            CatalogSuggestionMatcher.fuzzyMinimumSimilarity)
+        #expect(CatalogSuggestionMatcher.jaroWinklerSimilarity("milk", "silk") <
+            CatalogSuggestionMatcher.fuzzyMinimumSimilarity)
+        #expect(abs(CatalogSuggestionMatcher.jaroWinklerSimilarity("MARTHA", "MARHTA") - 0.961) < 0.001)
+        #expect(abs(CatalogSuggestionMatcher.jaroWinklerSimilarity("DIXON", "DICKSONX") - 0.813) < 0.001)
+    }
+
+    @Test("Suggestion eligibility obeys store, filters, category, and archive state")
+    func suggestionEligibility() {
+        let costco = UUID()
+        let publix = UUID()
+        let pantry = UUID()
+        let candidates = [
+            candidate(1, "Any milk", categoryID: pantry),
+            candidate(2, "Costco milk", categoryID: pantry, stores: [costco], anyStore: false),
+            candidate(3, "Publix milk", categoryID: pantry, stores: [publix], anyStore: false),
+            candidate(4, "Produce milk", stores: [costco], anyStore: false),
+            candidate(5, "Archived milk", categoryID: pantry, isArchived: true),
+            CatalogSuggestionCandidate(
+                id: uuid(6), name: "Unresolved milk", categoryID: pantry,
+                anyStore: false, hasResolvedIdentity: false
+            )
+        ]
+
+        let matches = CatalogSuggestionMatcher.suggestions(
+            for: "milk",
+            candidates: candidates,
+            purchaseFilter: PurchaseFilter(
+                selectedStoreID: costco,
+                includedStoreIDs: [costco],
+                excludedStoreIDs: [publix]
+            ),
+            activeStoreIDs: [costco, publix],
+            categoryID: pantry
+        )
+
+        #expect(matches.map(\.candidate.name) == ["Costco milk"])
+    }
+
+    @Test("Suggestions reject duplicate identity, use stable ties, and cap results")
+    func suggestionIdentityOrderingAndLimit() {
+        let duplicateID = uuid(20)
+        var candidates = (1...7).map { candidate($0, "Milk \($0)") }
+        candidates.append(CatalogSuggestionCandidate(id: duplicateID, name: "Milk duplicate"))
+        candidates.append(CatalogSuggestionCandidate(id: duplicateID, name: "Milk duplicate later"))
+
+        let matches = CatalogSuggestionMatcher.suggestions(for: "milk", candidates: candidates)
+
+        #expect(matches.count == CatalogSuggestionMatcher.maximumResults)
+        #expect(Set(matches.map(\.candidate.id)).count == matches.count)
+        #expect(matches.allSatisfy { $0.candidate.id != duplicateID })
+        #expect(matches.map(\.candidate.name) == ["Milk 1", "Milk 2", "Milk 3", "Milk 4", "Milk 5"])
+    }
+
+    private func candidate(
+        _ number: Int,
+        _ name: String,
+        categoryID: UUID? = nil,
+        stores: Set<UUID> = [],
+        anyStore: Bool = true,
+        isArchived: Bool = false
+    ) -> CatalogSuggestionCandidate {
+        CatalogSuggestionCandidate(
+            id: uuid(number),
+            name: name,
+            categoryID: categoryID,
+            explicitStoreIDs: stores,
+            anyStore: anyStore,
+            isArchived: isArchived
+        )
+    }
+
+    private func uuid(_ number: Int) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", number))!
+    }
 }
 
 @MainActor

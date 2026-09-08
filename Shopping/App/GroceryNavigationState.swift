@@ -145,6 +145,33 @@ struct GroceryAddScope: Identifiable, Equatable {
     let listID: UUID?
     let selectedStoreID: UUID?
     let selectedStoreName: String?
+    let includedStoreIDs: Set<UUID>
+    let excludedStoreIDs: Set<UUID>
+    let categoryID: UUID?
+    let textFilter: String
+    let urgentOnly: Bool
+
+    init(
+        householdID: UUID?,
+        listID: UUID?,
+        selectedStoreID: UUID?,
+        selectedStoreName: String?,
+        includedStoreIDs: Set<UUID> = [],
+        excludedStoreIDs: Set<UUID> = [],
+        categoryID: UUID? = nil,
+        textFilter: String = "",
+        urgentOnly: Bool = false
+    ) {
+        self.householdID = householdID
+        self.listID = listID
+        self.selectedStoreID = selectedStoreID
+        self.selectedStoreName = selectedStoreName
+        self.includedStoreIDs = includedStoreIDs
+        self.excludedStoreIDs = excludedStoreIDs
+        self.categoryID = categoryID
+        self.textFilter = textFilter
+        self.urgentOnly = urgentOnly
+    }
 
     func addOneTime(
         title: String,

@@ -82,6 +82,29 @@ final class PerformanceRegressionTests: XCTestCase {
         }
     }
 
+    func testCatalogSuggestionMatcherLatency() throws {
+        let candidates = (0..<1_000).map { index in
+            CatalogSuggestionCandidate(
+                id: UUID(uuidString: String(
+                    format: "00000000-0000-0000-0000-%012d", index + 1
+                ))!,
+                name: String(format: "Catalog item %04d", index + 1)
+            )
+        }
+        let expectedID = candidates[998].id
+        XCTAssertEqual(
+            CatalogSuggestionMatcher.suggestions(
+                for: "Catalog item 0999", candidates: candidates
+            ).first?.candidate.id,
+            expectedID
+        )
+        try assertLatency(name: "catalog.suggestions", limit: 0.100) {
+            _ = CatalogSuggestionMatcher.suggestions(
+                for: "Catalog item 0999", candidates: candidates
+            )
+        }
+    }
+
     private func assertLatency(
         name: String,
         limit: TimeInterval,
