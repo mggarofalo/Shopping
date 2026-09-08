@@ -206,6 +206,12 @@ struct CatalogAddResult: Equatable {
     let missingCount: Int
 }
 
+enum CatalogSuggestionSelectionResult: Equatable {
+    case added(UUID)
+    case focusExisting(UUID)
+    case renewed(UUID)
+}
+
 struct RememberedNeedValues: Equatable {
     var quantity: Int64? = nil
     var purchaseNotes: String = ""
@@ -882,7 +888,13 @@ final class NeedService: @unchecked Sendable {
 
     func setCategory(itemID: UUID, categoryID: UUID?) throws {
         try write { context in
-            guard let item = try self.item(id: itemID, in: context) else {
+            let itemRequest = Item.fetchRequest()
+            itemRequest.relationshipKeyPathsForPrefetching = ["stores"]
+            let itemsByID = try self.fetchBatch(
+                ids: [itemID], request: itemRequest, id: \.id, in: context,
+                identityError: .invalidCatalogIdentity
+            )
+            guard let item = itemsByID[itemID] else {
                 throw NeedServiceError.itemNotFound
             }
             guard let itemHousehold = item.household else {
@@ -1389,7 +1401,7 @@ final class NeedService: @unchecked Sendable {
                 let value = PurchaseRuleValue(
                     explicitStoreIDs: storeIDs,
                     anyStore: item.anyStore,
-                    hasResolvedIdentity: item.anyStore || !storeIDs.isEmpty
+                    hasResolvedIdentity: true
                 )
                 return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item.name, query: filter.text) &&
@@ -1547,6 +1559,87 @@ final class NeedService: @unchecked Sendable {
             need.notes = notes.map(self.trimmedNotes) ?? ""
             need.urgency = urgency.rawValue
             return need.id
+        }
+    }
+
+    func applyCatalogSuggestion(
+        itemID: UUID,
+        itemRevision: Int64,
+        expectedNeedID: UUID?,
+        expectedNeedRevision: Int64?,
+        listID: UUID,
+        householdID: UUID,
+        purchaseFilter: PurchaseFilter,
+        categoryID: UUID?,
+        textFilter: String,
+        urgentOnly: Bool,
+        renewCarted: Bool
+    ) throws -> CatalogSuggestionSelectionResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            guard let list = try self.list(id: listID, in: context), list.household == household else {
+                throw NeedServiceError.scopeChanged
+            }
+            let selectedStore = try self.validatedCatalogAddStore(
+                id: purchaseFilter.selectedStoreID, household: household, in: context
+            )
+            guard let item = try self.item(id: itemID, in: context) else {
+                throw NeedServiceError.itemNotFound
+            }
+            try self.validate(item: item, belongsTo: household)
+            guard item.id != Self.unsetImportedID,
+                  item.revision == itemRevision else { throw NeedServiceError.scopeChanged }
+            guard !item.isArchived else { throw NeedServiceError.itemArchived }
+            let storeIDs = Set(item.stores?.map(\.id) ?? [])
+            let activeStoreIDs = try self.activeStoreIDs(household: household, in: context)
+            let purchaseRules = PurchaseRuleValue(
+                explicitStoreIDs: storeIDs,
+                anyStore: item.anyStore,
+                hasResolvedIdentity: true
+            )
+            guard self.catalogItem(item, isEligibleFor: selectedStore),
+                  purchaseFilter.matches(purchaseRules, activeStoreIDs: activeStoreIDs),
+                  CatalogProjection.textMatches(item.name, query: textFilter),
+                  categoryID == nil || item.category?.id == categoryID else {
+                throw NeedServiceError.scopeChanged
+            }
+
+            let active = try self.activeRememberedNeeds(itemID: itemID, listID: listID, in: context)
+            guard active.count < 2 else {
+                throw NeedServiceError.activeRememberedNeedDuplicates(
+                    try self.duplicateGroup(itemID: itemID, needs: active)
+                )
+            }
+            if urgentOnly,
+               active.first?.urgency != NeedUrgency.urgent.rawValue {
+                throw NeedServiceError.scopeChanged
+            }
+            if let need = active.first {
+                let displayedNeedIsCurrent = need.id == expectedNeedID &&
+                    need.revision == expectedNeedRevision
+                guard renewCarted, displayedNeedIsCurrent, need.carted else {
+                    return .focusExisting(need.id)
+                }
+                let (revision, overflow) = need.revision.addingReportingOverflow(1)
+                guard !overflow else { throw NeedServiceError.scopeChanged }
+                need.carted = false
+                need.urgency = NeedUrgency.normal.rawValue
+                need.clearOperationID = nil
+                need.revision = revision
+                return .renewed(need.id)
+            }
+
+            guard expectedNeedID == nil, expectedNeedRevision == nil else {
+                throw NeedServiceError.scopeChanged
+            }
+            let need = self.makeNeed(title: item.name, list: list, context: context)
+            need.kind = NeedKind.remembered.rawValue
+            need.item = item
+            need.notes = item.notes
+            need.urgency = NeedUrgency.normal.rawValue
+            return .added(need.id)
         }
     }
 
@@ -2109,8 +2202,7 @@ final class NeedService: @unchecked Sendable {
 
     private func catalogItem(_ item: Item, isEligibleFor selectedStore: Store?) -> Bool {
         let stores = item.stores ?? []
-        if item.anyStore { return true }
-        guard !stores.isEmpty else { return false }
+        if item.anyStore || stores.isEmpty { return true }
         guard let selectedStore else { return true }
         return stores.contains(selectedStore)
     }

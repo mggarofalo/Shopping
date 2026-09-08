@@ -22,10 +22,10 @@ The shared `Shopping` scheme exposes 5 plans:
 
 | Plan | Owner | Contents | Normal trigger |
 | --- | --- | --- | --- |
-| `ShoppingFast` | Required pull-request check | 160 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
-| `ShoppingCritical` | Semantic local check | 9 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
-| `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus UI, appearance, and simulator device tests | Every milestone push and nightly at 07:00 UTC |
-| `ShoppingPerformance` | Performance investigation | The 2 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
+| `ShoppingFast` | Required pull-request check | 166 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
+| `ShoppingCritical` | Semantic local check | 14 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
+| `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus 54 UI, appearance, and simulator device tests | Every milestone push and nightly at 07:00 UTC |
+| `ShoppingPerformance` | Performance investigation | The 3 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
 | `ShoppingDevice` | Physical-device validation | `ShoppingDeviceUITests` | Manual local run on a signed device |
 
 The full and performance plans do not retry failures. A failed UI test remains visible and actionable. The performance flow moved out of ordinary regression coverage because it is a long measurement route, not a product assertion. `ShoppingFull` retains all product, accessibility, appearance, recovery, and device-simulation workflows.

@@ -16,13 +16,13 @@ Swift Testing tags add a second, semantic view across source suites. The `.criti
 
 ## Source inventory
 
-The September 8 inventory covers all 212 maintained tests: 160 fast tests and 52 non-performance UI tests. The 4 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
+The September 8 inventory covers all 220 maintained tests: 166 fast tests and 54 non-performance UI tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
 
 | Source | Tests | Layer | Runtime dependency | Cost | Coverage owner and notes |
 | --- | ---: | --- | --- | --- | --- |
-| `CatalogFilterUnitTests.swift` | 6 | Unit | None or isolated UserDefaults | Fast | Swift Testing; filter and navigation state tagged unit and critical. |
+| `CatalogFilterUnitTests.swift` | 11 | Unit | None or isolated UserDefaults | Fast | Swift Testing; filter, suggestion matching, and navigation state tagged unit and critical. |
 | `CatalogFilterTests.swift` | 5 | Integration | In-memory and SQLite Core Data | Fast | Catalog metadata, identity, and relaunch behavior. |
-| `CatalogManagementTests.swift` | 17 | Integration | In-memory and SQLite Core Data | Fast | Catalog commands, stale batches, recovery, and rollback. |
+| `CatalogManagementTests.swift` | 18 | Integration | In-memory and SQLite Core Data | Fast | Catalog commands, stale suggestions and batches, recovery, and rollback. |
 | `CategoryManagementTests.swift` | 9 | Integration | In-memory Core Data | Fast | Category ordering, scope, deletion, and revision behavior. |
 | `ChecklistSafetyTests.swift` | 9 | Integration | In-memory Core Data | Fast | Captured checkout, stale changes, and invalid graph handling. |
 | `GroceryEditingTests.swift` | 16 | Integration | Core Data writer contexts | Fast | Atomic edits, permission failures, responsiveness, and recovery. |
@@ -40,12 +40,12 @@ The September 8 inventory covers all 212 maintained tests: 160 fast tests and 52
 | `CategoryManagementUITests.swift` | 6 | UI | Simulator app and isolated store | Slow | Full plan; native selection and accessibility workflows. |
 | `ChecklistUITests.swift` | 7 | UI | Simulator app and isolated store | Slow | Full plan; cart, clear, recovery, quantity, and accessibility. |
 | `ClearInterruptionUITests.swift` | 1 | UI | Simulator app and forced process exit | Slow | Full plan; committed clear recovery after abrupt termination. |
-| `GroceryEditingUITests.swift` | 8 | UI | Simulator app and isolated store | Slow | Full plan; editing, relaunch, Dynamic Type, and optional quantity. |
+| `GroceryEditingUITests.swift` | 10 | UI | Simulator app and isolated store | Slow | Full plan; editing, catalog suggestions, relaunch, Dynamic Type, and optional quantity. |
 | `OneTimePromotionUITests.swift` | 4 | UI | Simulator app and isolated store | Slow | Full plan; promotion choices, conflicts, relaunch, and sorting. |
 | `ShoppingAppearanceUITests.swift` | 3 | UI | Simulator app in 2 appearances | Very slow | Full plan; light, dark, and accessibility-size layouts. |
 | `ShoppingDeviceUITests.swift` | 8 | UI and device | Simulator or signed device | Slow | Full and device plans; accessibility, compact layout, and recovery copy. |
 | `ShoppingLaunchTests.swift` | 15 | UI | Simulator app and isolated store | Very slow | Full plan; broad launch, settings, filters, catalog, and store workflows. |
-| `PerformanceRegressionTests.swift` | 2 | Performance | Loaded in-memory service fixture | Measured | Performance plan only; service latency baselines. |
+| `PerformanceRegressionTests.swift` | 3 | Performance | Loaded in-memory service fixture | Measured | Performance plan only; service and catalog-suggestion latency baselines. |
 | `PerformanceFlowUITests.swift` | 2 | Performance | Loaded simulator fixture | Measured | Performance plan only; UI trace routes and metrics. |
 
 `LocalTwoContextHarness.swift` and `Fixtures/generate-shopping-v1-fixture.swift` are support code, not test suites.
@@ -68,6 +68,12 @@ The inventory found these boundaries:
 Every test creates a unique store. Unit tests use no store. Integration tests use in-memory stores or unique directories under the test host’s temporary directory. UI tests pass a requested path through `SHOPPING_UI_TEST_STORE_PATH`. The app keeps writable Simulator paths and maps paths from another device-runner sandbox into its own Application Support directory.
 
 Fixture launch is idempotent. A deliberate relaunch removes `SHOPPING_UI_TEST_FIXTURE`, reuses the resolved store path, and does not seed again. The pruning policy removes only complete app-owned SQLite groups and old history tokens. It never reads, writes, logs, or deletes the user’s normal Shopping store.
+
+## Catalog suggestion tuning
+
+Catalog suggestions normalize case, diacritics, character width, and repeated whitespace before matching. Exact matches rank ahead of prefixes, then substrings, then Jaro–Winkler fuzzy matches. Substring matching starts with 1 character; fuzzy matching starts with 3 characters and requires a score of at least 0.85. Results use deterministic name and identity tie-breaks and are capped at 5.
+
+The matcher runs locally and synchronously over the already scoped catalog snapshot, so typing cannot create persistence writes or publish a result for an older query. The performance fixture measures an exact result near the end of a 1,000-item catalog over 20 iterations. On the documented iPhone 17 Pro simulator it recorded p50 36.09 ms, p95 36.61 ms, and worst 36.68 ms against a 100 ms ceiling. Grocery UI tests own selection semantics, keyboard focus, store-scope narrowing, saved metadata, cancellation, and accessibility XXXL layout.
 
 ## Coverage baseline and gate
 

@@ -155,7 +155,12 @@ struct GroceriesView: View {
                 }
             }
             .sheet(item: $editor, onDismiss: completeSaveFeedback) { target in
-                GroceryEditorView(target: target, onSaved: saved, onFocusNeed: focus, onRemoved: removed)
+                GroceryEditorView(
+                    target: target,
+                    onSaved: saved,
+                    onFocusNeed: requestFocus,
+                    onRemoved: removed
+                )
                     .id(target.id)
             }
             .alert("Couldn’t load groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
@@ -421,7 +426,12 @@ struct GroceriesView: View {
             householdID: householdID,
             listID: canonicalList.id,
             selectedStoreID: selectedStore?.id,
-            selectedStoreName: selectedStore?.name
+            selectedStoreName: selectedStore?.name,
+            includedStoreIDs: navigation.includedStoreIDs,
+            excludedStoreIDs: navigation.excludedStoreIDs,
+            categoryID: navigation.categoryID,
+            textFilter: searchText,
+            urgentOnly: navigation.urgentOnly
         ), need: nil)
     }
 
@@ -433,6 +443,11 @@ struct GroceriesView: View {
             householdID: canonicalList.household?.id, listID: canonicalList.id,
             selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
         ), need: need)
+    }
+
+    private func requestFocus(_ needID: UUID) {
+        navigation.requestNeedFocus(needID)
+        focusRequestedNeed()
     }
 
     private func focusRequestedNeed() {

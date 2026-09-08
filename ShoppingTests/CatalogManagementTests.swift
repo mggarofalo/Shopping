@@ -622,6 +622,109 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertFalse(item.anyStore)
     }
 
+    func testCatalogSuggestionAtomicallyRevalidatesStatusAndItemRevision() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let itemID = try service.createItem(
+            name: "Coffee", notes: "Whole bean", householdID: selection.householdID
+        )
+        let changedID = try service.createItem(
+            name: "Changed", householdID: selection.householdID
+        )
+        let displayedItemRevision = try itemRevision(itemID, persistence: persistence)
+        let collaboratorNeedID = try service.addRememberedNeed(
+            itemID: itemID, listID: selection.listID, urgency: .urgent
+        )
+
+        XCTAssertEqual(try service.applyCatalogSuggestion(
+            itemID: itemID,
+            itemRevision: displayedItemRevision,
+            expectedNeedID: nil,
+            expectedNeedRevision: nil,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: false
+        ), .focusExisting(collaboratorNeedID))
+        XCTAssertEqual(
+            try needSnapshot(collaboratorNeedID, persistence: persistence).urgency,
+            NeedUrgency.urgent.rawValue
+        )
+
+        try service.setCarted(true, needID: collaboratorNeedID)
+        let carted = try needSnapshot(collaboratorNeedID, persistence: persistence)
+        XCTAssertEqual(try service.applyCatalogSuggestion(
+            itemID: itemID,
+            itemRevision: displayedItemRevision,
+            expectedNeedID: collaboratorNeedID,
+            expectedNeedRevision: carted.revision,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: true
+        ), .renewed(collaboratorNeedID))
+        let renewed = try needSnapshot(collaboratorNeedID, persistence: persistence)
+        XCTAssertFalse(renewed.carted)
+        XCTAssertEqual(renewed.urgency, NeedUrgency.normal.rawValue)
+
+        let freshID = try service.createItem(
+            name: "Fresh", notes: "Saved details", householdID: selection.householdID
+        )
+        let freshRevision = try itemRevision(freshID, persistence: persistence)
+        let added = try service.applyCatalogSuggestion(
+            itemID: freshID,
+            itemRevision: freshRevision,
+            expectedNeedID: nil,
+            expectedNeedRevision: nil,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: false
+        )
+        guard case .added(let addedNeedID) = added else {
+            return XCTFail("Expected a newly added need")
+        }
+        let addedNeed = try needSnapshot(addedNeedID, persistence: persistence)
+        XCTAssertEqual(addedNeed.notes, "Saved details")
+        XCTAssertEqual(addedNeed.urgency, NeedUrgency.normal.rawValue)
+
+        let changedRevision = try itemRevision(changedID, persistence: persistence)
+        try service.saveCatalogItem(
+            itemID: changedID,
+            householdID: selection.householdID,
+            values: CatalogItemValues(
+                name: "Changed later", notes: "", categoryID: nil,
+                anyStore: true, storeIDs: []
+            )
+        )
+        XCTAssertThrowsError(try service.applyCatalogSuggestion(
+            itemID: changedID,
+            itemRevision: changedRevision,
+            expectedNeedID: nil,
+            expectedNeedRevision: nil,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: false
+        ))
+        XCTAssertNil(try service.activeRememberedNeedID(
+            itemID: changedID, listID: selection.listID
+        ))
+    }
+
     func testCatalogBatchAddHandlesExistingCartedArchivedIneligibleAndChangedItems() throws {
         let persistence = try PersistenceController(storeURL: temporaryStoreURL())
         let service = NeedService(persistence: persistence)
@@ -632,7 +735,7 @@ final class CatalogManagementTests: XCTestCase {
         let existing = try service.createItem(name: "Existing", householdID: selection.householdID)
         let carted = try service.createItem(name: "Carted", householdID: selection.householdID)
         let ineligible = try service.createItem(name: "Elsewhere", storeIDs: [otherStore], householdID: selection.householdID, anyStore: false)
-        let unresolved = try service.createItem(name: "Unresolved", householdID: selection.householdID, anyStore: false)
+        let untagged = try service.createItem(name: "Untagged", householdID: selection.householdID, anyStore: false)
         let archived = try service.createItem(name: "Archived", householdID: selection.householdID)
         let changed = try service.createItem(name: "Changed", householdID: selection.householdID)
         let existingNeed = try service.addRememberedNeed(itemID: existing, listID: selection.listID, urgency: .urgent)
@@ -647,16 +750,16 @@ final class CatalogManagementTests: XCTestCase {
         )
         XCTAssertTrue(projected.contains(fresh))
         XCTAssertFalse(projected.contains(ineligible))
-        XCTAssertFalse(projected.contains(unresolved))
+        XCTAssertTrue(projected.contains(untagged))
         let preview = try service.captureCatalogAdd(
-            itemIDs: [fresh, existing, carted, ineligible, unresolved, archived, changed],
+            itemIDs: [fresh, existing, carted, ineligible, untagged, archived, changed],
             householdID: selection.householdID, listID: selection.listID,
             selectedStoreID: selectedStore
         )
-        XCTAssertEqual(preview.addCount, 2)
+        XCTAssertEqual(preview.addCount, 3)
         XCTAssertEqual(preview.existingCount, 1)
         XCTAssertEqual(preview.needAgainCount, 1)
-        XCTAssertEqual(preview.ineligibleCount, 2)
+        XCTAssertEqual(preview.ineligibleCount, 1)
         XCTAssertEqual(preview.archivedCount, 1)
 
         try service.saveCatalogItem(
@@ -664,16 +767,16 @@ final class CatalogManagementTests: XCTestCase {
             values: CatalogItemValues(name: "Changed later", notes: "", categoryID: nil, anyStore: true, storeIDs: [])
         )
         let result = try service.applyCatalogAdd(preview.token, renewCarted: true)
-        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.addedNeedIDs.count, 2)
         XCTAssertEqual(result.existingNeedIDs, [existingNeed])
         XCTAssertEqual(result.renewedNeedIDs, [cartedNeed])
-        XCTAssertEqual(result.ineligibleCount, 2)
+        XCTAssertEqual(result.ineligibleCount, 1)
         XCTAssertEqual(result.archivedCount, 1)
         XCTAssertEqual(result.changedCount, 1)
         XCTAssertFalse(try needSnapshot(cartedNeed, persistence: persistence).carted)
         XCTAssertEqual(try needSnapshot(cartedNeed, persistence: persistence).urgency, NeedUrgency.normal.rawValue)
         XCTAssertNil(try service.activeRememberedNeedID(itemID: changed, listID: selection.listID))
-        XCTAssertNil(try service.activeRememberedNeedID(itemID: unresolved, listID: selection.listID))
+        XCTAssertNotNil(try service.activeRememberedNeedID(itemID: untagged, listID: selection.listID))
     }
 
     func testBatchTokenCodablePreservesScopeRevisionsAndIntent() throws {
@@ -756,6 +859,15 @@ final class CatalogManagementTests: XCTestCase {
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", itemID as CVarArg)
             return try context.count(for: request) == 1
+        }
+    }
+
+    private func itemRevision(_ itemID: UUID, persistence: PersistenceController) throws -> Int64 {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", itemID as CVarArg)
+            return try XCTUnwrap(context.fetch(request).first).revision
         }
     }
 

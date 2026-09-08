@@ -40,6 +40,69 @@ final class GroceryEditingUITests: XCTestCase {
         attachScreenshot(named: "Remembered item editor", app: app)
     }
 
+    func testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails() {
+        let app = launchApp()
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        app.textFields["shopping.catalog.name"].typeText("Café au lait")
+        app.textFields["shopping.catalog.notes"].tap()
+        app.typeText("Oat milk preferred")
+        app.buttons["shopping.catalog.save"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        app.tabBars.buttons["Groceries"].tap()
+
+        openAdd(in: app)
+        enterName("cafe", in: app)
+        let suggestion = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.grocery.suggestion.", "Need again Café au lait"
+        )).firstMatch
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
+        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "cafe")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue((suggestion.value as? String)?.contains("Uncategorized · Any store · Saved in Catalog") == true)
+        app.buttons["shopping.grocery.cancel"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+
+        openAdd(in: app)
+        enterName("cafe", in: app)
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
+        suggestion.tap()
+        let row = groceryRow(named: "Café au lait", app: app)
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Oat milk preferred")
+        XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "0")
+    }
+
+    func testSuggestionContextRemainsReachableAtAccessibilityTextSize() {
+        let app = launchApp(
+            fixture: "populated",
+            contentSize: "UICTContentSizeCategoryAccessibilityXXXL"
+        )
+        openAdd(in: app)
+        enterName("banan", in: app)
+        let suggestion = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.grocery.activeMatch.", "Edit current Bananas"
+        )).firstMatch
+
+        for _ in 0..<4 where !suggestion.exists { app.swipeUp() }
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "banan")
+        app.textFields["shopping.grocery.name"].typeText("\n")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+        reveal(suggestion, in: app)
+        XCTAssertTrue(suggestion.isHittable)
+        XCTAssertTrue((suggestion.value as? String)?.contains("Produce · Any store · On grocery list") == true)
+        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "banan")
+        attachScreenshot(named: "Catalog suggestion at accessibility text size", app: app)
+    }
+
     func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {
         let app = launchApp(contentSize: "UICTContentSizeCategoryAccessibilityL")
         openAdd(in: app)
@@ -95,17 +158,26 @@ final class GroceryEditingUITests: XCTestCase {
     func testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts() {
         let app = launchApp(fixture: "populated")
         openAdd(in: app)
-        enterName("Granola", in: app)
+        enterName("Grnola", in: app)
         let match = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.grocery.activeMatch.", "Granola"
         )).firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 2))
+        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Grnola")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
         match.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
+        app.buttons["shopping.grocery.cancel"].tap()
+
+        openAdd(in: app)
+        enterName("Birthday candles", in: app)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.activeMatch."
+        )).count, 0, "One-time groceries must not supply Catalog suggestions")
         app.buttons["shopping.grocery.cancel"].tap()
 
         openAdd(in: app)
@@ -160,6 +232,26 @@ final class GroceryEditingUITests: XCTestCase {
         let app = launchApp(fixture: "populated")
         app.buttons["shopping.store.menu"].tap()
         app.buttons["Costco"].tap()
+
+        app.buttons["shopping.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 2))
+        setSwitch(app.switches["Urgent only"], on: true, app: app)
+        app.navigationBars["Filters"].buttons["Done"].tap()
+        openAdd(in: app)
+        enterName("Bananas", in: app)
+        XCTAssertFalse(app.buttons["Edit current Bananas"].exists)
+        app.buttons["shopping.grocery.cancel"].tap()
+        openAdd(in: app)
+        enterName("Grnola", in: app)
+        XCTAssertTrue(app.buttons["Edit current Granola"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.cancel"].tap()
+        app.buttons["Remove Urgent filter"].tap()
+
+        openAdd(in: app)
+        enterName("Chipotles", in: app)
+        XCTAssertFalse(app.buttons["Edit current Chipotles in adobo"].exists)
+        app.buttons["shopping.grocery.cancel"].tap()
+
         openAdd(in: app)
         enterName("Bananas", in: app)
         let match = app.buttons.matching(NSPredicate(
