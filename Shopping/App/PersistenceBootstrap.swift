@@ -245,17 +245,24 @@ final class PersistenceBootstrap: ObservableObject {
                     selection = (created.householdID, created.listID)
                 }
             }
-            let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
-                ?? FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingHistory")
-            let consumer = PersistentHistoryConsumer(
-                persistence: persistence,
-                checkpoints: FileHistoryCheckpointStore(directory: checkpointDirectory)
-            )
-            historyConsumer = consumer
+            if Self.consumesPersistentHistory(for: resolvedConfiguration) {
+                let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
+                    ?? FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingHistory")
+                historyConsumer = PersistentHistoryConsumer(
+                    persistence: persistence,
+                    checkpoints: FileHistoryCheckpointStore(directory: checkpointDirectory)
+                )
+                installRemoteObserver(for: persistence)
+            } else {
+                historyConsumer = nil
+                if let remoteObserver {
+                    NotificationCenter.default.removeObserver(remoteObserver)
+                    self.remoteObserver = nil
+                }
+            }
             if let journal = persistence.shareAssociationJournal {
                 associationWorker = ManagedShareAssociationWorker(persistence: persistence, journal: journal)
             }
-            installRemoteObserver(for: persistence)
             installAssociationObserver(for: persistence)
             state = .ready(ReadyState(
                 persistence: persistence,
@@ -279,6 +286,10 @@ final class PersistenceBootstrap: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.consumeHistory() }
         }
+    }
+
+    static func consumesPersistentHistory(for configuration: PersistenceConfiguration) -> Bool {
+        configuration.isManaged
     }
 
     private func installAssociationObserver(for persistence: PersistenceController) {

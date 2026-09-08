@@ -61,6 +61,7 @@ struct GroceryEditorView: View {
     @State private var showingCategoryCreation = false
     @State private var showingStoreCreation = false
     @State private var didRequestInitialFocus = false
+    @State private var isSaving = false
     @FocusState private var nameIsFocused: Bool
     let target: GroceryEditorTarget
     let onSaved: (UUID) -> Void
@@ -293,19 +294,26 @@ struct GroceryEditorView: View {
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
+            .disabled(isSaving)
             .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
+                    Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
+                        .accessibilityIdentifier("shopping.grocery.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(
-                        isPromotingOneTime ? "Remember" : "Save",
-                        systemImage: "checkmark",
-                        action: save
-                    )
-                    .disabled(!canSave)
-                    .accessibilityIdentifier("shopping.grocery.save")
+                    if isSaving {
+                        ProgressView().accessibilityLabel("Saving item")
+                    } else {
+                        Button(
+                            isPromotingOneTime ? "Remember" : "Save",
+                            systemImage: "checkmark",
+                            action: save
+                        )
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("shopping.grocery.save")
+                    }
                 }
             }
             .alert(
@@ -347,6 +355,7 @@ struct GroceryEditorView: View {
                 error = nil
             }
         }
+        .interactiveDismissDisabled(isSaving)
     }
 
     @ViewBuilder
@@ -507,7 +516,17 @@ struct GroceryEditorView: View {
     }
 
     private func save() {
-        defer { allowDuplicate = false }
+        guard canSave, !isSaving else { return }
+        isSaving = true
+        Task { await saveItem() }
+    }
+
+    @MainActor
+    private func saveItem() async {
+        defer {
+            allowDuplicate = false
+            isSaving = false
+        }
         guard canSave, let service, let householdID = target.scope.householdID,
             let listID = target.scope.listID
         else { return }
@@ -522,12 +541,12 @@ struct GroceryEditorView: View {
                 anyStore: anyStore, storeIDs: storeIDs)
             if let needID = target.needID {
                 if remembered {
-                    try service.saveRememberedGrocery(
+                    try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, catalog: catalog, need: values(),
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
-                    try service.saveOneTimeGrocery(
+                    try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
                         anyStore: anyStore, need: values())
