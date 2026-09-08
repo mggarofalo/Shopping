@@ -41,7 +41,9 @@ The first local `ShoppingFull` validation also exposed a Catalog editor lookup t
 
 On the documented iPhone 17 Pro simulator, a clean `ShoppingFast` build took 38 seconds and its 152 tests passed in 10 seconds. This is the local proxy for the required check and is well below the 10-minute deterministic-feedback target.
 
-The initial local `ShoppingFull` run built in 37 seconds and ran 201 tests in 31m 26s. It passed 200 tests and found the Catalog lookup described above. After the fix, a clean build took 42 seconds and all 201 tests passed in 32m 37s. Hosted pull-request timing is recorded on the issue and pull request because the pinned CI image cannot be reproduced locally.
+The initial local `ShoppingFull` run built in 37 seconds and ran 201 tests in 31m 26s. It passed 200 tests and found the Catalog lookup described above. After the fix, a clean build took 42 seconds and all 201 tests passed in 32m 37s. The hosted runner uses the pinned Xcode 16.4 image, which is not installed in the local environment.
+
+The first remediated [hosted pull-request run](https://github.com/mggarofalo/Shopping/actions/runs/34195500331) passed in 6m 2s on the pinned image. Simulator setup took 1m 55s, the summary recorded a 2m 42s build and a 46-second test step, and all 152 tests passed. This first sample is below both the 10-minute target and the 15-minute timeout. A statistically useful post-change p95 requires more hosted runs; the timeout bounds feedback while those samples accumulate.
 
 ## Commands
 
