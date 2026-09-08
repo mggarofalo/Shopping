@@ -36,7 +36,7 @@ Automated regression evidence covers two separate requirements:
 
 The foreground/history overlap is the strongest code-level explanation for the physical delay, but the original 15–20-second event was not captured with signposts, so it is not claimed as a proven root cause. Existing `Persistence command` and `Core Data save` signposts distinguish queue/history contention from SQLite save time if it recurs.
 
-Post-fix physical acceptance remains pending: repeat the edit in Airplane Mode, record tap-to-dismiss time (target under one second), force-quit and verify the value after relaunch, reconnect, and confirm that no edit is lost or duplicated.
+Post-fix physical acceptance passed September 8 on an iPhone 16 Pro running iOS 27.0 beta with build 1.2.0 (5). In the requested Airplane Mode checks, including with Wi-Fi unavailable, item-edit dismissal felt immediate (observed under one second) and the updated values remained correct across app restarts. Reconnection produced no reported loss, duplicate need, or second blocking pause.
 
 ## Physical-device and live-sharing gates
 
