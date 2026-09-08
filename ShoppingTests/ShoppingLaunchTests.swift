@@ -643,8 +643,12 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 2))
         replaceText(in: search, with: name)
         search.typeKey(.return, modifierFlags: [])
-        let closeKeyboard = app.buttons["Close"]
-        if closeKeyboard.waitForExistence(timeout: 1) {
+        let cancelSearch = app.buttons["Cancel"]
+        if cancelSearch.waitForExistence(timeout: 1) {
+            cancelSearch.tap()
+        } else {
+            let closeKeyboard = app.buttons["Close"]
+            XCTAssertTrue(closeKeyboard.waitForExistence(timeout: 1))
             closeKeyboard.tap()
         }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
