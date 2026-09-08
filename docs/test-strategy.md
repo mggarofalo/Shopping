@@ -16,7 +16,7 @@ Swift Testing tags add a second, semantic view across source suites. The `.criti
 
 ## Source inventory
 
-The September 8 inventory covers all 220 maintained tests: 166 fast tests and 54 non-performance UI tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
+The September 8 inventory covers all 221 maintained tests: 166 fast tests and 55 non-performance UI tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
 
 | Source | Tests | Layer | Runtime dependency | Cost | Coverage owner and notes |
 | --- | ---: | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ The September 8 inventory covers all 220 maintained tests: 166 fast tests and 54
 | `CategoryManagementUITests.swift` | 6 | UI | Simulator app and isolated store | Slow | Full plan; native selection and accessibility workflows. |
 | `ChecklistUITests.swift` | 7 | UI | Simulator app and isolated store | Slow | Full plan; cart, clear, recovery, quantity, and accessibility. |
 | `ClearInterruptionUITests.swift` | 1 | UI | Simulator app and forced process exit | Slow | Full plan; committed clear recovery after abrupt termination. |
-| `GroceryEditingUITests.swift` | 10 | UI | Simulator app and isolated store | Slow | Full plan; editing, catalog suggestions, relaunch, Dynamic Type, and optional quantity. |
+| `GroceryEditingUITests.swift` | 11 | UI | Simulator app and isolated store | Slow | Full plan; editing, filtered category/cart feedback, keyboard dismissal, catalog suggestions, relaunch, Dynamic Type, and optional quantity. |
 | `OneTimePromotionUITests.swift` | 4 | UI | Simulator app and isolated store | Slow | Full plan; promotion choices, conflicts, relaunch, and sorting. |
 | `ShoppingAppearanceUITests.swift` | 3 | UI | Simulator app in 2 appearances | Very slow | Full plan; light, dark, and accessibility-size layouts. |
 | `ShoppingDeviceUITests.swift` | 8 | UI and device | Simulator or signed device | Slow | Full and device plans; accessibility, compact layout, and recovery copy. |

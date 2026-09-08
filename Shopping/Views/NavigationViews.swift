@@ -46,6 +46,7 @@ enum NavigationFetchRequests {
 }
 
 struct GroceriesView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
@@ -65,7 +66,9 @@ struct GroceriesView: View {
     @State private var removedOperationID: UUID?
     @State private var removedScope: GroceryAddScope?
     @State private var savedWhileFiltered = false
-    @State private var pendingSavedNeed: (id: UUID, scope: GroceryAddScope, expectsUncarted: Bool)?
+    @State private var savedFeedbackMessage = "Saved to groceries. Current filters hide this item."
+    @State private var actionFeedbackMessage: String?
+    @State private var pendingSavedNeed: PendingSavedNeed?
     @State private var error: Error?
 
     private var activeStores: [Store] {
@@ -171,12 +174,16 @@ struct GroceriesView: View {
                 VStack(spacing: 8) {
                     if savedWhileFiltered {
                         ShoppingFeedbackBar(
-                            message: "Saved to groceries. Current filters hide this item."
+                            message: savedFeedbackMessage
                         ) {
                             Button("Show all") { resetView(); savedWhileFiltered = false }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("shopping.grocery.showAll")
                         }
+                    }
+                    if let actionFeedbackMessage {
+                        ShoppingFeedbackBar(message: actionFeedbackMessage)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     if let removedOperationID {
                         ShoppingFeedbackBar(message: "Item removed") {
@@ -190,6 +197,14 @@ struct GroceriesView: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("shopping.grocery.feedback")
+            }
+            .task(id: actionFeedbackMessage) {
+                guard let message = actionFeedbackMessage else { return }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled, actionFeedbackMessage == message else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                    actionFeedbackMessage = nil
+                }
             }
             .onAppear {
                 completeSaveFeedback()
@@ -458,9 +473,16 @@ struct GroceriesView: View {
         focus(need)
     }
 
-    private func saved(_ id: UUID) {
+    private func saved(_ id: UUID, categoryID: UUID?) {
         if let scope = editor?.scope {
-            pendingSavedNeed = (id, scope, editor?.need?.carted != true)
+            pendingSavedNeed = PendingSavedNeed(
+                id: id,
+                scope: scope,
+                expectsUncarted: editor?.need?.carted != true,
+                originalCategoryID: editor?.originalCategoryID,
+                savedCategoryID: categoryID,
+                wasEditing: editor?.needID != nil
+            )
         }
         editor = nil
         refreshProjection()
@@ -480,9 +502,22 @@ struct GroceriesView: View {
         // A writer save can precede its queued main-context merge. Retain the acknowledgement
         // until the renewed occurrence is actually visible to this context.
         guard !pending.expectsUncarted || !need.carted else { return }
+        guard !pending.wasEditing || categoryID(for: need) == pending.savedCategoryID else { return }
         pendingSavedNeed = nil
         refreshProjection()
         savedWhileFiltered = !need.carted && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
+        let name = need.item?.name ?? need.title
+        if pending.wasEditing, pending.originalCategoryID != pending.savedCategoryID {
+            let message = "\(name) moved to \(categoryName(for: need))."
+            if savedWhileFiltered {
+                savedFeedbackMessage = message + " Current filters hide this item."
+                announce(message)
+            } else {
+                showActionFeedback(message)
+            }
+        } else {
+            savedFeedbackMessage = "Saved to groceries. Current filters hide this item."
+        }
     }
 
     private func needAgain(_ need: Need) {
@@ -498,18 +533,32 @@ struct GroceriesView: View {
                 try service.uncartNeed(needID: need.id, householdID: householdID, listID: canonicalList.id)
                 id = need.id
             } else { return }
-            pendingSavedNeed = (id, GroceryAddScope(householdID: householdID, listID: canonicalList.id,
-                selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName), true)
+            pendingSavedNeed = PendingSavedNeed(
+                id: id,
+                scope: GroceryAddScope(householdID: householdID, listID: canonicalList.id,
+                    selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName),
+                expectsUncarted: true,
+                originalCategoryID: nil,
+                savedCategoryID: categoryID(for: need),
+                wasEditing: false
+            )
             refreshProjection()
             completeSaveFeedback()
         } catch { self.error = error }
     }
 
     private func uncarted(_ needID: UUID, householdID: UUID, listID: UUID) {
-        pendingSavedNeed = (needID, GroceryAddScope(
-            householdID: householdID, listID: listID,
-            selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
-        ), true)
+        pendingSavedNeed = PendingSavedNeed(
+            id: needID,
+            scope: GroceryAddScope(
+                householdID: householdID, listID: listID,
+                selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
+            ),
+            expectsUncarted: true,
+            originalCategoryID: nil,
+            savedCategoryID: nil,
+            wasEditing: false
+        )
         completeSaveFeedback()
     }
 
@@ -623,6 +672,7 @@ struct GroceriesView: View {
         guard let service, let canonicalList, let householdID = canonicalList.household?.id,
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
+        let name = need.item?.name ?? need.title
         do {
             try service.setNeedCarted(
                 needID: needID,
@@ -632,7 +682,29 @@ struct GroceriesView: View {
             )
             hapticFeedback.play(.lightImpact)
             refreshProjection()
+            if carted { showActionFeedback("\(name) moved to In cart.") }
         } catch { self.error = error }
+    }
+
+    private func categoryID(for need: Need) -> UUID? {
+        need.item?.category?.id ?? (need.kind == NeedKind.oneTime.rawValue ? need.oneTimeCategory?.id : nil)
+    }
+
+    private func categoryName(for need: Need) -> String {
+        guard let id = categoryID(for: need),
+              let category = activeCategories.first(where: { $0.id == id }) else { return "Uncategorized" }
+        return category.name
+    }
+
+    private func showActionFeedback(_ message: String) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            actionFeedbackMessage = message
+        }
+        announce(message)
+    }
+
+    private func announce(_ message: String) {
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 
     private func setQuantity(_ need: Need, _ quantity: Int64?) {
@@ -649,6 +721,15 @@ struct GroceriesView: View {
             )
         } catch { self.error = error }
     }
+}
+
+private struct PendingSavedNeed {
+    let id: UUID
+    let scope: GroceryAddScope
+    let expectsUncarted: Bool
+    let originalCategoryID: UUID?
+    let savedCategoryID: UUID?
+    let wasEditing: Bool
 }
 
 enum GroceryRowScope {

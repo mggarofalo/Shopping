@@ -90,17 +90,18 @@ final class GroceryEditingUITests: XCTestCase {
             "shopping.grocery.activeMatch.", "Edit current Bananas"
         )).firstMatch
 
-        for _ in 0..<4 where !suggestion.exists { app.swipeUp() }
-        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "banan")
-        app.textFields["shopping.grocery.name"].typeText("\n")
+        app.buttons["shopping.grocery.keyboardDone"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         reveal(suggestion, in: app)
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
         XCTAssertTrue(suggestion.isHittable)
         XCTAssertTrue((suggestion.value as? String)?.contains("Produce · Any store · On grocery list") == true)
-        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "banan")
         attachScreenshot(named: "Catalog suggestion at accessibility text size", app: app)
+        let name = app.textFields["shopping.grocery.name"]
+        revealAbove(name, in: app)
+        XCTAssertEqual(name.value as? String, "banan")
     }
 
     func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {
@@ -305,6 +306,41 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertFalse(showAll.exists)
     }
 
+    func testCategoryMoveAndCartFeedbackAcknowledgeRowsLeavingTheView() {
+        let app = launchApp(fixture: "populated")
+        XCTAssertFalse(app.staticTexts["Urgent · Pantry"].exists)
+
+        app.buttons["shopping.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 2))
+        app.buttons["Pantry"].tap()
+        app.buttons["Done"].tap()
+
+        let granola = groceryRow(named: "Granola", app: app)
+        reveal(granola, in: app)
+        granola.tap()
+        let produce = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@", "shopping.category.", "Produce"
+        )).firstMatch
+        reveal(produce, in: app)
+        produce.tap()
+        app.buttons["shopping.grocery.save"].tap()
+
+        let categoryFeedback = app.staticTexts[
+            "Granola moved to Produce. Current filters hide this item."
+        ]
+        XCTAssertTrue(categoryFeedback.waitForExistence(timeout: 3))
+        XCTAssertFalse(granola.exists)
+        app.buttons["shopping.grocery.showAll"].tap()
+        XCTAssertTrue(granola.waitForExistence(timeout: 3))
+
+        reveal(granola, in: app)
+        granola.swipeLeft()
+        app.buttons["In cart"].tap()
+        XCTAssertFalse(granola.exists)
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForExistence(timeout: 3))
+        attachScreenshot(named: "Category and cart acknowledgement", app: app)
+    }
+
     private func launchApp(fixture: String? = nil, contentSize: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
@@ -474,6 +510,10 @@ extension GroceryEditingUITests {
                 reusableNotes.value as? String,
                 "A longer reusable note that remains editable across future needs"
             )
+            let groceryKeyboardDone = app.buttons["shopping.grocery.keyboardDone"]
+            XCTAssertTrue(groceryKeyboardDone.waitForExistence(timeout: 2))
+            groceryKeyboardDone.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
             setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
             reveal(currentNotes, in: app)
             XCTAssertEqual(currentNotes.value as? String, "Notes for this one-time need")
@@ -519,6 +559,10 @@ extension GroceryEditingUITests {
                 catalogNotes.value as? String,
                 "A longer catalog note that remains editable across future needs"
             )
+            let catalogKeyboardDone = app.buttons["shopping.catalog.keyboardDone"]
+            XCTAssertTrue(catalogKeyboardDone.waitForExistence(timeout: 2))
+            catalogKeyboardDone.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
             attachScreenshot(
                 named: "Two-line catalog notes - \(contentSize ?? "default")",
                 app: app

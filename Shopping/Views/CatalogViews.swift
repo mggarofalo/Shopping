@@ -973,6 +973,7 @@ private struct CatalogFiltersView: View {
 }
 
 private struct CatalogEditorView: View {
+    private enum Field: Hashable { case name, notes }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -989,7 +990,7 @@ private struct CatalogEditorView: View {
     @State private var showingCategoryCreation = false
     @State private var showingStoreCreation = false
     @State private var requestedArchived = true
-    @FocusState private var nameIsFocused: Bool
+    @FocusState private var focusedField: Field?
     let session: CatalogEditSession
     let onSaved: () -> Void
 
@@ -1028,9 +1029,9 @@ private struct CatalogEditorView: View {
                 Section("Remembered item") {
                     TextField("Item name", text: $values.name)
                         .accessibilityIdentifier("shopping.catalog.name")
-                        .focused($nameIsFocused)
+                        .focused($focusedField, equals: .name)
                         .submitLabel(.done)
-                        .onSubmit { nameIsFocused = false }
+                        .onSubmit { focusedField = nil }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Item notes")
                             .font(.subheadline).fontWeight(.semibold)
@@ -1042,6 +1043,7 @@ private struct CatalogEditorView: View {
                             axis: .vertical
                         )
                         .lineLimit(2...4)
+                        .focused($focusedField, equals: .notes)
                         .accessibilityIdentifier("shopping.catalog.notes")
                     }
                 }
@@ -1052,7 +1054,7 @@ private struct CatalogEditorView: View {
                                 "Edit \(item.name)\(item.isArchived ? " (archived)" : "")",
                                 systemImage: "pencil"
                             ) {
-                                nameIsFocused = false
+                                focusedField = nil
                                 itemID = item.id
                                 values = item.catalogValues
                                 allowingNameCollision = false
@@ -1100,10 +1102,11 @@ private struct CatalogEditorView: View {
                 }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(itemID == nil ? "New catalog item" : "Edit catalog item")
             .onAppear {
                 guard session.itemID == nil else { return }
-                DispatchQueue.main.async { nameIsFocused = true }
+                DispatchQueue.main.async { focusedField = .name }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -1111,6 +1114,11 @@ private struct CatalogEditorView: View {
                     Button("Save", systemImage: "checkmark") { save() }
                         .disabled(!canSave)
                         .accessibilityIdentifier("shopping.catalog.save")
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
+                        .accessibilityIdentifier("shopping.catalog.keyboardDone")
                 }
             }
             .onChange(of: values.name) { _, _ in allowingNameCollision = false }
