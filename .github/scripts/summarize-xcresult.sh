@@ -71,7 +71,11 @@ printf '{"result":"No test result bundle"}\n' > "$json_path"
     printf '\n## Relevant log lines\n\n'
     for log_path in "$build_log" "$test_log"; do
         if [[ -f "$log_path" ]]; then
-            grep -E '(^|[[:space:]])(error:|fatal error:|.*failed|.*failure)' "$log_path" | tail -20 | sed 's/^/- /'
+            grep -E '(^|[[:space:]])(error:|fatal error:|.*failed|.*failure)' "$log_path" \
+                | tail -20 \
+                | sed 's/^/- /' \
+                || true
         fi
     done
 } > "$markdown_path"
+exit 0

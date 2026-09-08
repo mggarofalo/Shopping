@@ -86,6 +86,6 @@ CI uses `build-for-testing` once, then `test-without-building`. Each run publish
 - Pushes to `main` repeat only the fast check. The milestone commit already received exhaustive coverage, while the nightly run checks the current `main` branch again.
 - The nightly workflow runs `ShoppingFull`. A maintainer owns failures and fixes them before the next milestone integration.
 - Manual dispatch can run either the full or performance plan. Physical-device automation stays local because signing and device access are unavailable to GitHub-hosted runners.
-- Workflow-level concurrency cancels an older run when a newer commit targets the same workflow and branch.
+- Workflow-level concurrency cancels an older run when a newer commit targets the same workflow, branch, and exhaustive suite. Manual performance work does not cancel a full regression run.
 
 This split preserves all maintained tests. SHOPPING-61 owns later test taxonomy, Swift Testing migration, and code-coverage ratcheting.
