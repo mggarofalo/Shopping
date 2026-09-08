@@ -30,6 +30,15 @@ jobs:
       - name: Select Xcode version
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
 
+      - name: Verify portable test boundaries
+        run: |
+          if grep -ER --include='*.swift' \
+            '^[[:space:]]*#[[:space:]]*(if|elseif).*targetEnvironment[[:space:]]*\([[:space:]]*simulator[[:space:]]*\)' \
+            ShoppingTests; then
+            echo 'Tests must use fixture or runtime capability boundaries, not simulator compilation checks.' >&2
+            exit 1
+          fi
+
       - name: Start pinned iOS simulator
         id: simulator
         timeout-minutes: 5
@@ -81,6 +90,20 @@ jobs:
           echo "$((finished_at - started_at))" > FastTestSeconds.txt
           exit "$exit_code"
 
+      - name: Enforce coverage baseline
+        if: always() && hashFiles('FastResults.xcresult/**') != ''
+        run: |
+          set +e
+          .github/scripts/check-coverage.sh \
+            FastResults.xcresult \
+            .github/coverage-baseline.json \
+            FastCoverage.json \
+            FastCoverage.md
+          exit_code="$?"
+          set -e
+          cat FastCoverage.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$exit_code"
+
       - name: Publish fast test summary
         if: always()
         run: |
@@ -103,6 +126,9 @@ jobs:
           path: |
             FastSummary.md
             FastSummary.json
+            FastCoverage.md
+            FastCoverage.json
+            FastCoverage.raw.json
           if-no-files-found: error
           retention-days: 30
 

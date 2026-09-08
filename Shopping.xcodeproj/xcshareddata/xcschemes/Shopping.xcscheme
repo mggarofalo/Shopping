@@ -16,6 +16,7 @@
    <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="NO">
       <TestPlans>
          <TestPlanReference reference="container:ShoppingFast.xctestplan" default="YES"/>
+         <TestPlanReference reference="container:ShoppingCritical.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingFull.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingPerformance.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingDevice.xctestplan" default="NO"/>

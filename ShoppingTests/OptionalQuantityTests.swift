@@ -1,10 +1,12 @@
 import CoreData
-import XCTest
+import Testing
 
 @testable import Shopping
 
-final class OptionalQuantityTests: XCTestCase {
-    func testNewNeedsStartUnsetAndCommandsCanSetAndClearQuantity() throws {
+@Suite("Optional quantity persistence", .tags(.integration, .persistence, .critical))
+struct OptionalQuantityTests {
+    @Test("New needs start unset and commands set or clear quantity")
+    func newNeedsStartUnsetAndCommandsCanSetAndClearQuantity() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -14,29 +16,33 @@ final class OptionalQuantityTests: XCTestCase {
             listID: selection.listID
         )
 
-        XCTAssertNil(try quantity(needID, in: persistence))
-        XCTAssertNil(try primitiveQuantity(needID, in: persistence))
+        #expect(try quantity(needID, in: persistence) == nil)
+        #expect(try primitiveQuantity(needID, in: persistence) == nil)
         try service.setNeedQuantity(
             needID: needID,
             householdID: selection.householdID,
             listID: selection.listID,
             quantity: 6
         )
-        XCTAssertEqual(try quantity(needID, in: persistence), 6)
-        XCTAssertEqual(try primitiveQuantity(needID, in: persistence)?.int64Value, 6)
+        #expect(try quantity(needID, in: persistence) == 6)
+        #expect(try primitiveQuantity(needID, in: persistence)?.int64Value == 6)
         try service.setNeedQuantity(
             needID: needID,
             householdID: selection.householdID,
             listID: selection.listID,
             quantity: nil
         )
-        XCTAssertNil(try quantity(needID, in: persistence))
-        XCTAssertThrowsError(try service.setQuantity(100, needID: needID)) {
-            XCTAssertEqual($0 as? NeedServiceError, .invalidQuantity)
+        #expect(try quantity(needID, in: persistence) == nil)
+        do {
+            try service.setQuantity(100, needID: needID)
+            Issue.record("Expected an invalid quantity error")
+        } catch {
+            #expect(error as? NeedServiceError == .invalidQuantity)
         }
     }
 
-    func testClearUndoPromotionAndReaddPreserveUnsetAndNumericQuantities() throws {
+    @Test("Clear, undo, promotion, and re-add preserve optional quantity")
+    func clearUndoPromotionAndReaddPreserveUnsetAndNumericQuantities() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -69,12 +75,12 @@ final class OptionalQuantityTests: XCTestCase {
             listID: selection.listID,
             filter: GroceryNeedFilter()
         )
-        XCTAssertEqual(preview.rows.first(where: { $0.needID == rememberedID })?.quantity, 4)
-        XCTAssertNil(preview.rows.first(where: { $0.needID == oneTimeID })?.quantity)
-        XCTAssertEqual(try service.clearCarted(using: preview.token), 2)
-        XCTAssertEqual(try service.undoClear(operationID: preview.token.id), 2)
-        XCTAssertEqual(try quantity(rememberedID, in: persistence), 4)
-        XCTAssertNil(try quantity(oneTimeID, in: persistence))
+        #expect(preview.rows.first(where: { $0.needID == rememberedID })?.quantity == 4)
+        #expect(preview.rows.first(where: { $0.needID == oneTimeID })?.quantity == nil)
+        #expect(try service.clearCarted(using: preview.token) == 2)
+        #expect(try service.undoClear(operationID: preview.token.id) == 2)
+        #expect(try quantity(rememberedID, in: persistence) == 4)
+        #expect(try quantity(oneTimeID, in: persistence) == nil)
 
         _ = try service.rememberOneTimeGrocery(
             needID: oneTimeID,
@@ -83,15 +89,13 @@ final class OptionalQuantityTests: XCTestCase {
             existingItemID: try service.createItem(name: "Tea", householdID: selection.householdID),
             need: RememberedNeedValues(quantity: nil, purchaseNotes: "", urgency: .normal)
         )
-        XCTAssertNil(try quantity(oneTimeID, in: persistence))
-        XCTAssertEqual(
-            try service.addRememberedNeed(itemID: itemID, listID: selection.listID),
-            rememberedID
-        )
-        XCTAssertEqual(try quantity(rememberedID, in: persistence), 4)
+        #expect(try quantity(oneTimeID, in: persistence) == nil)
+        #expect(try service.addRememberedNeed(itemID: itemID, listID: selection.listID) == rememberedID)
+        #expect(try quantity(rememberedID, in: persistence) == 4)
     }
 
-    func testSimulatedReplicasPreserveNilAndNumericQuantitySeparately() throws {
+    @Test("Simulated replicas preserve nil and numeric quantity independently")
+    func simulatedReplicasPreserveNilAndNumericQuantitySeparately() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OptionalQuantity-\(UUID().uuidString)")
         let storeURL = directory.appendingPathComponent("Store.sqlite")
@@ -99,10 +103,18 @@ final class OptionalQuantityTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let harness = try LocalTwoContextHarness(storeURL: storeURL)
+        let coordinator = harness.persistence.container.persistentStoreCoordinator
+        defer {
+            for store in coordinator.persistentStores {
+                try? coordinator.remove(store)
+            }
+        }
         let service = NeedService(persistence: harness.persistence)
         let selection = try service.createHousehold()
-        let numericID = try service.addOneTimeNeed(title: "Bags", quantity: 2, listID: selection.listID)
-        let unsetID = try service.addOneTimeNeed(title: "Loose fruit", listID: selection.listID)
+        let numericID = try service.addOneTimeNeed(
+            title: "Bags", quantity: 2, listID: selection.listID)
+        let unsetID = try service.addOneTimeNeed(
+            title: "Loose fruit", listID: selection.listID)
 
         try harness.stage(.first) { context in
             try self.setQuantity(7, for: numericID, in: context)
@@ -114,14 +126,15 @@ final class OptionalQuantityTests: XCTestCase {
         harness.reset(.first)
         harness.reset(.second)
 
-        XCTAssertEqual(try quantity(numericID, in: harness.persistence), 7)
-        XCTAssertNil(try quantity(unsetID, in: harness.persistence))
+        #expect(try quantity(numericID, in: harness.persistence) == 7)
+        #expect(try quantity(unsetID, in: harness.persistence) == nil)
     }
 
     private func setQuantity(_ value: Int64?, for needID: UUID, in context: NSManagedObjectContext) throws {
         let request = Need.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
-        try XCTUnwrap(context.fetch(request).first).quantity = value
+        let need = try #require(context.fetch(request).first)
+        need.quantity = value
     }
 
     private func primitiveQuantity(_ needID: UUID, in persistence: PersistenceController) throws -> NSNumber?
@@ -130,7 +143,8 @@ final class OptionalQuantityTests: XCTestCase {
         return try context.performAndWait {
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
-            return try XCTUnwrap(context.fetch(request).first).primitiveValue(forKey: "quantity") as? NSNumber
+            let need = try #require(context.fetch(request).first)
+            return need.primitiveValue(forKey: "quantity") as? NSNumber
         }
     }
 
@@ -139,7 +153,7 @@ final class OptionalQuantityTests: XCTestCase {
         return try context.performAndWait {
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
-            return try XCTUnwrap(context.fetch(request).first).quantity
+            return try #require(context.fetch(request).first).quantity
         }
     }
 }

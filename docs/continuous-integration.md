@@ -18,11 +18,12 @@ The 5 jobs ranged from 37m 16s to 50m 41s, with a median of 40m 9s and an observ
 
 ## Test plans
 
-The shared `Shopping` scheme exposes 4 plans:
+The shared `Shopping` scheme exposes 5 plans:
 
 | Plan | Owner | Contents | Normal trigger |
 | --- | --- | --- | --- |
-| `ShoppingFast` | Required pull-request check | 152 persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
+| `ShoppingFast` | Required pull-request check | 160 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
+| `ShoppingCritical` | Semantic local check | 9 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
 | `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus UI, appearance, and simulator device tests | Every milestone push and nightly at 07:00 UTC |
 | `ShoppingPerformance` | Performance investigation | The 2 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
 | `ShoppingDevice` | Physical-device validation | `ShoppingDeviceUITests` | Manual local run on a signed device |
@@ -39,9 +40,11 @@ The first local `ShoppingFull` validation also exposed a Catalog editor lookup t
 
 ## Validation
 
-On the documented iPhone 17 Pro simulator, a clean `ShoppingFast` build took 38 seconds and its 152 tests passed in 10 seconds. This is the local proxy for the required check and is well below the 10-minute deterministic-feedback target.
+On the documented iPhone 17 Pro simulator, the final September 8 `ShoppingFast` run passed 160 tests in about 6 seconds after incremental build setup. The 9-case `ShoppingCritical` plan finished its test execution in 0.04 seconds. This is the local proxy for the required check and is materially quicker than the full-plan baseline.
 
 The initial local `ShoppingFull` run built in 37 seconds and ran 201 tests in 31m 26s. It passed 200 tests and found the Catalog lookup described above. After the fix, a clean build took 42 seconds and all 201 tests passed in 32m 37s. The hosted runner uses the pinned Xcode 16.4 image, which is not installed in the local environment.
+
+The SHOPPING-61 coverage run passed all 209 tests then present in `ShoppingFull` in 34m 56s. The 3 focused navigation cases added afterward passed in the final fast and critical runs, bringing the maintained inventory to 212 without changing app or UI behavior.
 
 The first remediated [hosted pull-request run](https://github.com/mggarofalo/Shopping/actions/runs/34195500331) passed in 6m 2s on the pinned image. Simulator setup took 1m 55s, the summary recorded a 2m 42s build and a 46-second test step, and all 152 tests passed. This first sample is below both the 10-minute target and the 15-minute timeout. A statistically useful post-change p95 requires more hosted runs; the timeout bounds feedback while those samples accumulate.
 
@@ -57,6 +60,12 @@ Run the fast local gate:
 
 ```bash
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
+```
+
+Run the tag-filtered critical check:
+
+```bash
+xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingCritical -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
 ```
 
 Run exhaustive local coverage:
@@ -77,7 +86,13 @@ Run the signed physical-device plan by replacing the placeholder with the connec
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingDevice -destination 'platform=iOS,id=<DEVICE-UDID>'
 ```
 
-CI uses `build-for-testing` once, then `test-without-building`. Each run publishes a small Markdown and JSON summary. Failed runs also retain the build log, test log, and complete result bundle for 14 days.
+CI first rejects test categorization based on `#if targetEnvironment(simulator)`. It then uses `build-for-testing` once and `test-without-building`. Each run publishes a small Markdown and JSON test summary. Fast and full runs also publish line and function coverage from `xccov`. The required fast job fails when coverage regresses materially from `.github/coverage-baseline.json`. Failed runs retain the build log, test log, and complete result bundle for 14 days.
+
+## Coverage ownership
+
+`ShoppingFast` and `ShoppingFull` collect coverage. The fast plan gates the whole app at its measured 41.71% line and 34.84% function baseline. It also gates deterministic domain and service files at 96.38%. A change may vary by up to 0.5 percentage points before the gate treats it as a material regression.
+
+SwiftUI rendering dominates the lines uncovered by the fast plan. `ShoppingFull` publishes the broader UI-driven report without weakening the fast required check; the final local full run reached 89.83% line and 82.73% function coverage for the app target. [Test strategy](test-strategy.md) records the full inventory, the scoped 90% goal, fixture boundaries, and exclusions.
 
 ## Workflow ownership
 
@@ -88,4 +103,4 @@ CI uses `build-for-testing` once, then `test-without-building`. Each run publish
 - Manual dispatch can run either the full or performance plan. Physical-device automation stays local because signing and device access are unavailable to GitHub-hosted runners.
 - Workflow-level concurrency cancels an older run when a newer commit targets the same workflow, branch, and exhaustive suite. Manual performance work does not cancel a full regression run.
 
-This split preserves all maintained tests. SHOPPING-61 owns later test taxonomy, Swift Testing migration, and code-coverage ratcheting.
+This split preserves all maintained tests. New deterministic suites should use Swift Testing tags. UI automation stays in XCTest.
