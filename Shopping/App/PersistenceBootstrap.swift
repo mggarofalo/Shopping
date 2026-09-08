@@ -30,6 +30,8 @@ extension EnvironmentValues {
 @MainActor
 final class PersistenceBootstrap: ObservableObject {
     private static let performanceFixtureVersion = 2
+    private static let retainedUITestStoreLimit = 12
+    private static let retainedUITestHistoryTokenLimit = 24
 
     struct ReadyState {
         let persistence: PersistenceController
@@ -88,22 +90,86 @@ final class PersistenceBootstrap: ObservableObject {
             }
         }
         if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
-            let storeURL = URL(fileURLWithPath: path)
-            if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
-               let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
-                do {
+            do {
+                let storeURL = try uiTestStoreURL(for: path)
+                if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
+                   let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
                     return PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment
                     )
-                } catch {
-                    return PersistenceBootstrap(configuration: { throw error })
                 }
+                return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+            } catch {
+                return PersistenceBootstrap(configuration: { throw error })
             }
-            return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
         }
         return PersistenceBootstrap()
+    }
+
+    static func uiTestStoreURL(
+        for path: String,
+        applicationSupportDirectory: URL? = nil
+    ) throws -> URL {
+        let requestedURL = URL(fileURLWithPath: path)
+        if path.hasPrefix("/"), FileManager.default.isWritableFile(
+            atPath: requestedURL.deletingLastPathComponent().path
+        ) {
+            return requestedURL
+        }
+        let fileName = requestedURL.lastPathComponent
+        let supportDirectory = try applicationSupportDirectory ?? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = supportDirectory.appendingPathComponent("UITestStores", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        pruneUITestStores(in: directory, keeping: fileName)
+        return directory.appendingPathComponent(fileName)
+    }
+
+    private static func pruneUITestStores(in directory: URL, keeping currentStoreName: String) {
+        let fileManager = FileManager.default
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let storeGroups = Dictionary(grouping: contents.compactMap { url -> (String, URL)? in
+            guard let storeName = sqliteStoreName(for: url.lastPathComponent) else { return nil }
+            return (storeName, url)
+        }, by: \.0)
+        let inactiveGroups = storeGroups.keys.filter { $0 != currentStoreName }.sorted { left, right in
+            latestModificationDate(in: storeGroups[left] ?? []) > latestModificationDate(in: storeGroups[right] ?? [])
+        }
+        for storeName in inactiveGroups.dropFirst(max(0, retainedUITestStoreLimit - 1)) {
+            for entry in storeGroups[storeName] ?? [] {
+                try? fileManager.removeItem(at: entry.1)
+            }
+        }
+
+        let historyTokens = contents.filter { $0.lastPathComponent.hasPrefix("history-") }
+            .sorted { modificationDate(of: $0) > modificationDate(of: $1) }
+        for token in historyTokens.dropFirst(retainedUITestHistoryTokenLimit) {
+            try? fileManager.removeItem(at: token)
+        }
+    }
+
+    private static func sqliteStoreName(for fileName: String) -> String? {
+        guard let range = fileName.range(of: ".sqlite") else { return nil }
+        return String(fileName[..<range.upperBound])
+    }
+
+    private static func latestModificationDate(in entries: [(String, URL)]) -> Date {
+        entries.map { modificationDate(of: $0.1) }.max() ?? .distantPast
+    }
+
+    private static func modificationDate(of url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
     private static func performanceStoreURL(
