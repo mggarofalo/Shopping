@@ -36,3 +36,22 @@ No physical devices were connected during this validation. Before release, verif
 Simulator checks do not validate VoiceOver behavior on hardware, airplane-mode persistence, or live CloudKit sharing.
 
 Record device model, OS version, build, date, and pass/fail evidence for each physical check. SHOPPING-30 owns real invitation, transport, permissions, and convergence evidence; Apple Developer enrollment (SHOPPING-10) remains a prerequisite.
+
+## September 7 physical pass
+
+Validation resumed on a connected iPhone 16 Pro running iOS 27.0 beta (24A5430a), using a signed Debug build from `milestone/phase-5` plus the SHOPPING-9 fixture-path change. The test bootstrap now resolves a fixture path into the app's Application Support directory when the path supplied by a hardware UI-test runner belongs to a different sandbox. Absolute writable paths continue to work on Simulator. This keeps the test source platform-neutral and separates test data from the phone's normal Shopping store. It retains at most 12 app-owned UI-test stores and 24 history tokens; a physical 14-store launch sequence retained the current 12 stores as expected.
+
+The isolated populated fixture passed these physical checks through iPhone Mirroring:
+
+- Added a remembered item with Produce and Costco purchase constraints; it appeared in the active list and under Costco's Only buy here group.
+- The Costco projection showed Any store items under Can buy here and did not admit ineligible store-constrained items.
+- Need again moved the carted Strawberries occurrence back to the active Costco list with its quantity and purchase constraint retained.
+- Terminating and relaunching without reseeding reopened the same isolated store and retained the new item and lifecycle changes.
+- An Accessibility XXXL launch displayed growing grocery, quantity, store, filter, and settings text using the hardware runtime. Simulator automation remains the authoritative reachability measurement until the signed physical UI-test runner is available.
+- Checkout captured the two displayed cart occurrences, removed them after explicit confirmation, and retained both recovery batches across a forced relaunch. Restoring each batch returned Party ice and Strawberries to the cart with their one-time/catalog identities and quantities intact.
+- With Airplane Mode enabled, changing Strawberries from quantity 2 to 3 persisted across process termination and relaunch. This phone retained Wi-Fi while Airplane Mode was enabled. A second launch with Wi-Fi disabled reopened the isolated store, and a USB copy of that store retained Strawberries at quantity 3 and Party ice at quantity 3 with both occurrences carted. Cellular remained available during that launch, so an edit made with both radios unavailable is still needed to prove complete network isolation.
+- With Reduce Motion enabled, Groceries, Recently cleared, In cart, Checkout review, Catalog, and Settings reached stable layouts with all tested actions available. Reduce Motion was restored to its original Off setting afterward.
+
+The matching simulator run passed all 6 `ShoppingDeviceUITests` and all 5 `PreviewFixtureTests`. A physical XCUITest invocation could build the app but could not sign `com.mggarofalo.shopping.tests.xctrunner`: Xcode has no configured developer account or provisioning profile for that runner. SHOPPING-10 owns that external signing setup. SHOPPING-61 tracks the broader move to shared test plans, Swift Testing traits/tags where appropriate, platform-neutral fixtures, and ratcheting coverage gates. SHOPPING-62 tracks the cramped multiline text observed in the Checkout explanation and the broader app-wide text-layout audit.
+
+VoiceOver was enabled on the phone, the isolated app launched, and the grocery list and item editor remained usable while it was active. The earlier notification prompt did not reappear after permission to choose Don’t Allow was granted, so no notification setting was changed. VoiceOver was restored to its original Off setting. Broader hardware focus-order and gesture coverage remains pending because the physical XCUITest runner cannot yet be signed. An edit made with both Wi-Fi and cellular unavailable also remains. Real two-account sharing remains SHOPPING-30.
