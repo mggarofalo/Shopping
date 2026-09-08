@@ -12,6 +12,12 @@ baseline_path="$2"
 report_path="$3"
 summary_path="$4"
 raw_report="${report_path%.json}.raw.json"
+if [[ -n "${SHOPPING_COVERAGE_XCODE_VERSION:-}" ]]; then
+    xcode_version="$SHOPPING_COVERAGE_XCODE_VERSION"
+else
+    xcode_version="$(xcodebuild -version)"
+    xcode_version="${xcode_version%%$'\n'*}"
+fi
 
 if [[ ! -d "$result_bundle" ]]; then
     echo "coverage result bundle not found: $result_bundle" >&2
@@ -21,15 +27,21 @@ fi
 xcrun xccov view --report --json "$result_bundle" > "$raw_report"
 
 jq -n \
+    --arg xcodeVersion "$xcode_version" \
     --slurpfile baseline "$baseline_path" \
     --slurpfile coverage "$raw_report" '
     def ratio($covered; $total): if $total == 0 then 1 else $covered / $total end;
     $baseline[0] as $baseline |
+    ([ $baseline.toolchainBaselines[] | select(.xcodeVersion == $xcodeVersion) ] | first) as $toolchainBaseline |
+    if $toolchainBaseline == null then
+      error("no coverage baseline configured for " + $xcodeVersion)
+    else
     ($coverage[0].targets[] | select(.name == $baseline.target)) as $target |
     ([ $target.files[].functions[] ] | length) as $functionCount |
     ([ $target.files[].functions[] | select(.executionCount > 0) ] | length) as $coveredFunctions |
     {
       target: $target.name,
+      xcodeVersion: $xcodeVersion,
       lineCoverage: $target.lineCoverage,
       coveredLines: $target.coveredLines,
       executableLines: $target.executableLines,
@@ -63,12 +75,13 @@ jq -n \
               ratio($covered; $total) + $baseline.materialRegressionTolerance >= $scope.lineCoverage)
           }
       ],
-      baselineLineCoverage: $baseline.lineCoverage,
-      baselineFunctionCoverage: $baseline.functionCoverage
+      baselineLineCoverage: $toolchainBaseline.lineCoverage,
+      baselineFunctionCoverage: $toolchainBaseline.functionCoverage
     } |
     .linePassed = (.lineCoverage + .tolerance >= .baselineLineCoverage) |
     .functionPassed = (.functionCoverage + .tolerance >= .baselineFunctionCoverage) |
     .passed = (.linePassed and .functionPassed and ([.scopes[].passed] | all))
+    end
     ' > "$report_path"
 
 jq -r '

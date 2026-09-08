@@ -4,12 +4,22 @@
   "measuredPlan": "ShoppingFast",
   "measuredOn": "2026-09-08",
   "materialRegressionTolerance": 0.005,
-  "lineCoverage": 0.41706383835671612,
-  "functionCoverage": 0.34838709677419355,
+  "toolchainBaselines": [
+    {
+      "xcodeVersion": "Xcode 16.4",
+      "lineCoverage": 0.3933006645633349,
+      "functionCoverage": 0.3186104218362283
+    },
+    {
+      "xcodeVersion": "Xcode 26.6",
+      "lineCoverage": 0.41706383835671612,
+      "functionCoverage": 0.34838709677419355
+    }
+  ],
   "scopes": [
     {
       "name": "Deterministic domain and service logic",
-      "lineCoverage": 0.9637557771831671,
+      "lineCoverage": 0.9642422768182923,
       "files": [
         "CatalogFilter.swift",
         "GroceryNavigationState.swift",

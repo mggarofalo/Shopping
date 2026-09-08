@@ -73,12 +73,13 @@ Fixture launch is idempotent. A deliberate relaunch removes `SHOPPING_UI_TEST_FI
 
 `ShoppingFast` and `ShoppingFull` collect coverage. The required CI job exports machine-readable `xccov` JSON, a short Markdown summary, and the existing test summary. `.github/scripts/check-coverage.sh` compares the app target with `.github/coverage-baseline.json`.
 
-The September 8 `ShoppingFast` baseline is:
+The September 8 `ShoppingFast` baselines are toolchain-specific because Xcode 16.4 and Xcode 26.6 produce different coverage maps for the same maintained source:
 
 | Scope | Line coverage | Function coverage |
 | --- | ---: | ---: |
-| Whole `Shopping.app` target | 41.71% | 34.84% |
-| Deterministic domain and service files | 96.38% | Not gated |
+| Whole `Shopping.app` target, Xcode 16.4 | 39.33% | 31.86% |
+| Whole `Shopping.app` target, Xcode 26.6 | 41.71% | 34.84% |
+| Deterministic domain and service files | 96.42% | Not gated |
 
 The gate allows a 0.5 percentage-point change before it treats the result as a material regression. Raise the committed baseline when coverage grows. Do not lower it to make a change pass.
 

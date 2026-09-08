@@ -90,7 +90,7 @@ CI first rejects test categorization based on `#if targetEnvironment(simulator)`
 
 ## Coverage ownership
 
-`ShoppingFast` and `ShoppingFull` collect coverage. The fast plan gates the whole app at its measured 41.71% line and 34.84% function baseline. It also gates deterministic domain and service files at 96.38%. A change may vary by up to 0.5 percentage points before the gate treats it as a material regression.
+`ShoppingFast` and `ShoppingFull` collect coverage. The fast plan gates the whole app against measured toolchain-specific baselines: Xcode 16.4 uses 39.33% lines and 31.86% functions, while Xcode 26.6 uses 41.71% lines and 34.84% functions. Both gate deterministic domain and service files at 96.42%. An unknown Xcode version requires an explicit measured baseline instead of inheriting another compiler's values. A change may vary by up to 0.5 percentage points before the gate treats it as a material regression.
 
 SwiftUI rendering dominates the lines uncovered by the fast plan. `ShoppingFull` publishes the broader UI-driven report without weakening the fast required check; the final local full run reached 89.83% line and 82.73% function coverage for the app target. [Test strategy](test-strategy.md) records the full inventory, the scoped 90% goal, fixture boundaries, and exclusions.
 
