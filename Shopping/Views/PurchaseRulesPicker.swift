@@ -42,6 +42,9 @@ struct PurchaseRulesPicker: View {
     var body: some View {
         Group {
             Section("Where to buy") {
+                Button(action: onAddStore) { Label("Add store", systemImage: "plus") }
+                    .accessibilityIdentifier("shopping.tags.addStore")
+                    .disabled(canonicalList == nil)
                 PillFlowLayout {
                     SelectionPill(
                         title: "Any store",
@@ -80,9 +83,6 @@ struct PurchaseRulesPicker: View {
                     !validStores.contains(where: { !$0.isArchived && storeIDs.contains($0.id) }) {
                     Text("Choose an active store or turn on Any store.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Button(action: onAddStore) { Label("Add store", systemImage: "plus") }
-                    .accessibilityIdentifier("shopping.tags.addStore")
-                    .disabled(canonicalList == nil)
             }
         }
     }

@@ -47,6 +47,7 @@ struct ShoppingFeedbackBar<Action: View>: View {
         Text(message)
             .font(.subheadline)
             .shoppingMultilineText()
+            .accessibilityIdentifier("shopping.feedback.message")
     }
 }
 

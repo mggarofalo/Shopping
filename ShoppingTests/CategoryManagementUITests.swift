@@ -121,9 +121,9 @@ final class CategoryManagementUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", "in the cart will be needed again")
         ).firstMatch.exists)
         addConfirmation.buttons["Add to list"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS %@", "Added"
-        )).firstMatch.waitForExistence(timeout: 3))
+        let feedback = app.staticTexts["shopping.feedback.message"]
+        XCTAssertTrue(feedback.waitForExistence(timeout: 3))
+        XCTAssertTrue(feedback.label.contains("Needed again 1"))
     }
 
     func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {

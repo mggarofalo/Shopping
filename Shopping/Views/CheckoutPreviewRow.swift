@@ -19,11 +19,19 @@ struct CheckoutPreviewRow: View {
                 Text("\(quantity)")
                     .monospacedDigit()
                     .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(quantity)")
+                    .accessibilityHidden(true)
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier("shopping.checkout.row.\(row.needID.uuidString)")
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [row.title]
+        if let quantity = row.quantity { parts.append("Quantity \(quantity)") }
+        if row.oneTime { parts.append("One-time") }
+        return parts.joined(separator: ", ")
     }
 }
 
