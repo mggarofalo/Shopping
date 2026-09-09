@@ -24,7 +24,7 @@ The shared `Shopping` scheme exposes 5 plans:
 | --- | --- | --- | --- |
 | `ShoppingFast` | Required pull-request check | 166 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
 | `ShoppingCritical` | Semantic local check | 14 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
-| `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus 54 UI, appearance, and simulator device tests | Every milestone push and nightly at 07:00 UTC |
+| `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus UI, appearance, and simulator device tests | Manual remote dispatch only after the exact commit passes locally |
 | `ShoppingPerformance` | Performance investigation | The 3 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
 | `ShoppingDevice` | Physical-device validation | `ShoppingDeviceUITests` | Manual local run on a signed device |
 
@@ -71,8 +71,11 @@ xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingC
 Run exhaustive local coverage:
 
 ```bash
-xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
+.github/scripts/run-local-shopping-full.sh
+.github/scripts/dispatch-remote-shopping-full.sh
 ```
+
+The first command refuses a dirty worktree, exports the exact `HEAD` commit to an isolated temporary source snapshot, runs `ShoppingFull` there on the pinned local simulator, and records a pass only if the original worktree still has the same clean `HEAD` afterward. Push that unchanged commit before running the second command. The dispatch command refuses a missing local pass, a dirty worktree, or a remote branch whose head differs from the attested SHA. It publishes the `local/ShoppingFull` status on that exact commit and explicitly dispatches the hosted workflow. The hosted preflight independently requires a successful status on its exact workflow SHA before allocating the macOS exhaustive runner.
 
 Run the performance plan only when measuring a stable environment:
 
@@ -97,10 +100,10 @@ SwiftUI rendering dominates the lines uncovered by the fast plan. `ShoppingFull`
 ## Workflow ownership
 
 - Pull requests run the existing `Build & Test` check. Its name stays stable for branch protection. The active `main` ruleset required pull requests but no status-check context on September 8, 2026; changing repository protection is outside this code change.
-- Milestone pushes run the fast and exhaustive workflows independently. A slow UI failure does not delay deterministic feedback.
-- Pushes to `main` repeat only the fast check. The milestone commit already received exhaustive coverage, while the nightly run checks the current `main` branch again.
-- The nightly workflow runs `ShoppingFull`. A maintainer owns failures and fixes them before the next milestone integration.
-- Manual dispatch can run either the full or performance plan. Physical-device automation stays local because signing and device access are unavailable to GitHub-hosted runners.
+- Milestone pushes run only the fast workflow automatically. They never start the exhaustive workflow.
+- Pushes to `main` repeat only the fast check. The milestone commit must receive exact-SHA local and hosted exhaustive coverage before integration.
+- Remote `ShoppingFull` is deliberately infrequent and is expected to pass: it runs only through the exact-commit local pass and dispatch commands above. Missing or stale attestations fail in the lightweight preflight before simulator setup.
+- Manual dispatch can run the performance plan without a ShoppingFull attestation. Physical-device automation stays local because signing and device access are unavailable to GitHub-hosted runners.
 - Workflow-level concurrency cancels an older run when a newer commit targets the same workflow, branch, and exhaustive suite. Manual performance work does not cancel a full regression run.
 
 This split preserves all maintained tests. New deterministic suites should use Swift Testing tags. UI automation stays in XCTest.
