@@ -615,14 +615,14 @@ final class NeedService: @unchecked Sendable {
                     created.item = item
                     created.notes = item.notes
                     created.urgency = NeedUrgency.normal.rawValue
-                    created.carted = destination == .cart
+                    self.setCartedState(destination == .cart, for: created)
                     added.append(created.id)
                 case .focusExisting:
                     guard let need, !need.carted else { changed += 1; continue }
                     if destination == .cart {
                         let (revision, overflow) = need.revision.addingReportingOverflow(1)
                         guard !overflow else { throw NeedServiceError.scopeChanged }
-                        need.carted = true
+                        self.setCartedState(true, for: need)
                         need.clearOperationID = nil
                         need.revision = revision
                     }
@@ -634,7 +634,7 @@ final class NeedService: @unchecked Sendable {
                     } else if renewCarted {
                         let (revision, overflow) = need.revision.addingReportingOverflow(1)
                         guard !overflow else { throw NeedServiceError.scopeChanged }
-                        need.carted = false
+                        self.setCartedState(false, for: need)
                         need.urgency = NeedUrgency.normal.rawValue
                         need.clearOperationID = nil
                         need.revision = revision
@@ -1574,7 +1574,7 @@ final class NeedService: @unchecked Sendable {
             }
             let (nextRevision, overflow) = resolved.need.revision.addingReportingOverflow(1)
             guard !overflow else { throw NeedServiceError.scopeChanged }
-            resolved.need.carted = false
+            self.setCartedState(false, for: resolved.need)
             resolved.need.clearOperationID = nil
             resolved.need.revision = nextRevision
         }
@@ -1841,7 +1841,7 @@ final class NeedService: @unchecked Sendable {
                 guard !overflow else { throw NeedServiceError.scopeChanged }
                 if let quantity { existing.quantity = quantity }
                 if let notes { existing.notes = self.trimmedNotes(notes) }
-                existing.carted = false
+                self.setCartedState(false, for: existing)
                 existing.urgency = urgency.rawValue
                 existing.clearOperationID = nil
                 existing.revision = nextRevision
@@ -1922,7 +1922,7 @@ final class NeedService: @unchecked Sendable {
                 }
                 let (revision, overflow) = need.revision.addingReportingOverflow(1)
                 guard !overflow else { throw NeedServiceError.scopeChanged }
-                need.carted = false
+                self.setCartedState(false, for: need)
                 need.urgency = NeedUrgency.normal.rawValue
                 need.clearOperationID = nil
                 need.revision = revision
@@ -2007,7 +2007,7 @@ final class NeedService: @unchecked Sendable {
     }
 
     func setCarted(_ carted: Bool, needID: UUID) throws {
-        try editNeed(id: needID) { $0.carted = carted }
+        try editNeed(id: needID) { self.setCartedState(carted, for: $0) }
     }
 
     func setQuantity(_ quantity: Int64?, needID: UUID) throws {
@@ -2023,7 +2023,7 @@ final class NeedService: @unchecked Sendable {
                 needID: needID, householdID: householdID, listID: listID, in: context)
             let (revision, overflow) = resolved.need.revision.addingReportingOverflow(1)
             guard !overflow else { throw NeedServiceError.scopeChanged }
-            resolved.need.carted = carted
+            self.setCartedState(carted, for: resolved.need)
             resolved.need.clearOperationID = nil
             resolved.need.revision = revision
         }
@@ -2312,11 +2312,11 @@ final class NeedService: @unchecked Sendable {
             }
             let token = ClearCartedToken(
                 id: UUID(), householdID: householdID, listID: listID, revisionsByNeedID: snapshot)
-            let rows = captured.map {
+            let rows = CartedNeedOrdering.ordered(captured).map {
                 ClearCartedPreviewRow(
                     needID: $0.id, revision: $0.revision, title: $0.item?.name ?? $0.title,
                     quantity: $0.quantity, oneTime: $0.kind == NeedKind.oneTime.rawValue)
-            }.sorted { $0.needID.uuidString < $1.needID.uuidString }
+            }
             return ClearCartedPreview(token: token, rows: rows)
         }
     }
@@ -2442,6 +2442,7 @@ final class NeedService: @unchecked Sendable {
         need.notes = ""
         need.quantity = nil
         need.carted = false
+        need.cartedAt = nil
         need.urgency = "normal"
         need.revision = 0
         need.archived = false
@@ -2451,6 +2452,24 @@ final class NeedService: @unchecked Sendable {
         }
         need.list = list
         return need
+    }
+
+    private func setCartedState(_ carted: Bool, for need: Need) {
+        if carted {
+            if !need.carted || need.cartedAt == nil {
+                let now = Date()
+                let latestKnownEntry = need.list?.needs?
+                    .filter { $0 !== need && $0.carted }
+                    .compactMap(\.cartedAt)
+                    .max()
+                need.cartedAt = latestKnownEntry.map {
+                    max(now, $0.addingTimeInterval(0.001))
+                } ?? now
+            }
+        } else {
+            need.cartedAt = nil
+        }
+        need.carted = carted
     }
 
     private func household(id: UUID, in context: NSManagedObjectContext) throws -> Household? {

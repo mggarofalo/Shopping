@@ -4,6 +4,59 @@ import XCTest
 @testable import Shopping
 
 final class ChecklistSafetyTests: XCTestCase {
+    func testCartedOrderUsesPersistedEntryTimeAndRecartMovesItemToEnd() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let first = try service.addOneTimeNeed(title: "First", listID: selection.listID)
+        let second = try service.addOneTimeNeed(title: "Second", listID: selection.listID)
+        let legacy = try service.addOneTimeNeed(title: "Legacy", listID: selection.listID)
+        for id in [first, second, legacy] {
+            try service.setNeedCarted(
+                needID: id, householdID: selection.householdID,
+                listID: selection.listID, carted: true
+            )
+        }
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let values = try context.fetch(Need.fetchRequest())
+            XCTAssertTrue(values.allSatisfy { $0.cartedAt != nil })
+            values.first { $0.id == first }?.cartedAt = Date(timeIntervalSince1970: 100)
+            values.first { $0.id == second }?.cartedAt = Date(timeIntervalSinceNow: 3_600)
+            values.first { $0.id == legacy }?.cartedAt = nil
+            try context.save()
+            XCTAssertEqual(CartedNeedOrdering.ordered(values).map(\.id), [legacy, first, second])
+        }
+        XCTAssertEqual(
+            try service.prepareCheckout(
+                householdID: selection.householdID, listID: selection.listID
+            ).rows.map(\.needID),
+            [legacy, first, second]
+        )
+
+        try service.setNeedCarted(
+            needID: first, householdID: selection.householdID,
+            listID: selection.listID, carted: false
+        )
+        try context.performAndWait {
+            context.refreshAllObjects()
+            XCTAssertNil(try context.fetch(Need.fetchRequest()).first { $0.id == first }?.cartedAt)
+        }
+        try service.setNeedCarted(
+            needID: first, householdID: selection.householdID,
+            listID: selection.listID, carted: true
+        )
+        try context.performAndWait {
+            context.refreshAllObjects()
+            let values = try context.fetch(Need.fetchRequest()).filter(\.carted)
+            XCTAssertEqual(CartedNeedOrdering.ordered(values).map(\.id), [legacy, second, first])
+            let firstEntry = try XCTUnwrap(values.first { $0.id == first }?.cartedAt)
+            let secondEntry = try XCTUnwrap(values.first { $0.id == second }?.cartedAt)
+            XCTAssertGreaterThan(firstEntry, secondEntry, "Cart order must advance even after clock rollback")
+        }
+    }
+
     func testCheckoutCapturesAllCartedRowsAndSkipsLaterChangesWithoutLosingCatalog() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
