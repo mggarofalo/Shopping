@@ -49,6 +49,14 @@ struct GroceriesView: View {
         }
     }
 
+    private var groceryCategoryGroups: [CategoryNeedGroup] {
+        CategoryGrouping.listGroups(
+            needs: visibleNeeds,
+            categories: Array(categories),
+            household: canonicalList?.household
+        )
+    }
+
     private var hasActiveUncartedNeeds: Bool {
         GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains {
             !$0.carted && !$0.archived
@@ -215,8 +223,10 @@ struct GroceriesView: View {
                                 }
                             }
                         } else {
-                            Section {
-                                shoppingRows(visibleNeeds)
+                            ForEach(groceryCategoryGroups) { group in
+                                Section(group.title) {
+                                    shoppingRows(group.needs)
+                                }
                             }
                         }
                     }
@@ -586,7 +596,8 @@ struct GroceriesView: View {
     private func sorted(_ values: [Need]) -> [Need] {
         values.sorted {
             if $0.urgency != $1.urgency { return $0.urgency == NeedUrgency.urgent.rawValue }
-            return ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title) == .orderedAscending
+            let comparison = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
+            return comparison == .orderedSame ? $0.id.uuidString < $1.id.uuidString : comparison == .orderedAscending
         }
     }
 

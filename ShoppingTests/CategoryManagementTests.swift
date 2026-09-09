@@ -337,6 +337,42 @@ final class CategoryManagementTests: XCTestCase {
         }
     }
 
+    func testListGroupingUsesSettingsOrderThenArchivedAndUncategorized() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        _ = try service.createCategory(name: "Produce", householdID: selection.householdID, displayOrder: 0)
+        let bakery = try service.createCategory(name: "Bakery", householdID: selection.householdID, displayOrder: 1)
+        let dairy = try service.createCategory(name: "Dairy", householdID: selection.householdID, displayOrder: 2)
+        let normalItem = try service.createItem(name: "Apples", categoryID: bakery, householdID: selection.householdID)
+        let urgentItem = try service.createItem(name: "Zucchini", categoryID: bakery, householdID: selection.householdID)
+        let archivedItem = try service.createItem(name: "Milk", categoryID: dairy, householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true, categoryID: dairy, householdID: selection.householdID, listID: selection.listID
+        )
+        let normal = try service.addRememberedNeed(itemID: normalItem, listID: selection.listID)
+        let urgent = try service.addRememberedNeed(itemID: urgentItem, listID: selection.listID, urgency: .urgent)
+        let archived = try service.addRememberedNeed(itemID: archivedItem, listID: selection.listID)
+        let uncategorized = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let householdRequest = Household.fetchRequest()
+            householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
+            let household = try XCTUnwrap(context.fetch(householdRequest).first)
+            let groups = CategoryGrouping.listGroups(
+                needs: try context.fetch(Need.fetchRequest()),
+                categories: try context.fetch(Shopping.Category.fetchRequest()),
+                household: household
+            )
+
+            XCTAssertEqual(groups.map(\.title), ["Bakery", "Dairy", "Uncategorized"])
+            XCTAssertEqual(groups[0].needs.map(\.id), [urgent, normal])
+            XCTAssertEqual(groups[1].needs.map(\.id), [archived])
+            XCTAssertEqual(groups[2].needs.map(\.id), [uncategorized])
+        }
+    }
+
     private struct CategoryState: Equatable {
         let id: UUID
         let name: String
