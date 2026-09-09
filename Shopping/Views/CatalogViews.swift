@@ -111,6 +111,12 @@ private struct CatalogAddNotice: Identifiable {
     let needID: UUID?
 }
 
+private struct CatalogRefreshKey: Equatable {
+    let id: UUID
+    let revision: Int64
+    let archived: Bool
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -141,6 +147,9 @@ struct CatalogView: View {
     @State private var batchNotice: String?
     @State private var addConfirmation: CatalogAddConfirmation?
     @State private var addNotice: CatalogAddNotice?
+    @State private var showingCatalogImporter = false
+    @State private var importSession: CatalogImportSession?
+    @State private var importNotice: String?
     @ObservedObject var navigation: GroceryNavigationState
 
     private var canonicalList: GroceryList? {
@@ -157,6 +166,10 @@ struct CatalogView: View {
     }
     private var visibleItems: [Item] {
         scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
+    }
+    private var catalogRefreshKeys: [CatalogRefreshKey] {
+        scopedItems.map { CatalogRefreshKey(id: $0.id, revision: $0.revision, archived: $0.isArchived) }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
     }
     private func makeVisibleGroups(from items: [Item]) -> [CatalogItemGroup] {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
@@ -203,6 +216,15 @@ struct CatalogView: View {
         !searchText.isEmpty || filters.selectedStoreID != nil || filters.count > 0
     }
     private var removalAction: CatalogRemovalAction? { removalTarget?.preview.action }
+    private var archiveTargetPresented: Binding<Bool> {
+        Binding(get: { archiveTarget != nil }, set: { if !$0 { archiveTarget = nil } })
+    }
+    private var removalTargetPresented: Binding<Bool> {
+        Binding(get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } })
+    }
+    private var removalNoticePresented: Binding<Bool> {
+        Binding(get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } })
+    }
     private var removalDialogTitle: String {
         guard let target = removalTarget else { return "Remove catalog item?" }
         switch target.preview.action {
@@ -241,6 +263,11 @@ struct CatalogView: View {
                         Button("New catalog item", systemImage: "plus", action: create)
                             .accessibilityIdentifier("shopping.catalog.add")
                             .disabled(household == nil || service == nil)
+                        Button("Import CSV", systemImage: "square.and.arrow.down") {
+                            showingCatalogImporter = true
+                        }
+                        .accessibilityIdentifier("shopping.catalog.import")
+                        .disabled(canonicalList == nil || service == nil)
                     }
                 }
             }
@@ -289,10 +316,16 @@ struct CatalogView: View {
             .sheet(item: $editor) { session in
                 CatalogEditorView(session: session) { refresh() }
             }
+            .modifier(CatalogImportPresentationModifier(
+                showingFileImporter: $showingCatalogImporter,
+                session: $importSession,
+                errorMessage: $errorMessage,
+                notice: $importNotice,
+                load: loadCatalogImport,
+                apply: applyCatalogImport
+            ))
             .alert(archiveTarget?.archived == true ? "Archive catalog item?" : "Restore catalog item?",
-                   isPresented: Binding(
-                    get: { archiveTarget != nil }, set: { if !$0 { archiveTarget = nil } }
-                   ), presenting: archiveTarget) { target in
+                   isPresented: archiveTargetPresented, presenting: archiveTarget) { target in
                 Button(target.archived ? "Archive" : "Restore") { applyArchive(target) }
                     .accessibilityIdentifier("shopping.catalog.confirmSwipeArchive")
                 Button("Cancel", role: .cancel) {}
@@ -303,9 +336,7 @@ struct CatalogView: View {
             }
             .confirmationDialog(
                 removalDialogTitle,
-                isPresented: Binding(
-                    get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } }
-                ),
+                isPresented: removalTargetPresented,
                 titleVisibility: .visible
             ) {
                 if removalAction == .archive {
@@ -325,16 +356,11 @@ struct CatalogView: View {
                     Text("This item has no grocery history and will be permanently removed from Catalog.")
                 }
             }
-            .alert("Catalog item archived", isPresented: Binding(
-                get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } }
-            )) {
+            .alert("Catalog item archived", isPresented: removalNoticePresented) {
                 Button("OK", role: .cancel) { removalNotice = nil }
             } message: {
                 Text(removalNotice ?? "")
             }
-            .alert("Couldn’t load catalog", isPresented: Binding(
-                get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
             .modifier(CatalogBatchDialogs(
                 preview: $batchPreview, notice: $batchNotice, apply: applyBatch
             ))
@@ -348,6 +374,7 @@ struct CatalogView: View {
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: grouping) { _, _ in rebuildRenderedGroups() }
+            .onChange(of: catalogRefreshKeys) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
                 sanitizeFilters()
@@ -609,6 +636,46 @@ struct CatalogView: View {
             name: searchText, notes: "", categoryID: nil,
             anyStore: filters.selectedStoreID == nil, storeIDs: filters.selectedStoreID.map { [$0] } ?? []
         ))
+    }
+
+    private func loadCatalogImport(_ result: Result<[URL], Error>) {
+        guard let service, let canonicalList, let householdID = canonicalList.household?.id else { return }
+        do {
+            guard let url = try result.get().first else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            let rows = try CatalogCSVParser.parse(Data(contentsOf: url))
+            guard !rows.isEmpty else {
+                throw CatalogCSVError.invalidRow(line: 1, reason: "The file has no catalog rows.")
+            }
+            let preview = try service.previewCatalogImport(
+                rows: rows,
+                householdID: householdID,
+                listID: canonicalList.id
+            )
+            importSession = CatalogImportSession(filename: url.lastPathComponent, preview: preview)
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? CatalogErrorCopy.message(error)
+        }
+    }
+
+    private func applyCatalogImport(_ actions: [String: CatalogImportAction]) {
+        guard let service, let session = importSession else { return }
+        guard selection.householdID == session.preview.householdID,
+              selection.listID == session.preview.listID else {
+            errorMessage = "Return to the household where you reviewed this import."
+            return
+        }
+        do {
+            let result = try service.applyCatalogImport(session.preview, actions: actions)
+            importSession = nil
+            refresh()
+            var parts = ["\(result.created) created", "\(result.updated) updated", "\(result.skipped) skipped"]
+            if result.changed > 0 { parts.append("\(result.changed) changed since preview") }
+            importNotice = parts.joined(separator: ", ") + "."
+        } catch {
+            errorMessage = CatalogErrorCopy.message(error)
+        }
     }
 
     private func edit(_ item: Item) {

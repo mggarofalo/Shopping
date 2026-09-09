@@ -998,6 +998,217 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    func previewCatalogImport(
+        rows: [CatalogImportRow],
+        householdID: UUID,
+        listID: UUID
+    ) throws -> CatalogImportPreview {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let itemRequest = Item.fetchRequest()
+            itemRequest.predicate = NSPredicate(format: "household == %@", household)
+            let items = try self.validCatalogItems(try context.fetch(itemRequest))
+            let categories = Array(household.categories ?? [])
+            guard categories.allSatisfy({ $0.id != PersistenceModel.unsetID }),
+                  Set(categories.map(\.id)).count == categories.count else {
+                throw NeedServiceError.scopeChanged
+            }
+            let stores = try self.validActiveStores(Array(household.stores ?? []))
+            let importedIDs = Dictionary(uniqueKeysWithValues: rows.map { row in
+                (row.id, CatalogImportIdentity.uuid(
+                    householdID: householdID, sourceID: row.sourceID, itemID: row.itemID
+                ))
+            })
+            let incomingByName = Dictionary(grouping: rows.filter { $0.parseError == nil }) {
+                CatalogProjection.normalizedName($0.name)
+            }
+
+            return CatalogImportPreview(
+                householdID: householdID,
+                listID: listID,
+                entries: rows.map { row in
+                    let importedID = importedIDs[row.id] ?? CatalogImportIdentity.uuid(
+                        householdID: householdID, sourceID: row.sourceID, itemID: row.itemID
+                    )
+                    let existing = items.first { $0.id == importedID }
+                    let categoryMatches = row.categoryName.map { name in
+                        categories.filter { CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name) }
+                    } ?? []
+                    let storeMatches = row.storeNames.map { name in
+                        stores.filter { CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name) }
+                    }
+                    let invalidReason: String? = {
+                        if row.categoryName != nil, categoryMatches.count != 1 {
+                            return categoryMatches.isEmpty
+                                ? "Category “\(row.categoryName ?? "")” wasn’t found."
+                                : "Category “\(row.categoryName ?? "")” is ambiguous."
+                        }
+                        if let index = storeMatches.firstIndex(where: { $0.count != 1 }) {
+                            let name = row.storeNames[index]
+                            return storeMatches[index].isEmpty
+                                ? "Store “\(name)” wasn’t found."
+                                : "Store “\(name)” is ambiguous."
+                        }
+                        if storeMatches.flatMap({ $0 }).contains(where: { $0.isArchived }) {
+                            return "Archived stores must be restored before import."
+                        }
+                        return nil
+                    }()
+                    let collisions = items.filter {
+                        $0.id != importedID &&
+                            CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(row.name)
+                    }
+                    let incomingCollisionIDs = Set(
+                        (incomingByName[CatalogProjection.normalizedName(row.name)] ?? [])
+                            .filter { $0.id != row.id }
+                            .compactMap { importedIDs[$0.id] }
+                    )
+                    let newIncomingCollisionIDs = incomingCollisionIDs.subtracting(items.map(\.id))
+                    let persistedCollisions = collisions.filter { !newIncomingCollisionIDs.contains($0.id) }
+                    let resolvedStoresByID = Dictionary(
+                        grouping: storeMatches.compactMap(\.first),
+                        by: \.id
+                    ).compactMapValues(\.first)
+                    let disposition: CatalogImportDisposition
+                    if let parseError = row.parseError {
+                        disposition = .invalid(parseError)
+                    } else if let invalidReason {
+                        disposition = .invalid(invalidReason)
+                    } else if existing != nil {
+                        disposition = .update
+                    } else if !collisions.isEmpty || !incomingCollisionIDs.isEmpty {
+                        disposition = .nameConflict(
+                            (Set(collisions.map(\.id)).union(incomingCollisionIDs))
+                                .sorted { $0.uuidString < $1.uuidString }
+                        )
+                    } else {
+                        disposition = .create
+                    }
+                    return CatalogImportEntry(
+                        row: row,
+                        catalogItemID: importedID,
+                        existingRevision: existing?.revision,
+                        categoryID: categoryMatches.first?.id,
+                        categoryRevision: categoryMatches.first?.revision,
+                        storeIDs: Set(resolvedStoresByID.keys),
+                        storeRevisions: Dictionary(uniqueKeysWithValues: resolvedStoresByID.values.map {
+                            ($0.id, $0.revision)
+                        }),
+                        reviewedIncomingCollisionIDs: incomingCollisionIDs,
+                        allowedIncomingCollisionIDs: newIncomingCollisionIDs,
+                        collisionRevisions: Dictionary(uniqueKeysWithValues: persistedCollisions.map {
+                            ($0.id, $0.revision)
+                        }),
+                        disposition: disposition
+                    )
+                }
+            )
+        }
+    }
+
+    func applyCatalogImport(
+        _ preview: CatalogImportPreview,
+        actions: [String: CatalogImportAction]
+    ) throws -> CatalogImportResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: preview.householdID, listID: preview.listID, in: context
+            )
+            let categories = Array(household.categories ?? [])
+            guard categories.allSatisfy({ $0.id != PersistenceModel.unsetID }),
+                  Set(categories.map(\.id)).count == categories.count else {
+                throw NeedServiceError.scopeChanged
+            }
+            let stores = try self.validActiveStores(Array(household.stores ?? []))
+            let initialItemRequest = Item.fetchRequest()
+            initialItemRequest.predicate = NSPredicate(format: "household == %@", household)
+            let initialItems = try self.validCatalogItems(try context.fetch(initialItemRequest))
+            let initialItemRevisions = Dictionary(uniqueKeysWithValues: initialItems.map {
+                ($0.id, $0.revision)
+            })
+            let initialItemsByName = Dictionary(grouping: initialItems) {
+                CatalogProjection.normalizedName($0.name)
+            }
+            var created = 0
+            var updated = 0
+            var skipped = 0
+            var changed = 0
+            for entry in preview.entries.sorted(by: { $0.row.line < $1.row.line }) {
+                let action = actions[entry.id] ?? .skip
+                guard action != .skip else { skipped += 1; continue }
+                if case .invalid = entry.disposition { skipped += 1; continue }
+                let categoryMatches = entry.row.categoryName.map { name in
+                    categories.filter {
+                        CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name)
+                    }
+                } ?? []
+                let storeMatches = entry.row.storeNames.map { name in
+                    stores.filter {
+                        CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name)
+                    }
+                }
+                let currentCategory = categoryMatches.count == 1 ? categoryMatches.first : nil
+                let currentStores = storeMatches.compactMap { $0.count == 1 ? $0.first : nil }
+                let currentStoresByID = Dictionary(grouping: currentStores, by: \.id).compactMapValues(\.first)
+                guard (entry.row.categoryName == nil || categoryMatches.count == 1),
+                      storeMatches.allSatisfy({ $0.count == 1 }),
+                      !currentStores.contains(where: \.isArchived),
+                      currentCategory?.id == entry.categoryID,
+                      currentCategory?.revision == entry.categoryRevision,
+                      Set(currentStoresByID.keys) == entry.storeIDs,
+                      Dictionary(uniqueKeysWithValues: currentStoresByID.values.map { ($0.id, $0.revision) }) ==
+                        entry.storeRevisions else {
+                    changed += 1
+                    continue
+                }
+                let values = CatalogItemValues(
+                    name: entry.row.name,
+                    notes: entry.row.notes,
+                    categoryID: entry.categoryID,
+                    anyStore: entry.storeIDs.isEmpty,
+                    storeIDs: entry.storeIDs
+                )
+                let validated = try self.validatedCatalogValues(values, household: household, in: context)
+                let current = try self.item(id: entry.catalogItemID, in: context)
+                let initialCollisions = initialItemsByName[CatalogProjection.normalizedName(validated.name)] ?? []
+                let externalCollisionIDs = initialCollisions.map(\.id).filter {
+                    $0 != entry.catalogItemID && !entry.allowedIncomingCollisionIDs.contains($0)
+                }
+                let currentRevisions = Dictionary(uniqueKeysWithValues: externalCollisionIDs.compactMap { id in
+                    initialItemRevisions[id].map { (id, $0) }
+                })
+                guard currentRevisions == entry.collisionRevisions else { changed += 1; continue }
+                switch action {
+                case .skip:
+                    skipped += 1
+                case .update:
+                    guard case .update = entry.disposition,
+                          let current,
+                          current.revision == entry.existingRevision else {
+                        changed += 1
+                        continue
+                    }
+                    try self.validate(item: current, belongsTo: household)
+                    current.name = validated.name
+                    current.notes = validated.notes
+                    current.category = validated.category
+                    current.anyStore = validated.anyStore
+                    current.stores = validated.stores
+                    try self.advanceRevision(of: current)
+                    updated += 1
+                case .create:
+                    guard current == nil else { changed += 1; continue }
+                    let item = self.insertCatalogItem(validated, household: household, in: context)
+                    item.id = entry.catalogItemID
+                    created += 1
+                }
+            }
+            return CatalogImportResult(created: created, updated: updated, skipped: skipped, changed: changed)
+        }
+    }
+
     func saveCatalogItem(
         itemID: UUID,
         householdID: UUID,

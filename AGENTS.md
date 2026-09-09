@@ -44,6 +44,7 @@ SHOPPING-10 enrollment blocks real sharing proof, not local architecture, models
 
 - Use SwiftUI and the architecture selected by SHOPPING-27.
 - Use 4-space indentation, `let` where possible, `guard` for early exits, and Swift naming conventions.
+- Prefer one primary type per Swift file. Keep only small, tightly coupled value types together in a feature-model file; give services, parsers, and views their own files.
 - Add focused tests for behavior with persistence, recovery, filtering, or sharing consequences.
 - Add `#Preview` blocks to SwiftUI views.
 - Use Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`, with an optional scope.
