@@ -185,6 +185,27 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .anyStore)
     }
 
+    func testCatalogCategoryFilterMatchesAnySelectedCategory() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let produce = try service.createCategory(name: "Produce", householdID: ids.householdID)
+        let pantry = try service.createCategory(name: "Pantry", householdID: ids.householdID)
+        let bakery = try service.createCategory(name: "Bakery", householdID: ids.householdID)
+        let apples = try service.createItem(name: "Apples", categoryID: produce, householdID: ids.householdID)
+        let rice = try service.createItem(name: "Rice", categoryID: pantry, householdID: ids.householdID)
+        _ = try service.createItem(name: "Bread", categoryID: bakery, householdID: ids.householdID)
+        _ = try service.createItem(name: "Ice", householdID: ids.householdID)
+
+        XCTAssertEqual(
+            Set(try service.filteredCatalogItemIDs(
+                householdID: ids.householdID,
+                filter: CatalogItemFilter(categoryIDs: [produce, pantry])
+            )),
+            [apples, rice]
+        )
+    }
+
     private func fetchItem(_ id: UUID, context: NSManagedObjectContext) throws -> Item {
         let request = Item.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", id as CVarArg)

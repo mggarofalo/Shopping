@@ -174,6 +174,7 @@ struct CategoryManagementView: View {
                 Text("Categories group groceries across every store. They do not define aisle order.")
             }
         }
+        .listStyle(.plain)
         .environment(\.editMode, $editMode)
         .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Categories")
         .toolbar {

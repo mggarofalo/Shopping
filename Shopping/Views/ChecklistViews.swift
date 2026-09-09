@@ -101,6 +101,7 @@ struct CartedGroceriesView: View {
                 Section { rows(carted, activeStores: activeStores) }
             }
         }
+        .listStyle(.plain)
         .overlay {
             if allCarted.isEmpty {
                 ContentUnavailableView("Nothing in cart", systemImage: "cart")
