@@ -11,16 +11,33 @@ on:
       - main
       - "milestone/**"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build & Test
     runs-on: macos-15
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Select Xcode version
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
+
+      - name: Verify portable test boundaries
+        run: |
+          if grep -ER --include='*.swift' \
+            '^[[:space:]]*#[[:space:]]*(if|elseif).*targetEnvironment[[:space:]]*\([[:space:]]*simulator[[:space:]]*\)' \
+            ShoppingTests; then
+            echo 'Tests must use fixture or runtime capability boundaries, not simulator compilation checks.' >&2
+            exit 1
+          fi
 
       - name: Start pinned iOS simulator
         id: simulator
@@ -36,18 +53,93 @@ jobs:
           xcrun simctl bootstatus "$shopping_simulator_id" -b
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
 
-      - name: Build and test
+      - name: Build fast test products
         run: |
-          xcodebuild test \
+          set -uo pipefail
+          started_at="$(date +%s)"
+          set +e
+          xcodebuild build-for-testing \
             -project Shopping.xcodeproj \
             -scheme Shopping \
+            -testPlan ShoppingFast \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
-            -resultBundlePath TestResults.xcresult
+            -derivedDataPath DerivedData \
+            -quiet 2>&1 | tee FastBuild.log
+          exit_code="${PIPESTATUS[0]}"
+          set -e
+          finished_at="$(date +%s)"
+          echo "$((finished_at - started_at))" > FastBuildSeconds.txt
+          exit "$exit_code"
 
-      - name: Upload test failure results
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Run fast deterministic tests
+        run: |
+          set -uo pipefail
+          started_at="$(date +%s)"
+          set +e
+          xcodebuild test-without-building \
+            -project Shopping.xcodeproj \
+            -scheme Shopping \
+            -testPlan ShoppingFast \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -derivedDataPath DerivedData \
+            -resultBundlePath FastResults.xcresult \
+            -quiet 2>&1 | tee FastTest.log
+          exit_code="${PIPESTATUS[0]}"
+          set -e
+          finished_at="$(date +%s)"
+          echo "$((finished_at - started_at))" > FastTestSeconds.txt
+          exit "$exit_code"
+
+      - name: Enforce coverage baseline
+        if: always() && hashFiles('FastResults.xcresult/**') != ''
+        run: |
+          set +e
+          .github/scripts/check-coverage.sh \
+            FastResults.xcresult \
+            .github/coverage-baseline.json \
+            FastCoverage.json \
+            FastCoverage.md
+          exit_code="$?"
+          set -e
+          cat FastCoverage.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$exit_code"
+
+      - name: Publish fast test summary
+        if: always()
+        run: |
+          .github/scripts/summarize-xcresult.sh \
+            "Fast deterministic tests" \
+            FastResults.xcresult \
+            FastBuild.log \
+            FastTest.log \
+            FastSummary.md \
+            FastSummary.json \
+            FastBuildSeconds.txt \
+            FastTestSeconds.txt
+          cat FastSummary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fast summary
+        if: always()
+        uses: actions/upload-artifact@v6
         with:
-          name: Shopping-test-results
-          path: TestResults.xcresult
+          name: fast-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            FastSummary.md
+            FastSummary.json
+            FastCoverage.md
+            FastCoverage.json
+            FastCoverage.raw.json
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload fast failure results
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            FastResults.xcresult
+            FastBuild.log
+            FastTest.log
+          if-no-files-found: warn
+          retention-days: 14

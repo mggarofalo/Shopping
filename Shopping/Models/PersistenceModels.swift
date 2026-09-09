@@ -30,6 +30,7 @@ final class Store: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var displayOrder: Int64
     @NSManaged var isArchived: Bool
+    @NSManaged var revision: Int64
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?
     @NSManaged var oneTimeNeeds: Set<Need>?
@@ -41,6 +42,7 @@ final class Item: IdentifiedManagedObject {
     @NSManaged var notes: String
     @NSManaged var anyStore: Bool
     @NSManaged var isArchived: Bool
+    @NSManaged var revision: Int64
     @NSManaged var household: Household?
     @NSManaged var category: Category?
     @NSManaged var stores: Set<Store>?
@@ -51,6 +53,8 @@ final class Item: IdentifiedManagedObject {
 final class Category: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var displayOrder: Int64
+    @NSManaged var isArchived: Bool
+    @NSManaged var revision: Int64
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?
     @NSManaged var oneTimeNeeds: Set<Need>?

@@ -29,6 +29,10 @@ extension EnvironmentValues {
 
 @MainActor
 final class PersistenceBootstrap: ObservableObject {
+    private static let performanceFixtureVersion = 2
+    private static let retainedUITestStoreLimit = 12
+    private static let retainedUITestHistoryTokenLimit = 24
+
     struct ReadyState {
         let persistence: PersistenceController
         let service: NeedService
@@ -62,23 +66,153 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
+        if let fixtureName = processInfo.environment["SHOPPING_PERFORMANCE_FIXTURE"],
+           let fixture = ShoppingPreviewCase(rawValue: fixtureName),
+           fixture == .performance || fixture == .stress {
+            do {
+                let storeURL = try performanceStoreURL(
+                    for: fixture,
+                    runID: processInfo.environment["SHOPPING_PERFORMANCE_RUN_ID"]
+                )
+                if processInfo.environment["SHOPPING_PERFORMANCE_RESET"] == "1" {
+                    removeSQLiteStore(at: storeURL)
+                }
+                if FileManager.default.fileExists(atPath: storeURL.path) {
+                    return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+                }
+                let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
+                return PersistenceBootstrap(
+                    configuration: { .local(storeURL: storeURL) },
+                    preloadedPreviewEnvironment: environment
+                )
+            } catch {
+                return PersistenceBootstrap(configuration: { throw error })
+            }
+        }
+#if DEBUG
+        if processInfo.environment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] == "1" {
+            let error = NSError(
+                domain: "ShoppingUITest",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The saved household grocery store could not be opened. Its data was left unchanged so you can retry safely."
+                ]
+            )
+            return PersistenceBootstrap(configuration: { throw error })
+        }
+#endif
         if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
-            let storeURL = URL(fileURLWithPath: path)
-            if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
-               let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
-                do {
+            do {
+                let storeURL = try uiTestStoreURL(for: path)
+                if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
+                   let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
                     return PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment
                     )
-                } catch {
-                    return PersistenceBootstrap(configuration: { throw error })
                 }
+                return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+            } catch {
+                return PersistenceBootstrap(configuration: { throw error })
             }
-            return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
         }
         return PersistenceBootstrap()
+    }
+
+    static func uiTestStoreURL(
+        for path: String,
+        applicationSupportDirectory: URL? = nil
+    ) throws -> URL {
+        let requestedURL = URL(fileURLWithPath: path)
+        if path.hasPrefix("/"), FileManager.default.isWritableFile(
+            atPath: requestedURL.deletingLastPathComponent().path
+        ) {
+            return requestedURL
+        }
+        let fileName = requestedURL.lastPathComponent
+        let supportDirectory = try applicationSupportDirectory ?? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = supportDirectory.appendingPathComponent("UITestStores", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        pruneUITestStores(in: directory, keeping: fileName)
+        return directory.appendingPathComponent(fileName)
+    }
+
+    private static func pruneUITestStores(in directory: URL, keeping currentStoreName: String) {
+        let fileManager = FileManager.default
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let storeGroups = Dictionary(grouping: contents.compactMap { url -> (String, URL)? in
+            guard let storeName = sqliteStoreName(for: url.lastPathComponent) else { return nil }
+            return (storeName, url)
+        }, by: \.0)
+        let inactiveGroups = storeGroups.keys.filter { $0 != currentStoreName }.sorted { left, right in
+            latestModificationDate(in: storeGroups[left] ?? []) > latestModificationDate(in: storeGroups[right] ?? [])
+        }
+        for storeName in inactiveGroups.dropFirst(max(0, retainedUITestStoreLimit - 1)) {
+            for entry in storeGroups[storeName] ?? [] {
+                try? fileManager.removeItem(at: entry.1)
+            }
+        }
+
+        let historyTokens = contents.filter { $0.lastPathComponent.hasPrefix("history-") }
+            .sorted { modificationDate(of: $0) > modificationDate(of: $1) }
+        for token in historyTokens.dropFirst(retainedUITestHistoryTokenLimit) {
+            try? fileManager.removeItem(at: token)
+        }
+    }
+
+    private static func sqliteStoreName(for fileName: String) -> String? {
+        guard let range = fileName.range(of: ".sqlite") else { return nil }
+        return String(fileName[..<range.upperBound])
+    }
+
+    private static func latestModificationDate(in entries: [(String, URL)]) -> Date {
+        entries.map { modificationDate(of: $0.1) }.max() ?? .distantPast
+    }
+
+    private static func modificationDate(of url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+
+    private static func performanceStoreURL(
+        for fixture: ShoppingPreviewCase,
+        runID: String?
+    ) throws -> URL {
+        let directory = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appendingPathComponent("PerformanceFixtures", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let normalizedRunID = runID?.lowercased().filter { character in
+            character.isLetter || character.isNumber || character == "-"
+        }
+        let effectiveRunID = normalizedRunID.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+        let storeName = [
+            "shopping",
+            fixture.rawValue,
+            "v\(performanceFixtureVersion)",
+            effectiveRunID
+        ].joined(separator: "-")
+        return directory.appendingPathComponent("\(storeName).sqlite")
+    }
+
+    private static func removeSQLiteStore(at url: URL) {
+        for suffix in ["", "-shm", "-wal"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix))
+        }
     }
 
     deinit {
@@ -124,17 +258,24 @@ final class PersistenceBootstrap: ObservableObject {
                     selection = (created.householdID, created.listID)
                 }
             }
-            let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
-                ?? FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingHistory")
-            let consumer = PersistentHistoryConsumer(
-                persistence: persistence,
-                checkpoints: FileHistoryCheckpointStore(directory: checkpointDirectory)
-            )
-            historyConsumer = consumer
+            if Self.consumesPersistentHistory(for: resolvedConfiguration) {
+                let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
+                    ?? FileManager.default.temporaryDirectory.appendingPathComponent("ShoppingHistory")
+                historyConsumer = PersistentHistoryConsumer(
+                    persistence: persistence,
+                    checkpoints: FileHistoryCheckpointStore(directory: checkpointDirectory)
+                )
+                installRemoteObserver(for: persistence)
+            } else {
+                historyConsumer = nil
+                if let remoteObserver {
+                    NotificationCenter.default.removeObserver(remoteObserver)
+                    self.remoteObserver = nil
+                }
+            }
             if let journal = persistence.shareAssociationJournal {
                 associationWorker = ManagedShareAssociationWorker(persistence: persistence, journal: journal)
             }
-            installRemoteObserver(for: persistence)
             installAssociationObserver(for: persistence)
             state = .ready(ReadyState(
                 persistence: persistence,
@@ -158,6 +299,10 @@ final class PersistenceBootstrap: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.consumeHistory() }
         }
+    }
+
+    static func consumesPersistentHistory(for configuration: PersistenceConfiguration) -> Bool {
+        configuration.isManaged
     }
 
     private func installAssociationObserver(for persistence: PersistenceController) {

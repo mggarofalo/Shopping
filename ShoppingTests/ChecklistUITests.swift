@@ -69,11 +69,6 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Archive", for: item, app: app)
         app.buttons["Archive"].tap()
-        app.alerts.buttons["Cancel"].tap()
-        XCTAssertTrue(item.exists)
-        revealSwipeAction("Archive", for: item, app: app)
-        app.buttons["Archive"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(row("Bananas", app: app).exists)
@@ -90,11 +85,10 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Restore", for: item, app: app)
         app.buttons["Restore"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertFalse(item.label.contains("Any store"))
+        XCTAssertTrue(item.label.contains("Any store"))
     }
 
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
@@ -106,7 +100,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertFalse(row("Strawberries", app: app).exists)
+        XCTAssertTrue(row("Strawberries", app: app).exists)
 
         openCheckout(app: app)
         XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
@@ -127,7 +121,6 @@ final class ChecklistUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 3))
         reveal(row("Chipotles in adobo", app: app), app: app)
-        app.buttons["shopping.carted.all"].tap()
         reveal(row("Strawberries", app: app), app: app)
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }

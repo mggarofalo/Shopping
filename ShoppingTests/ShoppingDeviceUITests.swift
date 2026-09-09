@@ -83,7 +83,8 @@ final class ShoppingDeviceUITests: XCTestCase {
         try app.performAccessibilityAudit(for: .contrast) { issue in
             self.attachAudit(issue, phase: "Catalog row contrast")
             guard let element = issue.element else { return false }
-            return !self.contains(element, in: row)
+            guard self.usable(element.frame), self.usable(row.frame) else { return false }
+            return !row.frame.intersects(element.frame)
         }
     }
 
@@ -189,6 +190,74 @@ final class ShoppingDeviceUITests: XCTestCase {
             screenshot("Grocery text sizing - \(size)", app: app)
             app.terminate()
         }
+    }
+
+    func testMultilineCheckoutEditorAndSettingsAtLargestText() throws {
+        let app = launch(fixture: "populated", largestText: true)
+        let carted = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "In cart (1)")
+        ).firstMatch
+        reveal(carted, in: app, towardTop: true)
+        carted.tap()
+        let checkout = app.buttons["shopping.checkout.start"]
+        XCTAssertTrue(checkout.waitForExistence(timeout: 3))
+        checkout.tap()
+
+        let explanation = app.staticTexts["shopping.checkout.explanation"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(explanation.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(explanation.frame.minY, app.navigationBars["Checkout?"].frame.maxY)
+        XCTAssertGreaterThanOrEqual(explanation.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(explanation.frame.maxX, app.frame.maxX)
+        screenshot("Checkout explanation at largest text", app: app)
+        try audit(app, types: [.textClipped, .sufficientElementDescription])
+
+        app.buttons["shopping.checkout.cancel"].tap()
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
+        let granola = app.buttons["Edit Granola"]
+        reveal(granola, in: app)
+        granola.tap()
+        let reusableHeading = app.staticTexts["shopping.grocery.catalogNotesHeading"]
+        let temporaryHeading = app.staticTexts["shopping.grocery.purchaseNotesHeading"]
+        let reusableNotes = app.textFields["shopping.grocery.catalogNotes"]
+        let temporaryNotes = app.textFields["shopping.grocery.purchaseNotes"]
+        XCTAssertTrue(reusableNotes.waitForExistence(timeout: 3))
+        reveal(temporaryNotes, in: app)
+        XCTAssertGreaterThan(reusableHeading.frame.height, 0)
+        XCTAssertGreaterThan(temporaryHeading.frame.height, 0)
+        XCTAssertGreaterThanOrEqual(reusableNotes.frame.height, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(temporaryNotes.frame.height, 44 - 0.01)
+        screenshot("Item editor supporting text at largest text", app: app)
+        try audit(app, types: [.textClipped, .sufficientElementDescription])
+        app.buttons["shopping.grocery.cancel"].tap()
+
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Sharing status"].waitForExistence(timeout: 3))
+        screenshot("Settings multiline text at largest text", app: app)
+    }
+
+    func testEmptyAndPersistenceErrorCopyAtLargestText() throws {
+        let emptyApp = launch(fixture: "empty", largestText: true)
+        // Assert the user-facing copy as well as its layout; the empty-state
+        // container keeps a separate identifier for existing launch tests.
+        let emptyDescription = emptyApp.staticTexts["Add an item to get started."]
+        XCTAssertTrue(emptyDescription.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(emptyDescription.frame.height, 0)
+        screenshot("Empty state at largest text", app: emptyApp)
+        emptyApp.terminate()
+
+        let errorApp = XCUIApplication()
+        errorApp.launchEnvironment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] = "1"
+        errorApp.launchArguments = [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        errorApp.launch()
+        let errorState = errorApp.staticTexts["Groceries unavailable"]
+        XCTAssertTrue(errorState.waitForExistence(timeout: 5))
+        XCTAssertTrue(errorApp.staticTexts["Your saved data was left unchanged. Try opening it again."].exists)
+        assertTouchSize(errorApp.buttons["shopping.persistence.retry"])
+        screenshot("Persistence error at largest text", app: errorApp)
+        try audit(errorApp, types: [.textClipped, .sufficientElementDescription])
     }
 
     private struct EdgeAuditCandidate: Equatable {
@@ -436,16 +505,27 @@ final class ShoppingDeviceUITests: XCTestCase {
             if action.exists && action.isHittable {
                 return
             }
-            // XCTest clips its native swipe to the visible portion of an
-            // element. That matters when accessibility text makes a row taller
-            // than the viewport; a normalized-coordinate drag can otherwise
-            // begin outside the screen on iOS 18.
-            row.swipeLeft()
+            swipeLeftThroughVisibleSlice(of: row, in: app)
             if action.waitForExistence(timeout: 1), action.isHittable {
                 return
             }
         }
         XCTFail("Could not reveal the \(label) swipe action")
+    }
+
+    private func swipeLeftThroughVisibleSlice(of row: XCUIElement, in app: XCUIApplication) {
+        let top = app.navigationBars.firstMatch.frame.maxY
+        let tabBar = app.tabBars.firstMatch
+        let bottom = tabBar.exists ? tabBar.frame.minY : app.frame.maxY
+        let visibleTop = max(row.frame.minY, top) + 8
+        let visibleBottom = min(row.frame.maxY, bottom) - 8
+        let y = visibleTop < visibleBottom ? (visibleTop + visibleBottom) / 2 : (top + bottom) / 2
+        let startX = min(row.frame.maxX - 24, app.frame.maxX - 24)
+        let endX = max(row.frame.minX + 44, startX - 120)
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: startX, dy: y))
+        let end = origin.withOffset(CGVector(dx: endX, dy: y))
+        start.press(forDuration: 0.05, thenDragTo: end)
     }
 
     private func quantity(for row: XCUIElement, in app: XCUIApplication) -> XCUIElement {

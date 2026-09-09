@@ -3,6 +3,83 @@ import XCTest
 @testable import Shopping
 
 final class CategoryManagementTests: XCTestCase {
+    func testArchiveAndRestorePreserveCategoryRelationshipsAndActiveReordering() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let archivedID = try service.createCategory(name: "Frozen", householdID: selection.householdID)
+        let activeID = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let itemID = try service.createItem(name: "Peas", categoryID: archivedID, householdID: selection.householdID)
+
+        try service.setCategoryArchived(
+            true, categoryID: archivedID, householdID: selection.householdID, listID: selection.listID
+        )
+        try service.reorderCategories([activeID], householdID: selection.householdID, listID: selection.listID)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let category = try fetch(Shopping.Category.self, entity: "Category", id: archivedID, in: context)
+            let item = try fetch(Item.self, entity: "Item", id: itemID, in: context)
+            XCTAssertTrue(category.isArchived)
+            XCTAssertEqual(item.category, category)
+        }
+
+        try service.setCategoryArchived(
+            false, categoryID: archivedID, householdID: selection.householdID, listID: selection.listID
+        )
+        try context.performAndWait {
+            context.reset()
+            let restored = try fetch(Shopping.Category.self, entity: "Category", id: archivedID, in: context)
+            let active = try fetch(Shopping.Category.self, entity: "Category", id: activeID, in: context)
+            XCTAssertFalse(restored.isArchived)
+            XCTAssertEqual(active.displayOrder, 0)
+            XCTAssertEqual(restored.displayOrder, 1)
+        }
+    }
+
+    func testArchivedCategoryCannotBeAssignedToNewDataButExistingRelationshipCanBeSaved() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let categoryID = try service.createCategory(name: "Frozen", householdID: selection.householdID)
+        let itemID = try service.createItem(name: "Peas", categoryID: categoryID, householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: selection.householdID, listID: selection.listID
+        )
+
+        XCTAssertThrowsError(try service.createItem(
+            name: "Ice", categoryID: categoryID, householdID: selection.householdID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .categoryNotFound) }
+        try service.saveCatalogItem(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID,
+            values: CatalogItemValues(
+                name: "Frozen peas", notes: "", categoryID: categoryID,
+                anyStore: true, storeIDs: []
+            )
+        )
+    }
+
+    func testCategoryCreationAppendsByDefaultAndPreservesExplicitOrder() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+
+        let produce = try service.createCategory(
+            name: "Produce", householdID: selection.householdID, displayOrder: 3
+        )
+        let pantry = try service.createCategory(
+            name: "  Pantry \n", householdID: selection.householdID
+        )
+        let bakery = try service.createCategory(
+            name: "Bakery", householdID: selection.householdID
+        )
+
+        let states = try categoryStates(selection.householdID, persistence: persistence)
+        XCTAssertEqual(states.map(\.id), [produce, pantry, bakery])
+        XCTAssertEqual(states.map(\.name), ["Produce", "Pantry", "Bakery"])
+        XCTAssertEqual(states.map(\.order), [3, 4, 5])
+    }
+
     func testRenameAndExactReorderAreAtomicAndHouseholdScoped() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)

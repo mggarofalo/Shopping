@@ -60,6 +60,16 @@ final class PreviewFixtureTests: XCTestCase {
         XCTAssertTrue(pendingSnapshots.values.contains { $0.kind == NeedKind.remembered.rawValue && !$0.hasItem })
     }
 
+    func testPerformanceFixturesHaveStableRepresentativeCounts() throws {
+        for (fixtureCase, itemCount) in [(ShoppingPreviewCase.performance, 500), (.stress, 1_000)] {
+            let fixture = try ShoppingPreviewFixtures.make(fixtureCase)
+            XCTAssertEqual(fixture.ids.itemIDs.count, itemCount)
+            XCTAssertEqual(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).count, itemCount)
+            XCTAssertEqual(fixture.ids.storeIDs.count, 20)
+            XCTAssertEqual(fixture.ids.categoryIDs.count, 100)
+        }
+    }
+
     func testDiskBackedFixtureRetainsRecoveryAndOneTimeDoesNotPolluteCatalogAfterReopen() throws {
         let url = temporaryURL("fixture.sqlite")
         var ids: ShoppingPreviewIDs!
@@ -77,6 +87,68 @@ final class PreviewFixtureTests: XCTestCase {
         XCTAssertFalse(try service.catalogSuggestionNames(householdID: ids.householdID).contains("Party ice"))
         XCTAssertFalse(try service.catalogSuggestionNames(householdID: ids.householdID).contains("Birthday candles"))
         XCTAssertEqual(try service.allCatalogItemIDs(householdID: ids.householdID).count, 6)
+    }
+
+    @MainActor
+    func testWritableAbsoluteUITestStorePathRemainsUnchanged() throws {
+        let directory = temporaryURL("writable-store")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let requestedURL = directory.appendingPathComponent("fixture.sqlite")
+
+        let resolvedURL = try PersistenceBootstrap.uiTestStoreURL(
+            for: requestedURL.path,
+            applicationSupportDirectory: temporaryURL("unused-support")
+        )
+
+        XCTAssertEqual(resolvedURL, requestedURL)
+    }
+
+    @MainActor
+    func testUnwritableUITestStorePathUsesAppSupportAndPrunesOldArtifacts() throws {
+        let supportDirectory = temporaryURL("application-support")
+        let storesDirectory = supportDirectory.appendingPathComponent("UITestStores", isDirectory: true)
+        try FileManager.default.createDirectory(at: storesDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+
+        for index in 0..<14 {
+            for suffix in ["", "-wal", "-shm"] {
+                let url = storesDirectory.appendingPathComponent("fixture-\(index).sqlite\(suffix)")
+                try Data().write(to: url)
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date(timeIntervalSince1970: TimeInterval(index))],
+                    ofItemAtPath: url.path
+                )
+            }
+        }
+        for index in 0..<30 {
+            let url = storesDirectory.appendingPathComponent("history-\(index)")
+            try Data().write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: TimeInterval(index))],
+                ofItemAtPath: url.path
+            )
+        }
+
+        let currentName = "current.sqlite"
+        let resolvedURL = try PersistenceBootstrap.uiTestStoreURL(
+            for: "/runner-sandbox/\(currentName)",
+            applicationSupportDirectory: supportDirectory
+        )
+        try Data().write(to: resolvedURL)
+
+        let remainingNames = Set(try FileManager.default.contentsOfDirectory(atPath: storesDirectory.path))
+        XCTAssertEqual(remainingNames.filter { $0.hasSuffix(".sqlite") }.count, 12)
+        XCTAssertTrue(remainingNames.contains(currentName))
+        for index in 0..<3 {
+            XCTAssertFalse(remainingNames.contains("fixture-\(index).sqlite"))
+            XCTAssertFalse(remainingNames.contains("fixture-\(index).sqlite-wal"))
+            XCTAssertFalse(remainingNames.contains("fixture-\(index).sqlite-shm"))
+        }
+        XCTAssertEqual(remainingNames.filter { $0.hasPrefix("history-") }.count, 24)
+        for index in 0..<6 {
+            XCTAssertFalse(remainingNames.contains("history-\(index)"))
+        }
     }
 
     func testTwoContextHarnessKeepsStaleSnapshotsAndAppliesExplicitSaveOrder() throws {

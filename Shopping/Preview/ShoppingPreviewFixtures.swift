@@ -8,6 +8,8 @@ enum ShoppingPreviewCase: String, CaseIterable {
     case largeText
     case archivedStore
     case pendingRelationship
+    case performance
+    case stress
 }
 
 struct ShoppingPreviewIDs {
@@ -53,7 +55,15 @@ enum ShoppingPreviewFixtures {
             return ShoppingPreviewEnvironment(persistence: persistence, service: service, ids: ids)
         }
 
-        try populate(service: service, fixture: fixture, ids: &ids)
+        if fixture == .performance || fixture == .stress {
+            try populateLoadFixture(
+                persistence: persistence,
+                itemCount: fixture == .performance ? 500 : 1_000,
+                ids: &ids
+            )
+        } else {
+            try populate(service: service, fixture: fixture, ids: &ids)
+        }
         if fixture == .pendingRelationship {
             try insertPendingRelationship(in: persistence, householdID: ids.householdID, listID: ids.listID)
         }
@@ -156,6 +166,93 @@ enum ShoppingPreviewFixtures {
             need.list = list
             try context.save()
         }
+    }
+
+    private static func populateLoadFixture(
+        persistence: PersistenceController,
+        itemCount: Int,
+        ids: inout ShoppingPreviewIDs
+    ) throws {
+        var result: Result<ShoppingPreviewIDs, Error>!
+        persistence.writer.performAndWait {
+            result = Result {
+                let context = persistence.writer
+                let householdRequest = Household.fetchRequest()
+                householdRequest.predicate = NSPredicate(format: "id == %@", ids.householdID as CVarArg)
+                let listRequest = GroceryList.fetchRequest()
+                listRequest.predicate = NSPredicate(format: "id == %@", ids.listID as CVarArg)
+                guard let household = try context.fetch(householdRequest).first else {
+                    throw NeedServiceError.householdNotFound
+                }
+                guard let list = try context.fetch(listRequest).first else {
+                    throw NeedServiceError.listNotFound
+                }
+
+                let stores: [Store] = (0..<20).map { index in
+                    let store = NSEntityDescription.insertNewObject(forEntityName: "Store", into: context) as! Store
+                    store.id = UUID()
+                    store.name = String(format: "Store %02d", index + 1)
+                    store.displayOrder = Int64(index)
+                    store.isArchived = false
+                    store.revision = 0
+                    store.household = household
+                    return store
+                }
+                let categories: [Category] = (0..<100).map { index in
+                    let category = NSEntityDescription.insertNewObject(forEntityName: "Category", into: context) as! Category
+                    category.id = UUID()
+                    category.name = String(format: "Category %03d", index + 1)
+                    category.displayOrder = Int64(index)
+                    category.revision = 0
+                    category.household = household
+                    return category
+                }
+                var itemIDs: [String: UUID] = [:]
+                var needIDs: [String: UUID] = [:]
+                for index in 0..<itemCount {
+                    let item = NSEntityDescription.insertNewObject(forEntityName: "Item", into: context) as! Item
+                    item.id = UUID()
+                    item.name = String(format: "Catalog item %04d", index + 1)
+                    item.notes = index.isMultiple(of: 11) ? "Compare size and unit price" : ""
+                    item.anyStore = index.isMultiple(of: 4)
+                    item.isArchived = index.isMultiple(of: 97)
+                    item.revision = 0
+                    item.household = household
+                    item.category = categories[index % categories.count]
+                    if !item.anyStore {
+                        item.stores = index.isMultiple(of: 7)
+                            ? [stores[index % stores.count], stores[(index + 3) % stores.count]]
+                            : [stores[index % stores.count]]
+                    }
+                    let need = NSEntityDescription.insertNewObject(forEntityName: "Need", into: context) as! Need
+                    need.id = UUID()
+                    need.kind = NeedKind.remembered.rawValue
+                    need.title = item.name
+                    need.notes = index.isMultiple(of: 13) ? "Load fixture note" : ""
+                    need.quantity = Int64((index % 4) + 1)
+                    need.carted = index.isMultiple(of: 9)
+                    need.urgency = index.isMultiple(of: 10) ? NeedUrgency.urgent.rawValue : NeedUrgency.normal.rawValue
+                    need.revision = 0
+                    need.archived = false
+                    need.clearOperationID = nil
+                    need.oneTimeAnyStore = false
+                    need.list = list
+                    need.item = item
+                    needIDs["need-\(index)"] = need.id
+                    itemIDs["item-\(index)"] = item.id
+                }
+                try persistence.prepareForSave(context)
+                try context.save()
+
+                var updated = ids
+                updated.storeIDs = Dictionary(uniqueKeysWithValues: stores.enumerated().map { ("store-\($0.offset)", $0.element.id) })
+                updated.categoryIDs = Dictionary(uniqueKeysWithValues: categories.enumerated().map { ("category-\($0.offset)", $0.element.id) })
+                updated.itemIDs = itemIDs
+                updated.needIDs = needIDs
+                return updated
+            }
+        }
+        ids = try result.get()
     }
 
     private static let longHouseholdName = "The Very Large Extended Household With an Exceptionally Descriptive Shared Grocery List Name"

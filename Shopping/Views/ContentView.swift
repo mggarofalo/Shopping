@@ -13,9 +13,9 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $navigation.selectedTab) {
             GroceriesView(navigation: navigation)
-                .tabItem { Label("Groceries", systemImage: "cart") }
+                .tabItem { Label("Groceries", systemImage: "list.bullet") }
                 .tag(GroceryNavigationState.Tab.groceries)
-            CatalogView()
+            CatalogView(navigation: navigation)
                 .tabItem { Label("Catalog", systemImage: "books.vertical") }
                 .tag(GroceryNavigationState.Tab.catalog)
             SettingsView()

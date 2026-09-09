@@ -8,7 +8,7 @@
 - **Design review:** [SHOPPING-26](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/work-items/dc144997-592d-4da6-9b3f-b6b8a5e034f7)
 - **Architecture spike:** [SHOPPING-27](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/work-items/5e924f74-ae8e-49b0-ab02-1653ffa7ecbb)
 
-SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with compact two-group store shopping and an implicit Any store default for untagged items. These replace the original per-store trip and SwiftData-sharing sketches.
+SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with compact two-group store shopping and an implicit Any store default for items without a store restriction. These replace the original per-store trip and SwiftData-sharing sketches.
 
 ## Modules and roadmap
 
@@ -41,11 +41,11 @@ An obsolete SHOPPING-27 blocked-by-SHOPPING-10 relation was identified during th
 
 ## Product contract
 
-The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit purchase tags or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
+The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
 
-For selected store `S`, availability is `Any store OR explicitly tagged S`. No explicit tags means Any store, including older saved records. `Only buy here` means `S` is the only explicit active tag and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings; All has none. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit tag membership, exclusions win, and cannot widen availability. Tags express household buying rules, not retailer stock.
+For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. `Only buy here` means `S` is the only explicit active store and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings; All has none. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
 
-Ordinary re-add reuses the catalog item and its tags, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
+Ordinary re-add reuses the catalog item's purchase rules, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
 
 Clear-carted operations must be confirmed and recoverable. They target exact captured occurrence IDs and revisions, skip rows changed since capture, and do not delete catalog knowledge or overwrite a later uncart/re-add.
 
@@ -53,7 +53,7 @@ Clear-carted operations must be confirmed and recoverable. They target exact cap
 
 The recommended baseline is SwiftUI + Core Data + `NSPersistentCloudKitContainer` managed private/shared stores. SwiftData private-device sync does not establish household sharing. Treat managed sharing, CloudKit schema readiness, convergence timing, and two-phone behavior as unproven until SHOPPING-30 records real evidence.
 
-The observed developer environment is Xcode 26.6 (17F113) with the iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Local validation is `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. Local work may proceed while enrollment is missing, but the app cannot claim release-ready shared MVP behavior without SHOPPING-10 and SHOPPING-30.
+The observed developer environment is Xcode 26.6 (17F113) with the iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Fast local validation is `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. Use `ShoppingCritical` for the tag-filtered Swift Testing smoke suite and `ShoppingFull` for exhaustive local UI coverage. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. The fast and full plans collect coverage against the committed ratcheting baseline. `docs/test-strategy.md` and `docs/continuous-integration.md` record ownership, fixtures, coverage, and triggers. Local work may proceed while enrollment is missing, but the app cannot claim release-ready shared MVP behavior without SHOPPING-10 and SHOPPING-30.
 
 ## Branching and release
 

@@ -10,6 +10,7 @@ final class GroceryNavigationState: ObservableObject {
     @Published var excludedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var urgentOnly: Bool { didSet { persist() } }
     @Published var categoryID: UUID? { didSet { persist() } }
+    @Published private(set) var pendingNeedFocusID: UUID?
 
     private struct SavedFilter: Codable, Equatable {
         var selectedStoreID: UUID?
@@ -32,6 +33,7 @@ final class GroceryNavigationState: ObservableObject {
         excludedStoreIDs = []
         urgentOnly = false
         categoryID = nil
+        pendingNeedFocusID = nil
     }
 
     var activeFilterCount: Int {
@@ -95,6 +97,15 @@ final class GroceryNavigationState: ObservableObject {
         categoryID = nil
     }
 
+    func requestNeedFocus(_ id: UUID) {
+        pendingNeedFocusID = id
+        selectedTab = .groceries
+    }
+
+    func consumeNeedFocus(_ id: UUID) {
+        if pendingNeedFocusID == id { pendingNeedFocusID = nil }
+    }
+
     func sanitize(activeStoreIDs: Set<UUID>, activeCategoryIDs: Set<UUID> = []) {
         isRestoring = true
         if let selectedStoreID, !activeStoreIDs.contains(selectedStoreID) {
@@ -134,6 +145,33 @@ struct GroceryAddScope: Identifiable, Equatable {
     let listID: UUID?
     let selectedStoreID: UUID?
     let selectedStoreName: String?
+    let includedStoreIDs: Set<UUID>
+    let excludedStoreIDs: Set<UUID>
+    let categoryID: UUID?
+    let textFilter: String
+    let urgentOnly: Bool
+
+    init(
+        householdID: UUID?,
+        listID: UUID?,
+        selectedStoreID: UUID?,
+        selectedStoreName: String?,
+        includedStoreIDs: Set<UUID> = [],
+        excludedStoreIDs: Set<UUID> = [],
+        categoryID: UUID? = nil,
+        textFilter: String = "",
+        urgentOnly: Bool = false
+    ) {
+        self.householdID = householdID
+        self.listID = listID
+        self.selectedStoreID = selectedStoreID
+        self.selectedStoreName = selectedStoreName
+        self.includedStoreIDs = includedStoreIDs
+        self.excludedStoreIDs = excludedStoreIDs
+        self.categoryID = categoryID
+        self.textFilter = textFilter
+        self.urgentOnly = urgentOnly
+    }
 
     func addOneTime(
         title: String,

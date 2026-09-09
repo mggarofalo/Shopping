@@ -3,99 +3,6 @@ import XCTest
 @testable import Shopping
 
 final class CatalogFilterTests: XCTestCase {
-    func testIndependentPurchaseRuleMatrix() {
-        let a = UUID(), b = UUID(), c = UUID()
-        let active: Set<UUID> = [a, b, c]
-        struct Case {
-            let value: PurchaseRuleValue
-            let selected: UUID?
-            let include: Set<UUID>
-            let exclude: Set<UUID>
-            let expectedAvailability: PurchaseAvailability
-            let expectedMatch: Bool
-        }
-        let cases = [
-            Case(value: .init(explicitStoreIDs: [a], anyStore: false), selected: a, include: [], exclude: [], expectedAvailability: .mustBuyHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [a], anyStore: false), selected: b, include: [], exclude: [], expectedAvailability: .unavailable, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: true), selected: c, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [a], anyStore: true), selected: b, include: [a], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: nil, include: [], exclude: [], expectedAvailability: .unavailable, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [a], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [], anyStore: false), selected: a, include: [], exclude: [a], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [b], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [c], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [a, b], anyStore: false), selected: a, include: [], exclude: [b], expectedAvailability: .flexibleHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [a], anyStore: false), selected: a, include: [a], exclude: [a], expectedAvailability: .mustBuyHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [], anyStore: true), selected: a, include: [], exclude: [a], expectedAvailability: .flexibleHere, expectedMatch: true),
-            Case(value: .init(explicitStoreIDs: [], anyStore: true), selected: a, include: [a], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [a], anyStore: true), selected: b, include: [b], exclude: [], expectedAvailability: .flexibleHere, expectedMatch: false),
-            Case(value: .init(explicitStoreIDs: [a], anyStore: false), selected: b, include: [a], exclude: [], expectedAvailability: .unavailable, expectedMatch: false)
-        ]
-        for (index, testCase) in cases.enumerated() {
-            let filter = PurchaseFilter(
-                selectedStoreID: testCase.selected,
-                includedStoreIDs: testCase.include,
-                excludedStoreIDs: testCase.exclude
-            )
-            XCTAssertEqual(filter.matches(testCase.value, activeStoreIDs: active), testCase.expectedMatch, "case \(index)")
-            XCTAssertEqual(
-                filter.availability(of: testCase.value, selectedStoreID: testCase.selected, activeStoreIDs: active),
-                testCase.expectedAvailability,
-                "case \(index)"
-            )
-        }
-
-        let archivedB: Set<UUID> = [a, c]
-        let retained = PurchaseRuleValue(explicitStoreIDs: [a, b], anyStore: false)
-        XCTAssertEqual(PurchaseFilter().availability(of: retained, selectedStoreID: a, activeStoreIDs: archivedB), .mustBuyHere)
-        XCTAssertEqual(PurchaseFilter().availability(of: retained, selectedStoreID: b, activeStoreIDs: archivedB), .unavailable)
-        XCTAssertEqual(PurchaseFilter().availability(of: .init(explicitStoreIDs: [b], anyStore: false), selectedStoreID: nil, activeStoreIDs: archivedB), .needsStore)
-    }
-
-    func testGenericRuleValueCoversOneTimeRulesWithoutCatalogIdentity() {
-        let a = UUID(), b = UUID()
-        let oneTime = PurchaseRuleValue(explicitStoreIDs: [a], anyStore: false)
-        XCTAssertEqual(PurchaseFilter().availability(of: oneTime, selectedStoreID: a, activeStoreIDs: [a, b]), .mustBuyHere)
-        XCTAssertFalse(PurchaseFilter(selectedStoreID: b).matches(oneTime, activeStoreIDs: [a, b]))
-        let untagged = PurchaseRuleValue(explicitStoreIDs: [], anyStore: false)
-        XCTAssertEqual(PurchaseFilter().availability(of: untagged, selectedStoreID: a, activeStoreIDs: [a, b]), .flexibleHere)
-        XCTAssertTrue(PurchaseFilter(requiresAnyStore: true).matches(untagged, activeStoreIDs: [a, b]))
-        XCTAssertFalse(PurchaseFilter(requiresAnyStore: false).matches(untagged, activeStoreIDs: [a, b]))
-    }
-
-    func testGroceryFilterSanitizationDropsInactiveScopeAndPreservesOtherCriteria() {
-        let activeStore = UUID()
-        let archivedStore = UUID()
-        let activeCategory = UUID()
-        let removedCategory = UUID()
-        let filter = GroceryNeedFilter(
-            purchase: PurchaseFilter(
-                selectedStoreID: archivedStore,
-                includedStoreIDs: [activeStore, archivedStore],
-                excludedStoreIDs: [activeStore, archivedStore],
-                requiresAnyStore: false
-            ),
-            text: "berries",
-            categoryID: removedCategory,
-            carted: true,
-            urgency: NeedUrgency.urgent.rawValue
-        )
-
-        let sanitized = filter.sanitized(
-            activeStoreIDs: [activeStore], activeCategoryIDs: [activeCategory])
-
-        XCTAssertNil(sanitized.purchase.selectedStoreID)
-        XCTAssertEqual(sanitized.purchase.includedStoreIDs, [activeStore])
-        XCTAssertEqual(sanitized.purchase.excludedStoreIDs, [activeStore])
-        XCTAssertEqual(sanitized.purchase.requiresAnyStore, false)
-        XCTAssertEqual(sanitized.text, "berries")
-        XCTAssertNil(sanitized.categoryID)
-        XCTAssertEqual(sanitized.carted, true)
-        XCTAssertEqual(sanitized.urgency, NeedUrgency.urgent.rawValue)
-    }
-
     func testCatalogMetadataRoundTripsAndTagEditDoesNotChangeDemand() throws {
         let url = temporaryStoreURL()
         var householdID: UUID!, itemID: UUID!, needID: UUID!, costcoID: UUID!, publixID: UUID!
@@ -276,6 +183,27 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .activeStores([store]))
         try reloaded.setPurchaseRules(itemID: item, anyStore: false, storeIDs: [])
         XCTAssertEqual(try reloaded.storeEligibility(itemID: item), .anyStore)
+    }
+
+    func testCatalogCategoryFilterMatchesAnySelectedCategory() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let ids = try service.createHousehold()
+        let produce = try service.createCategory(name: "Produce", householdID: ids.householdID)
+        let pantry = try service.createCategory(name: "Pantry", householdID: ids.householdID)
+        let bakery = try service.createCategory(name: "Bakery", householdID: ids.householdID)
+        let apples = try service.createItem(name: "Apples", categoryID: produce, householdID: ids.householdID)
+        let rice = try service.createItem(name: "Rice", categoryID: pantry, householdID: ids.householdID)
+        _ = try service.createItem(name: "Bread", categoryID: bakery, householdID: ids.householdID)
+        _ = try service.createItem(name: "Ice", householdID: ids.householdID)
+
+        XCTAssertEqual(
+            Set(try service.filteredCatalogItemIDs(
+                householdID: ids.householdID,
+                filter: CatalogItemFilter(categoryIDs: [produce, pantry])
+            )),
+            [apples, rice]
+        )
     }
 
     private func fetchItem(_ id: UUID, context: NSManagedObjectContext) throws -> Item {

@@ -1,0 +1,41 @@
+{
+  "configurations" : [
+    {
+      "id" : "E6100000-0000-0000-0000-000000000005",
+      "name" : "Default",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {
+    "commandLineArgumentEntries" : [
+      {
+        "argument" : "-com.apple.CoreData.ConcurrencyDebug",
+        "enabled" : true
+      },
+      {
+        "argument" : "1",
+        "enabled" : true
+      }
+    ],
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Shopping.xcodeproj",
+      "identifier" : "A00000000000000000000002",
+      "name" : "Shopping"
+    }
+  },
+  "testTargets" : [
+    {
+      "selectedTags" : {
+        "tags" : [
+          ".critical"
+        ]
+      },
+      "target" : {
+        "containerPath" : "container:Shopping.xcodeproj",
+        "identifier" : "A00000000000000000000004",
+        "name" : "ShoppingPersistenceTests"
+      }
+    }
+  ],
+  "version" : 1
+}

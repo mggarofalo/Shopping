@@ -16,7 +16,7 @@ One household owns stores, reusable catalog items, and one logical grocery list.
 
 Each object has an immutable application UUID assigned when inserted. Names are display values, not identity. An `NSManagedObjectID` identifies a local stored object; it is not a portable replica ID or a CloudKit record ID. Core Data owns its mirrored record identifiers.
 
-Catalog purchase tags mean where this household chooses to buy. The model retains reusable category, tags, and general notes on the catalog, with quantity, carted state and Normal/Urgent on the current need. Re-add does not remember urgency. One-time data must never enter hints or learned defaults without explicit Remember. Events are out of scope.
+Catalog purchase rules mean where this household chooses to buy. The model retains reusable category, store relationships, and general notes on the catalog, with quantity, carted state and Normal/Urgent on the current need. Re-add does not remember urgency. One-time data must never enter hints or learned defaults without explicit Remember. Events are out of scope.
 
 The original spike used a programmatic model to keep the experiment small. SHOPPING-20 freezes the initial application schema as a bundled V1 model and a saved SQLite fixture; see the [persistence guide](../persistence.md). Attributes have defaults or are optional; relationships are optional, unordered, and have inverses. There are no uniqueness constraints or Deny delete rules. Commands enforce local invariants, while imported incomplete graphs must be handled as incomplete rather than force-unwrapped. These choices follow [Apple's CloudKit model restrictions](https://developer.apple.com/documentation/coredata/creating-a-core-data-model-for-cloudkit); actual mirroring validation remains a separate gate.
 
@@ -77,7 +77,7 @@ The SQLite simulations stage both contexts' edits before either saves, disable a
 | Explicit same-value carted command | Advances the need revision. |
 | Competing quantity edits | The later property-object-trump context save wins. |
 | Disjoint quantity and carted edits | Both survive in either save order. |
-| Independent store-tag additions | Core Data merges the to-many additions as a union; this is not whole-set LWW. |
+| Independent store relationship additions | Core Data merges the to-many additions as a union; this is not whole-set LWW. |
 | Clear after an external-context edit | Changed captured rows are skipped; newly carted rows outside the token survive. |
 | Repeated clear token | Does not archive another set or create another operation. |
 | SQLite close/reopen and undo | Restores one-time data without catalog creation. |
@@ -87,8 +87,8 @@ The SQLite simulations stage both contexts' edits before either saves, disable a
 
 Local validation on 2026-09-05 passed all 9 persistence tests and the existing UI launch test on Xcode 26.6 / iOS 26.5. The test log confirmed Core Data multithreading assertions were enabled. The same shared scheme runs in CI on the pinned Xcode 16.4 / iOS 18.5 configuration.
 
-The tag-union observation is a reason to test tag removals and competing purchase-rule edits explicitly in SHOPPING-30. It does not change the product's requested conflict baseline. No local test establishes the cloud's whole-tag-set behavior. Retain this distinction when building production tags.
+The relationship-union observation is a reason to test store removals and competing purchase-rule edits explicitly in SHOPPING-30. It does not change the product's requested conflict baseline. No local test establishes the cloud's whole-set behavior. Retain this distinction when building production purchase rules.
 
-SHOPPING-30 requires Developer enrollment and two different iCloud accounts, with final evidence on the two physical iPhones. Test initial invitation, participant permissions, owner and participant additions after sharing, relaunch, offline edits and reconnection, same-field/disjoint-field conflicts, tag changes, duplicate adds, incomplete imports, one-time recovery, and clear-versus-uncart/re-add. Record versions, action order, observed convergence, and failures.
+SHOPPING-30 requires Developer enrollment and two different iCloud accounts, with final evidence on the two physical iPhones. Test initial invitation, participant permissions, owner and participant additions after sharing, relaunch, offline edits and reconnection, same-field/disjoint-field conflicts, purchase-rule changes, duplicate adds, incomplete imports, one-time recovery, and clear-versus-uncart/re-add. Record versions, action order, observed convergence, and failures.
 
 A few seconds of healthy foreground convergence is desirable, not a deadline the managed API guarantees. Apple controls synchronization timing and exposes no force-sync scheduling API; delayed sync is accepted and pull-to-refresh remains deferred. [TN3164](https://developer.apple.com/documentation/technotes/tn3164-debugging-the-synchronization-of-nspersistentcloudkitcontainer) describes managed synchronization constraints. Local tests and simulator screenshots do not substitute for the live gate.

@@ -14,18 +14,13 @@
       </BuildActionEntries>
    </BuildAction>
    <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="NO">
-      <CommandLineArguments>
-         <CommandLineArgument argument="-com.apple.CoreData.ConcurrencyDebug" isEnabled="YES"/>
-         <CommandLineArgument argument="1" isEnabled="YES"/>
-      </CommandLineArguments>
-      <Testables>
-         <TestableReference skipped="NO">
-            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000003" BuildableName="ShoppingTests.xctest" BlueprintName="ShoppingTests" ReferencedContainer="container:Shopping.xcodeproj"/>
-         </TestableReference>
-         <TestableReference skipped="NO">
-            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000004" BuildableName="ShoppingPersistenceTests.xctest" BlueprintName="ShoppingPersistenceTests" ReferencedContainer="container:Shopping.xcodeproj"/>
-         </TestableReference>
-      </Testables>
+      <TestPlans>
+         <TestPlanReference reference="container:ShoppingFast.xctestplan" default="YES"/>
+         <TestPlanReference reference="container:ShoppingCritical.xctestplan" default="NO"/>
+         <TestPlanReference reference="container:ShoppingFull.xctestplan" default="NO"/>
+         <TestPlanReference reference="container:ShoppingPerformance.xctestplan" default="NO"/>
+         <TestPlanReference reference="container:ShoppingDevice.xctestplan" default="NO"/>
+      </TestPlans>
    </TestAction>
    <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
       <BuildableProductRunnable runnableDebuggingMode="0">

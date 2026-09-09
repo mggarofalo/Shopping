@@ -6,11 +6,14 @@ struct GroceryEditorTarget: Identifiable {
     let scope: GroceryAddScope
     let need: Need?
     let needID: UUID?
+    let originalCategoryID: UUID?
 
     init(scope: GroceryAddScope, need: Need?) {
         self.scope = scope
         self.need = need
         self.needID = need?.id
+        self.originalCategoryID = need?.item?.category?.id
+            ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
     }
 }
 
@@ -25,6 +28,12 @@ private struct RemovalTarget {
 private enum OneTimePromotionChoice: String, CaseIterable {
     case create
     case existing
+}
+
+private enum GroceryEditorField: Hashable {
+    case name
+    case catalogNotes
+    case purchaseNotes
 }
 
 struct GroceryEditorView: View {
@@ -59,15 +68,17 @@ struct GroceryEditorView: View {
     @State private var selectedCatalogItemID: UUID?
     @State private var conflictingNeedID: UUID?
     @State private var showingCategoryCreation = false
+    @State private var showingStoreCreation = false
     @State private var didRequestInitialFocus = false
-    @FocusState private var nameIsFocused: Bool
+    @State private var isSaving = false
+    @FocusState private var focusedField: GroceryEditorField?
     let target: GroceryEditorTarget
-    let onSaved: (UUID) -> Void
-    let onFocusNeed: (Need) -> Void
+    let onSaved: (UUID, UUID?) -> Void
+    let onFocusNeed: (UUID) -> Void
     let onRemoved: (UUID, GroceryAddScope) -> Void
 
     init(
-        target: GroceryEditorTarget, onSaved: @escaping (UUID) -> Void, onFocusNeed: @escaping (Need) -> Void,
+        target: GroceryEditorTarget, onSaved: @escaping (UUID, UUID?) -> Void, onFocusNeed: @escaping (UUID) -> Void,
         onRemoved: @escaping (UUID, GroceryAddScope) -> Void
     ) {
         self.target = target
@@ -136,22 +147,64 @@ struct GroceryEditorView: View {
     private var scopedCategories: [Category] {
         GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList)
     }
-    private var normalizedSearch: String { CatalogProjection.normalizedName(name) }
-    private var activeMatches: [Need] {
-        guard scopeValid, !normalizedSearch.isEmpty else { return [] }
-        return GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).filter { need in
-            !need.archived && need.id != target.needID
-                && CatalogProjection.normalizedName(need.item?.name ?? need.title).contains(normalizedSearch)
-                && (need.kind == NeedKind.oneTime.rawValue || scopedItems.contains { $0 == need.item })
-        }
+    private var activeStoreIDs: Set<UUID> {
+        Set(GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+            .filter { !$0.isArchived }.map(\.id))
     }
-    private var catalogMatches: [Item] {
-        guard scopeValid, !normalizedSearch.isEmpty else { return [] }
-        let activeItemIDs = Set(activeMatches.compactMap { $0.item?.id })
-        return scopedItems.filter {
-            CatalogProjection.normalizedName($0.name).contains(normalizedSearch)
-                && !activeItemIDs.contains($0.id)
+    private var activeRememberedNeedState: (byItemID: [UUID: Need], ambiguousItemIDs: Set<UUID>) {
+        let validItems = Set(scopedItems.map(\.objectID))
+        let activeNeeds = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+            .filter {
+                !$0.archived && $0.kind == NeedKind.remembered.rawValue &&
+                    $0.item.map { validItems.contains($0.objectID) } == true
+            }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        var needsByItemID: [UUID: Need] = [:]
+        var ambiguousItemIDs: Set<UUID> = []
+        for need in activeNeeds {
+            guard let itemID = need.item?.id, !ambiguousItemIDs.contains(itemID) else { continue }
+            guard needsByItemID.removeValue(forKey: itemID) == nil else {
+                ambiguousItemIDs.insert(itemID)
+                continue
+            }
+            needsByItemID[itemID] = need
         }
+        return (needsByItemID, ambiguousItemIDs)
+    }
+    private var activeRememberedNeedsByItemID: [UUID: Need] {
+        activeRememberedNeedState.byItemID
+    }
+    private var suggestedItems: [Item] {
+        guard scopeValid, !isEditing, remembered else { return [] }
+        let activeNeedState = activeRememberedNeedState
+        let eligibleItems = scopedItems.filter { item in
+            !activeNeedState.ambiguousItemIDs.contains(item.id) &&
+            CatalogProjection.textMatches(item.name, query: target.scope.textFilter) &&
+                (!target.scope.urgentOnly ||
+                    activeNeedState.byItemID[item.id]?.urgency == NeedUrgency.urgent.rawValue)
+        }
+        let itemsByID = Dictionary(uniqueKeysWithValues: eligibleItems.map { ($0.id, $0) })
+        let suggestions = CatalogSuggestionMatcher.suggestions(
+            for: name,
+            candidates: eligibleItems.map {
+                CatalogSuggestionCandidate(
+                    id: $0.id,
+                    name: $0.name,
+                    categoryID: $0.category?.id,
+                    explicitStoreIDs: Set($0.stores?.map(\.id) ?? []),
+                    anyStore: $0.anyStore,
+                    isArchived: $0.isArchived
+                )
+            },
+            purchaseFilter: PurchaseFilter(
+                selectedStoreID: target.scope.selectedStoreID,
+                includedStoreIDs: target.scope.includedStoreIDs,
+                excludedStoreIDs: target.scope.excludedStoreIDs
+            ),
+            activeStoreIDs: activeStoreIDs,
+            categoryID: target.scope.categoryID
+        )
+        return suggestions.compactMap { itemsByID[$0.candidate.id] }
     }
     private var promotionCatalogMatches: [Item] {
         let query = CatalogProjection.normalizedName(catalogSearch)
@@ -188,63 +241,83 @@ struct GroceryEditorView: View {
                             Text("The selected item’s name and saved Catalog details are read-only.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                                .shoppingMultilineText()
                         }
                         .accessibilityIdentifier("shopping.grocery.promotion.selectedName")
                     } else {
                         TextField("Item name", text: $name)
                             .accessibilityIdentifier("shopping.grocery.name")
-                            .focused($nameIsFocused)
+                            .focused($focusedField, equals: .name)
                             .submitLabel(.done)
-                            .onSubmit { nameIsFocused = false }
+                            .onSubmit { focusedField = nil }
                     }
-                    if !isEditing { matches }
                     if !remembered && !isPromotingOneTime {
                         Text("This item won’t be remembered in Catalog.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .shoppingMultilineText()
                     }
                     if remembered || (isPromotingOneTime && promotionChoice == .create) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Item notes").font(.subheadline).fontWeight(.semibold)
-                            TextField("Add reusable details", text: $catalogNotes, axis: .vertical)
-                                .accessibilityIdentifier("shopping.grocery.catalogNotes")
-                            Text("Reused whenever you add this item.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Item notes")
+                                .font(.subheadline).fontWeight(.semibold)
+                                .shoppingMultilineText()
+                                .accessibilityIdentifier("shopping.grocery.catalogNotesHeading")
+                            TextField(
+                                "Saved for future needs",
+                                text: $catalogNotes,
+                                axis: .vertical
+                            )
+                            .lineLimit(2...4)
+                            .focused($focusedField, equals: .catalogNotes)
+                            .accessibilityIdentifier("shopping.grocery.catalogNotes")
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text(remembered ? "Temporary notes" : "Notes")
                             .font(.subheadline).fontWeight(.semibold)
-                        TextField("Add notes for this item", text: $purchaseNotes, axis: .vertical)
-                            .accessibilityIdentifier("shopping.grocery.purchaseNotes")
-                        Text(remembered ? "Only for this item on the current list." : "Only for this item.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.grocery.purchaseNotesHeading")
+                        TextField(
+                            remembered ? "Only for this need" : "Notes for this one-time need",
+                            text: $purchaseNotes,
+                            axis: .vertical
+                        )
+                        .lineLimit(2...4)
+                        .focused($focusedField, equals: .purchaseNotes)
+                        .accessibilityIdentifier("shopping.grocery.purchaseNotes")
                     }
                 }
+                if !isEditing { matches }
                 if isEditing, !remembered {
                     promotionSection
                 }
                 Section {
                     if let quantity {
-                        Stepper(
-                            value: Binding(
-                                get: { self.quantity ?? 1 },
-                                set: { self.quantity = $0 }
-                            ),
-                            in: 1...99
-                        ) {
-                            LabeledContent("Quantity") { Text("\(quantity)") }
-                        }
-                        .accessibilityValue("\(quantity)")
-                        .accessibilityIdentifier("shopping.grocery.quantity")
-                        Button("Clear quantity") { self.quantity = nil }
-                            .frame(minHeight: 44)
+                        HStack(spacing: 8) {
+                            Stepper(
+                                value: Binding(
+                                    get: { self.quantity ?? 1 },
+                                    set: { self.quantity = $0 }
+                                ),
+                                in: 1...99
+                            ) {
+                                LabeledContent("Quantity") { Text("\(quantity)") }
+                            }
+                            .accessibilityValue("\(quantity)")
+                            .accessibilityIdentifier("shopping.grocery.quantity")
+                            Button { self.quantity = nil } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Clear quantity")
                             .accessibilityIdentifier("shopping.grocery.quantity.clear")
+                        }
                     } else {
                         Button("Add quantity") { quantity = 1 }
-                            .frame(minHeight: 44)
+                            .buttonStyle(.borderless)
                             .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
                     Toggle("Urgent", isOn: Binding(
@@ -261,15 +334,19 @@ struct GroceryEditorView: View {
                     )
                     PurchaseRulesPicker(
                         storeIDs: $storeIDs, anyStore: $anyStore, householdID: target.scope.householdID,
-                        listID: target.scope.listID)
+                        listID: target.scope.listID, onAddStore: { showingStoreCreation = true })
                 }
                 if !scopeValid {
                     Text(
                         "This item or household is no longer available. Your draft has been kept; close it and try again."
-                    ).foregroundStyle(.secondary)
+                    )
+                    .foregroundStyle(.secondary)
+                    .shoppingMultilineText()
                 }
                 if let error {
-                    Text(message(for: error)).foregroundStyle(.red)
+                    Text(message(for: error))
+                        .foregroundStyle(.red)
+                        .shoppingMultilineText()
                     if case NeedServiceError.catalogNameCollision = error {
                         if isPromotingOneTime { collisionChoices }
                         Button("Create distinct item") {
@@ -281,7 +358,7 @@ struct GroceryEditorView: View {
                     }
                     if let conflictingNeedID,
                        let conflictingNeed = activeRememberedNeed(id: conflictingNeedID) {
-                        Button("View existing item") { onFocusNeed(conflictingNeed) }
+                        Button("View existing item") { onFocusNeed(conflictingNeed.id) }
                             .frame(minHeight: 44)
                             .accessibilityIdentifier("shopping.grocery.promotion.viewConflict")
                     }
@@ -292,19 +369,32 @@ struct GroceryEditorView: View {
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .disabled(isSaving)
             .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.accessibilityIdentifier("shopping.grocery.cancel")
+                    Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
+                        .accessibilityIdentifier("shopping.grocery.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(
-                        isPromotingOneTime ? "Remember" : "Save",
-                        systemImage: "checkmark",
-                        action: save
-                    )
-                    .disabled(!canSave)
-                    .accessibilityIdentifier("shopping.grocery.save")
+                    if isSaving {
+                        ProgressView().accessibilityLabel("Saving item")
+                    } else {
+                        Button(
+                            isPromotingOneTime ? "Remember" : "Save",
+                            systemImage: "checkmark",
+                            action: save
+                        )
+                        .disabled(!canSave)
+                        .accessibilityIdentifier("shopping.grocery.save")
+                    }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
+                        .accessibilityIdentifier("shopping.grocery.keyboardDone")
                 }
             }
             .alert(
@@ -325,10 +415,19 @@ struct GroceryEditorView: View {
                     listID: target.scope.listID
                 ) { categoryID = $0 }
             }
+            .sheet(isPresented: $showingStoreCreation) {
+                StoreCreationView(
+                    householdID: target.scope.householdID,
+                    listID: target.scope.listID
+                ) { id in
+                    if storeIDs.isEmpty { anyStore = false }
+                    storeIDs.insert(id)
+                }
+            }
             .onAppear {
                 guard !isEditing, !didRequestInitialFocus else { return }
                 didRequestInitialFocus = true
-                DispatchQueue.main.async { nameIsFocused = true }
+                DispatchQueue.main.async { focusedField = .name }
             }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
             .onChange(of: promotionChoice) { _, _ in
@@ -337,6 +436,7 @@ struct GroceryEditorView: View {
                 error = nil
             }
         }
+        .interactiveDismissDisabled(isSaving)
     }
 
     @ViewBuilder
@@ -425,30 +525,41 @@ struct GroceryEditorView: View {
 
     @ViewBuilder
     private var matches: some View {
-        if !activeMatches.isEmpty {
-            Section("Current groceries") {
-                ForEach(activeMatches, id: \.objectID) { need in
+        if !suggestedItems.isEmpty {
+            Section {
+                ForEach(suggestedItems, id: \.objectID) { item in
                     VStack(alignment: .leading, spacing: 8) {
-                        Button("Edit current \(need.item?.name ?? need.title)") { focus(need) }
-                            .buttonStyle(.borderless)
-                            .frame(minHeight: 44)
-                            .accessibilityIdentifier("shopping.grocery.activeMatch.\(need.id.uuidString)")
-                        if remembered, need.carted, let item = need.item {
+                        Button { selectSuggestion(item.id) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name)
+                                Text(suggestionSummary(item))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(minHeight: 44)
+                        .accessibilityLabel(
+                            activeRememberedNeedsByItemID[item.id] == nil
+                                ? "Need again \(item.name)"
+                                : "Edit current \(item.name)"
+                        )
+                        .accessibilityValue(suggestionSummary(item))
+                        .accessibilityIdentifier(suggestionIdentifier(item))
+                        if activeRememberedNeedsByItemID[item.id]?.carted == true {
                             needAgainButton(item)
                         }
                     }
                 }
-            }
-        }
-        if !catalogMatches.isEmpty && remembered {
-            Section("Remembered items") {
-                ForEach(catalogMatches, id: \.objectID) { item in
-                    if item.isArchived {
-                        Text("\(item.name) · Archived in Catalog")
-                            .font(.subheadline)
-                    } else {
-                        needAgainButton(item)
-                    }
+            } header: {
+                Text("Suggestions")
+            } footer: {
+                if let selectedStoreName = target.scope.selectedStoreName {
+                    Text("Showing saved items available for \(selectedStoreName). Use All on Groceries to reuse other Catalog items.")
+                } else {
+                    Text("Choosing a suggestion is explicit. Typing does not change your Catalog or grocery list.")
                 }
             }
         }
@@ -460,6 +571,23 @@ struct GroceryEditorView: View {
             .frame(minHeight: 44)
             .disabled(!scopeValid)
             .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
+    }
+
+    private func suggestionSummary(_ item: Item) -> String {
+        let status: String
+        if let need = activeRememberedNeedsByItemID[item.id] {
+            status = need.carted ? "In cart" : "On grocery list"
+        } else {
+            status = "Saved in Catalog"
+        }
+        return "\(catalogSummary(item)) · \(status)"
+    }
+
+    private func suggestionIdentifier(_ item: Item) -> String {
+        if let need = activeRememberedNeedsByItemID[item.id] {
+            return "shopping.grocery.activeMatch.\(need.id.uuidString)"
+        }
+        return "shopping.grocery.suggestion.\(item.id.uuidString)"
     }
 
     private func message(for error: Error) -> String {
@@ -497,7 +625,17 @@ struct GroceryEditorView: View {
     }
 
     private func save() {
-        defer { allowDuplicate = false }
+        guard canSave, !isSaving else { return }
+        isSaving = true
+        Task { await saveItem() }
+    }
+
+    @MainActor
+    private func saveItem() async {
+        defer {
+            allowDuplicate = false
+            isSaving = false
+        }
         guard canSave, let service, let householdID = target.scope.householdID,
             let listID = target.scope.listID
         else { return }
@@ -512,12 +650,12 @@ struct GroceryEditorView: View {
                 anyStore: anyStore, storeIDs: storeIDs)
             if let needID = target.needID {
                 if remembered {
-                    try service.saveRememberedGrocery(
+                    try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, catalog: catalog, need: values(),
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
-                    try service.saveOneTimeGrocery(
+                    try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
                         anyStore: anyStore, need: values())
@@ -535,7 +673,7 @@ struct GroceryEditorView: View {
                     quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
             }
             hapticFeedback.play(.success)
-            onSaved(savedID)
+            onSaved(savedID, categoryID)
             dismiss()
         } catch { self.error = error }
     }
@@ -564,6 +702,7 @@ struct GroceryEditorView: View {
         guard isPromotingOneTime, canSave, let service, let needID = target.needID,
               let householdID = target.scope.householdID, let listID = target.scope.listID else { return }
         do {
+            let savedCategoryID: UUID?
             switch promotionChoice {
             case .create:
                 let catalog = CatalogItemValues(
@@ -574,15 +713,17 @@ struct GroceryEditorView: View {
                     needID: needID, householdID: householdID, listID: listID,
                     catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
                 )
+                savedCategoryID = categoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
                 _ = try service.rememberOneTimeGrocery(
                     needID: needID, householdID: householdID, listID: listID,
                     existingItemID: item.id, need: values()
                 )
+                savedCategoryID = item.category?.id
             }
             hapticFeedback.play(.success)
-            onSaved(needID)
+            onSaved(needID, savedCategoryID)
             dismiss()
         } catch {
             self.error = error
@@ -609,32 +750,55 @@ struct GroceryEditorView: View {
             category = "Uncategorized"
         }
         let purchaseRule: String
-        if item.anyStore || (item.stores ?? []).isEmpty {
-            purchaseRule = "Any store"
-        } else {
-            let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
-            let names = validStores.filter { !$0.isArchived && (item.stores ?? []).contains($0) }
-                .map(\.name)
-                .sorted()
-            purchaseRule = names.isEmpty ? "Archived store tags" : names.joined(separator: ", ")
-        }
+        let validStores = GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
+        let savedStoreLabels = validStores.filter { (item.stores ?? []).contains($0) }
+            .map { $0.isArchived ? "\($0.name) (archived)" : $0.name }
+        purchaseRule = CatalogSuggestionPurchaseSummary.text(
+            anyStore: item.anyStore,
+            savedStoreLabels: savedStoreLabels,
+            hasSavedStores: !(item.stores ?? []).isEmpty
+        )
         return "\(category) · \(purchaseRule)"
     }
 
-    private func focus(_ need: Need) {
-        guard scopeValid, activeMatches.contains(need) else { return }
-        onFocusNeed(need)
+    private func selectSuggestion(_ itemID: UUID) {
+        guard scopeValid, let item = suggestedItems.first(where: { $0.id == itemID }) else { return }
+        applySuggestion(item, renewCarted: false)
     }
 
     private func needAgain(_ item: Item) {
-        guard scopeValid, scopedItems.contains(item), let service,
-            let householdID = target.scope.householdID, let listID = target.scope.listID
-        else { return }
+        guard scopeValid, suggestedItems.contains(item) else { return }
+        applySuggestion(item, renewCarted: true)
+    }
+
+    private func applySuggestion(_ item: Item, renewCarted: Bool) {
+        guard scopeValid, suggestedItems.contains(item), let service,
+              let householdID = target.scope.householdID, let listID = target.scope.listID else { return }
+        let expectedNeed = activeRememberedNeedsByItemID[item.id]
         do {
-            let needID = try service.addRememberedNeed(
-                itemID: item.id, listID: listID, householdID: householdID)
-            onSaved(needID)
-            dismiss()
+            switch try service.applyCatalogSuggestion(
+                itemID: item.id,
+                itemRevision: item.revision,
+                expectedNeedID: expectedNeed?.id,
+                expectedNeedRevision: expectedNeed?.revision,
+                listID: listID,
+                householdID: householdID,
+                purchaseFilter: PurchaseFilter(
+                    selectedStoreID: target.scope.selectedStoreID,
+                    includedStoreIDs: target.scope.includedStoreIDs,
+                    excludedStoreIDs: target.scope.excludedStoreIDs
+                ),
+                categoryID: target.scope.categoryID,
+                textFilter: target.scope.textFilter,
+                urgentOnly: target.scope.urgentOnly,
+                renewCarted: renewCarted
+            ) {
+            case .added(let needID), .renewed(let needID):
+                onSaved(needID, item.category?.id)
+                dismiss()
+            case .focusExisting(let needID):
+                onFocusNeed(needID)
+            }
         } catch { self.error = error }
     }
 
@@ -660,63 +824,6 @@ struct GroceryEditorView: View {
 
 }
 
-private struct CategoryCreationView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.needService) private var service
-    @State private var name = ""
-    @State private var error: Error?
-    @FocusState private var nameIsFocused: Bool
-    let householdID: UUID?
-    let listID: UUID?
-    let onSelected: (UUID) -> Void
-
-    private var canSave: Bool {
-        service != nil && householdID != nil && listID != nil
-            && !CatalogProjection.normalizedName(name).isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Category name", text: $name)
-                    .accessibilityIdentifier("shopping.category.name")
-                    .focused($nameIsFocused)
-                    .submitLabel(.done)
-                    .onSubmit(save)
-                if let error {
-                    Text(error.localizedDescription).foregroundStyle(.red)
-                }
-            }
-            .navigationTitle("Add category")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .accessibilityIdentifier("shopping.category.cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save category", systemImage: "checkmark", action: save)
-                        .disabled(!canSave)
-                        .accessibilityIdentifier("shopping.category.save")
-                }
-            }
-            .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
-        }
-    }
-
-    private func save() {
-        guard canSave, let service, let householdID, let listID else { return }
-        do {
-            onSelected(try service.createCategory(
-                name: name, householdID: householdID, listID: listID
-            ))
-            dismiss()
-        } catch {
-            self.error = error
-        }
-    }
-}
-
 private struct GroceryEditorPreview: View {
     @Environment(\.persistenceSelection) private var selection
 
@@ -726,7 +833,7 @@ private struct GroceryEditorPreview: View {
                 scope: GroceryAddScope(
                     householdID: selection.householdID, listID: selection.listID, selectedStoreID: nil,
                     selectedStoreName: nil), need: nil),
-            onSaved: { _ in }, onFocusNeed: { _ in }, onRemoved: { _, _ in }
+            onSaved: { _, _ in }, onFocusNeed: { _ in }, onRemoved: { _, _ in }
         )
     }
 }
