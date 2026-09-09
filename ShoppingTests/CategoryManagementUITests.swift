@@ -89,9 +89,9 @@ final class CategoryManagementUITests: XCTestCase {
         assertSelectedCountIsVisible(app)
         XCTAssertTrue(app.buttons["shopping.stores.batchArchive"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.stores.batchDelete"].exists)
+        XCTAssertFalse(app.buttons["Move"].exists)
         app.buttons["shopping.stores.batchArchive"].tap()
-        XCTAssertTrue(app.sheets["Archive selected stores?"].waitForExistence(timeout: 2))
-        app.sheets.buttons["Archive"].tap()
+        XCTAssertFalse(app.sheets["Archive selected stores?"].exists)
         XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
         app.alerts.buttons["OK"].tap()
 
@@ -100,8 +100,7 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.stores.batchRestore"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.stores.batchArchive"].isEnabled)
         app.buttons["shopping.stores.batchRestore"].tap()
-        XCTAssertTrue(app.sheets["Restore selected stores?"].waitForExistence(timeout: 2))
-        app.sheets.buttons["Restore"].tap()
+        XCTAssertFalse(app.sheets["Restore selected stores?"].exists)
         XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
         app.alerts.buttons["OK"].tap()
 

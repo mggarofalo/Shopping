@@ -1616,7 +1616,7 @@ final class NeedService: @unchecked Sendable {
                 )
                 return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item.name, query: filter.text) &&
-                    (filter.categoryID == nil || item.category?.id == filter.categoryID)
+                    (filter.categoryIDs.isEmpty || item.category.map { filter.categoryIDs.contains($0.id) } == true)
             }.map(\.id).sorted { $0.uuidString < $1.uuidString }
         }
     }

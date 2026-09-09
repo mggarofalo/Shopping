@@ -78,10 +78,12 @@ final class PerformanceFlowUITests: XCTestCase {
         app.buttons["shopping.catalog.grouping"].tap()
         app.buttons["Category"].tap()
 
-        app.buttons["shopping.catalog.available"].tap()
-        app.buttons["Store 04"].tap()
-        app.buttons["shopping.catalog.available"].tap()
-        app.buttons["All items"].tap()
+        app.buttons["shopping.catalog.filters"].tap()
+        app.buttons["shopping.catalog.filters.include.\(storeID(named: "Store 04", in: app))"].tap()
+        app.buttons["Done"].tap()
+        app.buttons["shopping.catalog.filters"].tap()
+        app.buttons["Reset"].tap()
+        app.buttons["Done"].tap()
 
         enterSelectionMode(in: app)
         app.buttons["shopping.catalog.selectAll"].tap()
@@ -120,6 +122,14 @@ final class PerformanceFlowUITests: XCTestCase {
         search.typeText("item 04")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Catalog item 04")).firstMatch.waitForExistence(timeout: 3))
         clearSearch(in: app)
+    }
+
+    private func storeID(named name: String, in app: XCUIApplication) -> String {
+        let button = app.buttons.matching(NSPredicate(
+            format: "label == %@ AND identifier BEGINSWITH %@", name, "shopping.catalog.filters.include."
+        )).firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 3))
+        return String(button.identifier.dropFirst("shopping.catalog.filters.include.".count))
     }
 
     private func exerciseManagement(in app: XCUIApplication) {

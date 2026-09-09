@@ -109,8 +109,6 @@ final class ShoppingLaunchTests: XCTestCase {
         app.staticTexts["Local Market"].swipeLeft()
         XCTAssertTrue(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
-        app.staticTexts["Local Market"].swipeRight()
-        app.staticTexts["Local Market"].swipeRight()
         XCTAssertTrue(app.buttons["Delete"].exists)
         app.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
@@ -132,8 +130,6 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         app.buttons["Archive"].tap()
-        XCTAssertTrue(app.staticTexts["Archive Costco?"].waitForExistence(timeout: 2))
-        app.buttons["Archive store"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["Costco"].exists)
 
@@ -329,6 +325,17 @@ final class ShoppingLaunchTests: XCTestCase {
 
         let chipotles = app.staticTexts["Chipotles in adobo"]
         reveal(chipotles, in: app)
+        let groupedCategoryRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Chipotles in adobo").firstMatch
+        XCTAssertTrue(groupedCategoryRow.label.contains("Publix"))
+        XCTAssertFalse(groupedCategoryRow.label.contains("Pantry"))
+        let archivedStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Local honey").firstMatch
+        reveal(archivedStoreRow, in: app)
+        XCTAssertTrue(archivedStoreRow.label.contains("Neighborhood Market (closed) (archived)"))
+        reveal(chipotles, in: app)
         chipotles.swipeLeft()
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeArchive."
@@ -354,6 +361,9 @@ final class ShoppingLaunchTests: XCTestCase {
         )).allElementsBoundByIndex
         XCTAssertEqual(rows.count, expected.count)
         XCTAssertEqual(rows.compactMap { row in expected.first { row.label.contains($0) } }, expected)
+        let ungroupedChipotles = rows.first { $0.label.contains("Chipotles in adobo") }
+        XCTAssertTrue(ungroupedChipotles?.label.contains("Pantry") == true)
+        XCTAssertTrue(ungroupedChipotles?.label.contains("Publix") == true)
 
         grouping.tap()
         XCTAssertTrue(app.buttons["Store"].waitForExistence(timeout: 2))
@@ -363,8 +373,30 @@ final class ShoppingLaunchTests: XCTestCase {
         for title in expectedGroups {
             let heading = app.staticTexts[title]
             reveal(heading, in: app)
-            XCTAssertTrue(heading.exists, "Expected alphabetized store group \(title)")
+            XCTAssertTrue(heading.exists, "Expected store group \(title)")
         }
+        let groupedStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.catalog.item.", "Chipotles in adobo"
+        )).firstMatch
+        reveal(groupedStoreRow, in: app)
+        XCTAssertTrue(groupedStoreRow.label.contains("Pantry"))
+        XCTAssertFalse(groupedStoreRow.label.contains("Publix"))
+    }
+
+    func testCatalogCategoryFiltersAllowMultipleSelections() {
+        let app = launchApp(fixture: "populated")
+        openCatalog(in: app)
+
+        app.buttons["shopping.catalog.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
+        app.buttons["Produce"].tap()
+        app.buttons["Pantry"].tap()
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 2))
+        reveal(app.staticTexts["Granola"], in: app)
+        XCTAssertTrue(app.staticTexts["Granola"].exists)
+        XCTAssertFalse(app.staticTexts["Dinner rolls"].exists)
     }
 
     func testCatalogArchiveFilterAndRestorePreservesActiveGrocery() {

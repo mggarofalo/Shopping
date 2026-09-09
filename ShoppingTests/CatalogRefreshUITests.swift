@@ -18,7 +18,7 @@ final class CatalogRefreshUITests: XCTestCase {
         app.buttons["shopping.catalog.save"].tap()
 
         let row = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ AND label == %@",
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.catalog.item.", "Fresh basil"
         )).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 3))

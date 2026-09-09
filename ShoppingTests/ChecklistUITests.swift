@@ -69,11 +69,6 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Archive", for: item, app: app)
         app.buttons["Archive"].tap()
-        app.alerts.buttons["Cancel"].tap()
-        XCTAssertTrue(item.exists)
-        revealSwipeAction("Archive", for: item, app: app)
-        app.buttons["Archive"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(row("Bananas", app: app).exists)
@@ -90,11 +85,10 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Restore", for: item, app: app)
         app.buttons["Restore"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertFalse(item.label.contains("Any store"))
+        XCTAssertTrue(item.label.contains("Any store"))
     }
 
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
