@@ -34,7 +34,7 @@ struct GroceryNeedRow: View {
                 Button {
                     onCartedChange(need, !need.carted)
                 } label: {
-                    Label(cartActionTitle, systemImage: cartActionSymbol)
+                    Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
                 .tint(need.carted ? .orange : .blue)
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
@@ -42,7 +42,7 @@ struct GroceryNeedRow: View {
             if onRemoved != nil {
                 // The cart action remains first, so a full swipe still carts/uncarts.
                 Button(action: captureRemoval) {
-                    Label("Remove", systemImage: "trash")
+                    Label("Remove", systemImage: "trash").labelStyle(.iconOnly)
                 }
                 .tint(.red)
                 .accessibilityIdentifier("shopping.checklist.remove.\(need.id.uuidString)")

@@ -87,7 +87,7 @@ struct StoreManagementView: View {
 
     var body: some View {
         List(selection: $selectedIDs) {
-            storeSection("Stores", stores: activeStores)
+            storeSection(nil, stores: activeStores)
             if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
         }
         .listStyle(.plain)
@@ -117,9 +117,10 @@ struct StoreManagementView: View {
             if editMode.isEditing {
                 Divider()
                 HStack(spacing: 4) {
-                    Button("Edit", systemImage: "pencil", action: editSelectedStore)
-                        .disabled(selectedStores.count != 1)
-                        .accessibilityIdentifier("shopping.stores.batchEdit")
+                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                        .tint(.red)
+                        .disabled(selectedIDs.isEmpty)
+                        .accessibilityIdentifier("shopping.stores.batchDelete")
                         .frame(maxWidth: .infinity, minHeight: 44)
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedStores.contains(where: { !$0.isArchived }))
@@ -129,13 +130,12 @@ struct StoreManagementView: View {
                         .disabled(!selectedStores.contains(where: \.isArchived))
                         .accessibilityIdentifier("shopping.stores.batchRestore")
                         .frame(maxWidth: .infinity, minHeight: 44)
-                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
-                        .tint(.red)
-                        .disabled(selectedIDs.isEmpty)
-                        .accessibilityIdentifier("shopping.stores.batchDelete")
+                    Button("Edit", systemImage: "pencil", action: editSelectedStore)
+                        .disabled(selectedStores.count != 1)
+                        .accessibilityIdentifier("shopping.stores.batchEdit")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(.iconOnly)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(.bar)
@@ -218,14 +218,14 @@ struct StoreManagementView: View {
     private var selectedStores: [Store] { householdStores.filter { selectedIDs.contains($0.id) } }
 
     @ViewBuilder
-    private func storeSection(_ title: String, stores: [Store]) -> some View {
-        Section(title) {
+    private func storeSection(_ title: String?, stores: [Store]) -> some View {
+        Section {
             ForEach(stores, id: \.objectID) { store in
                 storeRow(store)
                     .shoppingListRowInsets()
                     .tag(store.id)
             }
-        }
+        } header: { if let title { Text(title) } }
     }
 
     @ViewBuilder
@@ -239,8 +239,7 @@ struct StoreManagementView: View {
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button { beginRename(store) } label: {
-                    Label("Edit", systemImage: "pencil")
-                        .labelStyle(.iconOnly)
+                    Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
                 }
                 .tint(.blue)
                 .disabled(!selectionAvailable)
@@ -253,8 +252,7 @@ struct StoreManagementView: View {
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
                 Button(role: .destructive) { beginDeletion(store) } label: {
-                    Label("Delete", systemImage: "trash")
-                        .labelStyle(.iconOnly)
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
                 }
                 .tint(.red)
                 .disabled(!selectionAvailable)

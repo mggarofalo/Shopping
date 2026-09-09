@@ -22,11 +22,6 @@ struct SettingsView: View {
                 Section("Household") {
                     LabeledContent("Sharing status", value: "Not connected")
                         .shoppingListRowInsets()
-                    Text("Groceries are available in this app’s current local household store.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                        .shoppingMultilineText()
-                        .accessibilityIdentifier("shopping.settings.householdDescription")
-                        .shoppingListRowInsets()
                 }
             }
             .navigationTitle("Settings")

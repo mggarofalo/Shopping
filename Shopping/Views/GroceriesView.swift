@@ -35,7 +35,7 @@ struct GroceriesView: View {
     }
 
     private var activeCategories: [Category] {
-        GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList)
+        GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).filter { !$0.isArchived }
     }
 
     private var canonicalList: GroceryList? {
@@ -89,9 +89,7 @@ struct GroceriesView: View {
                 switch destination {
                 case .carted:
                     CartedGroceriesView(
-                        initialFilter: currentNeedFilter,
                         onEdit: focus,
-                        onNeedAgain: needAgain,
                         onUncarted: uncarted
                     )
                 case .recentlyCleared: RecentlyClearedView()

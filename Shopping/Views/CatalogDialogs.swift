@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CatalogBatchDialogs: ViewModifier {
     @Binding var preview: ManagementBatchPreview?
-    @Binding var notice: String?
     let apply: (ManagementBatchToken) -> Void
 
     func body(content: Content) -> some View {
@@ -23,9 +22,6 @@ struct CatalogBatchDialogs: ViewModifier {
             } message: {
                 if let preview { Text(ManagementBatchCopy.message(preview)) }
             }
-            .alert("Batch update complete", isPresented: Binding(
-                get: { notice != nil }, set: { if !$0 { notice = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(notice ?? "") }
     }
 }
 
@@ -56,9 +52,7 @@ enum CatalogAddCopy {
 
 struct CatalogAddDialogs: ViewModifier {
     @Binding var confirmation: CatalogAddConfirmation?
-    @Binding var notice: CatalogAddNotice?
     let apply: (CatalogAddToken) -> Void
-    let viewNeed: (UUID) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -78,11 +72,5 @@ struct CatalogAddDialogs: ViewModifier {
             } message: {
                 if let confirmation { Text(CatalogAddCopy.preview(confirmation.preview)) }
             }
-            .alert("Catalog update complete", isPresented: Binding(
-                get: { notice != nil }, set: { if !$0 { notice = nil } }
-            )) {
-                if let id = notice?.needID { Button("View in groceries") { viewNeed(id) } }
-                Button("OK", role: .cancel) { notice = nil }
-            } message: { Text(notice?.message ?? "") }
     }
 }

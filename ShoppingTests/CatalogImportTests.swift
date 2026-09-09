@@ -3,6 +3,26 @@ import XCTest
 @testable import Shopping
 
 final class CatalogImportTests: XCTestCase {
+    func testArchivedCategoryMustBeRestoredBeforeImport() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let categoryID = try service.createCategory(name: "Frozen", householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: selection.householdID, listID: selection.listID
+        )
+        let imported = row(name: "Peas", category: "Frozen")
+
+        let preview = try service.previewCatalogImport(
+            rows: [imported], householdID: selection.householdID, listID: selection.listID
+        )
+
+        guard case .invalid(let reason) = try XCTUnwrap(preview.entries.first).disposition else {
+            return XCTFail("Expected archived category mapping to be invalid")
+        }
+        XCTAssertTrue(reason.contains("Archived categories"))
+    }
+
     func testRepeatImportUpdatesStableItemWithoutCreatingDuplicate() throws {
         let persistence = try PersistenceController(storeURL: temporaryStoreURL())
         let service = NeedService(persistence: persistence)

@@ -288,7 +288,6 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(carted.waitForExistence(timeout: 2))
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        app.buttons["shopping.carted.all"].tap()
         groceryRow(named: "Strawberries", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()

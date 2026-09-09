@@ -3,7 +3,7 @@ import XCTest
 @testable import Shopping
 
 final class SchemaVersionTests: XCTestCase {
-    func testBundledV3ModelPreservesProductionSchemaContract() throws {
+    func testBundledV4ModelPreservesProductionSchemaContract() throws {
         let model = try PersistenceModel.make()
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
@@ -40,6 +40,7 @@ final class SchemaVersionTests: XCTestCase {
         assertMissingIDStorage(in: category)
         XCTAssertEqual(try attribute("name", in: category).defaultValue as? String, "")
         XCTAssertEqual(try attribute("displayOrder", in: category).defaultValue as? Int64, 0)
+        XCTAssertEqual(try attribute("isArchived", in: category).defaultValue as? Bool, false)
         XCTAssertEqual(try attribute("revision", in: category).defaultValue as? Int64, 0)
         let item = try XCTUnwrap(model.entitiesByName["Item"])
         assertMissingIDStorage(in: item)
@@ -152,6 +153,7 @@ final class SchemaVersionTests: XCTestCase {
             XCTAssertTrue(need.archived)
             XCTAssertEqual(need.clearOperationID, UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
             XCTAssertEqual(need.oneTimeCategory?.name, "Frozen")
+            XCTAssertEqual(need.oneTimeCategory?.isArchived, false)
             XCTAssertEqual(need.oneTimeStores?.map(\.name), ["Costco"])
             XCTAssertEqual(need.list?.household?.name, "Fixture household")
 

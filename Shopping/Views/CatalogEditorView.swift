@@ -22,10 +22,16 @@ struct CatalogEditorView: View {
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
     let onSaved: () -> Void
+    let onAddToList: (UUID) -> Void
 
-    init(session: CatalogEditSession, onSaved: @escaping () -> Void) {
+    init(
+        session: CatalogEditSession,
+        onSaved: @escaping () -> Void,
+        onAddToList: @escaping (UUID) -> Void = { _ in }
+    ) {
         self.session = session
         self.onSaved = onSaved
+        self.onAddToList = onAddToList
         _itemID = State(initialValue: session.itemID)
         _values = State(initialValue: session.values)
     }
@@ -140,9 +146,17 @@ struct CatalogEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", systemImage: "checkmark") { save() }
-                        .disabled(!canSave)
-                        .accessibilityIdentifier("shopping.catalog.save")
+                    HStack {
+                        if itemID != nil {
+                            Button("Add to list", systemImage: "note.text.badge.plus") { save(addToList: true) }
+                                .labelStyle(.iconOnly)
+                                .disabled(!canSave || currentItem?.isArchived == true)
+                                .accessibilityIdentifier("shopping.catalog.editorAddToList")
+                        }
+                        Button("Save", systemImage: "checkmark") { save() }
+                            .disabled(!canSave)
+                            .accessibilityIdentifier("shopping.catalog.save")
+                    }
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -176,7 +190,7 @@ struct CatalogEditorView: View {
         }
     }
 
-    private func save() {
+    private func save(addToList: Bool = false) {
         guard scopeAvailable, let service, let householdID = session.selection.householdID,
               let listID = session.selection.listID else { return }
         do {
@@ -193,6 +207,7 @@ struct CatalogEditorView: View {
             }
             hapticFeedback.play(.success)
             onSaved()
+            if addToList, let itemID { onAddToList(itemID) }
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }

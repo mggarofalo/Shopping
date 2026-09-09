@@ -91,9 +91,9 @@ final class PerformanceFlowUITests: XCTestCase {
         let confirmation = app.sheets["Add selected items to list?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
         confirmation.buttons["Add to list"].tap()
-        let result = app.alerts["Catalog update complete"]
-        XCTAssertTrue(result.waitForExistence(timeout: 5))
-        result.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@", "Added"
+        )).firstMatch.waitForExistence(timeout: 5))
         if app.buttons["Done"].exists {
             app.buttons["Done"].tap()
         }

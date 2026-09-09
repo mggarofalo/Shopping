@@ -39,7 +39,7 @@ final class CategoryManagementUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.staticTexts["Dry goods"].swipeRight()
+        app.staticTexts["Dry goods"].swipeLeft()
         app.buttons["Delete"].tap()
         let confirmation = app.sheets["Delete Dry goods?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
@@ -121,8 +121,9 @@ final class CategoryManagementUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", "in the cart will be needed again")
         ).firstMatch.exists)
         addConfirmation.buttons["Add to list"].tap()
-        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@", "Added"
+        )).firstMatch.waitForExistence(timeout: 3))
     }
 
     func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {
@@ -130,22 +131,24 @@ final class CategoryManagementUITests: XCTestCase {
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
 
-        let existing = app.buttons["Add Bananas to list"]
-        XCTAssertTrue(existing.waitForExistence(timeout: 3))
-        existing.tap()
+        let existingRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bananas")).firstMatch
+        XCTAssertTrue(existingRow.waitForExistence(timeout: 3))
+        existingRow.swipeLeft()
+        app.buttons["Add to list"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Catalog"].tap()
-        let carted = app.buttons["Add Strawberries to list"]
+        let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
-        carted.tap()
+        carted.swipeLeft()
+        app.buttons["Add to list"].tap()
         let confirmation = app.sheets["Need Strawberries again?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         confirmation.buttons["Need again"].tap()
-        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["View in groceries"].tap()
+        XCTAssertTrue(app.buttons["View"].waitForExistence(timeout: 3))
+        app.buttons["View"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
     }

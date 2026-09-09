@@ -232,9 +232,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        let householdDescription = app.staticTexts["shopping.settings.householdDescription"]
-        reveal(householdDescription, in: app)
-        XCTAssertGreaterThan(householdDescription.frame.height, 44)
+        XCTAssertTrue(app.staticTexts["Sharing status"].waitForExistence(timeout: 3))
         screenshot("Settings multiline text at largest text", app: app)
     }
 

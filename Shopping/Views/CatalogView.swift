@@ -1,6 +1,7 @@
 import CoreData
 import os
 import SwiftUI
+import UIKit
 
 private struct CatalogItemGroup: Identifiable {
     let id: String
@@ -39,7 +40,6 @@ struct CatalogView: View {
     @State private var selectedIDs: Set<UUID> = []
     @State private var editMode: EditMode = .inactive
     @State private var batchPreview: ManagementBatchPreview?
-    @State private var batchNotice: String?
     @State private var addConfirmation: CatalogAddConfirmation?
     @State private var addNotice: CatalogAddNotice?
     @State private var showingCatalogImporter = false
@@ -55,6 +55,7 @@ struct CatalogView: View {
     private var household: Household? { canonicalList?.household }
     private var scopedItems: [Item] { CatalogScope.items(Array(items), household: household) }
     private var scopedCategories: [Category] { CatalogScope.categories(Array(categories), household: household) }
+    private var activeCategories: [Category] { scopedCategories.filter { !$0.isArchived } }
     private var validStores: [Store] {
         GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList)
     }
@@ -164,13 +165,23 @@ struct CatalogView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if editMode.isEditing {
-                    Divider()
-                    HStack(spacing: 4) {
-                        Button("Add", systemImage: "note.text.badge.plus") { prepareBatchAdd() }
-                            .disabled(!selectedItems.contains(where: { !$0.isArchived }))
-                            .accessibilityIdentifier("shopping.catalog.batchAdd")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                VStack(spacing: 0) {
+                    if let addNotice {
+                        ShoppingFeedbackBar(message: addNotice.message) {
+                            if let id = addNotice.needID {
+                                Button("View") { viewNeed(id) }.frame(minHeight: 44)
+                            }
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    if editMode.isEditing {
+                        Divider()
+                        HStack(spacing: 4) {
+                            Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
+                                .tint(.red)
+                                .disabled(selectedIDs.isEmpty)
+                                .accessibilityIdentifier("shopping.catalog.batchDelete")
+                                .frame(maxWidth: .infinity, minHeight: 44)
                         Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedItems.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.catalog.batchArchive")
@@ -179,16 +190,16 @@ struct CatalogView: View {
                             .disabled(!selectedItems.contains(where: \.isArchived))
                             .accessibilityIdentifier("shopping.catalog.batchRestore")
                             .frame(maxWidth: .infinity, minHeight: 44)
-                        Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
-                            .tint(.red)
-                            .disabled(selectedIDs.isEmpty)
-                            .accessibilityIdentifier("shopping.catalog.batchDelete")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            Button("Add", systemImage: "note.text.badge.plus") { prepareBatchAdd() }
+                                .disabled(!selectedItems.contains(where: { !$0.isArchived }))
+                                .accessibilityIdentifier("shopping.catalog.batchAdd")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .labelStyle(.iconOnly)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.bar)
                     }
-                    .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.bar)
                 }
             }
             .confirmationDialog("Group catalog", isPresented: $showingGrouping, titleVisibility: .visible) {
@@ -197,10 +208,12 @@ struct CatalogView: View {
                 }
             }
             .sheet(isPresented: $showingFilters) {
-                CatalogFiltersView(filters: $filters, stores: activeStores, categories: scopedCategories)
+                CatalogFiltersView(filters: $filters, stores: activeStores, categories: activeCategories)
             }
             .sheet(item: $editor) { session in
-                CatalogEditorView(session: session) { refresh() }
+                CatalogEditorView(session: session, onSaved: refresh) { itemID in
+                    if let item = scopedItems.first(where: { $0.id == itemID }) { prepareIndividualAdd(item) }
+                }
             }
             .modifier(CatalogImportPresentationModifier(
                 showingFileImporter: $showingCatalogImporter,
@@ -238,14 +251,19 @@ struct CatalogView: View {
                 Text(removalNotice ?? "")
             }
             .modifier(CatalogBatchDialogs(
-                preview: $batchPreview, notice: $batchNotice, apply: applyBatch
+                preview: $batchPreview, apply: applyBatch
             ))
             .modifier(CatalogAddDialogs(
                 confirmation: $addConfirmation,
-                notice: $addNotice,
-                apply: applyCatalogAdd,
-                viewNeed: viewNeed
+                apply: applyCatalogAdd
             ))
+            .task(id: addNotice?.id) {
+                guard let notice = addNotice else { return }
+                UIAccessibility.post(notification: .announcement, argument: notice.message)
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, addNotice?.id == notice.id else { return }
+                withAnimation { addNotice = nil }
+            }
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
@@ -330,7 +348,7 @@ struct CatalogView: View {
                         ForEach(activeStores.filter { filters.excludedStoreIDs.contains($0.id) }, id: \.objectID) { store in
                             chip("Excludes: \(store.name)") { filters.excludedStoreIDs.remove(store.id) }
                         }
-                        ForEach(scopedCategories.filter { filters.categoryIDs.contains($0.id) }, id: \.objectID) { category in
+                        ForEach(activeCategories.filter { filters.categoryIDs.contains($0.id) }, id: \.objectID) { category in
                             chip(category.name) { filters.categoryIDs.remove(category.id) }
                         }
                         if filters.showArchived { chip("Archived") { filters.showArchived = false } }
@@ -343,39 +361,41 @@ struct CatalogView: View {
     }
 
     private func catalogRow(_ item: Item) -> some View {
-        HStack(spacing: 8) {
-            Button { edit(item) } label: {
-                CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-            if !item.isArchived {
-                Button { prepareIndividualAdd(item) } label: {
-                    Label("Add \(item.name) to list", systemImage: "note.text.badge.plus")
-                        .labelStyle(.iconOnly)
-                        .font(.title3)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
-            }
+        Button { edit(item) } label: {
+            CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
         .shoppingListRowInsets()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if !item.isArchived {
+                Button { prepareIndividualCart(item) } label: {
+                    Label("Add to cart", systemImage: "cart.badge.plus").labelStyle(.iconOnly)
+                }
+                .tint(.indigo)
+                .accessibilityIdentifier("shopping.catalog.addToCart.\(item.id.uuidString)")
+                Button { prepareIndividualAdd(item) } label: {
+                    Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
+                }
+                .tint(.green)
+                .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
+            }
+            Button { edit(item) } label: {
+                Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
+            }
+            .tint(.blue)
             Button { prepareArchive(item) } label: {
-                Image(systemName: item.isArchived ? "arrow.uturn.backward" : "archivebox")
-                    .font(.caption2)
+                Label(item.isArchived ? "Restore" : "Archive", systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
             }
             .tint(item.isArchived ? .green : .orange)
             .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
             .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
             Button(role: .destructive) { prepareRemoval(item) } label: {
-                Image(systemName: "trash").font(.caption2)
+                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
             }
             .tint(.red)
-            .accessibilityLabel("Delete")
             .accessibilityIdentifier("shopping.catalog.swipeDelete.\(item.id.uuidString)")
         }
         .contextMenu {
@@ -462,7 +482,7 @@ struct CatalogView: View {
         let ids = Set(activeStores.map(\.id))
         filters.includedStoreIDs.formIntersection(ids)
         filters.excludedStoreIDs.formIntersection(ids)
-        filters.categoryIDs.formIntersection(Set(scopedCategories.map(\.id)))
+        filters.categoryIDs.formIntersection(Set(activeCategories.map(\.id)))
     }
 
     private func refresh() {
@@ -660,6 +680,29 @@ struct CatalogView: View {
         addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
     }
 
+    private func prepareIndividualCart(_ item: Item) {
+        guard let preview = captureCatalogAdd(ids: [item.id]) else { return }
+        guard let entry = preview.token.entries.first else { return }
+        switch entry.disposition {
+        case .archived:
+            addNotice = CatalogAddNotice(message: "Restore this catalog item before adding it.", needID: nil)
+        case .ineligible:
+            addNotice = CatalogAddNotice(message: "This item is not available for the selected store.", needID: nil)
+        default:
+            applyCatalogAddToCart(preview.token)
+        }
+    }
+
+    private func applyCatalogAddToCart(_ token: CatalogAddToken) {
+        guard let service, selection.householdID == token.householdID, selection.listID == token.listID else { return }
+        do {
+            let result = try service.applyCatalogAdd(token, renewCarted: false, destination: .cart)
+            let count = result.addedNeedIDs.count + result.existingNeedIDs.count
+            addNotice = CatalogAddNotice(message: count == 0 ? "No item was added to cart." : "Added to cart.", needID: nil)
+            hapticFeedback.play(count == 0 ? .lightImpact : .success)
+        } catch { errorMessage = CatalogErrorCopy.message(error) }
+    }
+
     private func captureCatalogAdd(ids: Set<UUID>) -> CatalogAddPreview? {
         guard let service, let list = canonicalList, let householdID = list.household?.id else { return nil }
         do {
@@ -718,7 +761,7 @@ struct CatalogView: View {
             batchPreview = nil
             clearSelection()
             refresh()
-            batchNotice = ManagementBatchCopy.result(result)
+            addNotice = CatalogAddNotice(message: ManagementBatchCopy.result(result), needID: nil)
             hapticFeedback.play(token.action == .delete ? .warning : .success)
         } catch { batchPreview = nil; errorMessage = CatalogErrorCopy.message(error) }
     }

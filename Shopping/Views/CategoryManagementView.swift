@@ -151,6 +151,8 @@ struct CategoryManagementView: View {
             householdID: selection.householdID, listID: selection.listID
         )
     }
+    private var activeCategories: [Category] { householdCategories.filter { !$0.isArchived } }
+    private var archivedCategories: [Category] { householdCategories.filter(\.isArchived) }
 
     private var selectionAvailable: Bool {
         service != nil && CategoryManagementScope.household(
@@ -162,16 +164,19 @@ struct CategoryManagementView: View {
     var body: some View {
         List(selection: $selectedIDs) {
             Section {
-                ForEach(householdCategories, id: \.objectID) { category in
+                ForEach(activeCategories, id: \.objectID) { category in
                     categoryRow(category)
                         .shoppingListRowInsets()
                         .tag(category.id)
                 }
                 .onMove(perform: reorder)
-            } header: {
-                Text("Categories")
-            } footer: {
-                Text("Categories group groceries across every store. They do not define aisle order.")
+            }
+            if !archivedCategories.isEmpty {
+                Section("Archived") {
+                    ForEach(archivedCategories, id: \.objectID) { category in
+                        categoryRow(category).shoppingListRowInsets().tag(category.id)
+                    }
+                }
             }
         }
         .listStyle(.plain)
@@ -189,10 +194,14 @@ struct CategoryManagementView: View {
                 }
             } else {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Select") { editMode = .active }
+                    Button { editMode = .active } label: {
+                        Label("Select", systemImage: "checkmark.circle").labelStyle(.iconOnly)
+                    }
                         .disabled(!selectionAvailable || householdCategories.isEmpty)
                         .accessibilityIdentifier("shopping.categories.select")
-                    Button { beginCreate() } label: { Label("Add category", systemImage: "plus") }
+                    Button { beginCreate() } label: {
+                        Label("Add category", systemImage: "plus").labelStyle(.iconOnly)
+                    }
                         .disabled(!selectionAvailable)
                         .accessibilityIdentifier("shopping.categories.add")
                 }
@@ -202,17 +211,25 @@ struct CategoryManagementView: View {
             if editMode.isEditing {
                 Divider()
                 HStack(spacing: 4) {
-                    Button("Edit", systemImage: "pencil", action: editSelectedCategory)
-                        .disabled(selectedCategories.count != 1)
-                        .accessibilityIdentifier("shopping.categories.batchEdit")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatchDelete() }
+                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
                         .tint(.red)
                         .disabled(selectedIDs.isEmpty)
                         .accessibilityIdentifier("shopping.categories.batchDelete")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
+                        .disabled(!selectedCategories.contains(where: { !$0.isArchived }))
+                        .accessibilityIdentifier("shopping.categories.batchArchive")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
+                        .disabled(!selectedCategories.contains(where: \.isArchived))
+                        .accessibilityIdentifier("shopping.categories.batchRestore")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    Button("Edit", systemImage: "pencil", action: editSelectedCategory)
+                        .disabled(selectedCategories.count != 1)
+                        .accessibilityIdentifier("shopping.categories.batchEdit")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(.iconOnly)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(.bar)
@@ -256,12 +273,14 @@ struct CategoryManagementView: View {
             titleVisibility: .visible
         ) {
             if let preview = batchPreview {
-                Button("Delete", role: .destructive) { applyBatch(preview.token) }
+                Button(batchActionLabel(preview.token.action), role: preview.token.action == .delete ? .destructive : nil) {
+                    applyBatch(preview.token)
+                }
             }
             Button("Cancel", role: .cancel) { batchPreview = nil }
         } message: {
             if let preview = batchPreview {
-                Text(ManagementBatchCopy.message(preview) + " Groceries and catalog items remain Uncategorized.")
+                Text(ManagementBatchCopy.message(preview) + (preview.token.action == .delete ? " Groceries and catalog items remain Uncategorized." : ""))
             }
         }
         .alert("Batch update complete", isPresented: Binding(
@@ -276,20 +295,28 @@ struct CategoryManagementView: View {
 
     @ViewBuilder
     private func categoryRow(_ category: Category) -> some View {
-        Text(category.name)
+        HStack {
+            Text(category.name)
+            Spacer()
+            if category.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
+        }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button { beginRename(category) } label: {
-                    Label("Edit", systemImage: "pencil")
+                    Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
                 }
                 .tint(.blue)
                 .disabled(!selectionAvailable)
                 .accessibilityIdentifier("shopping.categories.edit.\(category.id.uuidString)")
-            }
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button { setArchived(category, !category.isArchived) } label: {
+                    Label(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
+                }
+                .tint(category.isArchived ? .green : .orange)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
                 Button(role: .destructive) { removingCategory = category } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
                 }
                 .tint(.red)
                 .disabled(!selectionAvailable)
@@ -300,12 +327,18 @@ struct CategoryManagementView: View {
                     Button("Select", systemImage: "checkmark.circle") { beginSelection(with: category.id) }
                         .accessibilityIdentifier("shopping.categories.contextSelect.\(category.id.uuidString)")
                     Button("Edit", systemImage: "pencil") { beginRename(category) }
+                    Button(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox") {
+                        setArchived(category, !category.isArchived)
+                    }
                     Button("Delete", systemImage: "trash", role: .destructive) {
                         removingCategory = category
                     }
                 }
             }
             .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
+            .accessibilityAction(named: Text("\(category.isArchived ? "Restore" : "Archive") \(category.name)")) {
+                setArchived(category, !category.isArchived)
+            }
             .accessibilityAction(named: Text("Delete \(category.name)")) {
                 removingCategory = category
             }
@@ -376,20 +409,21 @@ struct CategoryManagementView: View {
     private func reorder(from offsets: IndexSet, to destination: Int) {
         guard selectionAvailable, let service, let householdID = selection.householdID,
               let listID = selection.listID else { return }
-        var ids = householdCategories.map(\.id)
+        var ids = activeCategories.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
         do {
             try service.reorderCategories(ids, householdID: householdID, listID: listID)
         } catch { self.error = error }
     }
 
-    private func prepareBatchDelete() {
+    private func prepareBatch(_ action: ManagementBatchAction) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
         do {
-            batchPreview = try service.captureManagementBatch(
-                entity: .category, action: .delete, ids: selectedIDs,
+            let preview = try service.captureManagementBatch(
+                entity: .category, action: action, ids: selectedIDs,
                 householdID: householdID, listID: listID
             )
+            if action == .delete { batchPreview = preview } else { applyBatch(preview.token) }
         } catch { self.error = error }
     }
 
@@ -402,11 +436,23 @@ struct CategoryManagementView: View {
             batchPreview = nil
             clearSelection()
             batchNotice = ManagementBatchCopy.result(result)
-            hapticFeedback.play(.warning)
+            hapticFeedback.play(token.action == .delete ? .warning : .success)
         } catch { batchPreview = nil; self.error = error }
     }
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }
+
+    private func setArchived(_ category: Category, _ archived: Bool) {
+        guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
+        do {
+            try service.setCategoryArchived(archived, categoryID: category.id, householdID: householdID, listID: listID)
+            hapticFeedback.play(.success)
+        } catch { self.error = error }
+    }
+
+    private func batchActionLabel(_ action: ManagementBatchAction) -> String {
+        switch action { case .archive: "Archive"; case .restore: "Restore"; case .delete: "Delete" }
+    }
 }
 
 private struct CategoryEditorSession: Identifiable {

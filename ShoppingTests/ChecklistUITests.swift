@@ -100,7 +100,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertFalse(row("Strawberries", app: app).exists)
+        XCTAssertTrue(row("Strawberries", app: app).exists)
 
         openCheckout(app: app)
         XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
@@ -121,7 +121,6 @@ final class ChecklistUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 3))
         reveal(row("Chipotles in adobo", app: app), app: app)
-        app.buttons["shopping.carted.all"].tap()
         reveal(row("Strawberries", app: app), app: app)
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }

@@ -171,6 +171,8 @@ enum CatalogAddDisposition: String, Codable, Equatable {
     case ineligible
 }
 
+enum CatalogAddDestination { case list, cart }
+
 struct CatalogAddEntry: Codable, Equatable {
     let itemID: UUID
     let itemRevision: Int64
@@ -294,15 +296,21 @@ final class NeedService: @unchecked Sendable {
                         if self.storeHasReferences(store) { archiveCount += 1 } else { deleteCount += 1 }
                     }
                 case .category:
-                    guard action == .delete,
-                          let category = categoriesByID[id],
+                    guard let category = categoriesByID[id],
                           self.belongs(category, to: household) else { continue }
                     entries.append(ManagementBatchEntry(
                         id: id,
                         revision: category.revision,
-                        references: self.categoryReferences(category)
+                        references: action == .delete ? self.categoryReferences(category) : []
                     ))
-                    deleteCount += 1
+                    switch action {
+                    case .archive:
+                        if category.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                    case .restore:
+                        if category.isArchived { restoreCount += 1 } else { retainedCount += 1 }
+                    case .delete:
+                        deleteCount += 1
+                    }
                 case .catalogItem:
                     guard let item = itemsByID[id] else { continue }
                     do { try self.validate(item: item, belongsTo: household) } catch { continue }
@@ -401,13 +409,33 @@ final class NeedService: @unchecked Sendable {
                     guard let category = categoriesByID[entry.id] else {
                         missing += 1; continue
                     }
-                    guard token.action == .delete, self.belongs(category, to: household),
-                          category.revision == entry.revision,
-                          self.categoryReferences(category) == entry.references else {
+                    guard self.belongs(category, to: household),
+                          category.revision == entry.revision else {
                         changed += 1; continue
                     }
-                    try self.detachAndDelete(category, in: context)
-                    deleted += 1
+                    switch token.action {
+                    case .archive:
+                        if category.isArchived { retained += 1 } else {
+                            category.isArchived = true
+                            try self.advanceRevision(of: category)
+                            archived += 1
+                        }
+                    case .restore:
+                        if !category.isArchived { retained += 1 } else {
+                            category.isArchived = false
+                            category.displayOrder = self.nextActiveCategoryOrder(
+                                in: household, excluding: category
+                            )
+                            try self.advanceRevision(of: category)
+                            restored += 1
+                        }
+                    case .delete:
+                        guard self.categoryReferences(category) == entry.references else {
+                            changed += 1; continue
+                        }
+                        try self.detachAndDelete(category, in: context)
+                        deleted += 1
+                    }
                 case .catalogItem:
                     guard let item = itemsByID[entry.id] else {
                         missing += 1; continue
@@ -526,7 +554,11 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
-    func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) throws -> CatalogAddResult {
+    func applyCatalogAdd(
+        _ token: CatalogAddToken,
+        renewCarted: Bool,
+        destination: CatalogAddDestination = .list
+    ) throws -> CatalogAddResult {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID)
         defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID) }
@@ -583,13 +615,23 @@ final class NeedService: @unchecked Sendable {
                     created.item = item
                     created.notes = item.notes
                     created.urgency = NeedUrgency.normal.rawValue
+                    created.carted = destination == .cart
                     added.append(created.id)
                 case .focusExisting:
                     guard let need, !need.carted else { changed += 1; continue }
+                    if destination == .cart {
+                        let (revision, overflow) = need.revision.addingReportingOverflow(1)
+                        guard !overflow else { throw NeedServiceError.scopeChanged }
+                        need.carted = true
+                        need.clearOperationID = nil
+                        need.revision = revision
+                    }
                     existing.append(need.id)
                 case .needAgain:
                     guard let need, need.carted else { changed += 1; continue }
-                    if renewCarted {
+                    if destination == .cart {
+                        existing.append(need.id)
+                    } else if renewCarted {
                         let (revision, overflow) = need.revision.addingReportingOverflow(1)
                         guard !overflow else { throw NeedServiceError.scopeChanged }
                         need.carted = false
@@ -696,6 +738,7 @@ final class NeedService: @unchecked Sendable {
             let category: Category = self.insert("Category", in: context)
             category.id = UUID()
             category.name = name
+            category.isArchived = false
             if let displayOrder {
                 category.displayOrder = displayOrder
             } else {
@@ -731,6 +774,33 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    func setCategoryArchived(
+        _ archived: Bool,
+        categoryID: UUID,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            guard let category = try self.category(id: categoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard self.belongs(category, to: household) else {
+                throw NeedServiceError.scopeChanged
+            }
+            guard category.isArchived != archived else { return }
+            category.isArchived = archived
+            if !archived {
+                category.displayOrder = self.nextActiveCategoryOrder(
+                    in: household, excluding: category
+                )
+            }
+            try self.advanceRevision(of: category)
+        }
+    }
+
     func reorderCategories(
         _ orderedCategoryIDs: [UUID],
         householdID: UUID,
@@ -745,9 +815,10 @@ final class NeedService: @unchecked Sendable {
                 $0.household == household &&
                     $0.objectID.persistentStore == household.objectID.persistentStore
             }
-            let ownedIDs = owned.map(\.id)
+            let active = owned.filter { !$0.isArchived }
+            let ownedIDs = active.map(\.id)
             guard !ownedIDs.contains(PersistenceModel.unsetID),
-                  Set(ownedIDs).count == owned.count,
+                  Set(ownedIDs).count == active.count,
                   Set(orderedCategoryIDs).count == orderedCategoryIDs.count,
                   Set(ownedIDs) == Set(orderedCategoryIDs) else {
                 throw NeedServiceError.scopeChanged
@@ -757,7 +828,7 @@ final class NeedService: @unchecked Sendable {
                     throw NeedServiceError.scopeChanged
                 }
             }
-            let byID = Dictionary(uniqueKeysWithValues: owned.map { ($0.id, $0) })
+            let byID = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0) })
             for (index, id) in orderedCategoryIDs.enumerated() {
                 guard let category = byID[id] else { continue }
                 let order = Int64(index)
@@ -1040,6 +1111,9 @@ final class NeedService: @unchecked Sendable {
                         stores.filter { CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name) }
                     }
                     let invalidReason: String? = {
+                        if categoryMatches.contains(where: \.isArchived) {
+                            return "Archived categories must be restored before import."
+                        }
                         if row.categoryName != nil, categoryMatches.count != 1 {
                             return categoryMatches.isEmpty
                                 ? "Category “\(row.categoryName ?? "")” wasn’t found."
@@ -1155,6 +1229,7 @@ final class NeedService: @unchecked Sendable {
                 guard (entry.row.categoryName == nil || categoryMatches.count == 1),
                       storeMatches.allSatisfy({ $0.count == 1 }),
                       !currentStores.contains(where: \.isArchived),
+                      currentCategory.map({ !$0.isArchived }) ?? true,
                       currentCategory?.id == entry.categoryID,
                       currentCategory?.revision == entry.categoryRevision,
                       Set(currentStoresByID.keys) == entry.storeIDs,
@@ -1224,7 +1299,11 @@ final class NeedService: @unchecked Sendable {
                 throw NeedServiceError.itemNotFound
             }
             try self.validate(item: item, belongsTo: household)
-            let validated = try self.validatedCatalogValues(values, household: household, in: context)
+            let validated = try self.validatedCatalogValues(
+                values, household: household,
+                allowingArchivedCategoryID: item.category?.id,
+                in: context
+            )
             let normalizedNameChanged = CatalogProjection.normalizedName(item.name) !=
                 CatalogProjection.normalizedName(validated.name)
             if normalizedNameChanged {
@@ -1383,7 +1462,9 @@ final class NeedService: @unchecked Sendable {
                 throw NeedServiceError.scopeChanged
             }
             let validatedCatalog = try self.validatedCatalogValues(
-                catalog, household: resolved.household, in: context
+                catalog, household: resolved.household,
+                allowingArchivedCategoryID: item.category?.id,
+                in: context
             )
             let normalizedNameChanged = CatalogProjection.normalizedName(item.name) !=
                 CatalogProjection.normalizedName(validatedCatalog.name)
@@ -1434,7 +1515,9 @@ final class NeedService: @unchecked Sendable {
                 in: context
             )
             let category = try self.validatedCategory(
-                id: categoryID, household: resolved.household, in: context
+                id: categoryID, household: resolved.household,
+                allowingArchivedID: resolved.need.oneTimeCategory?.id,
+                in: context
             )
             resolved.need.title = title
             resolved.need.oneTimeCategory = category
@@ -1540,7 +1623,11 @@ final class NeedService: @unchecked Sendable {
             }
             item.name = name
             item.notes = self.trimmedNotes(notes)
-            item.category = try self.validatedCategory(id: categoryID, household: household, in: context)
+            item.category = try self.validatedCategory(
+                id: categoryID, household: household,
+                allowingArchivedID: item.category?.id,
+                in: context
+            )
             item.isArchived = isArchived
             try self.advanceRevision(of: item)
         }
@@ -1979,7 +2066,11 @@ final class NeedService: @unchecked Sendable {
             let stores = try self.validatedStores(
                 ids: storeIDs, household: household, requiringActiveStoreUnless: anyStore, in: context
             )
-            let category = try self.validatedCategory(id: categoryID, household: household, in: context)
+            let category = try self.validatedCategory(
+                id: categoryID, household: household,
+                allowingArchivedID: need.oneTimeCategory?.id,
+                in: context
+            )
             need.title = title
             need.notes = self.trimmedNotes(notes)
             need.oneTimeCategory = category
@@ -2382,9 +2473,20 @@ final class NeedService: @unchecked Sendable {
         try fetch(id: id, request: Category.fetchRequest(), in: context)
     }
 
+    private func nextActiveCategoryOrder(in household: Household, excluding category: Category) -> Int64 {
+        let used = Set((household.categories ?? []).filter {
+            $0 !== category && !$0.isArchived
+        }.map(\.displayOrder))
+        if let maximum = used.max(), maximum < Int64.max { return maximum + 1 }
+        var candidate: Int64 = 0
+        while used.contains(candidate), candidate < Int64.max { candidate += 1 }
+        return candidate
+    }
+
     private func validatedCategory(
         id: UUID?,
         household: Household,
+        allowingArchivedID: UUID? = nil,
         in context: NSManagedObjectContext
     ) throws -> Category? {
         guard let id else { return nil }
@@ -2394,6 +2496,9 @@ final class NeedService: @unchecked Sendable {
         guard category.household == household,
               category.objectID.persistentStore == household.objectID.persistentStore else {
             throw NeedServiceError.scopeChanged
+        }
+        guard !category.isArchived || category.id == allowingArchivedID else {
+            throw NeedServiceError.categoryNotFound
         }
         return category
     }
@@ -2499,10 +2604,15 @@ final class NeedService: @unchecked Sendable {
     private func validatedCatalogValues(
         _ values: CatalogItemValues,
         household: Household,
+        allowingArchivedCategoryID: UUID? = nil,
         in context: NSManagedObjectContext
     ) throws -> ValidatedCatalogItemValues {
         let name = try validatedName(values.name)
-        let category = try validatedCategory(id: values.categoryID, household: household, in: context)
+        let category = try validatedCategory(
+            id: values.categoryID, household: household,
+            allowingArchivedID: allowingArchivedCategoryID,
+            in: context
+        )
         var stores: Set<Store> = []
         for id in values.storeIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
             guard let store = try store(id: id, in: context) else {

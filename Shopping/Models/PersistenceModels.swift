@@ -53,6 +53,7 @@ final class Item: IdentifiedManagedObject {
 final class Category: IdentifiedManagedObject {
     @NSManaged var name: String
     @NSManaged var displayOrder: Int64
+    @NSManaged var isArchived: Bool
     @NSManaged var revision: Int64
     @NSManaged var household: Household?
     @NSManaged var items: Set<Item>?

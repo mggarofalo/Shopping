@@ -317,7 +317,7 @@ struct GroceryEditorView: View {
                         }
                     } else {
                         Button("Add quantity") { quantity = 1 }
-                            .frame(minHeight: 44)
+                            .buttonStyle(.borderless)
                             .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
                     Toggle("Urgent", isOn: Binding(

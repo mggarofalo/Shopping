@@ -15,12 +15,17 @@ struct CategoryPills: View {
                     isSelected: selection == nil,
                     identifier: "shopping.category.none"
                 ) { selection = nil }
-                ForEach(categories, id: \.objectID) { category in
+                ForEach(categories.filter { !$0.isArchived }, id: \.objectID) { category in
                     SelectionPill(
                         title: category.name,
                         isSelected: selection == category.id,
                         identifier: "shopping.category.\(category.id.uuidString)"
                     ) { selection = category.id }
+                }
+                if let selection,
+                   let archived = categories.first(where: { $0.id == selection && $0.isArchived }) {
+                    SelectionPill(title: "\(archived.name) · Archived", isSelected: true) {}
+                        .disabled(true)
                 }
                 if includeUnavailable, let selection,
                    !categories.contains(where: { $0.id == selection }) {
@@ -41,9 +46,6 @@ struct CategoryPills: View {
             }
         } header: {
             Text("Category")
-        } footer: {
-            Text("Categories help filter groceries across all stores.")
-                .shoppingMultilineText()
         }
     }
 }
