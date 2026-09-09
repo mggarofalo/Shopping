@@ -524,7 +524,9 @@ extension GroceryEditingUITests {
             XCTAssertTrue(groceryKeyboardDone.waitForExistence(timeout: 2))
             groceryKeyboardDone.tap()
             XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
-            setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
+            let remembered = app.switches["shopping.grocery.remembered"]
+            revealAbove(remembered, in: app)
+            setSwitch(remembered, on: false, app: app)
             reveal(currentNotes, in: app)
             XCTAssertEqual(currentNotes.value as? String, "Notes for this one-time need")
             assertMultilineField(currentNotes)
