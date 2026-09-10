@@ -8,6 +8,7 @@ struct CartedGroceriesView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists:
         FetchedResults<GroceryList>
@@ -15,19 +16,20 @@ struct CartedGroceriesView: View {
         FetchedResults<Household>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @State private var checkoutDraft: CheckoutDraft?
-    @State private var checkoutResult: CheckoutResult?
-    @State private var resultNotice: String?
     @State private var clearErrorMessage: String?
     @State private var error: Error?
     var onEdit: ((Need) -> Void)?
     var onUncarted: ((UUID, UUID, UUID) -> Void)?
+    var onRemoved: ((UUID, UUID, UUID) -> Void)?
 
     init(
         onEdit: ((Need) -> Void)? = nil,
-        onUncarted: ((UUID, UUID, UUID) -> Void)? = nil
+        onUncarted: ((UUID, UUID, UUID) -> Void)? = nil,
+        onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
     ) {
         self.onEdit = onEdit
         self.onUncarted = onUncarted
+        self.onRemoved = onRemoved
     }
 
     var body: some View {
@@ -46,23 +48,20 @@ struct CartedGroceriesView: View {
         .navigationTitle("In cart")
         .sheet(item: $checkoutDraft, content: checkoutSheet)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                resultBar
-                if !allCarted.isEmpty {
-                    HStack {
-                        Spacer()
-                        Button { prepareCheckout() } label: {
-                            Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark")
-                                .labelStyle(.iconOnly)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .accessibilityLabel(checkoutLabel(count: allCarted.count))
-                        .accessibilityIdentifier("shopping.checkout.start")
-                        .padding(.trailing)
-                        .padding(.bottom, 8)
+            if !allCarted.isEmpty {
+                HStack {
+                    Spacer()
+                    Button { prepareCheckout() } label: {
+                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel(checkoutLabel(count: allCarted.count))
+                    .accessibilityIdentifier("shopping.checkout.start")
+                    .padding(.trailing)
+                    .padding(.bottom, 8)
                 }
             }
         }
@@ -84,13 +83,7 @@ struct CartedGroceriesView: View {
             GroceryNeedRow(
                 need: need, activeStores: activeStores, onEdit: onEdit,
                 onCartedChange: setCarted, onQuantityChange: setQuantity,
-                onRemoved: { operationID, householdID, listID in
-                    checkoutResult = CheckoutResult(
-                        operationID: operationID, householdID: householdID, listID: listID,
-                        cleared: 1, skipped: 0, isIndividualRemoval: true
-                    )
-                    resultNotice = nil
-                }
+                onRemoved: onRemoved
             )
             .shoppingListRowInsets()
         }
@@ -146,28 +139,6 @@ struct CartedGroceriesView: View {
                     .accessibilityLabel(checkoutLabel(count: draft.preview.rows.count))
                     .accessibilityIdentifier("shopping.checkout.confirm")
                 }
-            }
-        }
-    }
-
-    @ViewBuilder private var resultBar: some View {
-        if let resultNotice {
-            ShoppingFeedbackBar(message: resultNotice)
-        } else if let checkoutResult {
-            ShoppingFeedbackBar(
-                message: checkoutResult.isIndividualRemoval
-                    ? "Item removed"
-                    : checkoutResult.skipped == 0
-                    ? "Checked out \(checkoutResult.cleared) items"
-                    : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
-            ) {
-                Button("Undo") { undo(checkoutResult) }
-                    .frame(minHeight: 44)
-                    .disabled(
-                        selection.householdID != checkoutResult.householdID
-                            || selection.listID != checkoutResult.listID
-                    )
-                    .accessibilityIdentifier("shopping.checkout.undo")
             }
         }
     }
@@ -250,43 +221,67 @@ struct CartedGroceriesView: View {
                 _exit(0)
             }
 #endif
-            checkoutResult = CheckoutResult(
+            let result = CheckoutResult(
                 operationID: draft.preview.token.id,
                 householdID: draft.householdID, listID: draft.listID,
                 cleared: cleared, skipped: draft.preview.rows.count - cleared)
-            resultNotice = nil
+            let message = result.skipped == 0
+                ? "Checked out \(result.cleared) items"
+                : "Checked out \(result.cleared); skipped \(result.skipped) changed items"
+            toastCenter?.show(
+                message,
+                duration: .undo,
+                action: ShoppingToastAction(
+                    title: "Undo",
+                    accessibilityIdentifier: "shopping.checkout.undo"
+                ) {
+                    undo(result)
+                }
+            )
             clearErrorMessage = nil
             checkoutDraft = nil
             if cleared > 0 { hapticFeedback.play(.success) }
         } catch { clearErrorMessage = error.localizedDescription }
     }
 
-    private func undo(_ result: CheckoutResult) {
+    private func undo(_ result: CheckoutResult) -> Bool {
         guard let service, selection.householdID == result.householdID,
             selection.listID == result.listID
-        else { return }
+        else { return false }
         do {
             let restored = try service.undoClear(
                 operationID: result.operationID,
                 expectedHouseholdID: result.householdID, expectedListID: result.listID)
-            checkoutResult = nil
-            resultNotice = restoreMessage(restored: restored, expected: result.cleared)
-        } catch { self.error = error }
+            showRestoreNotice(restored: restored, expected: result.cleared)
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func checkoutLabel(count: Int) -> String {
         count == 1 ? "Checkout 1 item" : "Checkout \(count) items"
     }
 
-    private func restoreMessage(restored: Int, expected: Int) -> String {
+    private func showRestoreNotice(restored: Int, expected: Int) {
         let skipped = max(0, expected - restored)
         if restored == 0 {
-            return "Nothing restored. These groceries were already restored or have newer changes."
+            toastCenter?.show(
+                "Nothing restored. These groceries were already restored or have newer changes.",
+                duration: .attention
+            )
+        } else if skipped > 0 {
+            toastCenter?.show(
+                "Restored \(restored); skipped \(skipped) with newer changes.",
+                duration: .attention
+            )
+        } else {
+            toastCenter?.show(
+                restored == 1 ? "Restored 1 item" : "Restored \(restored) items",
+                duration: .success
+            )
         }
-        if skipped > 0 {
-            return "Restored \(restored); skipped \(skipped) with newer changes."
-        }
-        return restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
     }
 
 }

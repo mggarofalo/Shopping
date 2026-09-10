@@ -23,6 +23,11 @@ struct SettingsView: View {
                     LabeledContent("Sharing status", value: "Not connected")
                         .shoppingListRowInsets()
                 }
+                Section("About") {
+                    LabeledContent("Version", value: AppVersion.current.displayValue)
+                        .accessibilityIdentifier("shopping.settings.version")
+                        .shoppingListRowInsets()
+                }
             }
             .navigationTitle("Settings")
         }

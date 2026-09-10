@@ -177,11 +177,3 @@ enum GroceryPurchaseRuleLabel {
         return names.count == 1 ? "Only buy at \(names[0])" : "Buy at \(names.joined(separator: ", "))"
     }
 }
-
-struct SwipeRemovalTarget {
-    let needID: UUID
-    let revision: Int64
-    let householdID: UUID
-    let listID: UUID
-    let name: String
-}

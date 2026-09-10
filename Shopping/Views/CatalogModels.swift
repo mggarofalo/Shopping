@@ -91,12 +91,6 @@ struct CatalogAddConfirmation: Identifiable {
     let itemName: String?
 }
 
-struct CatalogAddNotice: Identifiable {
-    let id = UUID()
-    let message: String
-    let needID: UUID?
-}
-
 struct CatalogRefreshKey: Equatable {
     let id: UUID
     let revision: Int64

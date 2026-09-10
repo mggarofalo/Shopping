@@ -213,9 +213,7 @@ final class GroceryEditingUITests: XCTestCase {
         let remove = app.buttons["shopping.grocery.remove"]
         reveal(remove, in: app)
         remove.tap()
-        let confirm = app.alerts.buttons["shopping.grocery.confirmRemove"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
-        confirm.tap()
+        XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         XCTAssertFalse(row.exists)
         app.buttons["shopping.grocery.undoRemove"].tap()

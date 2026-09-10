@@ -1,7 +1,6 @@
 import CoreData
 import os
 import SwiftUI
-import UIKit
 
 private struct CatalogItemGroup: Identifiable {
     let id: String
@@ -20,6 +19,7 @@ struct CatalogView: View {
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
@@ -41,10 +41,6 @@ struct CatalogView: View {
     @State private var editMode: EditMode = .inactive
     @State private var batchPreview: ManagementBatchPreview?
     @State private var addConfirmation: CatalogAddConfirmation?
-    @State private var addNotice: CatalogAddNotice?
-    @State private var showingCatalogImporter = false
-    @State private var importSession: CatalogImportSession?
-    @State private var importNotice: String?
     @ObservedObject var navigation: GroceryNavigationState
 
     private var canonicalList: GroceryList? {
@@ -156,24 +152,11 @@ struct CatalogView: View {
                         Button("New catalog item", systemImage: "plus", action: create)
                             .accessibilityIdentifier("shopping.catalog.add")
                             .disabled(household == nil || service == nil)
-                        Button("Import CSV", systemImage: "square.and.arrow.down") {
-                            showingCatalogImporter = true
-                        }
-                        .accessibilityIdentifier("shopping.catalog.import")
-                        .disabled(canonicalList == nil || service == nil)
                     }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if let addNotice {
-                        ShoppingFeedbackBar(message: addNotice.message) {
-                            if let id = addNotice.needID {
-                                Button("View") { viewNeed(id) }.frame(minHeight: 44)
-                            }
-                        }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
                     if editMode.isEditing {
                         Divider()
                         HStack(spacing: 4) {
@@ -215,14 +198,6 @@ struct CatalogView: View {
                     if let item = scopedItems.first(where: { $0.id == itemID }) { prepareIndividualAdd(item) }
                 }
             }
-            .modifier(CatalogImportPresentationModifier(
-                showingFileImporter: $showingCatalogImporter,
-                session: $importSession,
-                errorMessage: $errorMessage,
-                notice: $importNotice,
-                load: loadCatalogImport,
-                apply: applyCatalogImport
-            ))
             .confirmationDialog(
                 removalDialogTitle,
                 isPresented: removalTargetPresented,
@@ -257,13 +232,6 @@ struct CatalogView: View {
                 confirmation: $addConfirmation,
                 apply: applyCatalogAdd
             ))
-            .task(id: addNotice?.id) {
-                guard let notice = addNotice else { return }
-                UIAccessibility.post(notification: .announcement, argument: notice.message)
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled, addNotice?.id == notice.id else { return }
-                withAnimation { addNotice = nil }
-            }
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
@@ -527,46 +495,6 @@ struct CatalogView: View {
         ))
     }
 
-    private func loadCatalogImport(_ result: Result<[URL], Error>) {
-        guard let service, let canonicalList, let householdID = canonicalList.household?.id else { return }
-        do {
-            guard let url = try result.get().first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            let rows = try CatalogCSVParser.parse(Data(contentsOf: url))
-            guard !rows.isEmpty else {
-                throw CatalogCSVError.invalidRow(line: 1, reason: "The file has no catalog rows.")
-            }
-            let preview = try service.previewCatalogImport(
-                rows: rows,
-                householdID: householdID,
-                listID: canonicalList.id
-            )
-            importSession = CatalogImportSession(filename: url.lastPathComponent, preview: preview)
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? CatalogErrorCopy.message(error)
-        }
-    }
-
-    private func applyCatalogImport(_ actions: [String: CatalogImportAction]) {
-        guard let service, let session = importSession else { return }
-        guard selection.householdID == session.preview.householdID,
-              selection.listID == session.preview.listID else {
-            errorMessage = "Return to the household where you reviewed this import."
-            return
-        }
-        do {
-            let result = try service.applyCatalogImport(session.preview, actions: actions)
-            importSession = nil
-            refresh()
-            var parts = ["\(result.created) created", "\(result.updated) updated", "\(result.skipped) skipped"]
-            if result.changed > 0 { parts.append("\(result.changed) changed since preview") }
-            importNotice = parts.joined(separator: ", ") + "."
-        } catch {
-            errorMessage = CatalogErrorCopy.message(error)
-        }
-    }
-
     private func edit(_ item: Item) {
         editor = CatalogEditSession(selection: selection, itemID: item.id, values: item.catalogValues)
     }
@@ -657,7 +585,7 @@ struct CatalogView: View {
     private func prepareIndividualAdd(_ item: Item) {
         guard let preview = captureCatalogAdd(ids: [item.id]) else { return }
         guard let entry = preview.token.entries.first else {
-            addNotice = CatalogAddNotice(message: "This catalog item is no longer available.", needID: nil)
+            showCatalogNotice("This catalog item is no longer available.", duration: .attention)
             return
         }
         switch entry.disposition {
@@ -669,9 +597,12 @@ struct CatalogView: View {
         case .needAgain:
             addConfirmation = CatalogAddConfirmation(preview: preview, itemName: item.name)
         case .archived:
-            addNotice = CatalogAddNotice(message: "Restore this catalog item before adding it.", needID: nil)
+            showCatalogNotice("Restore this catalog item before adding it.", duration: .attention)
         case .ineligible:
-            addNotice = CatalogAddNotice(message: "This item is not available for the selected store.", needID: nil)
+            showCatalogNotice(
+                "This item is not available for the selected store.",
+                duration: .attention
+            )
         }
     }
 
@@ -685,9 +616,12 @@ struct CatalogView: View {
         guard let entry = preview.token.entries.first else { return }
         switch entry.disposition {
         case .archived:
-            addNotice = CatalogAddNotice(message: "Restore this catalog item before adding it.", needID: nil)
+            showCatalogNotice("Restore this catalog item before adding it.", duration: .attention)
         case .ineligible:
-            addNotice = CatalogAddNotice(message: "This item is not available for the selected store.", needID: nil)
+            showCatalogNotice(
+                "This item is not available for the selected store.",
+                duration: .attention
+            )
         default:
             applyCatalogAddToCart(preview.token)
         }
@@ -698,7 +632,10 @@ struct CatalogView: View {
         do {
             let result = try service.applyCatalogAdd(token, renewCarted: false, destination: .cart)
             let count = result.addedNeedIDs.count + result.existingNeedIDs.count
-            addNotice = CatalogAddNotice(message: count == 0 ? "No item was added to cart." : "Added to cart.", needID: nil)
+            showCatalogNotice(
+                count == 0 ? "No item was added to cart." : "Added to cart.",
+                duration: count == 0 ? .attention : .success
+            )
             hapticFeedback.play(count == 0 ? .lightImpact : .success)
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
@@ -729,7 +666,10 @@ struct CatalogView: View {
               selection.listID == token.listID else {
             addConfirmation = nil
             clearSelection()
-            addNotice = CatalogAddNotice(message: "The household changed. Select the items again.", needID: nil)
+            showCatalogNotice(
+                "The household changed. Select the items again.",
+                duration: .attention
+            )
             return nil
         }
         do {
@@ -737,7 +677,13 @@ struct CatalogView: View {
             addConfirmation = nil
             clearSelection()
             let visibleNeedID = result.addedNeedIDs.first ?? result.renewedNeedIDs.first
-            addNotice = CatalogAddNotice(message: CatalogAddCopy.result(result), needID: visibleNeedID)
+            showCatalogNotice(
+                CatalogAddCopy.result(result),
+                needID: visibleNeedID,
+                duration: result.archivedCount > 0 || result.ineligibleCount > 0
+                    || result.changedCount > 0 || result.missingCount > 0
+                    ? .attention : .success
+            )
             hapticFeedback.play(result.addedNeedIDs.isEmpty && result.renewedNeedIDs.isEmpty ? .lightImpact : .success)
             return result
         } catch {
@@ -748,8 +694,24 @@ struct CatalogView: View {
     }
 
     private func viewNeed(_ id: UUID) {
-        addNotice = nil
         navigation.requestNeedFocus(id)
+    }
+
+    private func showCatalogNotice(
+        _ message: String,
+        needID: UUID? = nil,
+        duration: ShoppingToastDuration
+    ) {
+        let action = needID.map { id in
+            ShoppingToastAction(
+                title: "View",
+                accessibilityIdentifier: "shopping.catalog.viewNeed"
+            ) {
+                viewNeed(id)
+                return true
+            }
+        }
+        toastCenter?.show(message, duration: duration, action: action)
     }
 
     private func applyBatch(_ token: ManagementBatchToken) {
@@ -761,7 +723,12 @@ struct CatalogView: View {
             batchPreview = nil
             clearSelection()
             refresh()
-            addNotice = CatalogAddNotice(message: ManagementBatchCopy.result(result), needID: nil)
+            showCatalogNotice(
+                ManagementBatchCopy.result(result),
+                duration: result.retainedCount > 0 || result.changedCount > 0
+                    || result.missingCount > 0
+                    ? .attention : .success
+            )
             hapticFeedback.play(token.action == .delete ? .warning : .success)
         } catch { batchPreview = nil; errorMessage = CatalogErrorCopy.message(error) }
     }
