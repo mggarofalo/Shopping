@@ -3,6 +3,62 @@ import XCTest
 @testable import Shopping
 
 final class CategoryManagementTests: XCTestCase {
+    func testArchiveAndRestorePreserveCategoryRelationshipsAndActiveReordering() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let archivedID = try service.createCategory(name: "Frozen", householdID: selection.householdID)
+        let activeID = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let itemID = try service.createItem(name: "Peas", categoryID: archivedID, householdID: selection.householdID)
+
+        try service.setCategoryArchived(
+            true, categoryID: archivedID, householdID: selection.householdID, listID: selection.listID
+        )
+        try service.reorderCategories([activeID], householdID: selection.householdID, listID: selection.listID)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let category = try fetch(Shopping.Category.self, entity: "Category", id: archivedID, in: context)
+            let item = try fetch(Item.self, entity: "Item", id: itemID, in: context)
+            XCTAssertTrue(category.isArchived)
+            XCTAssertEqual(item.category, category)
+        }
+
+        try service.setCategoryArchived(
+            false, categoryID: archivedID, householdID: selection.householdID, listID: selection.listID
+        )
+        try context.performAndWait {
+            context.reset()
+            let restored = try fetch(Shopping.Category.self, entity: "Category", id: archivedID, in: context)
+            let active = try fetch(Shopping.Category.self, entity: "Category", id: activeID, in: context)
+            XCTAssertFalse(restored.isArchived)
+            XCTAssertEqual(active.displayOrder, 0)
+            XCTAssertEqual(restored.displayOrder, 1)
+        }
+    }
+
+    func testArchivedCategoryCannotBeAssignedToNewDataButExistingRelationshipCanBeSaved() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let categoryID = try service.createCategory(name: "Frozen", householdID: selection.householdID)
+        let itemID = try service.createItem(name: "Peas", categoryID: categoryID, householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: selection.householdID, listID: selection.listID
+        )
+
+        XCTAssertThrowsError(try service.createItem(
+            name: "Ice", categoryID: categoryID, householdID: selection.householdID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .categoryNotFound) }
+        try service.saveCatalogItem(
+            itemID: itemID, householdID: selection.householdID, listID: selection.listID,
+            values: CatalogItemValues(
+                name: "Frozen peas", notes: "", categoryID: categoryID,
+                anyStore: true, storeIDs: []
+            )
+        )
+    }
+
     func testCategoryCreationAppendsByDefaultAndPreservesExplicitOrder() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
@@ -278,6 +334,42 @@ final class CategoryManagementTests: XCTestCase {
             XCTAssertEqual(groups[0].categories.flatMap { $0.needs }.map(\.id), [urgentProduce, urgentNone])
             XCTAssertEqual(groups[1].categories.map(\.title), ["Produce", "Bakery", "Uncategorized"])
             XCTAssertEqual(groups[1].categories.flatMap { $0.needs }.map(\.id), [normalProduce, normalBakery, normalNone])
+        }
+    }
+
+    func testListGroupingUsesSettingsOrderThenArchivedAndUncategorized() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        _ = try service.createCategory(name: "Produce", householdID: selection.householdID, displayOrder: 0)
+        let bakery = try service.createCategory(name: "Bakery", householdID: selection.householdID, displayOrder: 1)
+        let dairy = try service.createCategory(name: "Dairy", householdID: selection.householdID, displayOrder: 2)
+        let normalItem = try service.createItem(name: "Apples", categoryID: bakery, householdID: selection.householdID)
+        let urgentItem = try service.createItem(name: "Zucchini", categoryID: bakery, householdID: selection.householdID)
+        let archivedItem = try service.createItem(name: "Milk", categoryID: dairy, householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true, categoryID: dairy, householdID: selection.householdID, listID: selection.listID
+        )
+        let normal = try service.addRememberedNeed(itemID: normalItem, listID: selection.listID)
+        let urgent = try service.addRememberedNeed(itemID: urgentItem, listID: selection.listID, urgency: .urgent)
+        let archived = try service.addRememberedNeed(itemID: archivedItem, listID: selection.listID)
+        let uncategorized = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let householdRequest = Household.fetchRequest()
+            householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
+            let household = try XCTUnwrap(context.fetch(householdRequest).first)
+            let groups = CategoryGrouping.listGroups(
+                needs: try context.fetch(Need.fetchRequest()),
+                categories: try context.fetch(Shopping.Category.fetchRequest()),
+                household: household
+            )
+
+            XCTAssertEqual(groups.map(\.title), ["Bakery", "Dairy", "Uncategorized"])
+            XCTAssertEqual(groups[0].needs.map(\.id), [urgent, normal])
+            XCTAssertEqual(groups[1].needs.map(\.id), [archived])
+            XCTAssertEqual(groups[2].needs.map(\.id), [uncategorized])
         }
     }
 

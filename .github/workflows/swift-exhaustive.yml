@@ -1,8 +1,6 @@
 name: Swift exhaustive tests
 
 on:
-  schedule:
-    - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
       suite:
@@ -13,20 +11,39 @@ on:
         options:
           - full
           - performance
-  push:
-    branches:
-      - "milestone/**"
 
 permissions:
   contents: read
+  statuses: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.suite || 'full' }}
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    name: Verify local ShoppingFull pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify exact-commit attestation
+        if: inputs.suite == 'full'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          attestation_state="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/status" \
+            --jq '[.statuses[] | select(.context == "local/ShoppingFull")][0].state // "missing"')"
+          .github/scripts/verify-shopping-full-attestation.sh \
+            "$GITHUB_SHA" \
+            "$attestation_state"
+
   exhaustive:
     name: Full UI or performance suite
+    needs: preflight
     runs-on: macos-15
     timeout-minutes: 60
     env:

@@ -17,14 +17,6 @@ struct GroceryEditorTarget: Identifiable {
     }
 }
 
-private struct RemovalTarget {
-    let needID: UUID
-    let revision: Int64
-    let householdID: UUID
-    let listID: UUID
-    let name: String
-}
-
 private enum OneTimePromotionChoice: String, CaseIterable {
     case create
     case existing
@@ -61,7 +53,6 @@ struct GroceryEditorView: View {
     @State private var anyStore: Bool
     @State private var error: Error?
     @State private var allowDuplicate = false
-    @State private var removal: RemovalTarget?
     @State private var isPromotingOneTime = false
     @State private var promotionChoice = OneTimePromotionChoice.create
     @State private var catalogSearch = ""
@@ -317,7 +308,7 @@ struct GroceryEditorView: View {
                         }
                     } else {
                         Button("Add quantity") { quantity = 1 }
-                            .frame(minHeight: 44)
+                            .buttonStyle(.borderless)
                             .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
                     Toggle("Urgent", isOn: Binding(
@@ -364,7 +355,7 @@ struct GroceryEditorView: View {
                     }
                 }
                 if isEditing {
-                    Button("Remove item", systemImage: "trash", role: .destructive) { captureRemoval() }
+                    Button("Remove item", systemImage: "trash", role: .destructive) { remove() }
                         .disabled(!scopeValid)
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
@@ -396,18 +387,6 @@ struct GroceryEditorView: View {
                     Button("Done") { focusedField = nil }
                         .accessibilityIdentifier("shopping.grocery.keyboardDone")
                 }
-            }
-            .alert(
-                "Remove \(removal?.name ?? name)?",
-                isPresented: Binding(
-                    get: { removal != nil }, set: { if !$0 { removal = nil } }
-                ), presenting: removal
-            ) { captured in
-                Button("Remove", role: .destructive) { remove(captured) }
-                    .accessibilityIdentifier("shopping.grocery.confirmRemove")
-                Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("You can undo this removal or restore the grocery from Recently cleared.")
             }
             .sheet(isPresented: $showingCategoryCreation) {
                 CategoryCreationView(
@@ -802,83 +781,19 @@ struct GroceryEditorView: View {
         } catch { self.error = error }
     }
 
-    private func captureRemoval() {
-        guard scopeValid, let need = canonicalNeed, let householdID = target.scope.householdID,
-            let listID = target.scope.listID
-        else { return }
-        removal = RemovalTarget(
-            needID: need.id, revision: need.revision,
-            householdID: householdID, listID: listID, name: need.item?.name ?? need.title)
-    }
-
-    private func remove(_ removal: RemovalTarget) {
-        guard scopeValid, let service else { return }
+    private func remove() {
+        guard scopeValid, let service, let need = canonicalNeed,
+              let householdID = target.scope.householdID,
+              let listID = target.scope.listID else { return }
         do {
             let operationID = try service.removeNeed(
-                needID: removal.needID, householdID: removal.householdID,
-                listID: removal.listID, expectedRevision: removal.revision)
+                needID: need.id, householdID: householdID,
+                listID: listID, expectedRevision: need.revision)
             onRemoved(operationID, target.scope)
             dismiss()
         } catch { self.error = error }
     }
 
-}
-
-struct CategoryCreationView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.needService) private var service
-    @State private var name = ""
-    @State private var error: Error?
-    @FocusState private var nameIsFocused: Bool
-    let householdID: UUID?
-    let listID: UUID?
-    let onSelected: (UUID) -> Void
-
-    private var canSave: Bool {
-        service != nil && householdID != nil && listID != nil
-            && !CatalogProjection.normalizedName(name).isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Category name", text: $name)
-                    .accessibilityIdentifier("shopping.category.name")
-                    .focused($nameIsFocused)
-                    .submitLabel(.done)
-                    .onSubmit(save)
-                if let error {
-                    Text(error.localizedDescription).foregroundStyle(.red)
-                }
-            }
-            .navigationTitle("Add category")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .accessibilityIdentifier("shopping.category.cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save category", systemImage: "checkmark", action: save)
-                        .disabled(!canSave)
-                        .accessibilityIdentifier("shopping.category.save")
-                }
-            }
-            .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
-        }
-    }
-
-    private func save() {
-        guard canSave, let service, let householdID, let listID else { return }
-        do {
-            onSelected(try service.createCategory(
-                name: name, householdID: householdID, listID: listID
-            ))
-            dismiss()
-        } catch {
-            self.error = error
-        }
-    }
 }
 
 private struct GroceryEditorPreview: View {

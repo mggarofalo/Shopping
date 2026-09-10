@@ -4,103 +4,41 @@ import SwiftUI
 import Darwin
 #endif
 
-private struct CheckoutDraft: Identifiable {
-    let preview: ClearCartedPreview
-    let householdID: UUID
-    let listID: UUID
-    var id: UUID { preview.token.id }
-}
-
-private struct CheckoutResult {
-    let operationID: UUID
-    let householdID: UUID
-    let listID: UUID
-    let cleared: Int
-    let skipped: Int
-    var isIndividualRemoval = false
-}
-
 struct CartedGroceriesView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
-    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists:
         FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
         FetchedResults<Household>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
-    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
-        FetchedResults<Category>
-    @State private var filter: GroceryNeedFilter
-    @State private var matchingNeedIDs: Set<UUID> = []
     @State private var checkoutDraft: CheckoutDraft?
-    @State private var checkoutResult: CheckoutResult?
-    @State private var resultNotice: String?
     @State private var clearErrorMessage: String?
     @State private var error: Error?
     var onEdit: ((Need) -> Void)?
-    var onNeedAgain: ((Need) -> Void)?
     var onUncarted: ((UUID, UUID, UUID) -> Void)?
+    var onRemoved: ((UUID, UUID, UUID) -> Void)?
 
     init(
-        initialFilter: GroceryNeedFilter = GroceryNeedFilter(),
         onEdit: ((Need) -> Void)? = nil,
-        onNeedAgain: ((Need) -> Void)? = nil,
-        onUncarted: ((UUID, UUID, UUID) -> Void)? = nil
+        onUncarted: ((UUID, UUID, UUID) -> Void)? = nil,
+        onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
     ) {
-        _filter = State(
-            initialValue: GroceryNeedFilter(
-                purchase: initialFilter.purchase,
-                text: initialFilter.text,
-                categoryID: initialFilter.categoryID,
-                carted: true,
-                urgency: initialFilter.urgency
-            ))
         self.onEdit = onEdit
-        self.onNeedAgain = onNeedAgain
         self.onUncarted = onUncarted
+        self.onRemoved = onRemoved
     }
 
     var body: some View {
-        let carted = scopedCarted
         let allCarted = allScopedCarted
         let activeStores = validActiveStores
         List {
-            if !allCarted.isEmpty {
-                Section {
-                    Button { prepareCheckout() } label: {
-                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark.circle.fill")
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .shoppingListRowInsets()
-                    .accessibilityHint("Includes all items in cart, even when this view is filtered")
-                    .accessibilityIdentifier("shopping.checkout.start")
-                }
-            }
-            Section {
-                Button("All in cart", action: showAllCarted)
-                    .accessibilityIdentifier("shopping.carted.all")
-                    .shoppingListRowInsets()
-                Text(scopeDescription).font(.footnote).foregroundStyle(.secondary)
-                    .shoppingMultilineText()
-                    .shoppingListRowInsets()
-            }
-            if let storeID = filter.purchase.selectedStoreID {
-                let onlyHere = carted.filter { availability($0, storeID: storeID) == .mustBuyHere }
-                let canHere = carted.filter { availability($0, storeID: storeID) == .flexibleHere }
-                if !onlyHere.isEmpty {
-                    Section("Only buy here") { rows(onlyHere, activeStores: activeStores) }
-                }
-                if !canHere.isEmpty {
-                    Section("Can buy here") { rows(canHere, activeStores: activeStores) }
-                }
-            } else {
-                Section { rows(carted, activeStores: activeStores) }
-            }
+            Section { rows(allCarted, activeStores: activeStores) }
         }
+        .listStyle(.plain)
         .overlay {
             if allCarted.isEmpty {
                 ContentUnavailableView("Nothing in cart", systemImage: "cart")
@@ -109,7 +47,24 @@ struct CartedGroceriesView: View {
         }
         .navigationTitle("In cart")
         .sheet(item: $checkoutDraft, content: checkoutSheet)
-        .safeAreaInset(edge: .bottom) { resultBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !allCarted.isEmpty {
+                HStack {
+                    Spacer()
+                    Button { prepareCheckout() } label: {
+                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel(checkoutLabel(count: allCarted.count))
+                    .accessibilityIdentifier("shopping.checkout.start")
+                    .padding(.trailing)
+                    .padding(.bottom, 8)
+                }
+            }
+        }
         .alert(
             "Couldn’t update groceries in cart",
             isPresented: Binding(
@@ -120,36 +75,16 @@ struct CartedGroceriesView: View {
         } message: {
             Text(error?.localizedDescription ?? "Unknown error")
         }
-        .onAppear(perform: sanitizeFilterAndRefresh)
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .NSManagedObjectContextObjectsDidChange, object: viewContext
-            )
-        ) { _ in sanitizeFilterAndRefresh() }
     }
 
     @ViewBuilder
     private func rows(_ values: [Need], activeStores: [Store]) -> some View {
         ForEach(values, id: \.objectID) { need in
-            VStack(alignment: .leading, spacing: 8) {
-                GroceryNeedRow(
-                    need: need, activeStores: activeStores, onEdit: onEdit,
-                    onCartedChange: setCarted, onQuantityChange: setQuantity,
-                    onRemoved: { operationID, householdID, listID in
-                        checkoutResult = CheckoutResult(
-                            operationID: operationID, householdID: householdID, listID: listID,
-                            cleared: 1, skipped: 0, isIndividualRemoval: true
-                        )
-                        resultNotice = nil
-                        refreshProjection()
-                    }
-                )
-                if let onNeedAgain, let item = need.item {
-                    Button("Need again \(item.name)") { onNeedAgain(need) }
-                        .buttonStyle(.borderless).frame(minHeight: 44)
-                        .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
-                }
-            }
+            GroceryNeedRow(
+                need: need, activeStores: activeStores, onEdit: onEdit,
+                onCartedChange: setCarted, onQuantityChange: setQuantity,
+                onRemoved: onRemoved
+            )
             .shoppingListRowInsets()
         }
     }
@@ -157,39 +92,9 @@ struct CartedGroceriesView: View {
     private func checkoutSheet(_ draft: CheckoutDraft) -> some View {
         NavigationStack {
             List {
-                Section {
-                    Text("Checkout removes only these captured items from the active list. Items changed after this confirmation opened will be skipped.")
-                        .shoppingMultilineText()
-                        .accessibilityIdentifier("shopping.checkout.explanation")
-                        .shoppingListRowInsets()
-                }
                 Section("Items (\(draft.preview.rows.count))") {
                     ForEach(draft.preview.rows, id: \.needID) { row in
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(row.title)
-                                    if row.oneTime {
-                                        Text("One-time").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer(minLength: 8)
-                                if let quantity = row.quantity {
-                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
-                                }
-                            }
-                            VStack(alignment: .leading) {
-                                Text(row.title)
-                                if row.oneTime {
-                                    Text("One-time").font(.caption).foregroundStyle(.secondary)
-                                }
-                                if let quantity = row.quantity {
-                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("shopping.checkout.row.\(row.needID.uuidString)")
+                        CheckoutPreviewRow(row: row)
                         .shoppingListRowInsets()
                     }
                 }
@@ -212,41 +117,28 @@ struct CartedGroceriesView: View {
                     }
                 }
             }
-            .navigationTitle("Checkout?")
+            .listStyle(.plain)
+            .navigationTitle("Checkout")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { checkoutDraft = nil }
+                    Button { checkoutDraft = nil } label: {
+                        Label("Cancel", systemImage: "xmark").labelStyle(.iconOnly)
+                    }
+                        .accessibilityLabel("Cancel")
                         .accessibilityIdentifier("shopping.checkout.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(checkoutLabel(count: draft.preview.rows.count)) {
+                    Button {
                         confirmCheckout(draft)
+                    } label: {
+                        Label(checkoutLabel(count: draft.preview.rows.count), systemImage: "checkmark")
+                            .labelStyle(.iconOnly)
                     }
                     .disabled(!selectionMatches(draft))
+                    .accessibilityLabel(checkoutLabel(count: draft.preview.rows.count))
                     .accessibilityIdentifier("shopping.checkout.confirm")
                 }
-            }
-        }
-    }
-
-    @ViewBuilder private var resultBar: some View {
-        if let resultNotice {
-            ShoppingFeedbackBar(message: resultNotice)
-        } else if let checkoutResult {
-            ShoppingFeedbackBar(
-                message: checkoutResult.isIndividualRemoval
-                    ? "Item removed"
-                    : checkoutResult.skipped == 0
-                    ? "Checked out \(checkoutResult.cleared) items"
-                    : "Checked out \(checkoutResult.cleared); skipped \(checkoutResult.skipped) changed items"
-            ) {
-                Button("Undo") { undo(checkoutResult) }
-                    .frame(minHeight: 44)
-                    .disabled(
-                        selection.householdID != checkoutResult.householdID
-                            || selection.listID != checkoutResult.listID
-                    )
-                    .accessibilityIdentifier("shopping.checkout.undo")
             }
         }
     }
@@ -261,79 +153,11 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private var scopedCarted: [Need] {
-        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter { $0.carted && !$0.archived && matchingNeedIDs.contains($0.id) }
-            .sorted {
-                let leftUrgent = $0.urgency == NeedUrgency.urgent.rawValue
-                let rightUrgent = $1.urgency == NeedUrgency.urgent.rawValue
-                if leftUrgent != rightUrgent { return leftUrgent }
-                let order = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
-                return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
-            }
-    }
-
     private var allScopedCarted: [Need] {
-        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter { $0.carted && !$0.archived }
-    }
-
-    private var scopeDescription: String {
-        var parts: [String] = []
-        let storeName: (UUID) -> String = { id in
-            validActiveStores.first(where: { $0.id == id })?.name ?? "selected store"
-        }
-        if let id = filter.purchase.selectedStoreID { parts.append("Available at \(storeName(id))") }
-        if !filter.purchase.includedStoreIDs.isEmpty {
-            parts.append(
-                "including " + filter.purchase.includedStoreIDs.map(storeName).sorted().joined(separator: ", ")
-            )
-        }
-        if !filter.purchase.excludedStoreIDs.isEmpty {
-            parts.append(
-                "excluding stores "
-                    + filter.purchase.excludedStoreIDs.map(storeName).sorted().joined(separator: ", "))
-        }
-        if !filter.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parts.append("matching “\(filter.text)”")
-        }
-        if let id = filter.categoryID {
-            let name =
-                GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList)
-                .first(where: { $0.id == id })?.name ?? "selected category"
-            parts.append("category \(name)")
-        }
-        if filter.urgency == NeedUrgency.urgent.rawValue { parts.append("Urgent") }
-        return parts.isEmpty ? "All groceries in cart" : parts.joined(separator: " · ")
-    }
-
-    private func refreshProjection() {
-        guard let service, let list = canonicalList, let householdID = list.household?.id else {
-            matchingNeedIDs = []
-            return
-        }
-        do {
-            matchingNeedIDs = Set(
-                try service.filteredActiveNeedIDs(householdID: householdID, filter: filter))
-        } catch {
-            self.error = error
-            matchingNeedIDs = []
-        }
-    }
-
-    private func sanitizeFilterAndRefresh() {
-        filter = filter.sanitized(
-            activeStoreIDs: Set(validActiveStores.map(\.id)),
-            activeCategoryIDs: Set(
-                GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).map(\.id)
-            )
+        CartedNeedOrdering.ordered(
+            GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+                .filter { $0.carted && !$0.archived }
         )
-        refreshProjection()
-    }
-
-    private func showAllCarted() {
-        filter = GroceryNeedFilter(carted: true)
-        refreshProjection()
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {
@@ -361,7 +185,6 @@ struct CartedGroceriesView: View {
         let needID = need.id
         do {
             try command(service, needID, householdID, list.id)
-            refreshProjection()
             return true
         } catch {
             self.error = error
@@ -398,59 +221,69 @@ struct CartedGroceriesView: View {
                 _exit(0)
             }
 #endif
-            checkoutResult = CheckoutResult(
+            let result = CheckoutResult(
                 operationID: draft.preview.token.id,
                 householdID: draft.householdID, listID: draft.listID,
                 cleared: cleared, skipped: draft.preview.rows.count - cleared)
-            resultNotice = nil
+            let message = result.skipped == 0
+                ? "Checked out \(result.cleared) items"
+                : "Checked out \(result.cleared); skipped \(result.skipped) changed items"
+            toastCenter?.show(
+                message,
+                duration: .undo,
+                action: ShoppingToastAction(
+                    title: "Undo",
+                    accessibilityIdentifier: "shopping.checkout.undo"
+                ) {
+                    undo(result)
+                }
+            )
             clearErrorMessage = nil
             checkoutDraft = nil
-            refreshProjection()
             if cleared > 0 { hapticFeedback.play(.success) }
         } catch { clearErrorMessage = error.localizedDescription }
     }
 
-    private func undo(_ result: CheckoutResult) {
+    private func undo(_ result: CheckoutResult) -> Bool {
         guard let service, selection.householdID == result.householdID,
             selection.listID == result.listID
-        else { return }
+        else { return false }
         do {
             let restored = try service.undoClear(
                 operationID: result.operationID,
                 expectedHouseholdID: result.householdID, expectedListID: result.listID)
-            checkoutResult = nil
-            resultNotice = restoreMessage(restored: restored, expected: result.cleared)
-            refreshProjection()
-        } catch { self.error = error }
+            showRestoreNotice(restored: restored, expected: result.cleared)
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func checkoutLabel(count: Int) -> String {
         count == 1 ? "Checkout 1 item" : "Checkout \(count) items"
     }
 
-    private func restoreMessage(restored: Int, expected: Int) -> String {
+    private func showRestoreNotice(restored: Int, expected: Int) {
         let skipped = max(0, expected - restored)
         if restored == 0 {
-            return "Nothing restored. These groceries were already restored or have newer changes."
+            toastCenter?.show(
+                "Nothing restored. These groceries were already restored or have newer changes.",
+                duration: .attention
+            )
+        } else if skipped > 0 {
+            toastCenter?.show(
+                "Restored \(restored); skipped \(skipped) with newer changes.",
+                duration: .attention
+            )
+        } else {
+            toastCenter?.show(
+                restored == 1 ? "Restored 1 item" : "Restored \(restored) items",
+                duration: .success
+            )
         }
-        if skipped > 0 {
-            return "Restored \(restored); skipped \(skipped) with newer changes."
-        }
-        return restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
     }
 
-    private func availability(_ need: Need, storeID: UUID) -> PurchaseAvailability {
-        let oneTime = need.kind == NeedKind.oneTime.rawValue
-        let value = PurchaseRuleValue(
-            explicitStoreIDs: need.item.map { Set($0.stores?.map(\.id) ?? []) }
-                ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
-            anyStore: need.item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
-            hasResolvedIdentity: need.item != nil || oneTime
-        )
-        return PurchaseFilter().availability(
-            of: value, selectedStoreID: storeID,
-            activeStoreIDs: Set(validActiveStores.map(\.id)))
-    }
 }
 
 #Preview("Checklist") {

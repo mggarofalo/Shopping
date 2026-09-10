@@ -127,13 +127,16 @@ struct CatalogFilterUnitTests {
         #expect(CatalogProjection.normalizedName("Ｍｉｌｋ") == "milk")
         #expect(CatalogSuggestionPurchaseSummary.text(
             anyStore: true, savedStoreLabels: ["Costco"]
-        ) == "Any store · Also: Costco")
+        ) == "Any Store, Costco")
         #expect(CatalogSuggestionPurchaseSummary.text(
             anyStore: true, savedStoreLabels: ["Publix"]
-        ) == "Any store · Also: Publix")
+        ) == "Any Store, Publix")
+        #expect(CatalogSuggestionPurchaseSummary.text(
+            anyStore: false, savedStoreLabels: ["Walmart", "Costco"]
+        ) == "Costco, Walmart")
         #expect(CatalogSuggestionPurchaseSummary.text(
             anyStore: false, savedStoreLabels: [], hasSavedStores: false
-        ) == "Any store")
+        ) == "Any Store")
     }
 
     @Test("Suggestions rank exact, prefix, substring, then fuzzy matches")

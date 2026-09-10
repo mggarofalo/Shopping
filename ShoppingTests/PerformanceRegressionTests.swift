@@ -37,7 +37,7 @@ final class PerformanceRegressionTests: XCTestCase {
                 filter: CatalogItemFilter(
                     purchase: PurchaseFilter(selectedStoreID: storeID),
                     text: "item 09",
-                    categoryID: categoryID
+                    categoryIDs: [categoryID]
                 )
             )
         }

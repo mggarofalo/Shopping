@@ -3,7 +3,7 @@ import XCTest
 @testable import Shopping
 
 final class SchemaVersionTests: XCTestCase {
-    func testBundledV3ModelPreservesProductionSchemaContract() throws {
+    func testBundledV5ModelPreservesProductionSchemaContract() throws {
         let model = try PersistenceModel.make()
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
@@ -20,6 +20,7 @@ final class SchemaVersionTests: XCTestCase {
         XCTAssertNil(quantity.defaultValue)
         XCTAssertEqual(try attribute("notes", in: need).defaultValue as? String, "")
         XCTAssertEqual(try attribute("carted", in: need).defaultValue as? Bool, false)
+        XCTAssertTrue(try attribute("cartedAt", in: need).isOptional)
         XCTAssertEqual(try attribute("urgency", in: need).defaultValue as? String, "normal")
         XCTAssertEqual(try attribute("revision", in: need).defaultValue as? Int64, 0)
         XCTAssertEqual(try attribute("archived", in: need).defaultValue as? Bool, false)
@@ -40,6 +41,7 @@ final class SchemaVersionTests: XCTestCase {
         assertMissingIDStorage(in: category)
         XCTAssertEqual(try attribute("name", in: category).defaultValue as? String, "")
         XCTAssertEqual(try attribute("displayOrder", in: category).defaultValue as? Int64, 0)
+        XCTAssertEqual(try attribute("isArchived", in: category).defaultValue as? Bool, false)
         XCTAssertEqual(try attribute("revision", in: category).defaultValue as? Int64, 0)
         let item = try XCTUnwrap(model.entitiesByName["Item"])
         assertMissingIDStorage(in: item)
@@ -149,9 +151,11 @@ final class SchemaVersionTests: XCTestCase {
             XCTAssertEqual(need.quantity, 4)
             XCTAssertEqual(need.notes, "Keep cold")
             XCTAssertTrue(need.carted)
+            XCTAssertNil(need.cartedAt)
             XCTAssertTrue(need.archived)
             XCTAssertEqual(need.clearOperationID, UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
             XCTAssertEqual(need.oneTimeCategory?.name, "Frozen")
+            XCTAssertEqual(need.oneTimeCategory?.isArchived, false)
             XCTAssertEqual(need.oneTimeStores?.map(\.name), ["Costco"])
             XCTAssertEqual(need.list?.household?.name, "Fixture household")
 
@@ -186,6 +190,7 @@ final class SchemaVersionTests: XCTestCase {
                 let recovered = try XCTUnwrap(recoveryContext.fetch(request).first)
                 XCTAssertFalse(recovered.archived)
                 XCTAssertTrue(recovered.carted)
+                XCTAssertNil(recovered.cartedAt)
                 XCTAssertEqual(recovered.kind, NeedKind.oneTime.rawValue)
                 XCTAssertEqual(recovered.notes, "Keep cold")
                 XCTAssertEqual(recovered.oneTimeCategory?.name, "Frozen")

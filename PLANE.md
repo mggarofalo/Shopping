@@ -20,9 +20,13 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 3: Device & Data Validation | `cd9f93f5-ad3a-4384-a776-14f2f0628f81` | Local/simulated validation and physical-device persistence checks. |
 | Phase 4: Household Sync & Sharing | `0a510d14-9e73-4776-b7b5-1cf8bac607d0` | Mandatory managed Core Data private/shared CloudKit sharing and two-phone evidence. |
 | Phase 5: Polish & TestFlight | `f9721e39-88e1-4e87-a10c-b3c66b4ed5ca` | Release preparation, including sharing and recoverable clearing validation. |
-| Phase 6: Post-MVP Explorations | `86a96d53-07da-4c9b-aacf-816245c1358f` | Optional import and pull-to-refresh work. |
+| Phase 6: Post-MVP Explorations | `86a96d53-07da-4c9b-aacf-816245c1358f` | Pull-to-refresh exploration. |
+| Phase 7: UI Simplification | `17f4b53b-dd8d-437b-9328-e55371af27f5` | Compact native controls, direct actions, and transient feedback. |
+| Phase 8: Grocery List Organization | `09d071d9-6a3b-48f3-bdfe-c33c78347ad1` | Category-grouped groceries and cart presentation cleanup. |
+| Phase 9: Final UI Polish | `057e0be9-d3bc-4019-b440-1526654bf8e3` | Final product-directed Settings, feedback, and scope cleanup. |
+| Phase 10: Interaction and Layout Polish | `75a6a861-8c43-4987-887b-5dcdfef81d1f` | Native management-row editing and spacing corrections for Settings and recovery UI. |
 
-Pull-to-refresh is deferred to SHOPPING-31. Events are removed from the product scope.
+Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States
 
@@ -43,7 +47,7 @@ An obsolete SHOPPING-27 blocked-by-SHOPPING-10 relation was identified during th
 
 The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
 
-For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. `Only buy here` means `S` is the only explicit active store and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings; All has none. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
+For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. `Only buy here` means `S` is the only explicit active store and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings in a selected-store view. All groups needs by category in the active order configured in Settings, followed by archived categories and then Uncategorized. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
 
 Ordinary re-add reuses the catalog item's purchase rules, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
 

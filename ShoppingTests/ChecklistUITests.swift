@@ -3,18 +3,13 @@ import XCTest
 final class ChecklistUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    func testSwipeRemovalConfirmsAndSupportsUndoAndRelaunchRecovery() {
+    func testSwipeRemovalSupportsUndoAndRelaunchRecoveryWithoutConfirmation() {
         let app = launchApp(fixture: "populated")
         let grocery = row("Granola", app: app)
         reveal(grocery, app: app)
         revealSwipeAction("Remove", for: grocery, app: app)
         app.buttons["Remove"].tap()
-        XCTAssertTrue(app.alerts.buttons["shopping.checklist.confirmRemove"].waitForExistence(timeout: 2))
-        app.alerts.buttons["Cancel"].tap()
-        XCTAssertTrue(grocery.exists)
-        revealSwipeAction("Remove", for: grocery, app: app)
-        app.buttons["Remove"].tap()
-        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
+        XCTAssertFalse(app.alerts.buttons["shopping.checklist.confirmRemove"].exists)
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         XCTAssertFalse(grocery.exists)
         app.buttons["shopping.grocery.undoRemove"].tap()
@@ -22,7 +17,6 @@ final class ChecklistUITests: XCTestCase {
         reveal(grocery, app: app)
         revealSwipeAction("Remove", for: grocery, app: app)
         app.buttons["Remove"].tap()
-        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         app.terminate()
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
@@ -35,6 +29,11 @@ final class ChecklistUITests: XCTestCase {
             format: "identifier BEGINSWITH %@", "shopping.recovery.restore."
         )).firstMatch
         XCTAssertTrue(restore.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(restore.frame.height, 44)
+        XCTAssertTrue(restore.label.contains("Restore cleared groceries"))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(restore.frame.minX - window.minX, 16)
+        XCTAssertGreaterThanOrEqual(window.maxX - restore.frame.maxX, 16)
         restore.tap()
         app.navigationBars["Recently cleared"].buttons.firstMatch.tap()
         XCTAssertTrue(grocery.waitForExistence(timeout: 3))
@@ -52,11 +51,47 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(grocery.waitForExistence(timeout: 3))
         revealSwipeAction("Remove", for: grocery, app: app)
         app.buttons["Remove"].tap()
-        app.alerts.buttons["shopping.checklist.confirmRemove"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["shopping.checkout.undo"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.alerts.buttons["shopping.checklist.confirmRemove"].exists)
+        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         XCTAssertFalse(grocery.exists)
-        app.buttons["shopping.checkout.undo"].tap()
+        app.buttons["shopping.grocery.undoRemove"].tap()
         XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+    }
+
+    func testEditorRemovalInCartKeepsUndoVisible() {
+        let app = launchApp(fixture: "populated")
+        cartedLink(count: 1, app: app).tap()
+        let grocery = row("Strawberries", app: app)
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+        grocery.tap()
+        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
+        let remove = app.buttons["shopping.grocery.remove"]
+        reveal(remove, app: app)
+        remove.tap()
+
+        let undo = app.buttons["shopping.grocery.undoRemove"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 3))
+        XCTAssertFalse(grocery.exists)
+        undo.tap()
+        XCTAssertTrue(grocery.waitForExistence(timeout: 3))
+    }
+
+    func testRapidRemovalsKeepEachUndoAvailable() {
+        let app = launchApp(fixture: "populated")
+        for name in ["Granola", "Bananas"] {
+            let grocery = row(name, app: app)
+            revealSwipeAction("Remove", for: grocery, app: app)
+            app.buttons["Remove"].tap()
+            XCTAssertFalse(grocery.exists)
+        }
+
+        let undos = app.buttons.matching(identifier: "shopping.grocery.undoRemove")
+        XCTAssertEqual(undos.count, 2)
+        undos.firstMatch.tap()
+        XCTAssertEqual(undos.count, 1)
+        undos.firstMatch.tap()
+        XCTAssertTrue(row("Granola", app: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(row("Bananas", app: app).waitForExistence(timeout: 3))
     }
 
     func testCatalogSwipeArchiveAndRestorePreserveCurrentGrocery() {
@@ -69,11 +104,6 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Archive", for: item, app: app)
         app.buttons["Archive"].tap()
-        app.alerts.buttons["Cancel"].tap()
-        XCTAssertTrue(item.exists)
-        revealSwipeAction("Archive", for: item, app: app)
-        app.buttons["Archive"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(row("Bananas", app: app).exists)
@@ -90,11 +120,10 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         revealSwipeAction("Restore", for: item, app: app)
         app.buttons["Restore"].tap()
-        app.alerts.buttons["shopping.catalog.confirmSwipeArchive"].firstMatch.tap()
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertFalse(item.label.contains("Any store"))
+        XCTAssertTrue(item.label.contains("Any store"))
     }
 
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
@@ -106,7 +135,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertFalse(row("Strawberries", app: app).exists)
+        XCTAssertTrue(row("Strawberries", app: app).exists)
 
         openCheckout(app: app)
         XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
@@ -127,7 +156,6 @@ final class ChecklistUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 3))
         reveal(row("Chipotles in adobo", app: app), app: app)
-        app.buttons["shopping.carted.all"].tap()
         reveal(row("Strawberries", app: app), app: app)
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }

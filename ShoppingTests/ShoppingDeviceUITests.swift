@@ -192,7 +192,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         }
     }
 
-    func testMultilineCheckoutEditorAndSettingsAtLargestText() throws {
+    func testCheckoutEditorAndSettingsAtLargestText() throws {
         let app = launch(fixture: "populated", largestText: true)
         let carted = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "In cart (1)")
@@ -203,13 +203,9 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertTrue(checkout.waitForExistence(timeout: 3))
         checkout.tap()
 
-        let explanation = app.staticTexts["shopping.checkout.explanation"]
-        XCTAssertTrue(explanation.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(explanation.frame.height, 44)
-        XCTAssertGreaterThanOrEqual(explanation.frame.minY, app.navigationBars["Checkout?"].frame.maxY)
-        XCTAssertGreaterThanOrEqual(explanation.frame.minX, app.frame.minX)
-        XCTAssertLessThanOrEqual(explanation.frame.maxX, app.frame.maxX)
-        screenshot("Checkout explanation at largest text", app: app)
+        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Strawberries"].waitForExistence(timeout: 3))
+        screenshot("Checkout at largest text", app: app)
         try audit(app, types: [.textClipped, .sufficientElementDescription])
 
         app.buttons["shopping.checkout.cancel"].tap()
@@ -232,9 +228,15 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        let householdDescription = app.staticTexts["shopping.settings.householdDescription"]
-        reveal(householdDescription, in: app)
-        XCTAssertGreaterThan(householdDescription.frame.height, 44)
+        XCTAssertTrue(app.staticTexts["Sharing Status"].waitForExistence(timeout: 3))
+        let sharingValue = app.staticTexts["shopping.settings.sharingStatus"]
+        let versionValue = app.staticTexts["shopping.settings.version"]
+        XCTAssertTrue(sharingValue.waitForExistence(timeout: 3))
+        let windowTrailingEdge = app.windows.firstMatch.frame.maxX
+        XCTAssertGreaterThanOrEqual(windowTrailingEdge - sharingValue.frame.maxX, 16)
+        reveal(versionValue, in: app)
+        XCTAssertTrue(versionValue.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(windowTrailingEdge - versionValue.frame.maxX, 16)
         screenshot("Settings multiline text at largest text", app: app)
     }
 

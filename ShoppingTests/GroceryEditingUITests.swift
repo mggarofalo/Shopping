@@ -23,7 +23,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(groceryRow(named: "Coconut yogurt", app: app).waitForExistence(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
         let catalogRow = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ AND label == %@",
+            format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
             "shopping.catalog.item.", "Coconut yogurt"
         )).firstMatch
         XCTAssertTrue(catalogRow.waitForExistence(timeout: 2))
@@ -213,9 +213,7 @@ final class GroceryEditingUITests: XCTestCase {
         let remove = app.buttons["shopping.grocery.remove"]
         reveal(remove, in: app)
         remove.tap()
-        let confirm = app.alerts.buttons["shopping.grocery.confirmRemove"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 2))
-        confirm.tap()
+        XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         XCTAssertFalse(row.exists)
         app.buttons["shopping.grocery.undoRemove"].tap()
@@ -288,7 +286,6 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(carted.waitForExistence(timeout: 2))
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        app.buttons["shopping.carted.all"].tap()
         groceryRow(named: "Strawberries", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
@@ -478,6 +475,17 @@ final class GroceryEditingUITests: XCTestCase {
             && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
+    private func assertMultilineField(
+        _ field: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // A TextField nested in a labeled Form row reports its control bounds, while a
+        // standalone TextField reports the row bounds. Compare against the two-line
+        // control minimum instead of comparing those different coordinate spaces.
+        XCTAssertGreaterThanOrEqual(field.frame.height, 40, file: file, line: line)
+    }
+
     private func attachScreenshot(named name: String, app: XCUIApplication) {
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = name
@@ -499,10 +507,10 @@ extension GroceryEditingUITests {
             let currentNotes = app.textFields["shopping.grocery.purchaseNotes"]
             XCTAssertTrue(reusableNotes.waitForExistence(timeout: 2))
             XCTAssertEqual(reusableNotes.value as? String, "Saved for future needs")
-            XCTAssertGreaterThan(reusableNotes.frame.height, name.frame.height)
+            assertMultilineField(reusableNotes)
             reveal(currentNotes, in: app)
             XCTAssertEqual(currentNotes.value as? String, "Only for this need")
-            XCTAssertGreaterThan(currentNotes.frame.height, name.frame.height)
+            assertMultilineField(currentNotes)
 
             reusableNotes.tap()
             reusableNotes.typeText("A longer reusable note that remains editable across future needs")
@@ -514,10 +522,12 @@ extension GroceryEditingUITests {
             XCTAssertTrue(groceryKeyboardDone.waitForExistence(timeout: 2))
             groceryKeyboardDone.tap()
             XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
-            setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
+            let remembered = app.switches["shopping.grocery.remembered"]
+            revealAbove(remembered, in: app)
+            setSwitch(remembered, on: false, app: app)
             reveal(currentNotes, in: app)
             XCTAssertEqual(currentNotes.value as? String, "Notes for this one-time need")
-            XCTAssertGreaterThan(currentNotes.frame.height, name.frame.height)
+            assertMultilineField(currentNotes)
             currentNotes.tap()
             currentNotes.typeText("A longer temporary note that remains editable for this need")
             XCTAssertEqual(
@@ -552,7 +562,7 @@ extension GroceryEditingUITests {
             let catalogNotes = app.textFields["shopping.catalog.notes"]
             XCTAssertTrue(catalogNotes.waitForExistence(timeout: 2))
             XCTAssertEqual(catalogNotes.value as? String, "Saved for future needs")
-            XCTAssertGreaterThan(catalogNotes.frame.height, catalogName.frame.height)
+            assertMultilineField(catalogNotes)
             catalogNotes.tap()
             catalogNotes.typeText("A longer catalog note that remains editable across future needs")
             XCTAssertEqual(

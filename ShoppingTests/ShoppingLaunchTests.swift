@@ -16,8 +16,14 @@ final class ShoppingLaunchTests: XCTestCase {
 
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["Import CSV"].exists)
+        XCTAssertFalse(app.buttons["shopping.catalog.import"].exists)
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
+        let version = app.descendants(matching: .any)["shopping.settings.version"]
+        XCTAssertTrue(version.waitForExistence(timeout: 2))
+        XCTAssertTrue(version.label.contains("1.2.0"))
+        XCTAssertTrue(version.label.contains("5"))
     }
 
     func testPopulatedCostcoNavigationAtAccessibilitySize() {
@@ -87,35 +93,33 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         createName.typeText("Neighborhood Market")
         app.buttons["Save store"].tap()
-        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+        let neighborhoodMarket = storeManagementRow(named: "Neighborhood Market", in: app)
+        XCTAssertTrue(neighborhoodMarket.waitForExistence(timeout: 2))
 
-        app.staticTexts["Neighborhood Market"].swipeLeft()
-        app.buttons["Edit"].tap()
+        neighborhoodMarket.tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Canceled Market")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+        XCTAssertTrue(neighborhoodMarket.waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
 
-        app.staticTexts["Neighborhood Market"].swipeLeft()
-        app.buttons["Edit"].tap()
+        neighborhoodMarket.tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Local Market")
         app.buttons["Save store"].tap()
-        XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
+        let localMarket = storeManagementRow(named: "Local Market", in: app)
+        XCTAssertTrue(localMarket.waitForExistence(timeout: 2))
+        XCTAssertFalse(neighborhoodMarket.exists)
 
-        app.staticTexts["Local Market"].swipeLeft()
-        XCTAssertTrue(app.buttons["Edit"].exists)
+        localMarket.swipeLeft()
+        XCTAssertFalse(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
-        app.staticTexts["Local Market"].swipeRight()
-        app.staticTexts["Local Market"].swipeRight()
         XCTAssertTrue(app.buttons["Delete"].exists)
         app.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
         app.buttons["Delete store"].tap()
-        XCTAssertFalse(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
+        XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
     }
 
     func testStoreManagementArchivesReferencedStoreHidesItAndResetsSelectedStore() {
@@ -127,15 +131,17 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.store.clear"].waitForExistence(timeout: 2))
 
         openStoreManagement(in: app)
-        XCTAssertTrue(app.staticTexts["Neighborhood Market (closed)"].exists)
-        app.staticTexts["Costco"].swipeLeft()
-        XCTAssertTrue(app.buttons["Edit"].exists)
+        XCTAssertTrue(storeManagementRow(named: "Neighborhood Market (closed)", in: app).exists)
+        let costco = storeManagementRow(named: "Costco", in: app)
+        costco.swipeLeft()
+        XCTAssertFalse(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         app.buttons["Archive"].tap()
-        XCTAssertTrue(app.staticTexts["Archive Costco?"].waitForExistence(timeout: 2))
-        app.buttons["Archive store"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Costco"].exists)
+        XCTAssertTrue(costco.exists)
+        costco.tap()
+        XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
+        app.buttons["Cancel"].tap()
 
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.buttons["shopping.store.all"].waitForExistence(timeout: 2))
@@ -329,7 +335,34 @@ final class ShoppingLaunchTests: XCTestCase {
 
         let chipotles = app.staticTexts["Chipotles in adobo"]
         reveal(chipotles, in: app)
-        chipotles.swipeLeft()
+        let groupedCategoryRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Chipotles in adobo").firstMatch
+        XCTAssertTrue(groupedCategoryRow.label.contains("Publix"))
+        XCTAssertFalse(groupedCategoryRow.label.contains("Pantry"))
+        let archivedStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Local honey").firstMatch
+        reveal(archivedStoreRow, in: app)
+        XCTAssertTrue(archivedStoreRow.label.contains("Neighborhood Market (closed) (archived)"))
+        let multiStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Dinner rolls").firstMatch
+        reveal(multiStoreRow, in: app)
+        XCTAssertTrue(multiStoreRow.label.contains("Costco, Walmart"))
+        XCTAssertFalse(multiStoreRow.label.contains("Also:"))
+        let visibleChipotlesRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Chipotles in adobo"
+        )).firstMatch
+        reveal(visibleChipotlesRow, in: app)
+        visibleChipotlesRow.swipeLeft()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.addToList."
+        )).firstMatch.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.addToCart."
+        )).firstMatch.exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeArchive."
         )).firstMatch.waitForExistence(timeout: 2))
@@ -337,7 +370,7 @@ final class ShoppingLaunchTests: XCTestCase {
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeDelete."
         )).firstMatch.exists)
         attachScreenshot(named: "Catalog top row swipe", app: app)
-        chipotles.swipeRight()
+        visibleChipotlesRow.swipeRight()
 
         reveal(grouping, in: app)
         grouping.tap()
@@ -354,6 +387,9 @@ final class ShoppingLaunchTests: XCTestCase {
         )).allElementsBoundByIndex
         XCTAssertEqual(rows.count, expected.count)
         XCTAssertEqual(rows.compactMap { row in expected.first { row.label.contains($0) } }, expected)
+        let ungroupedChipotles = rows.first { $0.label.contains("Chipotles in adobo") }
+        XCTAssertTrue(ungroupedChipotles?.label.contains("Pantry") == true)
+        XCTAssertTrue(ungroupedChipotles?.label.contains("Publix") == true)
 
         grouping.tap()
         XCTAssertTrue(app.buttons["Store"].waitForExistence(timeout: 2))
@@ -363,8 +399,30 @@ final class ShoppingLaunchTests: XCTestCase {
         for title in expectedGroups {
             let heading = app.staticTexts[title]
             reveal(heading, in: app)
-            XCTAssertTrue(heading.exists, "Expected alphabetized store group \(title)")
+            XCTAssertTrue(heading.exists, "Expected store group \(title)")
         }
+        let groupedStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.catalog.item.", "Chipotles in adobo"
+        )).firstMatch
+        reveal(groupedStoreRow, in: app)
+        XCTAssertTrue(groupedStoreRow.label.contains("Pantry"))
+        XCTAssertFalse(groupedStoreRow.label.contains("Publix"))
+    }
+
+    func testCatalogCategoryFiltersAllowMultipleSelections() {
+        let app = launchApp(fixture: "populated")
+        openCatalog(in: app)
+
+        app.buttons["shopping.catalog.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
+        app.buttons["Produce"].tap()
+        app.buttons["Pantry"].tap()
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 2))
+        reveal(app.staticTexts["Granola"], in: app)
+        XCTAssertTrue(app.staticTexts["Granola"].exists)
+        XCTAssertFalse(app.staticTexts["Dinner rolls"].exists)
     }
 
     func testCatalogArchiveFilterAndRestorePreservesActiveGrocery() {
@@ -468,12 +526,13 @@ final class ShoppingLaunchTests: XCTestCase {
 
     private func revealInlineAddStore(in app: XCUIApplication) -> XCUIElement {
         let button = app.buttons["shopping.tags.addStore"]
+        if app.keyboards.firstMatch.exists {
+            app.buttons["shopping.grocery.keyboardDone"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+        }
         for _ in 0..<8 {
             let top = app.navigationBars["Add item"].frame.maxY
-            let bottom = app.keyboards.firstMatch.exists
-                ? app.keyboards.firstMatch.frame.minY - 60 : app.frame.maxY - 40
-            // iOS 18 can report an offscreen link as hittable behind the keyboard.
-            // Its keyboard frame excludes the prediction bar, so leave room above it.
+            let bottom = app.frame.maxY - 40
             if button.exists && button.isHittable && button.frame.minY >= top && button.frame.maxY <= bottom {
                 return button
             }
@@ -504,6 +563,10 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
         app.buttons["Stores"].tap()
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
+    }
+
+    private func storeManagementRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
     private func openCatalog(in app: XCUIApplication) {
@@ -617,7 +680,7 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(archived.waitForExistence(timeout: 2))
         XCTAssertTrue(archived.isHittable)
         archived.tap()
-        XCTAssertEqual(archived.value as? String, "Selected")
+        XCTAssertTrue(archived.isSelected)
     }
 
     private func tapArchiveStateConfirmation(in title: String, app: XCUIApplication) {

@@ -40,7 +40,7 @@ final class ClearInterruptionUITests: XCTestCase {
         let checkout = app.buttons["shopping.checkout.start"]
         reveal(checkout, app: app)
         checkout.tap()
-        XCTAssertTrue(app.navigationBars["Checkout?"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 2))
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 

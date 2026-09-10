@@ -9,11 +9,12 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @StateObject private var navigation = GroceryNavigationState()
+    @StateObject private var toastCenter = ShoppingToastCenter()
 
     var body: some View {
         TabView(selection: $navigation.selectedTab) {
             GroceriesView(navigation: navigation)
-                .tabItem { Label("Groceries", systemImage: "cart") }
+                .tabItem { Label("Groceries", systemImage: "list.bullet") }
                 .tag(GroceryNavigationState.Tab.groceries)
             CatalogView(navigation: navigation)
                 .tabItem { Label("Catalog", systemImage: "books.vertical") }
@@ -23,6 +24,12 @@ struct ContentView: View {
                 .tag(GroceryNavigationState.Tab.settings)
         }
         .tint(.groceryAccent)
+        .overlay(alignment: .bottom) {
+            ShoppingToastHost(center: toastCenter)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 56)
+        }
+        .environment(\.shoppingToastCenter, toastCenter)
     }
 }
 

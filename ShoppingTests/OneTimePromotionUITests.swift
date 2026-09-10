@@ -46,7 +46,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let remove = app.buttons["shopping.grocery.remove"]
         reveal(remove, in: app)
         remove.tap()
-        app.alerts.buttons["shopping.grocery.confirmRemove"].firstMatch.tap()
+        XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         createOneTime("Breakfast cereal", in: app)
         let originalID = row("Breakfast cereal", in: app).identifier
@@ -126,7 +126,7 @@ final class OneTimePromotionUITests: XCTestCase {
             ).count, 2)
     }
 
-    func testCartedUrgentGroceriesSortBeforeNormalGroceries() {
+    func testCartedGroceriesPreserveAddedOrder() {
         let app = launchApp(fixture: "populated")
         let bananasRow = row("Bananas", in: app)
         reveal(bananasRow, in: app)
@@ -144,9 +144,12 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         let granola = row("Granola", in: app)
         let bananas = row("Bananas", in: app)
+        let strawberries = row("Strawberries", in: app)
         XCTAssertTrue(granola.waitForExistence(timeout: 3))
         XCTAssertTrue(bananas.exists)
-        XCTAssertLessThan(granola.frame.minY, bananas.frame.minY)
+        XCTAssertTrue(strawberries.exists)
+        XCTAssertLessThan(strawberries.frame.minY, bananas.frame.minY)
+        XCTAssertLessThan(bananas.frame.minY, granola.frame.minY)
     }
 
     private func launchApp(fixture: String? = nil) -> XCUIApplication {

@@ -63,12 +63,16 @@ struct PurchaseFilter: Equatable {
 struct CatalogItemFilter: Equatable {
     let purchase: PurchaseFilter
     let text: String
-    let categoryID: UUID?
+    let categoryIDs: Set<UUID>
 
-    init(purchase: PurchaseFilter = PurchaseFilter(), text: String = "", categoryID: UUID? = nil) {
+    init(
+        purchase: PurchaseFilter = PurchaseFilter(),
+        text: String = "",
+        categoryIDs: Set<UUID> = []
+    ) {
         self.purchase = purchase
         self.text = text
-        self.categoryID = categoryID
+        self.categoryIDs = categoryIDs
     }
 }
 
@@ -195,8 +199,8 @@ enum CatalogSuggestionPurchaseSummary {
         let labels = savedStoreLabels.sorted()
         if anyStore || !hasSavedStores {
             return labels.isEmpty
-                ? "Any store"
-                : "Any store · Also: \(labels.joined(separator: ", "))"
+                ? "Any Store"
+                : (["Any Store"] + labels).joined(separator: ", ")
         }
         return labels.isEmpty ? "Unresolved purchase rules" : labels.joined(separator: ", ")
     }

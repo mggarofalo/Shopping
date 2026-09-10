@@ -622,6 +622,29 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertFalse(item.anyStore)
     }
 
+    func testCatalogAddToCartCreatesOrMovesOneActiveRememberedNeed() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let fresh = try service.createItem(name: "Fresh", householdID: selection.householdID)
+        let existing = try service.createItem(name: "Existing", householdID: selection.householdID)
+        let existingNeed = try service.addRememberedNeed(itemID: existing, listID: selection.listID)
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [fresh, existing], householdID: selection.householdID,
+            listID: selection.listID, selectedStoreID: nil
+        )
+
+        let result = try service.applyCatalogAdd(
+            preview.token, renewCarted: false, destination: .cart
+        )
+
+        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.existingNeedIDs, [existingNeed])
+        XCTAssertTrue(try needSnapshot(try XCTUnwrap(result.addedNeedIDs.first), persistence: persistence).carted)
+        XCTAssertTrue(try needSnapshot(existingNeed, persistence: persistence).carted)
+        XCTAssertEqual(try service.activeRememberedNeedID(itemID: fresh, listID: selection.listID), result.addedNeedIDs.first)
+    }
+
     func testCatalogSuggestionAtomicallyRevalidatesStatusAndItemRevision() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)

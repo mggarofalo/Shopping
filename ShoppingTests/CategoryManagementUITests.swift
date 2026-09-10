@@ -18,35 +18,35 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         name.typeText("Pantry")
         app.buttons["Save category"].tap()
-        XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
+        let pantry = categoryRow(named: "Pantry", in: app)
+        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
 
-        app.staticTexts["Pantry"].swipeLeft()
-        app.buttons["Edit"].tap()
+        pantry.tap()
         XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.categories.name"], with: "Canceled category")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
+        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled category"].exists)
 
-        app.staticTexts["Pantry"].swipeLeft()
-        app.buttons["Edit"].tap()
+        pantry.tap()
         replaceText(in: app.textFields["shopping.categories.name"], with: "Dry goods")
         app.buttons["Save category"].tap()
-        XCTAssertTrue(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
+        let dryGoods = categoryRow(named: "Dry goods", in: app)
+        XCTAssertTrue(dryGoods.waitForExistence(timeout: 2))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Category management"
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.staticTexts["Dry goods"].swipeRight()
+        dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
         let confirmation = app.sheets["Delete Dry goods?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
             "Groceries and catalog items will remain and become Uncategorized.")).firstMatch.exists)
         confirmation.buttons["Delete category"].firstMatch.tap()
-        XCTAssertFalse(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
+        XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
         app.navigationBars["Categories"].buttons.firstMatch.tap()
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
@@ -89,9 +89,9 @@ final class CategoryManagementUITests: XCTestCase {
         assertSelectedCountIsVisible(app)
         XCTAssertTrue(app.buttons["shopping.stores.batchArchive"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.stores.batchDelete"].exists)
+        XCTAssertFalse(app.buttons["Move"].exists)
         app.buttons["shopping.stores.batchArchive"].tap()
-        XCTAssertTrue(app.sheets["Archive selected stores?"].waitForExistence(timeout: 2))
-        app.sheets.buttons["Archive"].tap()
+        XCTAssertFalse(app.sheets["Archive selected stores?"].exists)
         XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
         app.alerts.buttons["OK"].tap()
 
@@ -100,8 +100,7 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.stores.batchRestore"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.stores.batchArchive"].isEnabled)
         app.buttons["shopping.stores.batchRestore"].tap()
-        XCTAssertTrue(app.sheets["Restore selected stores?"].waitForExistence(timeout: 2))
-        app.sheets.buttons["Restore"].tap()
+        XCTAssertFalse(app.sheets["Restore selected stores?"].exists)
         XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
         app.alerts.buttons["OK"].tap()
 
@@ -122,8 +121,9 @@ final class CategoryManagementUITests: XCTestCase {
             NSPredicate(format: "label CONTAINS %@", "in the cart will be needed again")
         ).firstMatch.exists)
         addConfirmation.buttons["Add to list"].tap()
-        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["OK"].tap()
+        let feedback = app.staticTexts["shopping.feedback.message"]
+        XCTAssertTrue(feedback.waitForExistence(timeout: 3))
+        XCTAssertTrue(feedback.label.contains("Needed again 1"))
     }
 
     func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {
@@ -131,22 +131,24 @@ final class CategoryManagementUITests: XCTestCase {
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
 
-        let existing = app.buttons["Add Bananas to list"]
-        XCTAssertTrue(existing.waitForExistence(timeout: 3))
-        existing.tap()
+        let existingRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bananas")).firstMatch
+        XCTAssertTrue(existingRow.waitForExistence(timeout: 3))
+        existingRow.swipeLeft()
+        app.buttons["Add to list"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Catalog"].tap()
-        let carted = app.buttons["Add Strawberries to list"]
+        let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
-        carted.tap()
+        carted.swipeLeft()
+        app.buttons["Add to list"].tap()
         let confirmation = app.sheets["Need Strawberries again?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         confirmation.buttons["Need again"].tap()
-        XCTAssertTrue(app.alerts["Catalog update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["View in groceries"].tap()
+        XCTAssertTrue(app.buttons["View"].waitForExistence(timeout: 3))
+        app.buttons["View"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
     }
@@ -182,7 +184,7 @@ final class CategoryManagementUITests: XCTestCase {
 
         app.tabBars.buttons["Settings"].tap()
         app.buttons["Categories"].tap()
-        app.staticTexts["Produce"].press(forDuration: 0.7)
+        categoryRow(named: "Produce", in: app).press(forDuration: 0.7)
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.categories.contextSelect.")
         ).firstMatch.tap()
@@ -196,7 +198,7 @@ final class CategoryManagementUITests: XCTestCase {
 
         app.navigationBars["Categories"].buttons.firstMatch.tap()
         app.buttons["Stores"].tap()
-        app.staticTexts["Costco"].press(forDuration: 0.7)
+        storeRow(named: "Costco", in: app).press(forDuration: 0.7)
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.stores.contextSelect.")
         ).firstMatch.tap()
@@ -241,6 +243,14 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(select.isHittable, "Select must not be hidden in an overflow menu")
         select.tap()
         XCTAssertTrue(app.buttons["Select All"].waitForExistence(timeout: 2))
+    }
+
+    private func categoryRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@", name)).firstMatch
+    }
+
+    private func storeRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
     private func assertSelectedCountIsVisible(_ app: XCUIApplication) {
