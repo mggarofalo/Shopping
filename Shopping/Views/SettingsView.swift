@@ -20,13 +20,16 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
-                    LabeledContent("Sharing status", value: "Not connected")
-                        .shoppingListRowInsets()
+                    LabeledContent("Sharing Status") {
+                        Text("Not Connected")
+                            .accessibilityIdentifier("shopping.settings.sharingStatus")
+                    }
                 }
                 Section("About") {
-                    LabeledContent("App Version", value: AppVersion.current.displayValue)
-                        .accessibilityIdentifier("shopping.settings.version")
-                        .shoppingListRowInsets()
+                    LabeledContent("App Version") {
+                        Text(AppVersion.current.displayValue)
+                            .accessibilityIdentifier("shopping.settings.version")
+                    }
                 }
             }
             .navigationTitle("Settings")

@@ -86,9 +86,12 @@ struct StoreManagementView: View {
     }
 
     var body: some View {
-        List(selection: $selectedIDs) {
-            storeSection(nil, stores: activeStores)
-            if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
+        Group {
+            if editMode.isEditing {
+                selectableList
+            } else {
+                standardList
+            }
         }
         .listStyle(.plain)
         .environment(\.editMode, $editMode)
@@ -215,66 +218,98 @@ struct StoreManagementView: View {
         .onDisappear(perform: clearSelection)
     }
 
+    private var standardList: some View {
+        List {
+            storeSection(nil, stores: activeStores)
+            if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
+        }
+    }
+
+    private var selectableList: some View {
+        List(selection: $selectedIDs) {
+            storeSection(nil, stores: activeStores)
+            if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
+        }
+    }
+
     private var selectedStores: [Store] { householdStores.filter { selectedIDs.contains($0.id) } }
 
     @ViewBuilder
     private func storeSection(_ title: String?, stores: [Store]) -> some View {
         Section {
             ForEach(stores, id: \.objectID) { store in
-                storeRow(store)
-                    .shoppingListRowInsets()
-                    .tag(store.id)
+                if editMode.isEditing {
+                    storeRow(store)
+                        .shoppingListRowInsets()
+                        .tag(store.id)
+                } else {
+                    storeRow(store)
+                        .shoppingListRowInsets()
+                }
             }
         } header: { if let title { Text(title) } }
     }
 
     @ViewBuilder
     private func storeRow(_ store: Store) -> some View {
+        if editMode.isEditing {
+            storeRowActions(storeRowLabel(store), store: store)
+        } else {
+            storeRowActions(
+                Button { beginRename(store) } label: {
+                    storeRowLabel(store)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain),
+                store: store
+            )
+        }
+    }
+
+    private func storeRowActions<Content: View>(_ content: Content, store: Store) -> some View {
+        content
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button { store.isArchived ? restore(store) : archive(store) } label: {
+                Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox")
+                    .labelStyle(.iconOnly)
+            }
+            .tint(store.isArchived ? .green : .orange)
+            .disabled(!selectionAvailable)
+            .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
+            Button(role: .destructive) { beginDeletion(store) } label: {
+                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            }
+            .tint(.red)
+            .disabled(!selectionAvailable)
+            .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
+        }
+        .contextMenu {
+            if !editMode.isEditing {
+                Button("Select", systemImage: "checkmark.circle") { beginSelection(with: store.id) }
+                    .accessibilityIdentifier("shopping.stores.contextSelect.\(store.id.uuidString)")
+                Button(store.isArchived ? "Restore" : "Archive",
+                       systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox") {
+                    if store.isArchived { restore(store) } else { archive(store) }
+                }
+                Button("Delete", systemImage: "trash", role: .destructive) { beginDeletion(store) }
+            }
+        }
+        .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
+        .accessibilityAction(named: Text("\(store.isArchived ? "Restore" : "Archive") \(store.name)")) {
+            if store.isArchived { restore(store) } else { archive(store) }
+        }
+        .accessibilityAction(named: Text("Delete \(store.name)")) { beginDeletion(store) }
+    }
+
+    private func storeRowLabel(_ store: Store) -> some View {
         HStack {
             Text(store.name)
             Spacer()
             if store.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
         }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button { beginRename(store) } label: {
-                    Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
-                }
-                .tint(.blue)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.stores.edit.\(store.id.uuidString)")
-                Button { store.isArchived ? restore(store) : archive(store) } label: {
-                    Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox")
-                        .labelStyle(.iconOnly)
-                }
-                .tint(store.isArchived ? .green : .orange)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
-                Button(role: .destructive) { beginDeletion(store) } label: {
-                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
-                }
-                .tint(.red)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.stores.delete.\(store.id.uuidString)")
-            }
-            .contextMenu {
-                if !editMode.isEditing {
-                    Button("Select", systemImage: "checkmark.circle") { beginSelection(with: store.id) }
-                        .accessibilityIdentifier("shopping.stores.contextSelect.\(store.id.uuidString)")
-                    Button("Edit", systemImage: "pencil") { beginRename(store) }
-                    Button(store.isArchived ? "Restore" : "Archive",
-                           systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox") {
-                        if store.isArchived { restore(store) } else { archive(store) }
-                    }
-                    Button("Delete", systemImage: "trash", role: .destructive) { beginDeletion(store) }
-                }
-            }
-            .accessibilityAction(named: Text("Edit \(store.name)")) { beginRename(store) }
-            .accessibilityAction(named: Text("\(store.isArchived ? "Restore" : "Archive") \(store.name)")) {
-                if store.isArchived { restore(store) } else { archive(store) }
-            }
-            .accessibilityAction(named: Text("Delete \(store.name)")) { beginDeletion(store) }
     }
 
     private func beginCreate() {

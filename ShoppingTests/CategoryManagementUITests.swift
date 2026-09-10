@@ -18,35 +18,35 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         name.typeText("Pantry")
         app.buttons["Save category"].tap()
-        XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
+        let pantry = categoryRow(named: "Pantry", in: app)
+        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
 
-        app.staticTexts["Pantry"].swipeLeft()
-        app.buttons["Edit"].tap()
+        pantry.tap()
         XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.categories.name"], with: "Canceled category")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Pantry"].waitForExistence(timeout: 2))
+        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled category"].exists)
 
-        app.staticTexts["Pantry"].swipeLeft()
-        app.buttons["Edit"].tap()
+        pantry.tap()
         replaceText(in: app.textFields["shopping.categories.name"], with: "Dry goods")
         app.buttons["Save category"].tap()
-        XCTAssertTrue(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
+        let dryGoods = categoryRow(named: "Dry goods", in: app)
+        XCTAssertTrue(dryGoods.waitForExistence(timeout: 2))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Category management"
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        app.staticTexts["Dry goods"].swipeLeft()
+        dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
         let confirmation = app.sheets["Delete Dry goods?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
         XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
             "Groceries and catalog items will remain and become Uncategorized.")).firstMatch.exists)
         confirmation.buttons["Delete category"].firstMatch.tap()
-        XCTAssertFalse(app.staticTexts["Dry goods"].waitForExistence(timeout: 2))
+        XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
         app.navigationBars["Categories"].buttons.firstMatch.tap()
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
@@ -184,7 +184,7 @@ final class CategoryManagementUITests: XCTestCase {
 
         app.tabBars.buttons["Settings"].tap()
         app.buttons["Categories"].tap()
-        app.staticTexts["Produce"].press(forDuration: 0.7)
+        categoryRow(named: "Produce", in: app).press(forDuration: 0.7)
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.categories.contextSelect.")
         ).firstMatch.tap()
@@ -198,7 +198,7 @@ final class CategoryManagementUITests: XCTestCase {
 
         app.navigationBars["Categories"].buttons.firstMatch.tap()
         app.buttons["Stores"].tap()
-        app.staticTexts["Costco"].press(forDuration: 0.7)
+        storeRow(named: "Costco", in: app).press(forDuration: 0.7)
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.stores.contextSelect.")
         ).firstMatch.tap()
@@ -243,6 +243,14 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(select.isHittable, "Select must not be hidden in an overflow menu")
         select.tap()
         XCTAssertTrue(app.buttons["Select All"].waitForExistence(timeout: 2))
+    }
+
+    private func categoryRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@", name)).firstMatch
+    }
+
+    private func storeRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
     private func assertSelectedCountIsVisible(_ app: XCUIApplication) {

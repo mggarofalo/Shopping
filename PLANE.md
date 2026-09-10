@@ -24,6 +24,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 7: UI Simplification | `17f4b53b-dd8d-437b-9328-e55371af27f5` | Compact native controls, direct actions, and transient feedback. |
 | Phase 8: Grocery List Organization | `09d071d9-6a3b-48f3-bdfe-c33c78347ad1` | Category-grouped groceries and cart presentation cleanup. |
 | Phase 9: Final UI Polish | `057e0be9-d3bc-4019-b440-1526654bf8e3` | Final product-directed Settings, feedback, and scope cleanup. |
+| Phase 10: Interaction and Layout Polish | `75a6a861-8c43-4987-887b-5dcdfef81d1f` | Native management-row editing and spacing corrections for Settings and recovery UI. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 

@@ -17,18 +17,39 @@ struct RecentlyClearedView: View {
         let scopedOperations = GroceryRowScope.validClearOperations(
             Array(operations), canonicalList: canonicalList
         )
-        List {
-            ForEach(scopedOperations, id: \.objectID) { operation in
-                VStack(alignment: .leading) {
-                    Text(operation.createdAt, style: .relative)
-                    Button("Restore cleared groceries") { restore(operation.id) }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("shopping.recovery.restore.\(operation.id.uuidString)")
+        Group {
+            if scopedOperations.isEmpty {
+                ContentUnavailableView(
+                    "Nothing recently cleared",
+                    systemImage: "clock.arrow.circlepath"
+                )
+            } else {
+                List {
+                    Section {
+                        ForEach(scopedOperations, id: \.objectID) { operation in
+                            Button { restore(operation.id) } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "arrow.uturn.backward.circle.fill")
+                                        .foregroundStyle(.tint)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Restore cleared groceries")
+                                            .foregroundStyle(.primary)
+                                        Text(operation.createdAt, style: .relative)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 8)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("shopping.recovery.restore.\(operation.id.uuidString)")
+                        }
+                    }
                 }
-                .shoppingListRowInsets()
+                .listStyle(.insetGrouped)
             }
         }
-        .overlay { if scopedOperations.isEmpty { ContentUnavailableView("Nothing recently cleared", systemImage: "clock.arrow.circlepath") } }
         .navigationTitle("Recently cleared")
         .alert("Couldn’t restore groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}

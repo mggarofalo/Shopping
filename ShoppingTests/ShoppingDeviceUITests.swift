@@ -228,7 +228,15 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Sharing status"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Sharing Status"].waitForExistence(timeout: 3))
+        let sharingValue = app.staticTexts["shopping.settings.sharingStatus"]
+        let versionValue = app.staticTexts["shopping.settings.version"]
+        XCTAssertTrue(sharingValue.waitForExistence(timeout: 3))
+        let windowTrailingEdge = app.windows.firstMatch.frame.maxX
+        XCTAssertGreaterThanOrEqual(windowTrailingEdge - sharingValue.frame.maxX, 16)
+        reveal(versionValue, in: app)
+        XCTAssertTrue(versionValue.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(windowTrailingEdge - versionValue.frame.maxX, 16)
         screenshot("Settings multiline text at largest text", app: app)
     }
 
