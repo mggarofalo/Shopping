@@ -6,6 +6,9 @@ struct CategoryPills: View {
     let categories: [Category]
     var includeUnavailable = false
     var onAddCategory: (() -> Void)? = nil
+    var onRecommendCategory: (() -> Void)? = nil
+    var recommendationIsRunning = false
+    var recommendationIsEnabled = true
 
     var body: some View {
         Section {
@@ -45,7 +48,28 @@ struct CategoryPills: View {
                 }
             }
         } header: {
-            Text("Category")
+            HStack {
+                Text("Category")
+                Spacer()
+                if recommendationIsRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Recommending category")
+                        .accessibilityIdentifier("shopping.category.recommendation.progress")
+                } else if let onRecommendCategory {
+                    Button(action: onRecommendCategory) {
+                        Label("Recommend category", systemImage: "sparkles")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!recommendationIsEnabled)
+                    .accessibilityHint("Uses on-device intelligence")
+                    .accessibilityIdentifier("shopping.category.recommendation")
+                }
+            }
         }
     }
 }

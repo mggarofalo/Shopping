@@ -202,6 +202,76 @@ struct CategoryIntelligenceTests {
         #expect(!first.candidates.contains { $0.id == categoryID })
         #expect(second.candidates.first { $0.id == categoryID }?.rememberedItemNames == ["Shampoo"])
     }
+
+    @Test("Category fill reads current eligible remembered items and excludes active demand")
+    @MainActor
+    func categoryFillCandidatesRespectCurrentScope() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let householdID = environment.ids.householdID
+        let listID = environment.ids.listID
+        let categoryID = try service.createCategory(name: "Pantry", householdID: householdID)
+        let otherCategoryID = try service.createCategory(name: "Other", householdID: householdID)
+        let marketID = try service.createStore(name: "Market", householdID: householdID)
+        let clubID = try service.createStore(name: "Club", householdID: householdID)
+        _ = try service.createItem(name: "Any-store rice", categoryID: categoryID, householdID: householdID)
+        _ = try service.createItem(
+            name: "Market beans", categoryID: categoryID, storeIDs: [marketID],
+            householdID: householdID, anyStore: false
+        )
+        _ = try service.createItem(
+            name: "Club oil", categoryID: categoryID, storeIDs: [clubID],
+            householdID: householdID, anyStore: false
+        )
+        let activeItemID = try service.createItem(
+            name: "Already needed", categoryID: categoryID, householdID: householdID
+        )
+        let activeNeedID = try service.addRememberedNeed(itemID: activeItemID, listID: listID)
+        try service.setCarted(true, needID: activeNeedID)
+        _ = try service.createItem(name: "Wrong category", categoryID: otherCategoryID, householdID: householdID)
+        _ = try service.addOneTimeNeed(title: "One-time flour", categoryID: categoryID, listID: listID)
+
+        let loader = CategoryFillCandidateLoader()
+        let first = try loader.load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter(selectedStoreID: marketID)
+        )
+        #expect(first.categoryName == "Pantry")
+        #expect(first.candidates.map(\.name) == ["Any-store rice", "Market beans"])
+
+        _ = try service.createItem(name: "Applesauce", categoryID: categoryID, householdID: householdID)
+        environment.persistence.container.viewContext.reset()
+        let refreshed = try loader.load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter(selectedStoreID: marketID)
+        )
+        #expect(refreshed.candidates.map(\.name) == ["Any-store rice", "Applesauce", "Market beans"])
+    }
+
+    @Test("Category fill rejects an archived category")
+    @MainActor
+    func categoryFillRejectsArchivedCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let categoryID = try environment.service.createCategory(
+            name: "Old", householdID: environment.ids.householdID
+        )
+        try environment.service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: environment.ids.householdID
+        )
+
+        #expect(throws: CategoryIntelligenceError.invalidSuggestedCategory) {
+            try CategoryFillCandidateLoader().load(
+                from: environment.persistence.container.viewContext,
+                selection: environment.selection,
+                categoryID: categoryID,
+                purchaseFilter: PurchaseFilter()
+            )
+        }
+    }
 }
 
 final class CategoryIntelligenceDeviceTests: XCTestCase {

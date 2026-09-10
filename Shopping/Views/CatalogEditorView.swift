@@ -104,9 +104,12 @@ struct CatalogEditorView: View {
                         }
                     }
                 }
-                CategoryPills(
+                IntelligentCategoryPicker(
                     selection: $values.categoryID,
+                    itemName: values.name,
                     categories: scopedCategories,
+                    householdID: session.selection.householdID,
+                    listID: session.selection.listID,
                     includeUnavailable: true,
                     onAddCategory: { showingCategoryCreation = true }
                 )
