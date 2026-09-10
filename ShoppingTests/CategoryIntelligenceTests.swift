@@ -105,6 +105,51 @@ struct CategoryIntelligenceTests {
 
         #expect(start.duration(to: clock.now) < .milliseconds(100))
     }
+
+    @Test("Generated category names are bounded and never duplicate an existing category")
+    func generatedCategoryNameValidation() throws {
+        let candidates = CategoryIntelligenceFixtures.candidates
+
+        #expect(try FoundationModelCategoryClassifier.proposal(
+            forSuggestedCategoryName: "  Personal   Care ",
+            candidates: candidates
+        ) == .newCategory("Personal Care"))
+        #expect(try FoundationModelCategoryClassifier.proposal(
+            forSuggestedCategoryName: "produce",
+            candidates: candidates
+        ) == .category(CategoryIntelligenceFixtures.produceID))
+        #expect(throws: CategoryIntelligenceError.invalidSuggestedCategory) {
+            try FoundationModelCategoryClassifier.proposal(
+                forSuggestedCategoryName: "An excessively long category name",
+                candidates: candidates
+            )
+        }
+    }
+
+    @Test("Every candidate load reads current categories and reusable catalog items")
+    @MainActor
+    func candidateLoaderRefreshesEachInvocation() throws {
+        let environment = try ShoppingPreviewFixtures.make(.populated)
+        let context = environment.persistence.container.viewContext
+        let loader = CategoryIntelligenceCandidateLoader()
+        let first = try loader.load(from: context, selection: environment.selection)
+
+        let categoryID = try environment.service.createCategory(
+            name: "Personal Care",
+            householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+        _ = try environment.service.createItem(
+            name: "Shampoo",
+            categoryID: categoryID,
+            householdID: environment.ids.householdID
+        )
+        context.reset()
+
+        let second = try loader.load(from: context, selection: environment.selection)
+        #expect(!first.candidates.contains { $0.id == categoryID })
+        #expect(second.candidates.first { $0.id == categoryID }?.rememberedItemNames == ["Shampoo"])
+    }
 }
 
 final class CategoryIntelligenceDeviceTests: XCTestCase {

@@ -2,14 +2,12 @@
 import SwiftUI
 
 struct CategoryIntelligenceDebugView: View {
+    @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.persistenceSelection) private var selection
-    @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
-    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
-    @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
-    @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var itemName = "Avocados"
     @State private var requestID = 0
     @State private var pendingRequest: CategoryIntelligenceRequest?
+    @State private var lastSnapshot: CategoryIntelligenceCandidateSnapshot?
     @State private var result: ResultState = .idle
 
     var body: some View {
@@ -17,8 +15,12 @@ struct CategoryIntelligenceDebugView: View {
             Section("On-device model") {
                 LabeledContent("Availability", value: availability.title)
                 LabeledContent("Language and region", value: Locale.current.identifier)
-                LabeledContent("Active categories", value: candidates.count.formatted())
-                LabeledContent("Remembered examples", value: rememberedItemCount.formatted())
+                if let lastSnapshot {
+                    LabeledContent("Categories read", value: lastSnapshot.candidates.count.formatted())
+                    LabeledContent("Examples read", value: lastSnapshot.rememberedItemCount.formatted())
+                } else {
+                    LabeledContent("Category source", value: "Read when requested")
+                }
             }
 
             Section("Try a grocery") {
@@ -35,7 +37,7 @@ struct CategoryIntelligenceDebugView: View {
             }
 
             Section {
-                Text("This debug tool returns a proposal only. It does not edit groceries, categories, or catalog history.")
+                Text("Every request reads the current household categories and reusable catalog items. Existing matches and new-category ideas are proposals only; nothing is edited automatically.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -47,39 +49,6 @@ struct CategoryIntelligenceDebugView: View {
         }
     }
 
-    private var canonicalList: GroceryList? {
-        GroceryRowScope.canonicalList(
-            Array(lists), households: Array(households), selection: selection
-        )
-    }
-
-    private var candidates: [CategoryIntelligenceCandidate] {
-        let activeCategories = GroceryRowScope.validCategories(
-            Array(categories), canonicalList: canonicalList
-        ).filter { !$0.isArchived }
-        let activeCategoryIDs = Set(activeCategories.map(\.id))
-        let rememberedItems = GroceryRowScope.validItems(
-            Array(items), canonicalList: canonicalList
-        ).filter {
-            !$0.isArchived && $0.category.map { activeCategoryIDs.contains($0.id) } == true
-        }
-        let itemsByCategory = Dictionary(grouping: rememberedItems) { $0.category?.id }
-
-        return activeCategories.map { category in
-            CategoryIntelligenceCandidate(
-                id: category.id,
-                name: category.name,
-                evidence: (itemsByCategory[category.id] ?? []).map {
-                    .init(name: $0.name, source: .rememberedCatalog)
-                }
-            )
-        }
-    }
-
-    private var rememberedItemCount: Int {
-        candidates.reduce(0) { $0 + $1.rememberedItemNames.count }
-    }
-
     private var availability: CategoryIntelligenceAvailability {
         FoundationModelCategoryClassifier.availability()
     }
@@ -87,8 +56,6 @@ struct CategoryIntelligenceDebugView: View {
     private var canRequestSuggestion: Bool {
         availability.allowsSuggestions
             && !CatalogProjection.normalizedName(itemName).isEmpty
-            && !candidates.isEmpty
-            && candidates.count <= FoundationModelCategoryClassifier.maximumCategoryCount
             && result != .running
     }
 
@@ -104,7 +71,16 @@ struct CategoryIntelligenceDebugView: View {
                 Text("Thinking on this iPhone…")
             }
         case .suggestion(let category, let milliseconds):
-            LabeledContent("Suggestion") {
+            LabeledContent("Existing category") {
+                VStack(alignment: .trailing) {
+                    Text(category)
+                    Text("\(milliseconds) ms")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .newCategory(let category, let milliseconds):
+            LabeledContent("New category idea") {
                 VStack(alignment: .trailing) {
                     Text(category)
                     Text("\(milliseconds) ms")
@@ -129,11 +105,26 @@ struct CategoryIntelligenceDebugView: View {
 
     private func requestSuggestion() {
         guard canRequestSuggestion else { return }
-        pendingRequest = CategoryIntelligenceRequest(
-            itemName: itemName,
-            candidates: candidates
-        )
-        requestID += 1
+        do {
+            let snapshot = try CategoryIntelligenceCandidateLoader().load(
+                from: viewContext,
+                selection: selection
+            )
+            guard snapshot.candidates.count <= FoundationModelCategoryClassifier.maximumCategoryCount else {
+                result = .failed(
+                    "This prototype supports up to \(FoundationModelCategoryClassifier.maximumCategoryCount) active categories."
+                )
+                return
+            }
+            lastSnapshot = snapshot
+            pendingRequest = CategoryIntelligenceRequest(
+                itemName: itemName,
+                candidates: snapshot.candidates
+            )
+            requestID += 1
+        } catch {
+            result = .failed("Couldn’t read the current categories.")
+        }
     }
 
     private func cancelStaleRequest() {
@@ -144,12 +135,7 @@ struct CategoryIntelligenceDebugView: View {
     }
 
     private var idleMessage: String {
-        guard canonicalList != nil else { return "The selected household is unavailable." }
-        guard !candidates.isEmpty else { return "Add an active category before requesting a suggestion." }
-        guard candidates.count <= FoundationModelCategoryClassifier.maximumCategoryCount else {
-            return "This prototype supports up to \(FoundationModelCategoryClassifier.maximumCategoryCount) active categories."
-        }
-        return "Enter an item to request a suggestion from your categories."
+        "Enter an item to match an existing category or suggest a new one."
     }
 
     @MainActor
@@ -168,6 +154,8 @@ struct CategoryIntelligenceDebugView: View {
                     return
                 }
                 result = .suggestion(category.name, milliseconds)
+            case .newCategory(let categoryName):
+                result = .newCategory(categoryName, milliseconds)
             case .abstain:
                 result = .abstained(milliseconds)
             }
@@ -183,6 +171,7 @@ private enum ResultState: Equatable {
     case idle
     case running
     case suggestion(String, Int)
+    case newCategory(String, Int)
     case abstained(Int)
     case failed(String)
 }

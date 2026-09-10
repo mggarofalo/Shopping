@@ -16,14 +16,14 @@ Swift Testing tags add a second, semantic view across source suites. The `.criti
 
 ## Source inventory
 
-The September 10 inventory covers all 228 maintained tests: 172 fast tests, 55 non-performance UI tests, and 1 physical-device model test. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
+The September 10 inventory covers all 230 maintained tests: 174 fast tests, 55 non-performance UI tests, and 1 physical-device model test. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
 
 | Source | Tests | Layer | Runtime dependency | Cost | Coverage owner and notes |
 | --- | ---: | --- | --- | --- | --- |
 | `CatalogFilterUnitTests.swift` | 11 | Unit | None or isolated UserDefaults | Fast | Swift Testing; filter, suggestion matching, and navigation state tagged unit and critical. |
 | `CatalogFilterTests.swift` | 5 | Integration | In-memory and SQLite Core Data | Fast | Catalog metadata, identity, and relaunch behavior. |
 | `CatalogManagementTests.swift` | 18 | Integration | In-memory and SQLite Core Data | Fast | Catalog commands, stale suggestions and batches, recovery, and rollback. |
-| `CategoryIntelligenceTests.swift` | 6 | Unit | None | Fast | Proposal-only deterministic matching, safety boundaries, availability states, evaluation metrics, and large-catalog latency. |
+| `CategoryIntelligenceTests.swift` | 8 | Unit and integration | Core Data only for candidate refresh | Fast | Proposal-only matching, generated-name bounds, fresh category snapshots, safety boundaries, availability states, evaluation metrics, and large-catalog latency. |
 | `CategoryManagementTests.swift` | 9 | Integration | In-memory Core Data | Fast | Category ordering, scope, deletion, and revision behavior. |
 | `ChecklistSafetyTests.swift` | 9 | Integration | In-memory Core Data | Fast | Captured checkout, stale changes, and invalid graph handling. |
 | `GroceryEditingTests.swift` | 16 | Integration | Core Data writer contexts | Fast | Atomic edits, permission failures, responsiveness, and recovery. |

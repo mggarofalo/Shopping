@@ -20,7 +20,7 @@ struct CategoryIntelligenceEvaluator {
             durations.append(start.duration(to: clock.now))
             if proposal == evaluationCase.expected { correctCount += 1 }
             switch evaluationCase.expected {
-            case .category:
+            case .category, .newCategory:
                 expectedAssignmentCount += 1
                 if proposal == evaluationCase.expected { correctAssignmentCount += 1 }
             case .abstain:

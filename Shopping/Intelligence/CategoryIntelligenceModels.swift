@@ -44,6 +44,7 @@ struct CategoryIntelligenceRequest: Equatable, Sendable {
 
 enum CategoryIntelligenceProposal: Equatable, Sendable {
     case category(UUID)
+    case newCategory(String)
     case abstain
 }
 
@@ -63,10 +64,12 @@ enum CategoryIntelligenceAvailability: Equatable, Sendable {
 
 enum CategoryIntelligenceError: Error, Equatable {
     case unavailable(CategoryIntelligenceAvailability)
+    case unavailableHousehold
     case emptyItemName
     case noCategories
     case tooManyCategories
     case invalidModelChoice
+    case invalidSuggestedCategory
     case generationFailed
 }
 
