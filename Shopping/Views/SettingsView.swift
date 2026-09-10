@@ -25,6 +25,17 @@ struct SettingsView: View {
                             .accessibilityIdentifier("shopping.settings.sharingStatus")
                     }
                 }
+#if DEBUG
+                if FoundationModelCategoryClassifier.availability().allowsSuggestions {
+                    Section("Development") {
+                        NavigationLink {
+                            CategoryIntelligenceDebugView()
+                        } label: {
+                            Label("Category Intelligence", systemImage: "sparkles")
+                        }
+                    }
+                }
+#endif
                 Section("About") {
                     LabeledContent("App Version") {
                         Text(AppVersion.current.displayValue)
