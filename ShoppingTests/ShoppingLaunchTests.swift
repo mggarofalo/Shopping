@@ -335,8 +335,12 @@ final class ShoppingLaunchTests: XCTestCase {
         )).containing(.staticText, identifier: "Local honey").firstMatch
         reveal(archivedStoreRow, in: app)
         XCTAssertTrue(archivedStoreRow.label.contains("Neighborhood Market (closed) (archived)"))
-        reveal(chipotles, in: app)
-        chipotles.swipeLeft()
+        let visibleChipotlesRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Chipotles in adobo"
+        )).firstMatch
+        reveal(visibleChipotlesRow, in: app)
+        visibleChipotlesRow.swipeLeft()
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeArchive."
         )).firstMatch.waitForExistence(timeout: 2))
@@ -344,7 +348,7 @@ final class ShoppingLaunchTests: XCTestCase {
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeDelete."
         )).firstMatch.exists)
         attachScreenshot(named: "Catalog top row swipe", app: app)
-        chipotles.swipeRight()
+        visibleChipotlesRow.swipeRight()
 
         reveal(grouping, in: app)
         grouping.tap()
@@ -500,12 +504,13 @@ final class ShoppingLaunchTests: XCTestCase {
 
     private func revealInlineAddStore(in app: XCUIApplication) -> XCUIElement {
         let button = app.buttons["shopping.tags.addStore"]
+        if app.keyboards.firstMatch.exists {
+            app.buttons["shopping.grocery.keyboardDone"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+        }
         for _ in 0..<8 {
             let top = app.navigationBars["Add item"].frame.maxY
-            let bottom = app.keyboards.firstMatch.exists
-                ? app.keyboards.firstMatch.frame.minY - 60 : app.frame.maxY - 40
-            // iOS 18 can report an offscreen link as hittable behind the keyboard.
-            // Its keyboard frame excludes the prediction bar, so leave room above it.
+            let bottom = app.frame.maxY - 40
             if button.exists && button.isHittable && button.frame.minY >= top && button.frame.maxY <= bottom {
                 return button
             }
@@ -649,7 +654,7 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(archived.waitForExistence(timeout: 2))
         XCTAssertTrue(archived.isHittable)
         archived.tap()
-        XCTAssertEqual(archived.value as? String, "Selected")
+        XCTAssertTrue(archived.isSelected)
     }
 
     private func tapArchiveStateConfirmation(in title: String, app: XCUIApplication) {

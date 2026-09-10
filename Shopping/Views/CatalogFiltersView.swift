@@ -49,6 +49,7 @@ struct CatalogFiltersView: View {
                             Label("Archived", systemImage: filters.showArchived ? "archivebox.fill" : "archivebox")
                         }
                         .accessibilityIdentifier("shopping.catalog.archived")
+                        .accessibilityAddTraits(filters.showArchived ? .isSelected : [])
                         Spacer()
                         Button("Reset", systemImage: "arrow.counterclockwise") {
                             filters = CatalogFilterState()

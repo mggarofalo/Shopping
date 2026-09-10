@@ -4,22 +4,6 @@ import SwiftUI
 import Darwin
 #endif
 
-private struct CheckoutDraft: Identifiable {
-    let preview: ClearCartedPreview
-    let householdID: UUID
-    let listID: UUID
-    var id: UUID { preview.token.id }
-}
-
-private struct CheckoutResult {
-    let operationID: UUID
-    let householdID: UUID
-    let listID: UUID
-    let cleared: Int
-    let skipped: Int
-    var isIndividualRemoval = false
-}
-
 struct CartedGroceriesView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -65,17 +49,22 @@ struct CartedGroceriesView: View {
             VStack(spacing: 8) {
                 resultBar
                 if !allCarted.isEmpty {
-                    Button { prepareCheckout() } label: {
-                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark.circle.fill")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                    HStack {
+                        Spacer()
+                        Button { prepareCheckout() } label: {
+                            Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark")
+                                .labelStyle(.iconOnly)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .accessibilityLabel(checkoutLabel(count: allCarted.count))
+                        .accessibilityIdentifier("shopping.checkout.start")
+                        .padding(.trailing)
+                        .padding(.bottom, 8)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-                    .accessibilityIdentifier("shopping.checkout.start")
                 }
             }
-            .background(.bar)
         }
         .alert(
             "Couldn’t update groceries in cart",
@@ -110,39 +99,9 @@ struct CartedGroceriesView: View {
     private func checkoutSheet(_ draft: CheckoutDraft) -> some View {
         NavigationStack {
             List {
-                Section {
-                    Text("Checkout removes only these captured items from the active list. Items changed after this confirmation opened will be skipped.")
-                        .shoppingMultilineText()
-                        .accessibilityIdentifier("shopping.checkout.explanation")
-                        .shoppingListRowInsets()
-                }
                 Section("Items (\(draft.preview.rows.count))") {
                     ForEach(draft.preview.rows, id: \.needID) { row in
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(row.title)
-                                    if row.oneTime {
-                                        Text("One-time").font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer(minLength: 8)
-                                if let quantity = row.quantity {
-                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
-                                }
-                            }
-                            VStack(alignment: .leading) {
-                                Text(row.title)
-                                if row.oneTime {
-                                    Text("One-time").font(.caption).foregroundStyle(.secondary)
-                                }
-                                if let quantity = row.quantity {
-                                    Text("Quantity \(quantity)").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("shopping.checkout.row.\(row.needID.uuidString)")
+                        CheckoutPreviewRow(row: row)
                         .shoppingListRowInsets()
                     }
                 }
@@ -165,17 +124,26 @@ struct CartedGroceriesView: View {
                     }
                 }
             }
-            .navigationTitle("Checkout?")
+            .listStyle(.plain)
+            .navigationTitle("Checkout")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { checkoutDraft = nil }
+                    Button { checkoutDraft = nil } label: {
+                        Label("Cancel", systemImage: "xmark").labelStyle(.iconOnly)
+                    }
+                        .accessibilityLabel("Cancel")
                         .accessibilityIdentifier("shopping.checkout.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(checkoutLabel(count: draft.preview.rows.count)) {
+                    Button {
                         confirmCheckout(draft)
+                    } label: {
+                        Label(checkoutLabel(count: draft.preview.rows.count), systemImage: "checkmark")
+                            .labelStyle(.iconOnly)
                     }
                     .disabled(!selectionMatches(draft))
+                    .accessibilityLabel(checkoutLabel(count: draft.preview.rows.count))
                     .accessibilityIdentifier("shopping.checkout.confirm")
                 }
             }
@@ -215,15 +183,10 @@ struct CartedGroceriesView: View {
     }
 
     private var allScopedCarted: [Need] {
-        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter { $0.carted && !$0.archived }
-            .sorted {
-                let leftUrgent = $0.urgency == NeedUrgency.urgent.rawValue
-                let rightUrgent = $1.urgency == NeedUrgency.urgent.rawValue
-                if leftUrgent != rightUrgent { return leftUrgent }
-                let order = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
-                return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
-            }
+        CartedNeedOrdering.ordered(
+            GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+                .filter { $0.carted && !$0.archived }
+        )
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {

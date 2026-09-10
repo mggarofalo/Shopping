@@ -3,7 +3,7 @@ import XCTest
 @testable import Shopping
 
 final class SchemaVersionTests: XCTestCase {
-    func testBundledV4ModelPreservesProductionSchemaContract() throws {
+    func testBundledV5ModelPreservesProductionSchemaContract() throws {
         let model = try PersistenceModel.make()
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
@@ -20,6 +20,7 @@ final class SchemaVersionTests: XCTestCase {
         XCTAssertNil(quantity.defaultValue)
         XCTAssertEqual(try attribute("notes", in: need).defaultValue as? String, "")
         XCTAssertEqual(try attribute("carted", in: need).defaultValue as? Bool, false)
+        XCTAssertTrue(try attribute("cartedAt", in: need).isOptional)
         XCTAssertEqual(try attribute("urgency", in: need).defaultValue as? String, "normal")
         XCTAssertEqual(try attribute("revision", in: need).defaultValue as? Int64, 0)
         XCTAssertEqual(try attribute("archived", in: need).defaultValue as? Bool, false)
@@ -150,6 +151,7 @@ final class SchemaVersionTests: XCTestCase {
             XCTAssertEqual(need.quantity, 4)
             XCTAssertEqual(need.notes, "Keep cold")
             XCTAssertTrue(need.carted)
+            XCTAssertNil(need.cartedAt)
             XCTAssertTrue(need.archived)
             XCTAssertEqual(need.clearOperationID, UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
             XCTAssertEqual(need.oneTimeCategory?.name, "Frozen")
@@ -188,6 +190,7 @@ final class SchemaVersionTests: XCTestCase {
                 let recovered = try XCTUnwrap(recoveryContext.fetch(request).first)
                 XCTAssertFalse(recovered.archived)
                 XCTAssertTrue(recovered.carted)
+                XCTAssertNil(recovered.cartedAt)
                 XCTAssertEqual(recovered.kind, NeedKind.oneTime.rawValue)
                 XCTAssertEqual(recovered.notes, "Keep cold")
                 XCTAssertEqual(recovered.oneTimeCategory?.name, "Frozen")

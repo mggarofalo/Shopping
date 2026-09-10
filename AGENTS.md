@@ -40,6 +40,8 @@ Use SwiftUI with Core Data and `NSPersistentCloudKitContainer` as the intended b
 
 SHOPPING-10 enrollment blocks real sharing proof, not local architecture, models, UI, or simulated two-replica tests. The observed environment is Xcode 26.6 (17F113) with an iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Run fast local validation with `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. Use `ShoppingCritical` for the tag-filtered Swift Testing smoke suite and `ShoppingFull` for exhaustive local UI coverage. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. The fast and full plans collect coverage; do not lower `.github/coverage-baseline.json` to make a change pass. See `docs/test-strategy.md` and `docs/continuous-integration.md` for ownership, fixtures, coverage, and triggers. Do not carry forward the old acquire-a-Mac or code-without-building assumptions.
 
+Before dispatching remote `ShoppingFull`, commit the candidate, run `.github/scripts/run-local-shopping-full.sh`, push that exact unchanged commit, and run `.github/scripts/dispatch-remote-shopping-full.sh`. Never dispatch the remote full suite speculatively; it is an infrequent confirmation run expected to pass. The remote workflow must retain its exact-SHA local attestation preflight.
+
 ## Code conventions
 
 - Use SwiftUI and the architecture selected by SHOPPING-27.

@@ -89,6 +89,7 @@ final class Need: IdentifiedManagedObject {
         }
     }
     @NSManaged var carted: Bool
+    @NSManaged var cartedAt: Date?
     @NSManaged var urgency: String
     @NSManaged var revision: Int64
     @NSManaged var archived: Bool
