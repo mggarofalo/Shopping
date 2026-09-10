@@ -171,9 +171,9 @@ enum GroceryPurchaseRuleLabel {
     static func text(anyStore: Bool, stores: Set<Store>, activeStores: [Store]) -> String? {
         let names = activeStores.filter { stores.contains($0) }.map(\.name).sorted()
         if anyStore {
-            return names.isEmpty ? "Buy at any store" : "Buy at any store · Also: \(names.joined(separator: ", "))"
+            return (["Any Store"] + names).joined(separator: ", ")
         }
         guard !names.isEmpty else { return nil }
-        return names.count == 1 ? "Only buy at \(names[0])" : "Buy at \(names.joined(separator: ", "))"
+        return names.joined(separator: ", ")
     }
 }

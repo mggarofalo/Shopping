@@ -339,21 +339,12 @@ struct CatalogView: View {
         .shoppingListRowInsets()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !item.isArchived {
-                Button { prepareIndividualCart(item) } label: {
-                    Label("Add to cart", systemImage: "cart.badge.plus").labelStyle(.iconOnly)
-                }
-                .tint(.indigo)
-                .accessibilityIdentifier("shopping.catalog.addToCart.\(item.id.uuidString)")
                 Button { prepareIndividualAdd(item) } label: {
                     Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
                 }
                 .tint(.green)
                 .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
             }
-            Button { edit(item) } label: {
-                Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
-            }
-            .tint(.blue)
             Button { prepareArchive(item) } label: {
                 Label(item.isArchived ? "Restore" : "Archive", systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
             }
@@ -369,7 +360,6 @@ struct CatalogView: View {
         .contextMenu {
             Button("Select", systemImage: "checkmark.circle") { beginSelection(with: item.id) }
                 .accessibilityIdentifier("shopping.catalog.contextSelect.\(item.id.uuidString)")
-            Button("Edit", systemImage: "pencil") { edit(item) }
             if !item.isArchived {
                 Button("Add to List", systemImage: "note.text.badge.plus") { prepareIndividualAdd(item) }
             }
@@ -609,35 +599,6 @@ struct CatalogView: View {
     private func prepareBatchAdd() {
         guard let preview = captureCatalogAdd(ids: selectedIDs) else { return }
         addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
-    }
-
-    private func prepareIndividualCart(_ item: Item) {
-        guard let preview = captureCatalogAdd(ids: [item.id]) else { return }
-        guard let entry = preview.token.entries.first else { return }
-        switch entry.disposition {
-        case .archived:
-            showCatalogNotice("Restore this catalog item before adding it.", duration: .attention)
-        case .ineligible:
-            showCatalogNotice(
-                "This item is not available for the selected store.",
-                duration: .attention
-            )
-        default:
-            applyCatalogAddToCart(preview.token)
-        }
-    }
-
-    private func applyCatalogAddToCart(_ token: CatalogAddToken) {
-        guard let service, selection.householdID == token.householdID, selection.listID == token.listID else { return }
-        do {
-            let result = try service.applyCatalogAdd(token, renewCarted: false, destination: .cart)
-            let count = result.addedNeedIDs.count + result.existingNeedIDs.count
-            showCatalogNotice(
-                count == 0 ? "No item was added to cart." : "Added to cart.",
-                duration: count == 0 ? .attention : .success
-            )
-            hapticFeedback.play(count == 0 ? .lightImpact : .success)
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
     private func captureCatalogAdd(ids: Set<UUID>) -> CatalogAddPreview? {

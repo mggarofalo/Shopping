@@ -199,8 +199,8 @@ enum CatalogSuggestionPurchaseSummary {
         let labels = savedStoreLabels.sorted()
         if anyStore || !hasSavedStores {
             return labels.isEmpty
-                ? "Any store"
-                : "Any store · Also: \(labels.joined(separator: ", "))"
+                ? "Any Store"
+                : (["Any Store"] + labels).joined(separator: ", ")
         }
         return labels.isEmpty ? "Unresolved purchase rules" : labels.joined(separator: ", ")
     }

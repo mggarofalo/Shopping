@@ -24,7 +24,7 @@ struct SettingsView: View {
                         .shoppingListRowInsets()
                 }
                 Section("About") {
-                    LabeledContent("Version", value: AppVersion.current.displayValue)
+                    LabeledContent("App Version", value: AppVersion.current.displayValue)
                         .accessibilityIdentifier("shopping.settings.version")
                         .shoppingListRowInsets()
                 }
