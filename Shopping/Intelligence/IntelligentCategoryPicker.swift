@@ -18,19 +18,38 @@ struct IntelligentCategoryPicker: View {
     @State private var result: ResultState = .idle
 
     var body: some View {
-        Group {
+        Section {
+            if intelligenceAvailable {
+                recommendationResult
+            }
             CategoryPills(
                 selection: $selection,
                 categories: categories,
                 includeUnavailable: includeUnavailable,
-                onAddCategory: onAddCategory,
-                onRecommendCategory: intelligenceAvailable ? requestRecommendation : nil,
-                recommendationIsRunning: intelligenceAvailable && result == .running,
-                recommendationIsEnabled: canRequestRecommendation
+                onAddCategory: onAddCategory
             )
-
-            if intelligenceAvailable {
-                recommendationResult
+        } header: {
+            HStack {
+                Text("Category")
+                Spacer()
+                if intelligenceAvailable && result == .running {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Recommending category")
+                        .accessibilityIdentifier("shopping.category.recommendation.progress")
+                } else if intelligenceAvailable {
+                    Button(action: requestRecommendation) {
+                        Label("Recommend category", systemImage: "sparkles")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canRequestRecommendation)
+                    .accessibilityHint("Uses on-device intelligence")
+                    .accessibilityIdentifier("shopping.category.recommendation")
+                }
             }
         }
         .task(id: requestGeneration) {
@@ -54,7 +73,7 @@ struct IntelligentCategoryPicker: View {
         case .idle, .running:
             EmptyView()
         case .existing(let categoryID, let categoryName):
-            recommendationSection(
+            recommendationRow(
                 title: categoryName,
                 subtitle: "Existing category",
                 actionTitle: "Use \(categoryName)"
@@ -62,7 +81,7 @@ struct IntelligentCategoryPicker: View {
                 useExistingCategory(categoryID)
             }
         case .newCategory(let categoryName):
-            recommendationSection(
+            recommendationRow(
                 title: categoryName,
                 subtitle: "New category",
                 actionTitle: "Create \(categoryName)"
@@ -70,43 +89,42 @@ struct IntelligentCategoryPicker: View {
                 createCategory(named: categoryName)
             }
         case .abstained:
-            recommendationSection(
+            recommendationRow(
                 title: "No recommendation",
                 subtitle: "Choose a category below or leave this item uncategorized."
             )
         case .failed(let message):
-            recommendationSection(title: "Recommendation unavailable", subtitle: message)
+            recommendationRow(title: "Recommendation unavailable", subtitle: message)
         }
     }
 
-    private func recommendationSection(
+    private func recommendationRow(
         title: String,
         subtitle: String,
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) -> some View {
-        Section {
-            HStack(spacing: 10) {
-                Image(systemName: "sparkles")
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                Text(subtitle)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .shoppingMultilineText()
-                }
-                Spacer(minLength: 8)
-                if let actionTitle, let action {
-                    Button(shortActionTitle(for: actionTitle), action: action)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .accessibilityIdentifier("shopping.category.recommendation.accept")
-                }
+                    .shoppingMultilineText()
+            }
+            Spacer(minLength: 8)
+            if let actionTitle, let action {
+                Button(shortActionTitle(for: actionTitle), action: action)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("shopping.category.recommendation.accept")
             }
         }
+        .accessibilityIdentifier("shopping.category.recommendation.result")
     }
 
     private func shortActionTitle(for actionTitle: String) -> String {

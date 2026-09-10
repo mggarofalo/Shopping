@@ -22,8 +22,10 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
         let version = app.descendants(matching: .any)["shopping.settings.version"]
         XCTAssertTrue(version.waitForExistence(timeout: 2))
-        XCTAssertTrue(version.label.contains("1.2.0"))
-        XCTAssertTrue(version.label.contains("5"))
+        XCTAssertTrue(version.label.contains("1.3.1"))
+        XCTAssertTrue(version.label.contains("6"))
+        XCTAssertFalse(app.staticTexts["Development"].exists)
+        XCTAssertFalse(app.buttons["Category Intelligence"].exists)
     }
 
     func testPopulatedCostcoNavigationAtAccessibilitySize() {
