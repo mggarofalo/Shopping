@@ -763,8 +763,13 @@ final class NeedService: @unchecked Sendable {
             let household = try self.validatedCommandHousehold(
                 householdID: householdID, listID: listID, in: context
             )
-            let matches = (household.categories ?? []).filter {
-                !$0.isArchived && CatalogProjection.normalizedName($0.name) == normalizedName
+            let allCategories = try context.fetch(Category.fetchRequest())
+            let identityCounts = Dictionary(grouping: allCategories, by: \.id).mapValues(\.count)
+            let matches = allCategories.filter {
+                $0.household == household && !$0.isArchived &&
+                    $0.id != PersistenceModel.unsetID && identityCounts[$0.id] == 1 &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore &&
+                    CatalogProjection.normalizedName($0.name) == normalizedName
             }
             guard matches.count < 2 else { throw NeedServiceError.scopeChanged }
             if let existing = matches.first { return existing.id }

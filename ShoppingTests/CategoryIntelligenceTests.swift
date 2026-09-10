@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import Testing
 import XCTest
@@ -327,6 +328,36 @@ struct CategoryIntelligenceTests {
         )
 
         #expect(resolvedID == firstID)
+    }
+
+    @Test("Generated category creation never reuses an invalid identity")
+    @MainActor
+    func generatedCategoryCreationRejectsInvalidReuse() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let context = environment.persistence.container.viewContext
+        let household = try #require(context.fetch(NavigationFetchRequests.households()).first)
+        let invalid = NSEntityDescription.insertNewObject(
+            forEntityName: "Category", into: context
+        ) as! Shopping.Category
+        invalid.id = PersistenceModel.unsetID
+        invalid.name = "Pet Supplies"
+        invalid.household = household
+        invalid.isArchived = false
+        invalid.displayOrder = 0
+        try context.save()
+
+        let createdID = try environment.service.createOrReuseActiveCategory(
+            name: "Pet Supplies",
+            householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+
+        #expect(createdID != PersistenceModel.unsetID)
+        context.reset()
+        let matching = try context.fetch(NavigationFetchRequests.categories()).filter {
+            CatalogProjection.normalizedName($0.name) == "pet supplies"
+        }
+        #expect(matching.contains { $0.id == createdID })
     }
 
     @Test("A stale editor cannot overwrite a newer catalog category")
