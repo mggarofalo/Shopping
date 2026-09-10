@@ -37,14 +37,6 @@ struct IntelligentCategoryPicker: View {
             guard requestGeneration > 0, let pendingRequest, result == .running else { return }
             await runRecommendation(pendingRequest)
         }
-        .onChange(of: itemName) { _, _ in
-            guard result != .idle else { return }
-            dismissRecommendation()
-        }
-        .onChange(of: selection) { _, _ in
-            guard result != .idle else { return }
-            dismissRecommendation()
-        }
     }
 
     private var intelligenceAvailable: Bool {
@@ -94,36 +86,31 @@ struct IntelligentCategoryPicker: View {
         action: (() -> Void)? = nil
     ) -> some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.headline)
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .shoppingMultilineText()
-                    }
-                    Spacer(minLength: 12)
-                    Button(action: dismissRecommendation) {
-                        Label("Dismiss recommendation", systemImage: "xmark.circle.fill")
-                            .labelStyle(.iconOnly)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("shopping.category.recommendation.dismiss")
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .shoppingMultilineText()
                 }
+                Spacer(minLength: 8)
                 if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .buttonStyle(.borderedProminent)
+                    Button(shortActionTitle(for: actionTitle), action: action)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         .accessibilityIdentifier("shopping.category.recommendation.accept")
                 }
             }
-        } header: {
-            Label("Recommendation", systemImage: "sparkles")
         }
+    }
+
+    private func shortActionTitle(for actionTitle: String) -> String {
+        actionTitle.hasPrefix("Create ") ? "Create" : "Use"
     }
 
     private func requestRecommendation() {
@@ -165,7 +152,6 @@ struct IntelligentCategoryPicker: View {
         }
         selection = categoryID
         hapticFeedback.play(.lightImpact)
-        dismissRecommendation()
     }
 
     private func createCategory(named name: String) {
@@ -199,8 +185,8 @@ struct IntelligentCategoryPicker: View {
                 )
             }
             selection = categoryID
+            result = .existing(categoryID, name)
             hapticFeedback.play(.success)
-            dismissRecommendation()
         } catch {
             result = .failed("The category could not be created. Your item draft is unchanged.")
         }
