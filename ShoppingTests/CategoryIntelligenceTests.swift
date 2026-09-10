@@ -126,6 +126,16 @@ struct CategoryIntelligenceTests {
         }
     }
 
+    @Test("Model instructions distinguish missing categories from ambiguity")
+    func missingCategoryInstructions() {
+        let instructions = FoundationModelCategoryClassifier.modelInstructions
+
+        #expect(instructions.contains("Do not abstain merely because its natural category is missing"))
+        #expect(instructions.contains("chicken thighs with no meat category should suggest Meat"))
+        #expect(instructions.contains("frozen pizza with no frozen category should suggest Frozen"))
+        #expect(instructions.contains("dog food with no pet category should suggest Pet Supplies"))
+    }
+
     @Test("Every candidate load reads current categories and reusable catalog items")
     @MainActor
     func candidateLoaderRefreshesEachInvocation() throws {
@@ -183,6 +193,33 @@ final class CategoryIntelligenceDeviceTests: XCTestCase {
         #endif
     }
 
+    func testFoundationModelSuggestsMissingCategoriesOnPhysicalDevice() async throws {
+        #if canImport(FoundationModels)
+        guard #available(iOS 26.0, *) else {
+            throw XCTSkip("Foundation Models requires iOS 26 or newer")
+        }
+        let status = FoundationModelCategoryClassifier.availability(locale: .current)
+        guard status == .available else {
+            throw XCTSkip("On-device model unavailable: \(status)")
+        }
+
+        let classifier = FoundationModelCategoryClassifier()
+        for itemName in ["Chicken Thighs", "Frozen Pizza", "Dog Food"] {
+            let proposal = try await classifier.classify(.init(
+                itemName: itemName,
+                candidates: CategoryIntelligenceFixtures.missingCategoryCandidates
+            ))
+            print("CATEGORY_INTELLIGENCE missing-category item=\(itemName) proposal=\(proposal)")
+            guard case .newCategory = proposal else {
+                XCTFail("Expected a new-category idea for \(itemName), got \(proposal)")
+                continue
+            }
+        }
+        #else
+        throw XCTSkip("This Xcode toolchain does not contain Foundation Models")
+        #endif
+    }
+
     private var deviceModelName: String {
         var systemInfo = utsname()
         uname(&systemInfo)
@@ -213,6 +250,20 @@ private enum CategoryIntelligenceFixtures {
         candidate(pantryID, "Pantry", ["Rice", "Pasta", "Black beans"]),
         candidate(frozenID, "Frozen", ["Frozen peas", "Ice cream", "Frozen waffles"]),
         candidate(householdID, "Household", ["Dish soap", "Paper towels", "Trash bags"])
+    ]
+
+    static let missingCategoryCandidates = [
+        candidate(UUID(), "Vegetables", ["Carrots", "Spinach"]),
+        candidate(UUID(), "Fruit", ["Apples", "Bananas"]),
+        candidate(UUID(), "Canned Goods", ["Canned beans", "Tomato soup"]),
+        candidate(UUID(), "Baking", ["Flour", "Baking powder"]),
+        candidate(UUID(), "Household", ["Dish soap", "Paper towels"]),
+        candidate(UUID(), "Snacks", ["Potato chips", "Pretzels"]),
+        candidate(UUID(), "Bread", ["Sourdough", "Bagels"]),
+        candidate(UUID(), "Dairy", ["Milk", "Yogurt"]),
+        candidate(UUID(), "Drinks", ["Coffee", "Seltzer"]),
+        candidate(UUID(), "Pharmacy", ["Bandages", "Pain reliever"]),
+        candidate(UUID(), "Alcohol", ["Beer", "Wine"])
     ]
 
     static let evaluationCases = [
