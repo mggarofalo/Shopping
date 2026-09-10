@@ -72,21 +72,11 @@ struct CategoryManagementView: View {
     }
 
     var body: some View {
-        List(selection: $selectedIDs) {
-            Section {
-                ForEach(activeCategories, id: \.objectID) { category in
-                    categoryRow(category)
-                        .shoppingListRowInsets()
-                        .tag(category.id)
-                }
-                .onMove(perform: reorder)
-            }
-            if !archivedCategories.isEmpty {
-                Section("Archived") {
-                    ForEach(archivedCategories, id: \.objectID) { category in
-                        categoryRow(category).shoppingListRowInsets().tag(category.id)
-                    }
-                }
+        Group {
+            if editMode.isEditing {
+                selectableList
+            } else {
+                standardList
             }
         }
         .listStyle(.plain)
@@ -203,55 +193,104 @@ struct CategoryManagementView: View {
         .onDisappear(perform: clearSelection)
     }
 
+    private var standardList: some View {
+        List {
+            Section {
+                ForEach(activeCategories, id: \.objectID) { category in
+                    categoryRow(category).shoppingListRowInsets()
+                }
+                .onMove(perform: reorder)
+            }
+            if !archivedCategories.isEmpty {
+                Section("Archived") {
+                    ForEach(archivedCategories, id: \.objectID) { category in
+                        categoryRow(category).shoppingListRowInsets()
+                    }
+                }
+            }
+        }
+    }
+
+    private var selectableList: some View {
+        List(selection: $selectedIDs) {
+            Section {
+                ForEach(activeCategories, id: \.objectID) { category in
+                    categoryRow(category).shoppingListRowInsets().tag(category.id)
+                }
+                .onMove(perform: reorder)
+            }
+            if !archivedCategories.isEmpty {
+                Section("Archived") {
+                    ForEach(archivedCategories, id: \.objectID) { category in
+                        categoryRow(category).shoppingListRowInsets().tag(category.id)
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func categoryRow(_ category: Category) -> some View {
+        if editMode.isEditing {
+            categoryRowActions(categoryRowLabel(category), category: category)
+        } else {
+            categoryRowActions(
+                Button { beginRename(category) } label: {
+                    categoryRowLabel(category)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain),
+                category: category
+            )
+        }
+    }
+
+    private func categoryRowActions<Content: View>(_ content: Content, category: Category) -> some View {
+        content
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button { setArchived(category, !category.isArchived) } label: {
+                Label(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
+            }
+            .tint(category.isArchived ? .green : .orange)
+            .disabled(!selectionAvailable)
+            .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
+            Button(role: .destructive) { removingCategory = category } label: {
+                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            }
+            .tint(.red)
+            .disabled(!selectionAvailable)
+            .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
+        }
+        .contextMenu {
+            if !editMode.isEditing {
+                Button("Select", systemImage: "checkmark.circle") { beginSelection(with: category.id) }
+                    .accessibilityIdentifier("shopping.categories.contextSelect.\(category.id.uuidString)")
+                Button(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox") {
+                    setArchived(category, !category.isArchived)
+                }
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    removingCategory = category
+                }
+            }
+        }
+        .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
+        .accessibilityAction(named: Text("\(category.isArchived ? "Restore" : "Archive") \(category.name)")) {
+            setArchived(category, !category.isArchived)
+        }
+        .accessibilityAction(named: Text("Delete \(category.name)")) {
+            removingCategory = category
+        }
+    }
+
+    private func categoryRowLabel(_ category: Category) -> some View {
         HStack {
             Text(category.name)
             Spacer()
             if category.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
         }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button { beginRename(category) } label: {
-                    Label("Edit", systemImage: "pencil").labelStyle(.iconOnly)
-                }
-                .tint(.blue)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.categories.edit.\(category.id.uuidString)")
-                Button { setArchived(category, !category.isArchived) } label: {
-                    Label(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
-                }
-                .tint(category.isArchived ? .green : .orange)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
-                Button(role: .destructive) { removingCategory = category } label: {
-                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
-                }
-                .tint(.red)
-                .disabled(!selectionAvailable)
-                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
-            }
-            .contextMenu {
-                if !editMode.isEditing {
-                    Button("Select", systemImage: "checkmark.circle") { beginSelection(with: category.id) }
-                        .accessibilityIdentifier("shopping.categories.contextSelect.\(category.id.uuidString)")
-                    Button("Edit", systemImage: "pencil") { beginRename(category) }
-                    Button(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox") {
-                        setArchived(category, !category.isArchived)
-                    }
-                    Button("Delete", systemImage: "trash", role: .destructive) {
-                        removingCategory = category
-                    }
-                }
-            }
-            .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
-            .accessibilityAction(named: Text("\(category.isArchived ? "Restore" : "Archive") \(category.name)")) {
-                setArchived(category, !category.isArchived)
-            }
-            .accessibilityAction(named: Text("Delete \(category.name)")) {
-                removingCategory = category
-            }
     }
 
     private func beginCreate() {

@@ -93,33 +93,33 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         createName.typeText("Neighborhood Market")
         app.buttons["Save store"].tap()
-        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+        let neighborhoodMarket = storeManagementRow(named: "Neighborhood Market", in: app)
+        XCTAssertTrue(neighborhoodMarket.waitForExistence(timeout: 2))
 
-        app.staticTexts["Neighborhood Market"].swipeLeft()
-        app.buttons["Edit"].tap()
+        neighborhoodMarket.tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Canceled Market")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Neighborhood Market"].waitForExistence(timeout: 2))
+        XCTAssertTrue(neighborhoodMarket.waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled Market"].exists)
 
-        app.staticTexts["Neighborhood Market"].swipeLeft()
-        app.buttons["Edit"].tap()
+        neighborhoodMarket.tap()
         XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.stores.name"], with: "Local Market")
         app.buttons["Save store"].tap()
-        XCTAssertTrue(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.staticTexts["Neighborhood Market"].exists)
+        let localMarket = storeManagementRow(named: "Local Market", in: app)
+        XCTAssertTrue(localMarket.waitForExistence(timeout: 2))
+        XCTAssertFalse(neighborhoodMarket.exists)
 
-        app.staticTexts["Local Market"].swipeLeft()
-        XCTAssertTrue(app.buttons["Edit"].exists)
+        localMarket.swipeLeft()
+        XCTAssertFalse(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         XCTAssertTrue(app.buttons["Delete"].exists)
         app.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
         app.buttons["Delete store"].tap()
-        XCTAssertFalse(app.staticTexts["Local Market"].waitForExistence(timeout: 2))
+        XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
     }
 
     func testStoreManagementArchivesReferencedStoreHidesItAndResetsSelectedStore() {
@@ -131,13 +131,17 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.store.clear"].waitForExistence(timeout: 2))
 
         openStoreManagement(in: app)
-        XCTAssertTrue(app.staticTexts["Neighborhood Market (closed)"].exists)
-        app.staticTexts["Costco"].swipeLeft()
-        XCTAssertTrue(app.buttons["Edit"].exists)
+        XCTAssertTrue(storeManagementRow(named: "Neighborhood Market (closed)", in: app).exists)
+        let costco = storeManagementRow(named: "Costco", in: app)
+        costco.swipeLeft()
+        XCTAssertFalse(app.buttons["Edit"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         app.buttons["Archive"].tap()
         XCTAssertTrue(app.staticTexts["Archived"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Costco"].exists)
+        XCTAssertTrue(costco.exists)
+        costco.tap()
+        XCTAssertTrue(app.navigationBars["Rename store"].waitForExistence(timeout: 2))
+        app.buttons["Cancel"].tap()
 
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.buttons["shopping.store.all"].waitForExistence(timeout: 2))
@@ -559,6 +563,10 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
         app.buttons["Stores"].tap()
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
+    }
+
+    private func storeManagementRow(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
     private func openCatalog(in app: XCUIApplication) {

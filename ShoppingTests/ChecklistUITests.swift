@@ -29,6 +29,11 @@ final class ChecklistUITests: XCTestCase {
             format: "identifier BEGINSWITH %@", "shopping.recovery.restore."
         )).firstMatch
         XCTAssertTrue(restore.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(restore.frame.height, 44)
+        XCTAssertTrue(restore.label.contains("Restore cleared groceries"))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(restore.frame.minX - window.minX, 16)
+        XCTAssertGreaterThanOrEqual(window.maxX - restore.frame.maxX, 16)
         restore.tap()
         app.navigationBars["Recently cleared"].buttons.firstMatch.tap()
         XCTAssertTrue(grocery.waitForExistence(timeout: 3))
