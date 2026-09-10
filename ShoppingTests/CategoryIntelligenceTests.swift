@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import Testing
 import XCTest
@@ -201,6 +202,233 @@ struct CategoryIntelligenceTests {
         let second = try loader.load(from: context, selection: environment.selection)
         #expect(!first.candidates.contains { $0.id == categoryID })
         #expect(second.candidates.first { $0.id == categoryID }?.rememberedItemNames == ["Shampoo"])
+    }
+
+    @Test("Category fill reads current eligible remembered items and excludes active demand")
+    @MainActor
+    func categoryFillCandidatesRespectCurrentScope() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let householdID = environment.ids.householdID
+        let listID = environment.ids.listID
+        let categoryID = try service.createCategory(name: "Pantry", householdID: householdID)
+        let otherCategoryID = try service.createCategory(name: "Other", householdID: householdID)
+        let marketID = try service.createStore(name: "Market", householdID: householdID)
+        let clubID = try service.createStore(name: "Club", householdID: householdID)
+        _ = try service.createItem(name: "Any-store rice", categoryID: categoryID, householdID: householdID)
+        _ = try service.createItem(
+            name: "Market beans", categoryID: categoryID, storeIDs: [marketID],
+            householdID: householdID, anyStore: false
+        )
+        _ = try service.createItem(
+            name: "Club oil", categoryID: categoryID, storeIDs: [clubID],
+            householdID: householdID, anyStore: false
+        )
+        let activeItemID = try service.createItem(
+            name: "Already needed", categoryID: categoryID, householdID: householdID
+        )
+        let activeNeedID = try service.addRememberedNeed(itemID: activeItemID, listID: listID)
+        try service.setCarted(true, needID: activeNeedID)
+        _ = try service.createItem(name: "Wrong category", categoryID: otherCategoryID, householdID: householdID)
+        _ = try service.addOneTimeNeed(title: "One-time flour", categoryID: categoryID, listID: listID)
+
+        let loader = CategoryFillCandidateLoader()
+        let first = try loader.load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter(selectedStoreID: marketID)
+        )
+        #expect(first.categoryName == "Pantry")
+        #expect(first.candidates.map(\.name) == ["Any-store rice", "Market beans"])
+
+        _ = try service.createItem(name: "Applesauce", categoryID: categoryID, householdID: householdID)
+        environment.persistence.container.viewContext.reset()
+        let refreshed = try loader.load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter(selectedStoreID: marketID)
+        )
+        #expect(refreshed.candidates.map(\.name) == ["Any-store rice", "Applesauce", "Market beans"])
+    }
+
+    @Test("Category fill rejects an archived category")
+    @MainActor
+    func categoryFillRejectsArchivedCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let categoryID = try environment.service.createCategory(
+            name: "Old", householdID: environment.ids.householdID
+        )
+        try environment.service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: environment.ids.householdID
+        )
+
+        #expect(throws: CategoryIntelligenceError.invalidSuggestedCategory) {
+            try CategoryFillCandidateLoader().load(
+                from: environment.persistence.container.viewContext,
+                selection: environment.selection,
+                categoryID: categoryID,
+                purchaseFilter: PurchaseFilter()
+            )
+        }
+    }
+
+    @Test("Category fill acceptance rejects a category archived after loading")
+    @MainActor
+    func categoryFillAcceptanceRevalidatesCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let categoryID = try service.createCategory(
+            name: "Pantry", householdID: environment.ids.householdID
+        )
+        let itemID = try service.createItem(
+            name: "Rice", categoryID: categoryID, householdID: environment.ids.householdID
+        )
+        let snapshot = try CategoryFillCandidateLoader().load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter()
+        )
+        let itemRevision = try #require(snapshot.candidates.first { $0.itemID == itemID }?.itemRevision)
+        try service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: environment.ids.householdID
+        )
+
+        #expect(throws: NeedServiceError.categoryNotFound) {
+            try service.applyCatalogSuggestion(
+                itemID: itemID,
+                itemRevision: itemRevision,
+                expectedNeedID: nil,
+                expectedNeedRevision: nil,
+                listID: environment.ids.listID,
+                householdID: environment.ids.householdID,
+                purchaseFilter: PurchaseFilter(),
+                categoryID: categoryID,
+                expectedCategoryRevision: snapshot.categoryRevision,
+                textFilter: "",
+                urgentOnly: false,
+                renewCarted: false
+            )
+        }
+        #expect(try service.allActiveNeedIDs(householdID: environment.ids.householdID).isEmpty)
+    }
+
+    @Test("Generated category creation atomically reuses an active name")
+    func generatedCategoryCreationReusesExistingName() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let firstID = try environment.service.createCategory(
+            name: "Pet Supplies", householdID: environment.ids.householdID
+        )
+        let resolvedID = try environment.service.createOrReuseActiveCategory(
+            name: "  pet   supplies ",
+            householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+
+        #expect(resolvedID == firstID)
+    }
+
+    @Test("Generated category creation never reuses an invalid identity")
+    @MainActor
+    func generatedCategoryCreationRejectsInvalidReuse() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let context = environment.persistence.container.viewContext
+        let household = try #require(context.fetch(NavigationFetchRequests.households()).first)
+        let invalid = NSEntityDescription.insertNewObject(
+            forEntityName: "Category", into: context
+        ) as! Shopping.Category
+        invalid.id = PersistenceModel.unsetID
+        invalid.name = "Pet Supplies"
+        invalid.household = household
+        invalid.isArchived = false
+        invalid.displayOrder = 0
+        try context.save()
+
+        let createdID = try environment.service.createOrReuseActiveCategory(
+            name: "Pet Supplies",
+            householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+
+        #expect(createdID != PersistenceModel.unsetID)
+        context.reset()
+        let matching = try context.fetch(NavigationFetchRequests.categories()).filter {
+            CatalogProjection.normalizedName($0.name) == "pet supplies"
+        }
+        #expect(matching.contains { $0.id == createdID })
+    }
+
+    @Test("A stale editor cannot overwrite a newer catalog category")
+    @MainActor
+    func staleEditorCannotOverwriteCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let householdID = environment.ids.householdID
+        let firstCategoryID = try service.createCategory(name: "First", householdID: householdID)
+        let newerCategoryID = try service.createCategory(name: "Newer", householdID: householdID)
+        let itemID = try service.createItem(
+            name: "Rice", categoryID: firstCategoryID, householdID: householdID
+        )
+        let context = environment.persistence.container.viewContext
+        let original = try #require(context.fetch(NavigationFetchRequests.items()).first { $0.id == itemID })
+        let originalRevision = original.revision
+        try service.updateItemMetadata(
+            itemID: itemID, householdID: householdID, name: "Rice", notes: "",
+            categoryID: newerCategoryID, isArchived: false
+        )
+
+        #expect(throws: NeedServiceError.scopeChanged) {
+            try service.saveCatalogItem(
+                itemID: itemID,
+                householdID: householdID,
+                listID: environment.ids.listID,
+                values: CatalogItemValues(
+                    name: "Rice", notes: "", categoryID: firstCategoryID,
+                    anyStore: true, storeIDs: []
+                ),
+                expectedRevision: originalRevision
+            )
+        }
+        context.reset()
+        let current = try #require(context.fetch(NavigationFetchRequests.items()).first { $0.id == itemID })
+        #expect(current.category?.id == newerCategoryID)
+    }
+
+    @Test("A stale one-time draft cannot be promoted")
+    @MainActor
+    func staleOneTimeDraftCannotBePromoted() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let needID = try service.addOneTimeNeed(
+            title: "Rice", householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+        let context = environment.persistence.container.viewContext
+        let original = try #require(context.fetch(NavigationFetchRequests.needs()).first { $0.id == needID })
+        let originalRevision = original.revision
+        try service.setQuantity(2, needID: needID)
+
+        #expect(throws: NeedServiceError.scopeChanged) {
+            try service.rememberOneTimeGroceryCreatingItem(
+                needID: needID,
+                householdID: environment.ids.householdID,
+                listID: environment.ids.listID,
+                catalog: CatalogItemValues(
+                    name: "Rice", notes: "", categoryID: nil,
+                    anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(
+                    quantity: nil, purchaseNotes: "", urgency: .normal
+                ),
+                expectedNeedRevision: originalRevision
+            )
+        }
+        context.reset()
+        let current = try #require(context.fetch(NavigationFetchRequests.needs()).first { $0.id == needID })
+        #expect(current.kind == NeedKind.oneTime.rawValue)
+        #expect(current.quantity == 2)
     }
 }
 

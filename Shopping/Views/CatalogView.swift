@@ -479,14 +479,17 @@ struct CatalogView: View {
 
     private func create() {
         guard household != nil else { return }
-        editor = CatalogEditSession(selection: selection, itemID: nil, values: CatalogItemValues(
+        editor = CatalogEditSession(selection: selection, itemID: nil, itemRevision: nil, values: CatalogItemValues(
             name: searchText, notes: "", categoryID: nil,
             anyStore: true, storeIDs: []
         ))
     }
 
     private func edit(_ item: Item) {
-        editor = CatalogEditSession(selection: selection, itemID: item.id, values: item.catalogValues)
+        editor = CatalogEditSession(
+            selection: selection, itemID: item.id, itemRevision: item.revision,
+            values: item.catalogValues
+        )
     }
 
     private func prepareArchive(_ item: Item) {

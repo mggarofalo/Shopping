@@ -12,6 +12,7 @@ struct CatalogEditorView: View {
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var itemID: UUID?
+    @State private var itemRevision: Int64?
     @State private var values: CatalogItemValues
     @State private var allowingNameCollision = false
     @State private var errorMessage: String?
@@ -33,6 +34,7 @@ struct CatalogEditorView: View {
         self.onSaved = onSaved
         self.onAddToList = onAddToList
         _itemID = State(initialValue: session.itemID)
+        _itemRevision = State(initialValue: session.itemRevision)
         _values = State(initialValue: session.values)
     }
 
@@ -91,6 +93,7 @@ struct CatalogEditorView: View {
                             ) {
                                 focusedField = nil
                                 itemID = item.id
+                                itemRevision = item.revision
                                 values = item.catalogValues
                                 allowingNameCollision = false
                                 errorMessage = nil
@@ -104,9 +107,12 @@ struct CatalogEditorView: View {
                         }
                     }
                 }
-                CategoryPills(
+                IntelligentCategoryPicker(
                     selection: $values.categoryID,
+                    itemName: values.name,
                     categories: scopedCategories,
+                    householdID: session.selection.householdID,
+                    listID: session.selection.listID,
                     includeUnavailable: true,
                     onAddCategory: { showingCategoryCreation = true }
                 )
@@ -197,7 +203,8 @@ struct CatalogEditorView: View {
             if let itemID {
                 try service.saveCatalogItem(
                     itemID: itemID, householdID: householdID, listID: listID,
-                    values: values, allowingNameCollision: allowingNameCollision
+                    values: values, expectedRevision: itemRevision,
+                    allowingNameCollision: allowingNameCollision
                 )
             } else {
                 _ = try service.createCatalogItem(

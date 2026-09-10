@@ -6,12 +6,16 @@ struct GroceryEditorTarget: Identifiable {
     let scope: GroceryAddScope
     let need: Need?
     let needID: UUID?
+    let needRevision: Int64?
+    let itemRevision: Int64?
     let originalCategoryID: UUID?
 
     init(scope: GroceryAddScope, need: Need?) {
         self.scope = scope
         self.need = need
         self.needID = need?.id
+        self.needRevision = need?.revision
+        self.itemRevision = need?.item?.revision
         self.originalCategoryID = need?.item?.category?.id
             ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
     }
@@ -318,9 +322,12 @@ struct GroceryEditorView: View {
                     .accessibilityIdentifier("shopping.grocery.urgency")
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
-                    CategoryPills(
+                    IntelligentCategoryPicker(
                         selection: $categoryID,
+                        itemName: name,
                         categories: scopedCategories,
+                        householdID: target.scope.householdID,
+                        listID: target.scope.listID,
                         onAddCategory: { showingCategoryCreation = true }
                     )
                     PurchaseRulesPicker(
@@ -632,12 +639,15 @@ struct GroceryEditorView: View {
                     try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, catalog: catalog, need: values(),
+                        expectedNeedRevision: target.needRevision,
+                        expectedItemRevision: target.itemRevision,
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
                     try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
-                        anyStore: anyStore, need: values())
+                        anyStore: anyStore, need: values(),
+                        expectedNeedRevision: target.needRevision)
                 }
                 savedID = needID
             } else if remembered {
@@ -690,14 +700,17 @@ struct GroceryEditorView: View {
                 )
                 _ = try service.rememberOneTimeGroceryCreatingItem(
                     needID: needID, householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
+                    catalog: catalog, need: values(),
+                    expectedNeedRevision: target.needRevision,
+                    allowingCatalogNameCollision: allowDuplicate
                 )
                 savedCategoryID = categoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
                 _ = try service.rememberOneTimeGrocery(
                     needID: needID, householdID: householdID, listID: listID,
-                    existingItemID: item.id, need: values()
+                    existingItemID: item.id, need: values(),
+                    expectedNeedRevision: target.needRevision
                 )
                 savedCategoryID = item.category?.id
             }

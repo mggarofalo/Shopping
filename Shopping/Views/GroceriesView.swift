@@ -19,6 +19,7 @@ struct GroceriesView: View {
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
     @State private var showingStorePicker = false
+    @State private var showingCategoryFill = false
     @State private var editor: GroceryEditorTarget?
     @State private var pendingSavedNeed: PendingSavedNeed?
     @State private var error: Error?
@@ -82,6 +83,16 @@ struct GroceriesView: View {
                     recoveryLinks
                         .labelStyle(.iconOnly)
                 }
+                if categoryFillAvailable {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { requestCategoryFill() } label: {
+                            Label("Suggest saved items for \(selectedCategoryName)", systemImage: "sparkles")
+                                .labelStyle(.iconOnly)
+                        }
+                        .accessibilityHint("Choose saved items to add to this category")
+                        .accessibilityIdentifier("shopping.category.fill")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { presentAdd() } label: { Label("Add item", systemImage: "plus") }
                         .accessibilityIdentifier("shopping.addGrocery")
@@ -113,6 +124,22 @@ struct GroceriesView: View {
                     categories: activeCategories,
                     onReset: resetView
                 )
+            }
+            .sheet(isPresented: $showingCategoryFill) {
+                if let categoryID = navigation.categoryID,
+                   let category = activeCategories.first(where: { $0.id == categoryID }) {
+                    CategoryFillSuggestionsView(
+                        categoryID: category.id,
+                        categoryName: category.name,
+                        purchaseFilter: currentPurchaseFilter
+                    ) { count in
+                        toastCenter?.show(
+                            "Added \(count) \(count == 1 ? "item" : "items")",
+                            duration: .success
+                        )
+                        refreshProjection()
+                    }
+                }
             }
             .confirmationDialog(
                 "Choose store",
@@ -345,6 +372,32 @@ struct GroceriesView: View {
     private var selectedStoreName: String {
         guard let id = navigation.selectedStoreID else { return "Choose store" }
         return activeStores.first(where: { $0.id == id })?.name ?? "Choose store"
+    }
+
+    private var selectedCategoryName: String {
+        guard let categoryID = navigation.categoryID else { return "category" }
+        return activeCategories.first(where: { $0.id == categoryID })?.name ?? "category"
+    }
+
+    private var categoryFillAvailable: Bool {
+        FoundationModelCategoryClassifier.availability().allowsSuggestions &&
+            navigation.categoryID.map { categoryID in
+                activeCategories.contains(where: { $0.id == categoryID })
+            } == true
+    }
+
+    private var currentPurchaseFilter: PurchaseFilter {
+        PurchaseFilter(
+            selectedStoreID: navigation.selectedStoreID,
+            includedStoreIDs: navigation.includedStoreIDs,
+            excludedStoreIDs: navigation.excludedStoreIDs
+        )
+    }
+
+    private func requestCategoryFill() {
+        guard categoryFillAvailable,
+              FoundationModelCategoryClassifier.availability().allowsSuggestions else { return }
+        showingCategoryFill = true
     }
 
     private var filterLabel: String {
