@@ -16,14 +16,14 @@ Swift Testing tags add a second, semantic view across source suites. The `.criti
 
 ## Source inventory
 
-The September 10 inventory covers all 230 maintained tests: 174 fast tests, 55 non-performance UI tests, and 1 physical-device model test. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
+The September 10 inventory covers all 234 maintained tests: 177 fast tests, 55 non-performance UI tests, and 2 physical-device model tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the roughly 6-second deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan.
 
 | Source | Tests | Layer | Runtime dependency | Cost | Coverage owner and notes |
 | --- | ---: | --- | --- | --- | --- |
 | `CatalogFilterUnitTests.swift` | 11 | Unit | None or isolated UserDefaults | Fast | Swift Testing; filter, suggestion matching, and navigation state tagged unit and critical. |
 | `CatalogFilterTests.swift` | 5 | Integration | In-memory and SQLite Core Data | Fast | Catalog metadata, identity, and relaunch behavior. |
 | `CatalogManagementTests.swift` | 18 | Integration | In-memory and SQLite Core Data | Fast | Catalog commands, stale suggestions and batches, recovery, and rollback. |
-| `CategoryIntelligenceTests.swift` | 8 | Unit and integration | Core Data only for candidate refresh | Fast | Proposal-only matching, generated-name bounds, fresh category snapshots, safety boundaries, availability states, evaluation metrics, and large-catalog latency. |
+| `CategoryIntelligenceTests.swift` | 11 | Unit and integration | Core Data only for candidate refresh | Fast | Proposal-only matching, generated-name bounds, fresh category snapshots, safety boundaries, availability states, evaluation metrics, phrase boundaries, request bounds, and large-catalog latency. |
 | `CategoryManagementTests.swift` | 9 | Integration | In-memory Core Data | Fast | Category ordering, scope, deletion, and revision behavior. |
 | `ChecklistSafetyTests.swift` | 9 | Integration | In-memory Core Data | Fast | Captured checkout, stale changes, and invalid graph handling. |
 | `GroceryEditingTests.swift` | 16 | Integration | Core Data writer contexts | Fast | Atomic edits, permission failures, responsiveness, and recovery. |
@@ -45,7 +45,7 @@ The September 10 inventory covers all 230 maintained tests: 174 fast tests, 55 n
 | `OneTimePromotionUITests.swift` | 4 | UI | Simulator app and isolated store | Slow | Full plan; promotion choices, conflicts, relaunch, and sorting. |
 | `ShoppingAppearanceUITests.swift` | 3 | UI | Simulator app in 2 appearances | Very slow | Full plan; light, dark, and accessibility-size layouts. |
 | `ShoppingDeviceUITests.swift` | 8 | UI and device | Simulator or signed device | Slow | Full and device plans; accessibility, compact layout, and recovery copy. |
-| `CategoryIntelligenceDeviceTests` | 1 | Device and system | Signed Foundation Models-eligible device | Slow | Device plan only; records model availability, locale, accuracy, abstention, and latency without persistence writes. |
+| `CategoryIntelligenceDeviceTests` | 2 | Device and system | Signed Foundation Models-eligible device | Slow | Device plan only; records model availability, locale, accuracy, abstention, missing-category quality, and latency without persistence writes. |
 | `ShoppingLaunchTests.swift` | 15 | UI | Simulator app and isolated store | Very slow | Full plan; broad launch, settings, filters, catalog, and store workflows. |
 | `PerformanceRegressionTests.swift` | 3 | Performance | Loaded in-memory service fixture | Measured | Performance plan only; service and catalog-suggestion latency baselines. |
 | `PerformanceFlowUITests.swift` | 2 | Performance | Loaded simulator fixture | Measured | Performance plan only; UI trace routes and metrics. |

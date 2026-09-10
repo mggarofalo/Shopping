@@ -60,6 +60,29 @@ struct FoundationModelCategoryClassifier: CategoryIntelligenceClassifying {
         }
         return .newCategory(name)
     }
+
+    static func bounded(_ request: CategoryIntelligenceRequest) -> CategoryIntelligenceRequest {
+        CategoryIntelligenceRequest(
+            itemName: limited(request.itemName, to: maximumItemNameLength),
+            locale: request.locale,
+            candidates: request.candidates.map { candidate in
+                CategoryIntelligenceCandidate(
+                    id: candidate.id,
+                    name: candidate.name,
+                    evidence: candidate.rememberedItemNames.map {
+                        CategoryIntelligenceEvidence(
+                            name: limited($0, to: maximumItemNameLength),
+                            source: .rememberedCatalog
+                        )
+                    }
+                )
+            }
+        )
+    }
+
+    private static func limited(_ value: String, to maximumLength: Int) -> String {
+        String(value.prefix(maximumLength))
+    }
 }
 
 #if canImport(FoundationModels)
@@ -85,15 +108,16 @@ private extension FoundationModelCategoryClassifier {
         _ request: CategoryIntelligenceRequest
     ) async throws -> CategoryIntelligenceProposal {
         try Task.checkCancellation()
-        let itemName = limited(request.itemName, to: Self.maximumItemNameLength)
-        guard !CatalogProjection.normalizedName(itemName).isEmpty else {
-            throw CategoryIntelligenceError.emptyItemName
-        }
         guard request.candidates.count <= Self.maximumCategoryCount else {
             throw CategoryIntelligenceError.tooManyCategories
         }
+        let boundedRequest = Self.bounded(request)
+        let itemName = boundedRequest.itemName
+        guard !CatalogProjection.normalizedName(itemName).isEmpty else {
+            throw CategoryIntelligenceError.emptyItemName
+        }
 
-        let deterministicProposal = try await DeterministicCategoryClassifier().classify(request)
+        let deterministicProposal = try await DeterministicCategoryClassifier().classify(boundedRequest)
         if case .category = deterministicProposal {
             return deterministicProposal
         }
@@ -103,7 +127,7 @@ private extension FoundationModelCategoryClassifier {
         guard let idealCategory else { return .abstain }
         return try Self.proposal(
             forSuggestedCategoryName: idealCategory,
-            candidates: request.candidates
+            candidates: boundedRequest.candidates
         )
     }
 
@@ -157,10 +181,6 @@ private extension FoundationModelCategoryClassifier {
             throw CategoryIntelligenceError.invalidSuggestedCategory
         }
         return validatedName
-    }
-
-    func limited(_ value: String, to maximumLength: Int) -> String {
-        String(value.prefix(maximumLength))
     }
 }
 #endif

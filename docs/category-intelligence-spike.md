@@ -18,7 +18,7 @@ The deterministic baseline uses only remembered catalog names and requires a Jar
 - runs only when the framework, OS, model, and locale are available;
 - first checks the freshly loaded remembered catalog evidence for a strong deterministic match, then generates a bounded natural shopper-facing category without exposing the household's category list;
 - maps the independent category name to an existing category only on an exact normalized name match; otherwise a clear item produces a bounded new-category idea instead of being forced into the nearest bucket;
-- maps an existing-category code back to a stable category ID after generation;
+- maps an exact normalized generated category name back to a stable existing category ID;
 - validates a new-category idea as a nonempty, normalized name of at most 40 characters and four words, and maps a duplicate idea back to its existing category ID;
 - keeps category names and remembered examples out of the model prompt, and bounds item length, category count, response tokens, and the generated category name;
 - treats item text as untrusted data and exposes no tools;

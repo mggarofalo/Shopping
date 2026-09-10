@@ -42,6 +42,26 @@ struct CategoryIntelligenceTests {
         )) == .abstain)
     }
 
+    @Test("Deterministic phrase matching does not match embedded substrings")
+    func deterministicPhraseBoundaries() async throws {
+        let meatID = UUID()
+        let candidates = [CategoryIntelligenceCandidate(
+            id: meatID,
+            name: "Meat",
+            evidence: [.init(name: "Ham", source: .rememberedCatalog)]
+        )]
+        let classifier = DeterministicCategoryClassifier()
+
+        #expect(try await classifier.classify(.init(
+            itemName: "Whole Ham",
+            candidates: candidates
+        )) == .category(meatID))
+        #expect(try await classifier.classify(.init(
+            itemName: "Graham Crackers",
+            candidates: candidates
+        )) == .abstain)
+    }
+
     @Test("Evaluation separates assignment accuracy from abstention accuracy")
     func evaluationMetrics() async throws {
         let evaluator = CategoryIntelligenceEvaluator()
@@ -126,6 +146,28 @@ struct CategoryIntelligenceTests {
         }
     }
 
+    @Test("Foundation model requests bound item and remembered evidence names")
+    func modelRequestBounds() async throws {
+        let dairyID = UUID()
+        let request = CategoryIntelligenceRequest(
+            itemName: String(repeating: "x", count: 120) + " milk",
+            candidates: [CategoryIntelligenceCandidate(
+                id: dairyID,
+                name: "Dairy",
+                evidence: [.init(
+                    name: String(repeating: "y", count: 200),
+                    source: .rememberedCatalog
+                )]
+            )]
+        )
+
+        let bounded = FoundationModelCategoryClassifier.bounded(request)
+        #expect(bounded.itemName.count == FoundationModelCategoryClassifier.maximumItemNameLength)
+        #expect(bounded.candidates[0].rememberedItemNames[0].count ==
+            FoundationModelCategoryClassifier.maximumItemNameLength)
+        #expect(try await DeterministicCategoryClassifier().classify(bounded) == .abstain)
+    }
+
     @Test("Model instructions distinguish missing categories from ambiguity")
     func missingCategoryInstructions() {
         let idealInstructions = FoundationModelCategoryClassifier.idealCategoryInstructions
@@ -204,16 +246,25 @@ final class CategoryIntelligenceDeviceTests: XCTestCase {
         }
 
         let classifier = FoundationModelCategoryClassifier()
-        for itemName in ["Chicken Thighs", "Frozen Pizza", "Dog Food"] {
+        let expectedCategories = [
+            (itemName: "Chicken Thighs", categoryName: "Meat"),
+            (itemName: "Frozen Pizza", categoryName: "Frozen"),
+            (itemName: "Dog Food", categoryName: "Pet Supplies")
+        ]
+        for expected in expectedCategories {
             let proposal = try await classifier.classify(.init(
-                itemName: itemName,
+                itemName: expected.itemName,
                 candidates: CategoryIntelligenceFixtures.missingCategoryCandidates
             ))
-            print("CATEGORY_INTELLIGENCE missing-category item=\(itemName) proposal=\(proposal)")
-            guard case .newCategory = proposal else {
-                XCTFail("Expected a new-category idea for \(itemName), got \(proposal)")
+            print("CATEGORY_INTELLIGENCE missing-category item=\(expected.itemName) proposal=\(proposal)")
+            guard case .newCategory(let categoryName) = proposal else {
+                XCTFail("Expected a new-category idea for \(expected.itemName), got \(proposal)")
                 continue
             }
+            XCTAssertEqual(
+                CatalogProjection.normalizedName(categoryName),
+                CatalogProjection.normalizedName(expected.categoryName)
+            )
         }
         #else
         throw XCTSkip("This Xcode toolchain does not contain Foundation Models")
