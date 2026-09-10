@@ -18,6 +18,16 @@
   "testTargets" : [
     {
       "selectedTests" : [
+        "CategoryIntelligenceDeviceTests"
+      ],
+      "target" : {
+        "containerPath" : "container:Shopping.xcodeproj",
+        "identifier" : "A00000000000000000000004",
+        "name" : "ShoppingPersistenceTests"
+      }
+    },
+    {
+      "selectedTests" : [
         "ShoppingDeviceUITests"
       ],
       "target" : {

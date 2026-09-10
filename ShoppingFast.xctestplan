@@ -29,6 +29,7 @@
   "testTargets" : [
     {
       "skippedTests" : [
+        "CategoryIntelligenceDeviceTests",
         "PerformanceRegressionTests"
       ],
       "target" : {
