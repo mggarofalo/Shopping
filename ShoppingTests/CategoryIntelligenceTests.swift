@@ -272,6 +272,98 @@ struct CategoryIntelligenceTests {
             )
         }
     }
+
+    @Test("Category fill acceptance rejects a category archived after loading")
+    @MainActor
+    func categoryFillAcceptanceRevalidatesCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let categoryID = try service.createCategory(
+            name: "Pantry", householdID: environment.ids.householdID
+        )
+        let itemID = try service.createItem(
+            name: "Rice", categoryID: categoryID, householdID: environment.ids.householdID
+        )
+        let snapshot = try CategoryFillCandidateLoader().load(
+            from: environment.persistence.container.viewContext,
+            selection: environment.selection,
+            categoryID: categoryID,
+            purchaseFilter: PurchaseFilter()
+        )
+        let itemRevision = try #require(snapshot.candidates.first { $0.itemID == itemID }?.itemRevision)
+        try service.setCategoryArchived(
+            true, categoryID: categoryID, householdID: environment.ids.householdID
+        )
+
+        #expect(throws: NeedServiceError.categoryNotFound) {
+            try service.applyCatalogSuggestion(
+                itemID: itemID,
+                itemRevision: itemRevision,
+                expectedNeedID: nil,
+                expectedNeedRevision: nil,
+                listID: environment.ids.listID,
+                householdID: environment.ids.householdID,
+                purchaseFilter: PurchaseFilter(),
+                categoryID: categoryID,
+                expectedCategoryRevision: snapshot.categoryRevision,
+                textFilter: "",
+                urgentOnly: false,
+                renewCarted: false
+            )
+        }
+        #expect(try service.allActiveNeedIDs(householdID: environment.ids.householdID).isEmpty)
+    }
+
+    @Test("Generated category creation atomically reuses an active name")
+    func generatedCategoryCreationReusesExistingName() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let firstID = try environment.service.createCategory(
+            name: "Pet Supplies", householdID: environment.ids.householdID
+        )
+        let resolvedID = try environment.service.createOrReuseActiveCategory(
+            name: "  pet   supplies ",
+            householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+
+        #expect(resolvedID == firstID)
+    }
+
+    @Test("A stale editor cannot overwrite a newer catalog category")
+    @MainActor
+    func staleEditorCannotOverwriteCategory() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let householdID = environment.ids.householdID
+        let firstCategoryID = try service.createCategory(name: "First", householdID: householdID)
+        let newerCategoryID = try service.createCategory(name: "Newer", householdID: householdID)
+        let itemID = try service.createItem(
+            name: "Rice", categoryID: firstCategoryID, householdID: householdID
+        )
+        let context = environment.persistence.container.viewContext
+        let original = try #require(context.fetch(NavigationFetchRequests.items()).first { $0.id == itemID })
+        let originalRevision = original.revision
+        try service.updateItemMetadata(
+            itemID: itemID, householdID: householdID, name: "Rice", notes: "",
+            categoryID: newerCategoryID, isArchived: false
+        )
+
+        #expect(throws: NeedServiceError.scopeChanged) {
+            try service.saveCatalogItem(
+                itemID: itemID,
+                householdID: householdID,
+                listID: environment.ids.listID,
+                values: CatalogItemValues(
+                    name: "Rice", notes: "", categoryID: firstCategoryID,
+                    anyStore: true, storeIDs: []
+                ),
+                expectedRevision: originalRevision
+            )
+        }
+        context.reset()
+        let current = try #require(context.fetch(NavigationFetchRequests.items()).first { $0.id == itemID })
+        #expect(current.category?.id == newerCategoryID)
+    }
 }
 
 final class CategoryIntelligenceDeviceTests: XCTestCase {

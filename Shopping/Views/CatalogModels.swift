@@ -67,6 +67,7 @@ struct CatalogEditSession: Identifiable {
     let id = UUID()
     let selection: PersistenceSelection
     let itemID: UUID?
+    let itemRevision: Int64?
     let values: CatalogItemValues
 }
 

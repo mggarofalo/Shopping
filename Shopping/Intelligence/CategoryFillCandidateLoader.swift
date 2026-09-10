@@ -9,6 +9,7 @@ struct CategoryFillCandidate: Equatable, Hashable, Sendable {
 
 struct CategoryFillCandidateSnapshot: Equatable, Sendable {
     let categoryID: UUID
+    let categoryRevision: Int64
     let categoryName: String
     let candidates: [CategoryFillCandidate]
 }
@@ -71,6 +72,7 @@ struct CategoryFillCandidateLoader {
 
         return CategoryFillCandidateSnapshot(
             categoryID: category.id,
+            categoryRevision: category.revision,
             categoryName: category.name,
             candidates: candidates
         )

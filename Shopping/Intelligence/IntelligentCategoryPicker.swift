@@ -166,24 +166,15 @@ struct IntelligentCategoryPicker: View {
                 from: viewContext,
                 selection: persistenceSelection
             )
-            let normalizedName = CatalogProjection.normalizedName(name)
-            let matches = snapshot.candidates.filter {
-                CatalogProjection.normalizedName($0.name) == normalizedName
+            guard snapshot.candidates.filter({
+                CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name)
+            }).count < 2 else {
+                result = .failed("Matching categories have conflicting identities. Choose one manually.")
+                return
             }
-            let categoryID: UUID
-            if matches.count == 1, let existing = matches.first {
-                categoryID = existing.id
-            } else {
-                guard matches.isEmpty else {
-                    result = .failed("Matching categories have conflicting identities. Choose one manually.")
-                    return
-                }
-                categoryID = try service.createCategory(
-                    name: name,
-                    householdID: householdID,
-                    listID: listID
-                )
-            }
+            let categoryID = try service.createOrReuseActiveCategory(
+                name: name, householdID: householdID, listID: listID
+            )
             selection = categoryID
             result = .existing(categoryID, name)
             hapticFeedback.play(.success)

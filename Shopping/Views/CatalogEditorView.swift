@@ -200,7 +200,8 @@ struct CatalogEditorView: View {
             if let itemID {
                 try service.saveCatalogItem(
                     itemID: itemID, householdID: householdID, listID: listID,
-                    values: values, allowingNameCollision: allowingNameCollision
+                    values: values, expectedRevision: session.itemRevision,
+                    allowingNameCollision: allowingNameCollision
                 )
             } else {
                 _ = try service.createCatalogItem(

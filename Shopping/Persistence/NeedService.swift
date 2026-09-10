@@ -751,6 +751,36 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    func createOrReuseActiveCategory(
+        name: String,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws -> UUID {
+        let name = try validatedName(name)
+        let normalizedName = CatalogProjection.normalizedName(name)
+        return try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let matches = (household.categories ?? []).filter {
+                !$0.isArchived && CatalogProjection.normalizedName($0.name) == normalizedName
+            }
+            guard matches.count < 2 else { throw NeedServiceError.scopeChanged }
+            if let existing = matches.first { return existing.id }
+
+            let category: Category = self.insert("Category", in: context)
+            category.id = UUID()
+            category.name = name
+            category.isArchived = false
+            let currentMaximum = household.categories?.map(\.displayOrder).max() ?? -1
+            category.displayOrder = currentMaximum == Int64.max ? Int64.max : currentMaximum + 1
+            self.route(category, with: household, in: context)
+            category.household = household
+            return category.id
+        }
+    }
+
     func renameCategory(
         name: String,
         categoryID: UUID,
@@ -1075,6 +1105,7 @@ final class NeedService: @unchecked Sendable {
         householdID: UUID,
         listID: UUID? = nil,
         values: CatalogItemValues,
+        expectedRevision: Int64? = nil,
         allowingNameCollision: Bool = false
     ) throws {
         try write { context in
@@ -1085,6 +1116,9 @@ final class NeedService: @unchecked Sendable {
                 throw NeedServiceError.itemNotFound
             }
             try self.validate(item: item, belongsTo: household)
+            if let expectedRevision, item.revision != expectedRevision {
+                throw NeedServiceError.scopeChanged
+            }
             let validated = try self.validatedCatalogValues(
                 values, household: household,
                 allowingArchivedCategoryID: item.category?.id,
@@ -1223,6 +1257,8 @@ final class NeedService: @unchecked Sendable {
         listID: UUID,
         catalog: CatalogItemValues,
         need values: RememberedNeedValues,
+        expectedNeedRevision: Int64? = nil,
+        expectedItemRevision: Int64? = nil,
         allowingCatalogNameCollision: Bool = false
     ) async throws {
         try validate(needValues: values)
@@ -1230,6 +1266,9 @@ final class NeedService: @unchecked Sendable {
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context
             )
+            if let expectedNeedRevision, resolved.need.revision != expectedNeedRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard resolved.need.kind == NeedKind.remembered.rawValue,
                   let item = resolved.need.item else { throw NeedServiceError.scopeChanged }
             guard item.id != PersistenceModel.unsetID,
@@ -1238,6 +1277,9 @@ final class NeedService: @unchecked Sendable {
                 throw NeedServiceError.invalidCatalogIdentity
             }
             try self.validate(item: item, belongsTo: resolved.household)
+            if let expectedItemRevision, item.revision != expectedItemRevision {
+                throw NeedServiceError.scopeChanged
+            }
             let active = try self.activeRememberedNeeds(itemID: item.id, listID: listID, in: context)
             guard active.count == 1, active[0] === resolved.need else {
                 if active.count > 1 {
@@ -1284,7 +1326,8 @@ final class NeedService: @unchecked Sendable {
         categoryID: UUID?,
         storeIDs: Set<UUID>,
         anyStore: Bool,
-        need values: RememberedNeedValues
+        need values: RememberedNeedValues,
+        expectedNeedRevision: Int64? = nil
     ) async throws {
         let title = try validatedName(title)
         try validate(needValues: values)
@@ -1292,6 +1335,9 @@ final class NeedService: @unchecked Sendable {
             let resolved = try self.validatedActiveNeed(
                 needID: needID, householdID: householdID, listID: listID, in: context
             )
+            if let expectedNeedRevision, resolved.need.revision != expectedNeedRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard resolved.need.kind == NeedKind.oneTime.rawValue,
                   resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
             let stores = try self.validatedStores(
@@ -1655,6 +1701,7 @@ final class NeedService: @unchecked Sendable {
         householdID: UUID,
         purchaseFilter: PurchaseFilter,
         categoryID: UUID?,
+        expectedCategoryRevision: Int64? = nil,
         textFilter: String,
         urgentOnly: Bool,
         renewCarted: Bool
@@ -1669,6 +1716,13 @@ final class NeedService: @unchecked Sendable {
             let selectedStore = try self.validatedCatalogAddStore(
                 id: purchaseFilter.selectedStoreID, household: household, in: context
             )
+            let category = try self.validatedCategory(
+                id: categoryID, household: household, in: context
+            )
+            if let expectedCategoryRevision,
+               category?.revision != expectedCategoryRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }

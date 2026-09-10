@@ -6,12 +6,16 @@ struct GroceryEditorTarget: Identifiable {
     let scope: GroceryAddScope
     let need: Need?
     let needID: UUID?
+    let needRevision: Int64?
+    let itemRevision: Int64?
     let originalCategoryID: UUID?
 
     init(scope: GroceryAddScope, need: Need?) {
         self.scope = scope
         self.need = need
         self.needID = need?.id
+        self.needRevision = need?.revision
+        self.itemRevision = need?.item?.revision
         self.originalCategoryID = need?.item?.category?.id
             ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
     }
@@ -635,12 +639,15 @@ struct GroceryEditorView: View {
                     try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, catalog: catalog, need: values(),
+                        expectedNeedRevision: target.needRevision,
+                        expectedItemRevision: target.itemRevision,
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
                     try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
-                        anyStore: anyStore, need: values())
+                        anyStore: anyStore, need: values(),
+                        expectedNeedRevision: target.needRevision)
                 }
                 savedID = needID
             } else if remembered {

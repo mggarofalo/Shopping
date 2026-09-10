@@ -13,6 +13,7 @@ struct CategoryFillSuggestionsView: View {
     let onAdded: (Int) -> Void
 
     @State private var candidates: [CategoryFillCandidate] = []
+    @State private var categoryRevision: Int64?
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var isLoading = true
     @State private var isAdding = false
@@ -111,6 +112,7 @@ struct CategoryFillSuggestionsView: View {
                 purchaseFilter: purchaseFilter
             )
             candidates = snapshot.candidates
+            categoryRevision = snapshot.categoryRevision
             selectedItemIDs.formIntersection(Set(candidates.map(\.itemID)))
             isLoading = false
         } catch {
@@ -126,7 +128,8 @@ struct CategoryFillSuggestionsView: View {
         }
         guard let service,
               let householdID = persistenceSelection.householdID,
-              let listID = persistenceSelection.listID else {
+              let listID = persistenceSelection.listID,
+              let categoryRevision else {
             errorMessage = "The household changed. Open the suggestions again."
             return
         }
@@ -144,6 +147,7 @@ struct CategoryFillSuggestionsView: View {
                     householdID: householdID,
                     purchaseFilter: purchaseFilter,
                     categoryID: categoryID,
+                    expectedCategoryRevision: categoryRevision,
                     textFilter: "",
                     urgentOnly: false,
                     renewCarted: false
