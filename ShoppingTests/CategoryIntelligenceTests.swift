@@ -364,6 +364,41 @@ struct CategoryIntelligenceTests {
         let current = try #require(context.fetch(NavigationFetchRequests.items()).first { $0.id == itemID })
         #expect(current.category?.id == newerCategoryID)
     }
+
+    @Test("A stale one-time draft cannot be promoted")
+    @MainActor
+    func staleOneTimeDraftCannotBePromoted() throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        let service = environment.service
+        let needID = try service.addOneTimeNeed(
+            title: "Rice", householdID: environment.ids.householdID,
+            listID: environment.ids.listID
+        )
+        let context = environment.persistence.container.viewContext
+        let original = try #require(context.fetch(NavigationFetchRequests.needs()).first { $0.id == needID })
+        let originalRevision = original.revision
+        try service.setQuantity(2, needID: needID)
+
+        #expect(throws: NeedServiceError.scopeChanged) {
+            try service.rememberOneTimeGroceryCreatingItem(
+                needID: needID,
+                householdID: environment.ids.householdID,
+                listID: environment.ids.listID,
+                catalog: CatalogItemValues(
+                    name: "Rice", notes: "", categoryID: nil,
+                    anyStore: true, storeIDs: []
+                ),
+                need: RememberedNeedValues(
+                    quantity: nil, purchaseNotes: "", urgency: .normal
+                ),
+                expectedNeedRevision: originalRevision
+            )
+        }
+        context.reset()
+        let current = try #require(context.fetch(NavigationFetchRequests.needs()).first { $0.id == needID })
+        #expect(current.kind == NeedKind.oneTime.rawValue)
+        #expect(current.quantity == 2)
+    }
 }
 
 final class CategoryIntelligenceDeviceTests: XCTestCase {

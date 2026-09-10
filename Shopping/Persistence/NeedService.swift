@@ -1960,11 +1960,15 @@ final class NeedService: @unchecked Sendable {
         listID: UUID,
         catalog: CatalogItemValues,
         need values: RememberedNeedValues,
+        expectedNeedRevision: Int64? = nil,
         allowingCatalogNameCollision: Bool = false
     ) throws -> UUID {
         try validate(needValues: values)
         return try write { context in
             let resolved = try self.validatedActiveNeed(needID: needID, householdID: householdID, listID: listID, in: context)
+            if let expectedNeedRevision, resolved.need.revision != expectedNeedRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard resolved.need.kind == NeedKind.oneTime.rawValue, resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
             let validated = try self.validatedCatalogValues(catalog, household: resolved.household, in: context)
             let collisions = try self.catalogNameCollisions(name: validated.name, household: resolved.household, excluding: nil, in: context)
@@ -1980,11 +1984,15 @@ final class NeedService: @unchecked Sendable {
         householdID: UUID,
         listID: UUID,
         existingItemID: UUID,
-        need values: RememberedNeedValues
+        need values: RememberedNeedValues,
+        expectedNeedRevision: Int64? = nil
     ) throws -> UUID {
         try validate(needValues: values)
         return try write { context in
             let resolved = try self.validatedActiveNeed(needID: needID, householdID: householdID, listID: listID, in: context)
+            if let expectedNeedRevision, resolved.need.revision != expectedNeedRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard resolved.need.kind == NeedKind.oneTime.rawValue, resolved.need.item == nil else { throw NeedServiceError.scopeChanged }
             guard let item = try self.item(id: existingItemID, in: context) else { throw NeedServiceError.itemNotFound }
             try self.validate(item: item, belongsTo: resolved.household)

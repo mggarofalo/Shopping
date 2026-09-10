@@ -700,14 +700,17 @@ struct GroceryEditorView: View {
                 )
                 _ = try service.rememberOneTimeGroceryCreatingItem(
                     needID: needID, householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
+                    catalog: catalog, need: values(),
+                    expectedNeedRevision: target.needRevision,
+                    allowingCatalogNameCollision: allowDuplicate
                 )
                 savedCategoryID = categoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
                 _ = try service.rememberOneTimeGrocery(
                     needID: needID, householdID: householdID, listID: listID,
-                    existingItemID: item.id, need: values()
+                    existingItemID: item.id, need: values(),
+                    expectedNeedRevision: target.needRevision
                 )
                 savedCategoryID = item.category?.id
             }
