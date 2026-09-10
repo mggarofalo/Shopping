@@ -16,11 +16,11 @@ A production recommendation requires all four thresholds. A failed threshold is 
 The deterministic baseline uses only remembered catalog names and requires a Jaro–Winkler score of 0.88 plus a 0.04 winning margin. The Foundation Models prototype:
 
 - runs only when the framework, OS, model, and locale are available;
-- uses guided generation with dynamic choices that contain opaque category codes, `SUGGEST_NEW`, and `ABSTAIN`;
-- treats existing categories as natural shopper-facing fits rather than forced nearest-neighbor buckets; clear items with missing categories should produce a bounded new-category idea instead of abstaining;
+- first checks the freshly loaded remembered catalog evidence for a strong deterministic match, then generates a bounded natural shopper-facing category without exposing the household's category list;
+- maps the independent category name to an existing category only on an exact normalized name match; otherwise a clear item produces a bounded new-category idea instead of being forced into the nearest bucket;
 - maps an existing-category code back to a stable category ID after generation;
 - validates a new-category idea as a nonempty, normalized name of at most 40 characters and four words, and maps a duplicate idea back to its existing category ID;
-- bounds names, examples, category count, response tokens, and evidence per category;
+- keeps category names and remembered examples out of the model prompt, and bounds item length, category count, response tokens, and the generated category name;
 - treats item text as untrusted data and exposes no tools;
 - returns a proposal only and performs no persistence write;
 - has no network or remote-model fallback.
@@ -48,7 +48,18 @@ The live Foundation Models run used an Apple M2 Pro Mac on macOS 26.6.2 with `Sy
 
 The ambiguous `Cream` case was assigned to Dairy, the out-of-scope `Party balloons` case was assigned to Household, and the prompt-injection string was assigned to Produce. Guided generation prevented an invalid category or free-form response, but it did not make the model reliably abstain.
 
-An iPhone 16 Pro (`iPhone17,1`) running iOS 27.0 beta (24A5430a), with Developer Mode enabled, ran the signed Debug probe using the existing local app provisioning profile. The user successfully invoked the on-device model and observed existing-category and abstention results, proving model availability for the phone's current locale. With the phone's categories limited to Vegetables, Fruit, Canned Goods, Baking, Household, Snacks, Bread, Dairy, Drinks, Pharmacy, and Alcohol, the first new-category probe incorrectly returned Household for Chicken Thighs, Baking for Frozen Pizza, and abstention for Dog Food. The prompt now defines a natural shopper-facing fit, warns against nearest-bucket matches, and uses those three cases as explicit missing-category examples. A physical-device regression requires every case to return a bounded new-category idea. Exact iPhone latency and the complete automated fixture matrix have not yet been recorded. The command-line XCTest runner still lacks profiles for its test bundle identifiers; that limitation does not prevent a manually signed app build from running the interactive probe.
+An iPhone 16 Pro (`iPhone17,1`) running iOS 27.0 beta (24A5430a), with Developer Mode enabled, ran the signed Debug probe using the existing local app provisioning profile. The user successfully invoked the on-device model and observed existing-category and abstention results, proving model availability for the phone's current locale. With the phone's categories limited to Vegetables, Fruit, Canned Goods, Baking, Household, Snacks, Bread, Dairy, Drinks, Pharmacy, and Alcohol, the first new-category probe incorrectly returned Household for Chicken Thighs, Baking for Frozen Pizza, and abstention for Dog Food. Stronger single-pass instructions still forced all three into existing categories: Baking, Snacks, and Household respectively. A two-model-call experiment also forced Chicken Thighs into Baking (4,551 ms), Frozen Pizza into Canned Goods (2,445 ms), and Dog Food into Household (3,349 ms). The second call and its forced existing-category choices were therefore removed.
+
+The current prototype combines strong deterministic remembered-item matching with one independent natural-category generation and exact normalized name reconciliation in app code. Interactive retesting through iPhone Mirroring returned:
+
+| Item | Proposal | Latency |
+| --- | --- | ---: |
+| Chicken Thighs | New category: Meat | 3,457 ms |
+| Frozen Pizza | New category: Frozen | 1,306 ms |
+| Dog Food | New category: Pet Supplies | 1,285 ms |
+| Milk | Existing category: Dairy | 14 ms |
+
+All four results meet the 4-second latency budget. The fast Milk result demonstrates the local remembered-item short circuit; model inference was not needed. The physical-device regression requires each missing-category case to return a bounded new-category idea. The complete automated device fixture matrix has not yet been recorded because the command-line XCTest runner still lacks profiles for its test bundle identifiers; that limitation does not prevent a manually signed app build from running the interactive probe.
 
 The local machine does not have Xcode 16.4 installed, so that toolchain could not be executed directly. Compatibility is structural and covered by the existing CI strategy: Foundation Models is isolated behind `#if canImport(FoundationModels)` and an iOS 26 availability guard, while the protocol, deterministic classifier, and manual category flow compile for the iOS 17 deployment target. CI remains the required Xcode 16.4 proof.
 

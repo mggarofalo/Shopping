@@ -128,12 +128,12 @@ struct CategoryIntelligenceTests {
 
     @Test("Model instructions distinguish missing categories from ambiguity")
     func missingCategoryInstructions() {
-        let instructions = FoundationModelCategoryClassifier.modelInstructions
+        let idealInstructions = FoundationModelCategoryClassifier.idealCategoryInstructions
 
-        #expect(instructions.contains("Do not abstain merely because its natural category is missing"))
-        #expect(instructions.contains("chicken thighs with no meat category should suggest Meat"))
-        #expect(instructions.contains("frozen pizza with no frozen category should suggest Frozen"))
-        #expect(instructions.contains("dog food with no pet category should suggest Pet Supplies"))
+        #expect(idealInstructions.contains("without seeing or guessing the household's existing categories"))
+        #expect(idealInstructions.contains("chicken thighs are Meat"))
+        #expect(idealInstructions.contains("frozen pizza is Frozen"))
+        #expect(idealInstructions.contains("dog food is Pet Supplies"))
     }
 
     @Test("Every candidate load reads current categories and reusable catalog items")
