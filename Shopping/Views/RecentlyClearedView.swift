@@ -1,15 +1,14 @@
 import CoreData
 import SwiftUI
-import UIKit
 
 struct RecentlyClearedView: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.clearOperations()) private var operations: FetchedResults<ClearOperation>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var error: Error?
-    @State private var restoreMessage: String?
 
     var body: some View {
         let canonicalList = GroceryRowScope.canonicalList(
@@ -31,11 +30,6 @@ struct RecentlyClearedView: View {
         }
         .overlay { if scopedOperations.isEmpty { ContentUnavailableView("Nothing recently cleared", systemImage: "clock.arrow.circlepath") } }
         .navigationTitle("Recently cleared")
-        .safeAreaInset(edge: .bottom) {
-            if let restoreMessage {
-                ShoppingFeedbackBar(message: restoreMessage)
-            }
-        }
         .alert("Couldn’t restore groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error?.localizedDescription ?? "Unknown error") }
@@ -59,11 +53,20 @@ struct RecentlyClearedView: View {
             )
             let skipped = max(0, expected - restored)
             if restored == 0 {
-                restoreMessage = "Nothing restored. These groceries were already restored or have newer changes."
+                toastCenter?.show(
+                    "Nothing restored. These groceries were already restored or have newer changes.",
+                    duration: .attention
+                )
             } else if skipped > 0 {
-                restoreMessage = "Restored \(restored); skipped \(skipped) with newer changes."
+                toastCenter?.show(
+                    "Restored \(restored); skipped \(skipped) with newer changes.",
+                    duration: .attention
+                )
             } else {
-                restoreMessage = restored == 1 ? "Restored 1 item" : "Restored \(restored) items"
+                toastCenter?.show(
+                    restored == 1 ? "Restored 1 item" : "Restored \(restored) items",
+                    duration: .success
+                )
             }
         } catch { self.error = error }
     }

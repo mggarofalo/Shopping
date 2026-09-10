@@ -3,10 +3,10 @@ import SwiftUI
 import UIKit
 
 struct GroceriesView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
@@ -20,11 +20,6 @@ struct GroceriesView: View {
     @State private var showingFilters = false
     @State private var showingStorePicker = false
     @State private var editor: GroceryEditorTarget?
-    @State private var removedOperationID: UUID?
-    @State private var removedScope: GroceryAddScope?
-    @State private var savedWhileFiltered = false
-    @State private var savedFeedbackMessage = "Saved to groceries. Current filters hide this item."
-    @State private var actionFeedbackMessage: String?
     @State private var pendingSavedNeed: PendingSavedNeed?
     @State private var error: Error?
 
@@ -98,7 +93,15 @@ struct GroceriesView: View {
                 case .carted:
                     CartedGroceriesView(
                         onEdit: focus,
-                        onUncarted: uncarted
+                        onUncarted: uncarted,
+                        onRemoved: { operationID, householdID, listID in
+                            removed(operationID, scope: GroceryAddScope(
+                                householdID: householdID,
+                                listID: listID,
+                                selectedStoreID: nil,
+                                selectedStoreName: nil
+                            ))
+                        }
                     )
                 case .recentlyCleared: RecentlyClearedView()
                 }
@@ -133,42 +136,6 @@ struct GroceriesView: View {
                 Button("OK", role: .cancel) {}
             } message: { Text(error?.localizedDescription ?? "Unknown error") }
 
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    if savedWhileFiltered {
-                        ShoppingFeedbackBar(
-                            message: savedFeedbackMessage
-                        ) {
-                            Button("Show all") { resetView(); savedWhileFiltered = false }
-                                .frame(minHeight: 44)
-                                .accessibilityIdentifier("shopping.grocery.showAll")
-                        }
-                    }
-                    if let actionFeedbackMessage {
-                        ShoppingFeedbackBar(message: actionFeedbackMessage)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                    if let removedOperationID {
-                        ShoppingFeedbackBar(message: "Item removed") {
-                            Button("Undo") { undo(removedOperationID) }
-                                .frame(minHeight: 44)
-                                .disabled(removedScope?.householdID != selection.householdID ||
-                                    removedScope?.listID != selection.listID || canonicalList == nil)
-                                .accessibilityIdentifier("shopping.grocery.undoRemove")
-                        }
-                    }
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("shopping.grocery.feedback")
-            }
-            .task(id: actionFeedbackMessage) {
-                guard let message = actionFeedbackMessage else { return }
-                try? await Task.sleep(for: .seconds(4))
-                guard !Task.isCancelled, actionFeedbackMessage == message else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-                    actionFeedbackMessage = nil
-                }
-            }
             .onAppear {
                 completeSaveFeedback()
                 focusRequestedNeed()
@@ -459,7 +426,6 @@ struct GroceriesView: View {
         guard selection.householdID == pending.scope.householdID,
               selection.listID == pending.scope.listID, canonicalList != nil else {
             pendingSavedNeed = nil
-            savedWhileFiltered = false
             return
         }
         guard let need = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
@@ -470,18 +436,40 @@ struct GroceriesView: View {
         guard !pending.wasEditing || categoryID(for: need) == pending.savedCategoryID else { return }
         pendingSavedNeed = nil
         refreshProjection()
-        savedWhileFiltered = !need.carted && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
+        let savedWhileFiltered = !need.carted && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
         let name = need.item?.name ?? need.title
         if pending.wasEditing, pending.originalCategoryID != pending.savedCategoryID {
             let message = "\(name) moved to \(categoryName(for: need))."
             if savedWhileFiltered {
-                savedFeedbackMessage = message + " Current filters hide this item."
+                toastCenter?.show(
+                    message + " Current filters hide this item.",
+                    duration: .attention,
+                    action: ShoppingToastAction(
+                        title: "Show all",
+                        accessibilityIdentifier: "shopping.grocery.showAll",
+                        perform: {
+                            resetView()
+                            return true
+                        }
+                    )
+                )
                 announce(message)
             } else {
                 showActionFeedback(message)
             }
-        } else {
-            savedFeedbackMessage = "Saved to groceries. Current filters hide this item."
+        } else if savedWhileFiltered {
+            toastCenter?.show(
+                "Saved to groceries. Current filters hide this item.",
+                duration: .attention,
+                action: ShoppingToastAction(
+                    title: "Show all",
+                    accessibilityIdentifier: "shopping.grocery.showAll",
+                    perform: {
+                        resetView()
+                        return true
+                    }
+                )
+            )
         }
     }
 
@@ -529,23 +517,39 @@ struct GroceriesView: View {
 
     private func removed(_ operationID: UUID, scope: GroceryAddScope) {
         editor = nil
-        removedOperationID = operationID
-        removedScope = scope
-        savedWhileFiltered = false
+        toastCenter?.show(
+            "Item removed",
+            duration: .undo,
+            action: ShoppingToastAction(
+                title: "Undo",
+                accessibilityIdentifier: "shopping.grocery.undoRemove"
+            ) {
+                undo(operationID, scope: scope)
+            }
+        )
         refreshProjection()
     }
 
-    private func undo(_ operationID: UUID) {
-        guard let service, let scope = removedScope, let householdID = scope.householdID,
-              let listID = scope.listID, selection.householdID == householdID,
-              selection.listID == listID, canonicalList != nil else { return }
+    private func undo(_ operationID: UUID, scope: GroceryAddScope) -> Bool {
+        guard let service, let householdID = scope.householdID,
+              let listID = scope.listID,
+              selection.householdID == householdID, selection.listID == listID,
+              canonicalList != nil else {
+            toastCenter?.show(
+                "Return to the household where you removed the item to undo it.",
+                duration: .attention
+            )
+            return false
+        }
         do {
             _ = try service.undoClear(operationID: operationID,
                 expectedHouseholdID: householdID, expectedListID: listID)
-            removedOperationID = nil
-            removedScope = nil
             refreshProjection()
-        } catch { self.error = error }
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func configureAndRefresh() {
@@ -663,9 +667,7 @@ struct GroceriesView: View {
     }
 
     private func showActionFeedback(_ message: String) {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-            actionFeedbackMessage = message
-        }
+        toastCenter?.show(message, duration: .success)
         announce(message)
     }
 

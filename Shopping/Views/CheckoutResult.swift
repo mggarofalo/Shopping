@@ -6,5 +6,4 @@ struct CheckoutResult {
     let listID: UUID
     let cleared: Int
     let skipped: Int
-    var isIndividualRemoval = false
 }

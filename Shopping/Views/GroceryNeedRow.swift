@@ -13,7 +13,6 @@ struct GroceryNeedRow: View {
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
     var onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
-    @State private var removal: SwipeRemovalTarget?
     @State private var removalError: String?
 
 
@@ -41,7 +40,7 @@ struct GroceryNeedRow: View {
             }
             if onRemoved != nil {
                 // The cart action remains first, so a full swipe still carts/uncarts.
-                Button(action: captureRemoval) {
+                Button(action: remove) {
                     Label("Remove", systemImage: "trash").labelStyle(.iconOnly)
                 }
                 .tint(.red)
@@ -53,17 +52,8 @@ struct GroceryNeedRow: View {
         }
         .accessibilityActions {
             if onRemoved != nil {
-                Button("Remove \(title)", action: captureRemoval)
+                Button("Remove \(title)", action: remove)
             }
-        }
-        .alert("Remove \(removal?.name ?? "item")?", isPresented: Binding(
-            get: { removal != nil }, set: { if !$0 { removal = nil } }
-        ), presenting: removal) { captured in
-            Button("Remove", role: .destructive) { confirmRemoval(captured) }
-                .accessibilityIdentifier("shopping.checklist.confirmRemove")
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Remove this item from the grocery list? You can restore it from Recently cleared. Saved catalog details are kept.")
         }
         .alert("Couldn’t remove item", isPresented: Binding(
             get: { removalError != nil }, set: { if !$0 { removalError = nil } }
@@ -72,28 +62,18 @@ struct GroceryNeedRow: View {
         } message: { Text(removalError ?? "") }
     }
 
-    private func captureRemoval() {
-        guard onRemoved != nil, service != nil, !need.archived,
+    private func remove() {
+        guard let service, onRemoved != nil, !need.archived,
               let householdID = selection.householdID, let listID = selection.listID,
               need.list?.household?.id == householdID, need.list?.id == listID else { return }
-        removal = SwipeRemovalTarget(
-            needID: need.id, revision: need.revision,
-            householdID: householdID, listID: listID, name: title
-        )
-    }
-
-    private func confirmRemoval(_ captured: SwipeRemovalTarget) {
-        guard let service, selection.householdID == captured.householdID,
-              selection.listID == captured.listID else {
-            removalError = "Return to the household where you started this removal."
-            return
-        }
+        let needID = need.id
+        let revision = need.revision
         do {
             let operationID = try service.removeNeed(
-                needID: captured.needID, householdID: captured.householdID,
-                listID: captured.listID, expectedRevision: captured.revision
+                needID: needID, householdID: householdID,
+                listID: listID, expectedRevision: revision
             )
-            onRemoved?(operationID, captured.householdID, captured.listID)
+            onRemoved?(operationID, householdID, listID)
             hapticFeedback.play(.warning)
         } catch { removalError = error.localizedDescription }
     }

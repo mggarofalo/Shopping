@@ -20,9 +20,12 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 3: Device & Data Validation | `cd9f93f5-ad3a-4384-a776-14f2f0628f81` | Local/simulated validation and physical-device persistence checks. |
 | Phase 4: Household Sync & Sharing | `0a510d14-9e73-4776-b7b5-1cf8bac607d0` | Mandatory managed Core Data private/shared CloudKit sharing and two-phone evidence. |
 | Phase 5: Polish & TestFlight | `f9721e39-88e1-4e87-a10c-b3c66b4ed5ca` | Release preparation, including sharing and recoverable clearing validation. |
-| Phase 6: Post-MVP Explorations | `86a96d53-07da-4c9b-aacf-816245c1358f` | Optional import and pull-to-refresh work. |
+| Phase 6: Post-MVP Explorations | `86a96d53-07da-4c9b-aacf-816245c1358f` | Pull-to-refresh exploration. |
+| Phase 7: UI Simplification | `17f4b53b-dd8d-437b-9328-e55371af27f5` | Compact native controls, direct actions, and transient feedback. |
+| Phase 8: Grocery List Organization | `09d071d9-6a3b-48f3-bdfe-c33c78347ad1` | Category-grouped groceries and cart presentation cleanup. |
+| Phase 9: Final UI Polish | `057e0be9-d3bc-4019-b440-1526654bf8e3` | Final product-directed Settings, feedback, and scope cleanup. |
 
-Pull-to-refresh is deferred to SHOPPING-31. Events are removed from the product scope.
+Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States
 

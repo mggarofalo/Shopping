@@ -46,7 +46,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let remove = app.buttons["shopping.grocery.remove"]
         reveal(remove, in: app)
         remove.tap()
-        app.alerts.buttons["shopping.grocery.confirmRemove"].firstMatch.tap()
+        XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
         XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
         createOneTime("Breakfast cereal", in: app)
         let originalID = row("Breakfast cereal", in: app).identifier

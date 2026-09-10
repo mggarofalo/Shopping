@@ -174,12 +174,12 @@ final class GroceryNavigationStateTests: XCTestCase {
                 anyStore: remembered.item!.anyStore,
                 stores: remembered.item!.stores ?? [],
                 activeStores: Array(remembered.item!.stores ?? []).filter { !$0.isArchived }
-            ), "Buy at any store · Also: Costco")
+            ), "Any Store, Costco")
             XCTAssertEqual(GroceryPurchaseRuleLabel.text(
                 anyStore: oneTime.oneTimeAnyStore,
                 stores: oneTime.oneTimeStores ?? [],
                 activeStores: Array(oneTime.oneTimeStores ?? []).filter { !$0.isArchived }
-            ), "Buy at any store · Also: Costco")
+            ), "Any Store, Costco")
             XCTAssertNil(GroceryPurchaseRuleLabel.text(
                 anyStore: archived.item!.anyStore,
                 stores: archived.item!.stores ?? [],
@@ -190,7 +190,7 @@ final class GroceryNavigationStateTests: XCTestCase {
                 anyStore: mixedNeed.item!.anyStore,
                 stores: mixedNeed.item!.stores ?? [],
                 activeStores: Array(mixedNeed.item!.stores ?? []).filter { !$0.isArchived }
-            ), "Only buy at Costco")
+            ), "Costco")
             XCTAssertFalse(GroceryRowScope.needsStore(mixedNeed))
         }
     }

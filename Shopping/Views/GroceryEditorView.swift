@@ -17,14 +17,6 @@ struct GroceryEditorTarget: Identifiable {
     }
 }
 
-private struct RemovalTarget {
-    let needID: UUID
-    let revision: Int64
-    let householdID: UUID
-    let listID: UUID
-    let name: String
-}
-
 private enum OneTimePromotionChoice: String, CaseIterable {
     case create
     case existing
@@ -61,7 +53,6 @@ struct GroceryEditorView: View {
     @State private var anyStore: Bool
     @State private var error: Error?
     @State private var allowDuplicate = false
-    @State private var removal: RemovalTarget?
     @State private var isPromotingOneTime = false
     @State private var promotionChoice = OneTimePromotionChoice.create
     @State private var catalogSearch = ""
@@ -364,7 +355,7 @@ struct GroceryEditorView: View {
                     }
                 }
                 if isEditing {
-                    Button("Remove item", systemImage: "trash", role: .destructive) { captureRemoval() }
+                    Button("Remove item", systemImage: "trash", role: .destructive) { remove() }
                         .disabled(!scopeValid)
                         .accessibilityIdentifier("shopping.grocery.remove")
                 }
@@ -396,18 +387,6 @@ struct GroceryEditorView: View {
                     Button("Done") { focusedField = nil }
                         .accessibilityIdentifier("shopping.grocery.keyboardDone")
                 }
-            }
-            .alert(
-                "Remove \(removal?.name ?? name)?",
-                isPresented: Binding(
-                    get: { removal != nil }, set: { if !$0 { removal = nil } }
-                ), presenting: removal
-            ) { captured in
-                Button("Remove", role: .destructive) { remove(captured) }
-                    .accessibilityIdentifier("shopping.grocery.confirmRemove")
-                Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("You can undo this removal or restore the grocery from Recently cleared.")
             }
             .sheet(isPresented: $showingCategoryCreation) {
                 CategoryCreationView(
@@ -802,21 +781,14 @@ struct GroceryEditorView: View {
         } catch { self.error = error }
     }
 
-    private func captureRemoval() {
-        guard scopeValid, let need = canonicalNeed, let householdID = target.scope.householdID,
-            let listID = target.scope.listID
-        else { return }
-        removal = RemovalTarget(
-            needID: need.id, revision: need.revision,
-            householdID: householdID, listID: listID, name: need.item?.name ?? need.title)
-    }
-
-    private func remove(_ removal: RemovalTarget) {
-        guard scopeValid, let service else { return }
+    private func remove() {
+        guard scopeValid, let service, let need = canonicalNeed,
+              let householdID = target.scope.householdID,
+              let listID = target.scope.listID else { return }
         do {
             let operationID = try service.removeNeed(
-                needID: removal.needID, householdID: removal.householdID,
-                listID: removal.listID, expectedRevision: removal.revision)
+                needID: need.id, householdID: householdID,
+                listID: listID, expectedRevision: need.revision)
             onRemoved(operationID, target.scope)
             dismiss()
         } catch { self.error = error }

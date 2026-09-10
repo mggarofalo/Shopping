@@ -16,8 +16,14 @@ final class ShoppingLaunchTests: XCTestCase {
 
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["Import CSV"].exists)
+        XCTAssertFalse(app.buttons["shopping.catalog.import"].exists)
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
+        let version = app.descendants(matching: .any)["shopping.settings.version"]
+        XCTAssertTrue(version.waitForExistence(timeout: 2))
+        XCTAssertTrue(version.label.contains("1.2.0"))
+        XCTAssertTrue(version.label.contains("5"))
     }
 
     func testPopulatedCostcoNavigationAtAccessibilitySize() {
@@ -335,12 +341,24 @@ final class ShoppingLaunchTests: XCTestCase {
         )).containing(.staticText, identifier: "Local honey").firstMatch
         reveal(archivedStoreRow, in: app)
         XCTAssertTrue(archivedStoreRow.label.contains("Neighborhood Market (closed) (archived)"))
+        let multiStoreRow = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
+        )).containing(.staticText, identifier: "Dinner rolls").firstMatch
+        reveal(multiStoreRow, in: app)
+        XCTAssertTrue(multiStoreRow.label.contains("Costco, Walmart"))
+        XCTAssertFalse(multiStoreRow.label.contains("Also:"))
         let visibleChipotlesRow = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.catalog.item.", "Chipotles in adobo"
         )).firstMatch
         reveal(visibleChipotlesRow, in: app)
         visibleChipotlesRow.swipeLeft()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.addToList."
+        )).firstMatch.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.catalog.addToCart."
+        )).firstMatch.exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.catalog.swipeArchive."
         )).firstMatch.waitForExistence(timeout: 2))
