@@ -1,6 +1,11 @@
 import CoreData
 import SwiftUI
 
+struct CatalogSaveResult {
+    let itemID: UUID
+    let wasCreated: Bool
+}
+
 struct CatalogEditorView: View {
     private enum Field: Hashable { case name, notes }
     @Environment(\.dismiss) private var dismiss
@@ -21,12 +26,12 @@ struct CatalogEditorView: View {
     @State private var requestedArchived = true
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
-    let onSaved: () -> Void
+    let onSaved: (CatalogSaveResult) -> Void
     let onAddToList: (UUID) -> Void
 
     init(
         session: CatalogEditSession,
-        onSaved: @escaping () -> Void,
+        onSaved: @escaping (CatalogSaveResult) -> Void,
         onAddToList: @escaping (UUID) -> Void = { _ in }
     ) {
         self.session = session
@@ -194,20 +199,23 @@ struct CatalogEditorView: View {
         guard scopeAvailable, let service, let householdID = session.selection.householdID,
               let listID = session.selection.listID else { return }
         do {
+            let wasCreated = itemID == nil
+            let savedItemID: UUID
             if let itemID {
                 try service.saveCatalogItem(
                     itemID: itemID, householdID: householdID, listID: listID,
                     values: values, allowingNameCollision: allowingNameCollision
                 )
+                savedItemID = itemID
             } else {
-                _ = try service.createCatalogItem(
+                savedItemID = try service.createCatalogItem(
                     values: values, householdID: householdID, listID: listID,
                     allowingNameCollision: allowingNameCollision
                 )
             }
             hapticFeedback.play(.success)
-            onSaved()
-            if addToList, let itemID { onAddToList(itemID) }
+            onSaved(CatalogSaveResult(itemID: savedItemID, wasCreated: wasCreated))
+            if addToList { onAddToList(savedItemID) }
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
@@ -220,7 +228,7 @@ struct CatalogEditorView: View {
                 itemID: itemID, householdID: householdID, listID: listID,
                 archived: archived
             )
-            onSaved()
+            onSaved(CatalogSaveResult(itemID: itemID, wasCreated: false))
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }

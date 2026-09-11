@@ -41,6 +41,10 @@ struct CatalogView: View {
     @State private var editMode: EditMode = .inactive
     @State private var batchPreview: ManagementBatchPreview?
     @State private var addConfirmation: CatalogAddConfirmation?
+    @State private var pendingRevealID: UUID?
+    @State private var highlightedItemID: UUID?
+    @State private var highlightTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var navigation: GroceryNavigationState
 
     private var canonicalList: GroceryList? {
@@ -125,13 +129,17 @@ struct CatalogView: View {
 
     var body: some View {
         NavigationStack {
-            List(selection: $selectedIDs) {
-                catalogListRows
+            ScrollViewReader { proxy in
+                List(selection: $selectedIDs) {
+                    catalogListRows
+                }
+                .listStyle(.plain)
+                .contentMargins(.top, 0, for: .scrollContent)
+                .accessibilityIdentifier("shopping.catalog.list")
+                .onChange(of: pendingRevealID) { _, _ in revealPendingItem(with: proxy) }
+                .onChange(of: renderedItemIDs) { _, _ in revealPendingItem(with: proxy) }
             }
             .environment(\.editMode, $editMode)
-            .listStyle(.plain)
-            .contentMargins(.top, 0, for: .scrollContent)
-            .accessibilityIdentifier("shopping.catalog.list")
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
@@ -194,7 +202,9 @@ struct CatalogView: View {
                 CatalogFiltersView(filters: $filters, stores: activeStores, categories: activeCategories)
             }
             .sheet(item: $editor) { session in
-                CatalogEditorView(session: session, onSaved: refresh) { itemID in
+                CatalogEditorView(session: session, onSaved: { result in
+                    catalogItemSaved(result.itemID, wasCreated: result.wasCreated)
+                }) { itemID in
                     if let item = scopedItems.first(where: { $0.id == itemID }) { prepareIndividualAdd(item) }
                 }
             }
@@ -242,7 +252,13 @@ struct CatalogView: View {
                 sanitizeFilters()
                 refreshAndSanitizeSelection()
             }
-            .onDisappear(perform: clearSelection)
+            .onDisappear {
+                clearSelection()
+                highlightTask?.cancel()
+                highlightTask = nil
+                pendingRevealID = nil
+                highlightedItemID = nil
+            }
         }
     }
 
@@ -269,17 +285,24 @@ struct CatalogView: View {
             ForEach(renderedGroups) { group in
                 Section {
                     ForEach(group.items, id: \.objectID) { item in
-                        if editMode.isEditing {
-                            CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .shoppingListRowInsets()
-                                .tag(item.id)
-                                .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-                        } else {
-                            catalogRow(item)
-                                .tag(item.id)
+                        Group {
+                            if editMode.isEditing {
+                                CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                    .shoppingListRowInsets()
+                                    .tag(item.id)
+                                    .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                            } else {
+                                catalogRow(item)
+                                    .tag(item.id)
+                            }
                         }
+                        .id(item.id)
+                        .listRowBackground(
+                            highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : Color.clear
+                        )
+                        .accessibilityValue(highlightedItemID == item.id ? "Recently added" : "")
                     }
                 } header: {
                     if let title = group.title { Text(title) }
@@ -289,6 +312,7 @@ struct CatalogView: View {
     }
 
     private var visibleItemIDs: Set<UUID> { Set(visibleItems.map(\.id)) }
+    private var renderedItemIDs: [UUID] { renderedGroups.flatMap(\.items).map(\.id) }
     private var selectedItems: [Item] { visibleItems.filter { selectedIDs.contains($0.id) } }
 
     private var filterHeader: some View {
@@ -476,6 +500,40 @@ struct CatalogView: View {
     }
 
     private func resetFilters() { searchText = ""; filters = CatalogFilterState(); refresh() }
+
+    private func catalogItemSaved(_ itemID: UUID, wasCreated: Bool) {
+        guard wasCreated else {
+            refresh()
+            return
+        }
+        pendingRevealID = itemID
+        resetFilters()
+    }
+
+    private func revealPendingItem(with proxy: ScrollViewProxy) {
+        guard let itemID = pendingRevealID, renderedItemIDs.contains(itemID) else { return }
+        pendingRevealID = nil
+        if reduceMotion {
+            proxy.scrollTo(itemID, anchor: .center)
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(itemID, anchor: .center)
+            }
+        }
+        highlightedItemID = itemID
+        let itemName = scopedItems.first(where: { $0.id == itemID })?.name ?? "Item"
+        UIAccessibility.post(notification: .announcement, argument: "Added \(itemName) to Catalog")
+        highlightTask?.cancel()
+        highlightTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, highlightedItemID == itemID else { return }
+            if reduceMotion {
+                highlightedItemID = nil
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) { highlightedItemID = nil }
+            }
+        }
+    }
 
     private func create() {
         guard household != nil else { return }
