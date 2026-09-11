@@ -117,17 +117,6 @@ struct CatalogView: View {
         !searchText.isEmpty || filters.count > 0
     }
     private var removalAction: CatalogRemovalAction? { removalTarget?.preview.action }
-    private func removalTargetPresented(for source: CatalogRowSource) -> Binding<Bool> {
-        Binding(
-            get: { removalTarget?.itemID == source.itemID && presentationSource == source },
-            set: {
-                if !$0, presentationSource == source {
-                    removalTarget = nil
-                    presentationSource = nil
-                }
-            }
-        )
-    }
     private var removalNoticePresented: Binding<Bool> {
         Binding(get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } })
     }
@@ -261,6 +250,30 @@ struct CatalogView: View {
                 Button("OK", role: .cancel) { removalNotice = nil }
             } message: {
                 Text(removalNotice ?? "")
+            }
+            .alert(
+                removalDialogTitle,
+                isPresented: Binding(
+                    get: { removalTarget != nil },
+                    set: { if !$0 { removalTarget = nil } }
+                )
+            ) {
+                if removalAction == .archive {
+                    Button("Archive item", action: applyRemoval)
+                } else if removalAction == .delete {
+                    Button("Delete item", role: .destructive, action: applyRemoval)
+                }
+                Button(removalAction == .keepArchived ? "OK" : "Cancel", role: .cancel) {
+                    removalTarget = nil
+                }
+            } message: {
+                if removalAction == .archive {
+                    Text("A grocery still uses this catalog item. Archiving keeps that grocery and its saved details available for recovery.")
+                } else if removalAction == .keepArchived {
+                    Text("A grocery still uses this archived item, so its saved details must remain available for recovery.")
+                } else {
+                    Text("This item has no grocery history and will be permanently removed from Catalog.")
+                }
             }
             .alert(
                 "Couldn’t update Catalog",
@@ -438,7 +451,7 @@ struct CatalogView: View {
             .tint(item.isArchived ? .green : .orange)
             .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
             .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
-            Button(role: .destructive) { prepareRemoval(item, source: source) } label: {
+            Button(role: .destructive) { prepareRemoval(item) } label: {
                 Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
             }
             .tint(.red)
@@ -457,7 +470,7 @@ struct CatalogView: View {
                 prepareArchive(item)
             }
             Button("Delete", systemImage: "trash", role: .destructive) {
-                prepareRemoval(item, source: source)
+                prepareRemoval(item)
             }
         }
         .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
@@ -468,29 +481,7 @@ struct CatalogView: View {
             name: item.name
         ) { prepareIndividualAdd(item, source: source) }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
-            prepareRemoval(item, source: source)
-        }
-        .confirmationDialog(
-            removalDialogTitle,
-            isPresented: removalTargetPresented(for: source),
-            titleVisibility: .visible
-        ) {
-            if removalAction == .archive {
-                Button("Archive item", action: applyRemoval)
-            } else if removalAction == .delete {
-                Button("Delete item", role: .destructive, action: applyRemoval)
-            }
-            Button(removalAction == .keepArchived ? "OK" : "Cancel", role: .cancel) {
-                removalTarget = nil
-            }
-        } message: {
-            if removalAction == .archive {
-                Text("A grocery still uses this catalog item. Archiving keeps that grocery and its saved details available for recovery.")
-            } else if removalAction == .keepArchived {
-                Text("A grocery still uses this archived item, so its saved details must remain available for recovery.")
-            } else {
-                Text("This item has no grocery history and will be permanently removed from Catalog.")
-            }
+            prepareRemoval(item)
         }
         .modifier(CatalogAddDialogs(
             confirmation: individualAddConfirmation(for: source),
@@ -671,7 +662,7 @@ struct CatalogView: View {
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
-    private func prepareRemoval(_ item: Item, source: CatalogRowSource) {
+    private func prepareRemoval(_ item: Item) {
         guard let service, let list = canonicalList, let householdID = list.household?.id,
               scopedItems.contains(item) else { return }
         do {
@@ -682,7 +673,6 @@ struct CatalogView: View {
                 itemID: item.id, householdID: householdID, listID: list.id,
                 name: item.name, preview: preview
             )
-            presentationSource = source
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 

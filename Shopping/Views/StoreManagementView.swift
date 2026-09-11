@@ -181,6 +181,28 @@ struct StoreManagementView: View {
             Text(removalNotice ?? "")
         }
         .alert(
+            removalTitle,
+            isPresented: Binding(
+                get: { removingStore != nil },
+                set: { if !$0 { clearRemoval() } }
+            )
+        ) {
+            if removalAction == .archive {
+                Button("Archive store", action: remove)
+            } else {
+                Button("Delete store", role: .destructive, action: remove)
+            }
+            Button("Cancel", role: .cancel, action: clearRemoval)
+        } message: {
+            if requestedDeletion && removalAction == .archive {
+                Text("This store is still used by saved items or groceries, so it cannot be permanently deleted. You can archive it instead and keep those purchase rules recoverable.")
+            } else if removalAction == .archive {
+                Text("Archiving hides this store from active choices and preserves saved purchase rules for recovery.")
+            } else {
+                Text("This store has no catalog or one-time grocery references and will be removed.")
+            }
+        }
+        .alert(
             "Couldn’t update stores",
             isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
         ) {
@@ -282,29 +304,6 @@ struct StoreManagementView: View {
             if store.isArchived { restore(store) } else { archive(store) }
         }
         .accessibilityAction(named: Text("Delete \(store.name)")) { beginDeletion(store) }
-        .confirmationDialog(
-            removalTitle,
-            isPresented: Binding(
-                get: { removingStore?.objectID == store.objectID },
-                set: { if !$0 { clearRemoval() } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if removalAction == .archive {
-                Button("Archive store", action: remove)
-            } else {
-                Button("Delete store", role: .destructive, action: remove)
-            }
-            Button("Cancel", role: .cancel, action: clearRemoval)
-        } message: {
-            if requestedDeletion && removalAction == .archive {
-                Text("This store is still used by saved items or groceries, so it cannot be permanently deleted. You can archive it instead and keep those purchase rules recoverable.")
-            } else if removalAction == .archive {
-                Text("Archiving hides this store from active choices and preserves saved purchase rules for recovery.")
-            } else {
-                Text("This store has no catalog or one-time grocery references and will be removed.")
-            }
-        }
     }
 
     private func storeRowLabel(_ store: Store) -> some View {

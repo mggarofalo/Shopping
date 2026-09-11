@@ -164,7 +164,10 @@ final class ChecklistUITests: XCTestCase {
         let app = launchApp()
         app.buttons["shopping.addGrocery"].tap()
         XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
-        app.buttons["shopping.grocery.addOneTime"].tap()
+        let addOneTime = app.buttons["shopping.grocery.addOneTime"]
+        reveal(addOneTime, app: app)
+        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        addOneTime.tap()
         let name = app.textFields["shopping.grocery.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 2))
         name.tap()
@@ -354,7 +357,8 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(checkout.waitForExistence(timeout: 2))
         XCTAssertTrue(checkout.isHittable)
         checkout.tap()
-        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 3))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {
