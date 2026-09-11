@@ -14,6 +14,11 @@ private struct CatalogGroupKey: Hashable {
     let order: Int64
 }
 
+private struct CatalogRowSource: Hashable {
+    let groupID: String
+    let itemID: UUID
+}
+
 struct CatalogView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -30,7 +35,6 @@ struct CatalogView: View {
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
     @State private var showingFilters = false
-    @State private var showingGrouping = false
     @State private var grouping = CatalogGrouping.category
     @State private var renderedGroups: [CatalogItemGroup] = []
     @State private var editor: CatalogEditSession?
@@ -41,6 +45,7 @@ struct CatalogView: View {
     @State private var editMode: EditMode = .inactive
     @State private var batchPreview: ManagementBatchPreview?
     @State private var addConfirmation: CatalogAddConfirmation?
+    @State private var presentationSource: CatalogRowSource?
     @State private var pendingRevealID: UUID?
     @State private var highlightedItemID: UUID?
     @State private var highlightTask: Task<Void, Never>?
@@ -112,8 +117,16 @@ struct CatalogView: View {
         !searchText.isEmpty || filters.count > 0
     }
     private var removalAction: CatalogRemovalAction? { removalTarget?.preview.action }
-    private var removalTargetPresented: Binding<Bool> {
-        Binding(get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } })
+    private func removalTargetPresented(for source: CatalogRowSource) -> Binding<Bool> {
+        Binding(
+            get: { removalTarget?.itemID == source.itemID && presentationSource == source },
+            set: {
+                if !$0, presentationSource == source {
+                    removalTarget = nil
+                    presentationSource = nil
+                }
+            }
+        )
     }
     private var removalNoticePresented: Binding<Bool> {
         Binding(get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } })
@@ -125,6 +138,33 @@ struct CatalogView: View {
         case .keepArchived: return "Can’t delete \(target.name)"
         case .delete: return "Delete \(target.name)?"
         }
+    }
+
+    private var batchAddConfirmation: Binding<CatalogAddConfirmation?> {
+        Binding(
+            get: { addConfirmation?.itemName == nil ? addConfirmation : nil },
+            set: { if $0 == nil, addConfirmation?.itemName == nil { addConfirmation = nil } }
+        )
+    }
+
+    private func individualAddConfirmation(for source: CatalogRowSource) -> Binding<CatalogAddConfirmation?> {
+        Binding(
+            get: {
+                guard let confirmation = addConfirmation,
+                      presentationSource == source,
+                      confirmation.itemName != nil,
+                      confirmation.preview.token.entries.contains(where: { $0.itemID == source.itemID })
+                else { return nil }
+                return confirmation
+            },
+            set: { value in
+                if value == nil,
+                   presentationSource == source {
+                    addConfirmation = nil
+                    presentationSource = nil
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -173,6 +213,7 @@ struct CatalogView: View {
                                 .disabled(selectedIDs.isEmpty)
                                 .accessibilityIdentifier("shopping.catalog.batchDelete")
                                 .frame(maxWidth: .infinity, minHeight: 44)
+                                .modifier(CatalogBatchDialogs(preview: $batchPreview, apply: applyBatch))
                         Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedItems.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.catalog.batchArchive")
@@ -185,17 +226,16 @@ struct CatalogView: View {
                                 .disabled(!selectedItems.contains(where: { !$0.isArchived }))
                                 .accessibilityIdentifier("shopping.catalog.batchAdd")
                                 .frame(maxWidth: .infinity, minHeight: 44)
+                                .modifier(CatalogAddDialogs(
+                                    confirmation: batchAddConfirmation,
+                                    apply: applyCatalogAdd
+                                ))
                         }
                         .labelStyle(.iconOnly)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(.bar)
                     }
-                }
-            }
-            .confirmationDialog("Group catalog", isPresented: $showingGrouping, titleVisibility: .visible) {
-                ForEach(CatalogGrouping.allCases) { choice in
-                    Button(choice.title) { grouping = choice }
                 }
             }
             .sheet(isPresented: $showingFilters) {
@@ -205,31 +245,16 @@ struct CatalogView: View {
                 CatalogEditorView(session: session, onSaved: { result in
                     catalogItemSaved(result.itemID, wasCreated: result.wasCreated)
                 }) { result in
+                    presentationSource = nil
                     let message = prepareIndividualAdd(itemID: result.itemID, itemName: result.itemName)
                     if message != nil { errorMessage = nil }
-                    return message
-                }
-            }
-            .confirmationDialog(
-                removalDialogTitle,
-                isPresented: removalTargetPresented,
-                titleVisibility: .visible
-            ) {
-                if removalAction == .archive {
-                    Button("Archive item", action: applyRemoval)
-                } else if removalAction == .delete {
-                    Button("Delete item", role: .destructive, action: applyRemoval)
-                }
-                Button(removalAction == .keepArchived ? "OK" : "Cancel", role: .cancel) {
-                    removalTarget = nil
-                }
-            } message: {
-                if removalAction == .archive {
-                    Text("A grocery still uses this catalog item. Archiving keeps that grocery and its saved details available for recovery.")
-                } else if removalAction == .keepArchived {
-                    Text("A grocery still uses this archived item, so its saved details must remain available for recovery.")
-                } else {
-                    Text("This item has no grocery history and will be permanently removed from Catalog.")
+                    if let message { return .failed(message) }
+                    guard let confirmation = addConfirmation else { return .completed }
+                    addConfirmation = nil
+                    return .confirmation(confirmation)
+                } onConfirmAdd: { token in
+                    applyCatalogAdd(token)
+                    editor = nil
                 }
             }
             .alert("Catalog item archived", isPresented: removalNoticePresented) {
@@ -248,13 +273,6 @@ struct CatalogView: View {
             } message: {
                 Text(errorMessage ?? "Unknown error")
             }
-            .modifier(CatalogBatchDialogs(
-                preview: $batchPreview, apply: applyBatch
-            ))
-            .modifier(CatalogAddDialogs(
-                confirmation: $addConfirmation,
-                apply: applyCatalogAdd
-            ))
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
@@ -298,6 +316,7 @@ struct CatalogView: View {
             ForEach(renderedGroups) { group in
                 Section {
                     ForEach(group.items, id: \.objectID) { item in
+                        let source = CatalogRowSource(groupID: group.id, itemID: item.id)
                         Group {
                             if editMode.isEditing {
                                 CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
@@ -307,11 +326,11 @@ struct CatalogView: View {
                                     .tag(item.id)
                                     .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
                             } else {
-                                catalogRow(item)
+                                catalogRow(item, source: source)
                                     .tag(item.id)
                             }
                         }
-                        .id(item.id)
+                        .id(source)
                         .listRowBackground(
                             highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : Color.clear
                         )
@@ -337,12 +356,43 @@ struct CatalogView: View {
                     systemImage: "line.3.horizontal.decrease.circle",
                     identifier: "shopping.catalog.filters"
                 ) { showingFilters = true }
-                SelectionPill(
-                    title: "Group: \(grouping.title)",
-                    isSelected: grouping != .none,
-                    systemImage: "rectangle.3.group",
-                    identifier: "shopping.catalog.grouping"
-                ) { showingGrouping = true }
+                Menu {
+                    ForEach(CatalogGrouping.allCases) { choice in
+                        Button {
+                            grouping = choice
+                        } label: {
+                            if grouping == choice {
+                                Label(choice.title, systemImage: "checkmark")
+                            } else {
+                                Text(choice.title)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.3.group")
+                        Text("Group: \(grouping.title)")
+                    }
+                    .font(.subheadline)
+                    .fontWeight(grouping == .none ? .regular : .semibold)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(grouping == .none ? Color.secondary.opacity(0.1) : Color.groceryAccent.opacity(0.18))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(grouping == .none ? Color.secondary.opacity(0.35) : Color.groceryAccent)
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .menuStyle(.button)
+                .accessibilityLabel("Group: \(grouping.title)")
+                .accessibilityHint("Choose catalog grouping")
+                .accessibilityIdentifier("shopping.catalog.grouping")
             }
             if filters.count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -365,7 +415,7 @@ struct CatalogView: View {
         .padding(.vertical, 4)
     }
 
-    private func catalogRow(_ item: Item) -> some View {
+    private func catalogRow(_ item: Item, source: CatalogRowSource) -> some View {
         Button { edit(item) } label: {
             CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -376,7 +426,7 @@ struct CatalogView: View {
         .shoppingListRowInsets()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !item.isArchived {
-                Button { prepareIndividualAdd(item) } label: {
+                Button { prepareIndividualAdd(item, source: source) } label: {
                     Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
                 }
                 .tint(.green)
@@ -388,7 +438,7 @@ struct CatalogView: View {
             .tint(item.isArchived ? .green : .orange)
             .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
             .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
-            Button(role: .destructive) { prepareRemoval(item) } label: {
+            Button(role: .destructive) { prepareRemoval(item, source: source) } label: {
                 Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
             }
             .tint(.red)
@@ -398,13 +448,17 @@ struct CatalogView: View {
             Button("Select", systemImage: "checkmark.circle") { beginSelection(with: item.id) }
                 .accessibilityIdentifier("shopping.catalog.contextSelect.\(item.id.uuidString)")
             if !item.isArchived {
-                Button("Add to List", systemImage: "note.text.badge.plus") { prepareIndividualAdd(item) }
+                Button("Add to List", systemImage: "note.text.badge.plus") {
+                    prepareIndividualAdd(item, source: source)
+                }
             }
             Button(item.isArchived ? "Restore" : "Archive",
                    systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox") {
                 prepareArchive(item)
             }
-            Button("Delete", systemImage: "trash", role: .destructive) { prepareRemoval(item) }
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                prepareRemoval(item, source: source)
+            }
         }
         .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
             prepareArchive(item)
@@ -412,10 +466,36 @@ struct CatalogView: View {
         .catalogAddAccessibilityAction(
             enabled: !editMode.isEditing && !item.isArchived,
             name: item.name
-        ) { prepareIndividualAdd(item) }
+        ) { prepareIndividualAdd(item, source: source) }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
-            prepareRemoval(item)
+            prepareRemoval(item, source: source)
         }
+        .confirmationDialog(
+            removalDialogTitle,
+            isPresented: removalTargetPresented(for: source),
+            titleVisibility: .visible
+        ) {
+            if removalAction == .archive {
+                Button("Archive item", action: applyRemoval)
+            } else if removalAction == .delete {
+                Button("Delete item", role: .destructive, action: applyRemoval)
+            }
+            Button(removalAction == .keepArchived ? "OK" : "Cancel", role: .cancel) {
+                removalTarget = nil
+            }
+        } message: {
+            if removalAction == .archive {
+                Text("A grocery still uses this catalog item. Archiving keeps that grocery and its saved details available for recovery.")
+            } else if removalAction == .keepArchived {
+                Text("A grocery still uses this archived item, so its saved details must remain available for recovery.")
+            } else {
+                Text("This item has no grocery history and will be permanently removed from Catalog.")
+            }
+        }
+        .modifier(CatalogAddDialogs(
+            confirmation: individualAddConfirmation(for: source),
+            apply: applyCatalogAdd
+        ))
     }
 
     private func catalogItemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
@@ -524,13 +604,19 @@ struct CatalogView: View {
     }
 
     private func revealPendingItem(with proxy: ScrollViewProxy) {
-        guard let itemID = pendingRevealID, renderedItemIDs.contains(itemID) else { return }
+        guard let itemID = pendingRevealID,
+              let source = renderedGroups.lazy.compactMap({ group in
+                  group.items.contains(where: { $0.id == itemID })
+                      ? CatalogRowSource(groupID: group.id, itemID: itemID)
+                      : nil
+              }).first
+        else { return }
         pendingRevealID = nil
         if reduceMotion {
-            proxy.scrollTo(itemID, anchor: .center)
+            proxy.scrollTo(source, anchor: .center)
         } else {
             withAnimation(.easeInOut(duration: 0.25)) {
-                proxy.scrollTo(itemID, anchor: .center)
+                proxy.scrollTo(source, anchor: .center)
             }
         }
         highlightedItemID = itemID
@@ -585,7 +671,7 @@ struct CatalogView: View {
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
-    private func prepareRemoval(_ item: Item) {
+    private func prepareRemoval(_ item: Item, source: CatalogRowSource) {
         guard let service, let list = canonicalList, let householdID = list.household?.id,
               scopedItems.contains(item) else { return }
         do {
@@ -596,10 +682,12 @@ struct CatalogView: View {
                 itemID: item.id, householdID: householdID, listID: list.id,
                 name: item.name, preview: preview
             )
+            presentationSource = source
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
     private func applyRemoval() {
+        defer { presentationSource = nil }
         guard let target = removalTarget, let service,
               selection.householdID == target.householdID,
               selection.listID == target.listID, canonicalList != nil else {
@@ -643,8 +731,10 @@ struct CatalogView: View {
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
-    private func prepareIndividualAdd(_ item: Item) {
+    private func prepareIndividualAdd(_ item: Item, source: CatalogRowSource) {
+        presentationSource = source
         _ = prepareIndividualAdd(itemID: item.id, itemName: item.name)
+        if addConfirmation == nil { presentationSource = nil }
     }
 
     private func prepareIndividualAdd(itemID: UUID, itemName: String) -> String? {
@@ -680,6 +770,7 @@ struct CatalogView: View {
     }
 
     private func prepareBatchAdd() {
+        presentationSource = nil
         guard let preview = captureCatalogAdd(ids: selectedIDs) else { return }
         addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
     }
@@ -706,6 +797,7 @@ struct CatalogView: View {
     }
 
     private func applyCatalogAddResult(_ token: CatalogAddToken, renewCarted: Bool) -> CatalogAddResult? {
+        defer { presentationSource = nil }
         guard let service, selection.householdID == token.householdID,
               selection.listID == token.listID else {
             addConfirmation = nil

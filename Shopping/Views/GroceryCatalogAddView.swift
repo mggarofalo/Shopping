@@ -177,7 +177,10 @@ struct GroceryCatalogAddView: View {
                     allowsSaveWithoutAdding: false,
                     onSaved: { _ in }
                 ) { result in
-                    addSavedCatalogItem(result)
+                    if let message = addSavedCatalogItem(result) {
+                        return .failed(message)
+                    }
+                    return .completed
                 }
             }
             .alert(

@@ -60,22 +60,6 @@ struct PersonManagementView: View {
                 onSave: { save(session) }, onCancel: { editor = nil }
             )
         }
-        .confirmationDialog(
-            removalTitle,
-            isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let removal {
-                Button(removal.action == .archive ? "Archive person" : "Delete person", role: .destructive) {
-                    remove(removal)
-                }
-            }
-            Button("Cancel", role: .cancel) { removal = nil }
-        } message: {
-            Text(removal?.action == .archive
-                ? "This person is assigned to groceries, so archiving keeps those assignments visible and recoverable."
-                : "This person is not assigned to any groceries and can be deleted.")
-        }
         .alert("Couldn’t update people", isPresented: Binding(
             get: { error != nil }, set: { if !$0 { error = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(error?.localizedDescription ?? "Unknown error") }
@@ -115,6 +99,25 @@ struct PersonManagementView: View {
             setArchived(person, !person.isArchived)
         }
         .accessibilityAction(named: Text("Delete \(person.name)")) { beginRemoval(person) }
+        .confirmationDialog(
+            removalTitle,
+            isPresented: Binding(
+                get: { removal?.person.objectID == person.objectID },
+                set: { if !$0 { removal = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let removal {
+                Button(removal.action == .archive ? "Archive person" : "Delete person", role: .destructive) {
+                    remove(removal)
+                }
+            }
+            Button("Cancel", role: .cancel) { removal = nil }
+        } message: {
+            Text(removal?.action == .archive
+                ? "This person is assigned to groceries, so archiving keeps those assignments visible and recoverable."
+                : "This person is not assigned to any groceries and can be deleted.")
+        }
     }
 
     private func beginCreate() {

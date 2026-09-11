@@ -116,6 +116,20 @@ struct CategoryManagementView: View {
                         .disabled(selectedIDs.isEmpty)
                         .accessibilityIdentifier("shopping.categories.batchDelete")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .confirmationDialog(
+                            batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected categories?",
+                            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
+                            titleVisibility: .visible
+                        ) {
+                            if let preview = batchPreview {
+                                Button("Delete", role: .destructive) { applyBatch(preview.token) }
+                            }
+                            Button("Cancel", role: .cancel) { batchPreview = nil }
+                        } message: {
+                            if let preview = batchPreview {
+                                Text(ManagementBatchCopy.message(preview) + " Groceries and catalog items remain Uncategorized.")
+                            }
+                        }
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedCategories.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.categories.batchArchive")
@@ -152,37 +166,9 @@ struct CategoryManagementView: View {
                 onCancel: { editor = nil }
             )
         }
-        .confirmationDialog(
-            "Delete \(removingCategory?.name ?? "category")?",
-            isPresented: Binding(get: { removingCategory != nil }, set: { if !$0 { removingCategory = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let category = removingCategory {
-                Button("Delete category", role: .destructive) { remove(category) }
-            }
-            Button("Cancel", role: .cancel) { removingCategory = nil }
-        } message: {
-            Text("Groceries and catalog items will remain and become Uncategorized.")
-        }
         .alert("Couldn’t update categories", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error?.localizedDescription ?? "Unknown error") }
-        .confirmationDialog(
-            batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected categories?",
-            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let preview = batchPreview {
-                Button(batchActionLabel(preview.token.action), role: preview.token.action == .delete ? .destructive : nil) {
-                    applyBatch(preview.token)
-                }
-            }
-            Button("Cancel", role: .cancel) { batchPreview = nil }
-        } message: {
-            if let preview = batchPreview {
-                Text(ManagementBatchCopy.message(preview) + (preview.token.action == .delete ? " Groceries and catalog items remain Uncategorized." : ""))
-            }
-        }
         .alert("Batch update complete", isPresented: Binding(
             get: { batchNotice != nil }, set: { if !$0 { batchNotice = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(batchNotice ?? "") }
@@ -282,6 +268,19 @@ struct CategoryManagementView: View {
         }
         .accessibilityAction(named: Text("Delete \(category.name)")) {
             removingCategory = category
+        }
+        .confirmationDialog(
+            "Delete \(category.name)?",
+            isPresented: Binding(
+                get: { removingCategory?.objectID == category.objectID },
+                set: { if !$0 { removingCategory = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete category", role: .destructive) { remove(category) }
+            Button("Cancel", role: .cancel) { removingCategory = nil }
+        } message: {
+            Text("Groceries and catalog items will remain and become Uncategorized.")
         }
     }
 
@@ -399,9 +398,6 @@ struct CategoryManagementView: View {
         } catch { self.error = error }
     }
 
-    private func batchActionLabel(_ action: ManagementBatchAction) -> String {
-        switch action { case .archive: "Archive"; case .restore: "Restore"; case .delete: "Delete" }
-    }
 }
 
 private struct CategoryEditorSession: Identifiable {

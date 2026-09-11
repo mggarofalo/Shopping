@@ -83,6 +83,28 @@ final class CatalogRefreshUITests: XCTestCase {
         )).count, 1)
     }
 
+    func testFilteredRenameKeepsNeedAgainConfirmationAttachedToEditor() {
+        let app = launchApp(named: "ShoppingCatalogFilteredRenameUITest", fixture: "populated")
+        app.tabBars.buttons["Catalog"].tap()
+        searchFor("Strawberries", in: app)
+        let row = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Strawberries"
+        )).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+
+        let name = app.textFields["shopping.catalog.name"]
+        replace(name, with: "Blueberries")
+        app.buttons["shopping.catalog.saveAndAddToList"].tap()
+
+        let confirmation = app.sheets["Need Blueberries again?"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 3))
+        XCTAssertFalse(row.exists, "The renamed item should no longer match the active search")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+    }
+
     func testGroceryAddSearchesCatalogAndFocusesExistingNeedWithoutDuplicates() {
         let app = launchApp(named: "ShoppingGroceryCatalogChooserUITest")
         app.tabBars.buttons["Catalog"].tap()
@@ -135,10 +157,11 @@ final class CatalogRefreshUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Birthday candles"].exists)
     }
 
-    private func launchApp(named name: String) -> XCUIApplication {
+    private func launchApp(named name: String, fixture: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite").path
+        if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
         return app
@@ -161,5 +184,13 @@ final class CatalogRefreshUITests: XCTestCase {
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.grocery.row.", name
         )).firstMatch
+    }
+
+    private func replace(_ field: XCUIElement, with text: String) {
+        field.tap()
+        if let value = field.value as? String {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        }
+        field.typeText(text)
     }
 }

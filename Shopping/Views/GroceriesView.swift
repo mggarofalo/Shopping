@@ -18,7 +18,6 @@ struct GroceriesView: View {
     @State private var searchText = ""
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
-    @State private var showingStorePicker = false
     @State private var addPickerScope: GroceryAddScope?
     @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
     @State private var pendingCatalogScope: GroceryAddScope?
@@ -117,15 +116,6 @@ struct GroceriesView: View {
                     categories: activeCategories,
                     onReset: resetView
                 )
-            }
-            .confirmationDialog(
-                "Choose store",
-                isPresented: $showingStorePicker,
-                titleVisibility: .visible
-            ) {
-                ForEach(activeStores, id: \.objectID) { store in
-                    Button(store.name) { navigation.selectStore(store.id) }
-                }
             }
             .sheet(item: $editor, onDismiss: completeSaveFeedback) { target in
                 GroceryEditorView(
@@ -320,7 +310,19 @@ struct GroceriesView: View {
 
     private var storeMenu: some View {
         HStack(spacing: 0) {
-            Button { showingStorePicker = true } label: {
+            Menu {
+                ForEach(activeStores, id: \.objectID) { store in
+                    Button {
+                        navigation.selectStore(store.id)
+                    } label: {
+                        if navigation.selectedStoreID == store.id {
+                            Label(store.name, systemImage: "checkmark")
+                        } else {
+                            Text(store.name)
+                        }
+                    }
+                }
+            } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "storefront").accessibilityHidden(true)
                     Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
@@ -328,7 +330,9 @@ struct GroceriesView: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
+            .menuStyle(.button)
             .accessibilityLabel(selectedStoreName)
+            .accessibilityHint("Choose a store")
             .accessibilityIdentifier("shopping.store.menu")
             if navigation.selectedStoreID != nil {
                 Button { navigation.selectAll() } label: {

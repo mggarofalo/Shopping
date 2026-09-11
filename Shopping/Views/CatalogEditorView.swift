@@ -7,6 +7,12 @@ struct CatalogSaveResult {
     let wasCreated: Bool
 }
 
+enum CatalogEditorAddOutcome {
+    case completed
+    case confirmation(CatalogAddConfirmation)
+    case failed(String)
+}
+
 struct CatalogEditorView: View {
     private enum Field: Hashable { case name, notes }
     @Environment(\.dismiss) private var dismiss
@@ -25,22 +31,26 @@ struct CatalogEditorView: View {
     @State private var showingCategoryCreation = false
     @State private var showingStoreCreation = false
     @State private var requestedArchived = true
+    @State private var pendingAddConfirmation: CatalogAddConfirmation?
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
     let allowsSaveWithoutAdding: Bool
     let onSaved: (CatalogSaveResult) -> Void
-    let onAddToList: (CatalogSaveResult) -> String?
+    let onAddToList: (CatalogSaveResult) -> CatalogEditorAddOutcome
+    let onConfirmAdd: (CatalogAddToken) -> Void
 
     init(
         session: CatalogEditSession,
         allowsSaveWithoutAdding: Bool = true,
         onSaved: @escaping (CatalogSaveResult) -> Void,
-        onAddToList: @escaping (CatalogSaveResult) -> String? = { _ in nil }
+        onAddToList: @escaping (CatalogSaveResult) -> CatalogEditorAddOutcome = { _ in .completed },
+        onConfirmAdd: @escaping (CatalogAddToken) -> Void = { _ in }
     ) {
         self.session = session
         self.allowsSaveWithoutAdding = allowsSaveWithoutAdding
         self.onSaved = onSaved
         self.onAddToList = onAddToList
+        self.onConfirmAdd = onConfirmAdd
         _itemID = State(initialValue: session.itemID)
         _values = State(initialValue: session.values)
     }
@@ -163,6 +173,31 @@ struct CatalogEditorView: View {
                         .disabled(!canSave || currentItem?.isArchived == true)
                         .accessibilityLabel("Save and Add to List")
                         .accessibilityIdentifier("shopping.catalog.saveAndAddToList")
+                        .confirmationDialog(
+                            pendingAddConfirmation?.itemName.map { "Need \($0) again?" }
+                                ?? "Add item to list?",
+                            isPresented: Binding(
+                                get: { pendingAddConfirmation != nil },
+                                set: { if !$0 { pendingAddConfirmation = nil; dismiss() } }
+                            ),
+                            titleVisibility: .visible
+                        ) {
+                            if let confirmation = pendingAddConfirmation {
+                                Button(confirmation.itemName == nil ? "Add to list" : "Need again") {
+                                    pendingAddConfirmation = nil
+                                    onConfirmAdd(confirmation.preview.token)
+                                    dismiss()
+                                }
+                            }
+                            Button("Cancel", role: .cancel) {
+                                pendingAddConfirmation = nil
+                                dismiss()
+                            }
+                        } message: {
+                            if let confirmation = pendingAddConfirmation {
+                                Text(CatalogAddCopy.preview(confirmation.preview))
+                            }
+                        }
                         if allowsSaveWithoutAdding {
                             Button("Save", systemImage: "checkmark") { save() }
                                 .disabled(!canSave)
@@ -226,11 +261,20 @@ struct CatalogEditorView: View {
                 wasCreated: wasCreated
             )
             onSaved(result)
-            if addToList, let addError = onAddToList(result) {
-                itemID = savedItemID
-                errorMessage = "Saved to Catalog, but couldn’t add to the list. \(addError)"
-                hapticFeedback.play(.warning)
-                return
+            if addToList {
+                switch onAddToList(result) {
+                case .completed:
+                    break
+                case .confirmation(let confirmation):
+                    itemID = savedItemID
+                    pendingAddConfirmation = confirmation
+                    return
+                case .failed(let addError):
+                    itemID = savedItemID
+                    errorMessage = "Saved to Catalog, but couldn’t add to the list. \(addError)"
+                    hapticFeedback.play(.warning)
+                    return
+                }
             }
             hapticFeedback.play(.success)
             dismiss()
