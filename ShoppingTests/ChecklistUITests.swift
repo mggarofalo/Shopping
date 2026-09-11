@@ -240,6 +240,27 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
     }
 
+    func testAllAndStoreGroupsUseCategoryOrder() throws {
+        let app = launchApp(fixture: "populated")
+        var names = groceryRowLabels(app: app)
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Bananas") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") })
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Chipotles in adobo") })
+        )
+
+        selectStore("Costco", app: app)
+        XCTAssertTrue(row("Dinner rolls", app: app).waitForExistence(timeout: 2))
+        names = groceryRowLabels(app: app)
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Dinner rolls") })
+        )
+    }
+
     func testChecklistControlsRemainUsableAtAccessibilityTextSize() {
         let app = launchApp(fixture: "populated", largeText: true)
         selectStore("Costco", app: app)
@@ -320,6 +341,12 @@ final class ChecklistUITests: XCTestCase {
         app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.grocery.row.", name
         )).firstMatch
+    }
+
+    private func groceryRowLabels(app: XCUIApplication) -> [String] {
+        app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.row."
+        )).allElementsBoundByIndex.map(\.label)
     }
 
     private func openCheckout(app: XCUIApplication) {

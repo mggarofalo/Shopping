@@ -353,6 +353,7 @@ final class CategoryManagementTests: XCTestCase {
         let normal = try service.addRememberedNeed(itemID: normalItem, listID: selection.listID)
         let urgent = try service.addRememberedNeed(itemID: urgentItem, listID: selection.listID, urgency: .urgent)
         let archived = try service.addRememberedNeed(itemID: archivedItem, listID: selection.listID)
+        let unavailable = try service.addOneTimeNeed(title: "Mystery", listID: selection.listID)
         let uncategorized = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
 
         let context = persistence.simulationContext()
@@ -360,16 +361,37 @@ final class CategoryManagementTests: XCTestCase {
             let householdRequest = Household.fetchRequest()
             householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
             let household = try XCTUnwrap(context.fetch(householdRequest).first)
+            let unresolved = NSEntityDescription.insertNewObject(
+                forEntityName: "Category", into: context
+            ) as! Shopping.Category
+            unresolved.id = PersistenceModel.unsetID
+            unresolved.name = "Imported category"
+            unresolved.displayOrder = 0
+            unresolved.isArchived = false
+            unresolved.revision = 0
+            unresolved.household = household
+            let unavailableNeed = try XCTUnwrap(
+                context.fetch(Need.fetchRequest()).first { $0.id == unavailable }
+            )
+            unavailableNeed.oneTimeCategory = unresolved
             let groups = CategoryGrouping.listGroups(
                 needs: try context.fetch(Need.fetchRequest()),
                 categories: try context.fetch(Shopping.Category.fetchRequest()),
                 household: household
             )
 
-            XCTAssertEqual(groups.map(\.title), ["Bakery", "Dairy", "Uncategorized"])
+            XCTAssertEqual(
+                groups.map(\.title),
+                ["Bakery", "Dairy", "Unavailable category", "Uncategorized"]
+            )
+            XCTAssertEqual(
+                groups.map(\.id),
+                [.category(bakery), .category(dairy), .unavailable, .uncategorized]
+            )
             XCTAssertEqual(groups[0].needs.map(\.id), [urgent, normal])
             XCTAssertEqual(groups[1].needs.map(\.id), [archived])
-            XCTAssertEqual(groups[2].needs.map(\.id), [uncategorized])
+            XCTAssertEqual(groups[2].needs.map(\.id), [unavailable])
+            XCTAssertEqual(groups[3].needs.map(\.id), [uncategorized])
         }
     }
 

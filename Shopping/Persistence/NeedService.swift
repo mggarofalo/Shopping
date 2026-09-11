@@ -2305,7 +2305,11 @@ final class NeedService: @unchecked Sendable {
             }
             let token = ClearCartedToken(
                 id: UUID(), householdID: householdID, listID: listID, revisionsByNeedID: snapshot)
-            let rows = CartedNeedOrdering.ordered(captured).map {
+            let rows = CartedNeedOrdering.ordered(
+                captured,
+                categories: Array(household.categories ?? []),
+                household: household
+            ).map {
                 ClearCartedPreviewRow(
                     needID: $0.id, revision: $0.revision, title: $0.item?.name ?? $0.title,
                     quantity: $0.quantity, oneTime: $0.kind == NeedKind.oneTime.rawValue)

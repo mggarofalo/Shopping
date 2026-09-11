@@ -15,6 +15,8 @@ struct CartedGroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
         FetchedResults<Household>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
+        FetchedResults<Category>
     @State private var checkoutDraft: CheckoutDraft?
     @State private var clearErrorMessage: String?
     @State private var error: Error?
@@ -156,7 +158,9 @@ struct CartedGroceriesView: View {
     private var allScopedCarted: [Need] {
         CartedNeedOrdering.ordered(
             GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-                .filter { $0.carted && !$0.archived }
+                .filter { $0.carted && !$0.archived },
+            categories: Array(categories),
+            household: canonicalList?.household
         )
     }
 

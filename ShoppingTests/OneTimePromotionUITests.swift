@@ -126,7 +126,7 @@ final class OneTimePromotionUITests: XCTestCase {
             ).count, 2)
     }
 
-    func testCartedGroceriesPreserveAddedOrder() {
+    func testCartAndCheckoutUseCategoryOrderInsteadOfAddedOrder() {
         let app = launchApp(fixture: "populated")
         let bananasRow = row("Bananas", in: app)
         reveal(bananasRow, in: app)
@@ -148,8 +148,22 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(granola.waitForExistence(timeout: 3))
         XCTAssertTrue(bananas.exists)
         XCTAssertTrue(strawberries.exists)
-        XCTAssertLessThan(strawberries.frame.minY, bananas.frame.minY)
-        XCTAssertLessThan(bananas.frame.minY, granola.frame.minY)
+        XCTAssertLessThan(bananas.frame.minY, strawberries.frame.minY)
+        XCTAssertLessThan(strawberries.frame.minY, granola.frame.minY)
+
+        let checkout = app.buttons["shopping.checkout.start"]
+        reveal(checkout, in: app)
+        checkout.tap()
+        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 2))
+        let checkoutRows = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.checkout.row."
+        )).allElementsBoundByIndex
+        let labels = checkoutRows.map(\.label)
+        let bananasIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Bananas") })
+        let strawberriesIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Strawberries") })
+        let granolaIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Granola") })
+        XCTAssertLessThan(bananasIndex, strawberriesIndex)
+        XCTAssertLessThan(strawberriesIndex, granolaIndex)
     }
 
     private func launchApp(fixture: String? = nil) -> XCUIApplication {
