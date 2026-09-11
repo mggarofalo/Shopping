@@ -25,6 +25,12 @@ struct CatalogItemRow: View {
                     .accessibilityLabel("Archived")
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        [item.name, metadata].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     private var metadata: String {

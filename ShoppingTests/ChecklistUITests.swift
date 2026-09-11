@@ -123,7 +123,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertTrue(item.label.contains("Any store"))
+        XCTAssertTrue(item.label.contains("Any Store"))
     }
 
     func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
@@ -351,7 +351,8 @@ final class ChecklistUITests: XCTestCase {
 
     private func openCheckout(app: XCUIApplication) {
         let checkout = app.buttons["shopping.checkout.start"]
-        reveal(checkout, app: app)
+        XCTAssertTrue(checkout.waitForExistence(timeout: 2))
+        XCTAssertTrue(checkout.isHittable)
         checkout.tap()
         XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 2))
     }
