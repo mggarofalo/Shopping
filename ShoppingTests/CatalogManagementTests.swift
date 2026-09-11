@@ -709,6 +709,41 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertEqual(try service.activeRememberedNeedID(itemID: fresh, listID: selection.listID), result.addedNeedIDs.first)
     }
 
+    func testCatalogAddAndSuggestionPersistTemporaryPersonAtomically() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let personID = try service.createPerson(
+            name: "Sam", householdID: selection.householdID, listID: selection.listID
+        )
+        let firstItem = try service.createItem(name: "Apples", householdID: selection.householdID)
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [firstItem], householdID: selection.householdID,
+            listID: selection.listID, selectedStoreID: nil
+        )
+        let firstResult = try service.applyCatalogAdd(
+            preview.token, renewCarted: false, personID: personID
+        )
+        XCTAssertEqual(
+            try needSnapshot(XCTUnwrap(firstResult.addedNeedIDs.first), persistence: persistence).personID,
+            personID
+        )
+
+        let secondItem = try service.createItem(name: "Pears", householdID: selection.householdID)
+        let secondRevision = try itemRevision(secondItem, persistence: persistence)
+        let secondResult = try service.applyCatalogSuggestion(
+            itemID: secondItem, itemRevision: secondRevision,
+            expectedNeedID: nil, expectedNeedRevision: nil,
+            listID: selection.listID, householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(), categoryID: nil, textFilter: "",
+            urgentOnly: false, renewCarted: false, personID: personID
+        )
+        guard case .added(let secondNeedID) = secondResult else {
+            return XCTFail("Expected suggestion to create a need")
+        }
+        XCTAssertEqual(try needSnapshot(secondNeedID, persistence: persistence).personID, personID)
+    }
+
     func testCatalogSuggestionAtomicallyRevalidatesStatusAndItemRevision() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)
@@ -740,6 +775,30 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertEqual(
             try needSnapshot(collaboratorNeedID, persistence: persistence).urgency,
             NeedUrgency.urgent.rawValue
+        )
+
+        let personID = try service.createPerson(
+            name: "Sam", householdID: selection.householdID, listID: selection.listID
+        )
+        let current = try needSnapshot(collaboratorNeedID, persistence: persistence)
+        XCTAssertEqual(try service.applyCatalogSuggestion(
+            itemID: itemID,
+            itemRevision: displayedItemRevision,
+            expectedNeedID: collaboratorNeedID,
+            expectedNeedRevision: current.revision,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: false,
+            personID: personID,
+            applyPersonToFocusedNeed: true
+        ), .focusExisting(collaboratorNeedID))
+        XCTAssertEqual(
+            try needSnapshot(collaboratorNeedID, persistence: persistence).personID,
+            personID
         )
 
         try service.setCarted(true, needID: collaboratorNeedID)
@@ -920,6 +979,7 @@ final class CatalogManagementTests: XCTestCase {
         let isArchived: Bool
         let revision: Int64
         let clearOperationID: UUID?
+        let personID: UUID?
     }
 
     private func itemSnapshot(_ itemID: UUID, persistence: PersistenceController) throws -> ItemSnapshot {
@@ -974,7 +1034,8 @@ final class CatalogManagementTests: XCTestCase {
                 notes: need.notes,
                 isArchived: need.archived,
                 revision: need.revision,
-                clearOperationID: need.clearOperationID
+                clearOperationID: need.clearOperationID,
+                personID: need.person?.id
             )
         }
     }

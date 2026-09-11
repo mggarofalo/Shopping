@@ -14,20 +14,23 @@ struct GroceryCatalogAddView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var searchText: String
     @State private var catalogEditor: CatalogEditSession?
     @State private var pendingCompletion: GroceryCatalogAddCompletion?
     @State private var errorMessage: String?
+    @State private var personID: UUID?
+    @State private var personSelectionWasChanged = false
     let scope: GroceryAddScope
     let onCompleted: (GroceryCatalogAddCompletion) -> Void
-    let onOneTime: (String) -> Void
+    let onOneTime: (String, UUID?) -> Void
 
     init(
         scope: GroceryAddScope,
         onCompleted: @escaping (GroceryCatalogAddCompletion) -> Void,
-        onOneTime: @escaping (String) -> Void
+        onOneTime: @escaping (String, UUID?) -> Void
     ) {
         self.scope = scope
         self.onCompleted = onCompleted
@@ -45,6 +48,16 @@ struct GroceryCatalogAddView: View {
 
     private var activeStores: [Store] {
         GroceryRowScope.validStores(Array(stores), canonicalList: canonicalList).filter { !$0.isArchived }
+    }
+
+    private var scopedPeople: [Person] {
+        GroceryRowScope.validPeople(Array(people), canonicalList: canonicalList)
+    }
+
+    private var activePeople: [Person] { scopedPeople.filter { !$0.isArchived } }
+
+    private var personSelectionValid: Bool {
+        personID == nil || activePeople.contains(where: { $0.id == personID })
     }
 
     private var purchaseFilter: PurchaseFilter {
@@ -94,6 +107,28 @@ struct GroceryCatalogAddView: View {
     var body: some View {
         NavigationStack {
             List {
+                if !activePeople.isEmpty || personID != nil {
+                    Section("Person") {
+                        Picker("For", selection: $personID) {
+                            Text("No person").tag(UUID?.none)
+                            ForEach(activePeople, id: \.objectID) { person in
+                                Text(person.name).tag(Optional(person.id))
+                            }
+                            if let personID, !activePeople.contains(where: { $0.id == personID }) {
+                                Text("Person unavailable").tag(Optional(personID))
+                            }
+                        }
+                        .onChange(of: personID) { _, _ in
+                            personSelectionWasChanged = true
+                        }
+                        .accessibilityIdentifier("shopping.grocery.catalogPerson")
+                        if !personSelectionValid {
+                            Text("This person is no longer available. Choose another person or No person.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                                .shoppingMultilineText()
+                        }
+                    }
+                }
                 if visibleItems.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                         .listRowBackground(Color.clear)
@@ -112,18 +147,20 @@ struct GroceryCatalogAddView: View {
                             }
                             .buttonStyle(.plain)
                             .frame(minHeight: 44)
+                            .disabled(!personSelectionValid)
                             .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
                         }
                     }
                 }
                 Section("Other options") {
                     Button("Add New “\(displaySearch)”", systemImage: "plus") { createCatalogItem() }
-                        .disabled(!canCreateNew)
+                        .disabled(!canCreateNew || !personSelectionValid)
                         .accessibilityIdentifier("shopping.grocery.catalogAddNew")
                     Button("Add One-Time Item", systemImage: "1.circle") {
-                        onOneTime(displaySearch)
+                        onOneTime(displaySearch, personID)
                         dismiss()
                     }
+                    .disabled(!personSelectionValid)
                     .accessibilityIdentifier("shopping.grocery.addOneTime")
                 }
             }
@@ -215,7 +252,9 @@ struct GroceryCatalogAddView: View {
                 categoryID: scope.categoryID,
                 textFilter: scope.textFilter,
                 urgentOnly: scope.urgentOnly,
-                renewCarted: false
+                renewCarted: false,
+                personID: personID,
+                applyPersonToFocusedNeed: personSelectionWasChanged
             )
             hapticFeedback.play(.success)
             complete(with: completion(for: result))
@@ -269,7 +308,8 @@ struct GroceryCatalogAddView: View {
             let applied = try service.applyCatalogAdd(
                 preview.token,
                 renewCarted: false,
-                scopeConstraint: addScopeConstraint
+                scopeConstraint: addScopeConstraint,
+                personID: personID
             )
             if let id = applied.addedNeedIDs.first {
                 pendingCompletion = .added(id)
@@ -307,7 +347,7 @@ struct GroceryCatalogAddView: View {
                 selectedStoreName: nil
             ),
             onCompleted: { _ in },
-            onOneTime: { _ in }
+            onOneTime: { _, _ in }
         )
     }
 }

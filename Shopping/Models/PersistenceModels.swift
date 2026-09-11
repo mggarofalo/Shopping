@@ -22,7 +22,18 @@ final class Household: IdentifiedManagedObject {
     @NSManaged var stores: Set<Store>?
     @NSManaged var items: Set<Item>?
     @NSManaged var categories: Set<Category>?
+    @NSManaged var people: Set<Person>?
     @NSManaged var clearOperations: Set<ClearOperation>?
+}
+
+@objc(Person)
+final class Person: IdentifiedManagedObject {
+    @NSManaged var name: String
+    @NSManaged var displayOrder: Int64
+    @NSManaged var isArchived: Bool
+    @NSManaged var revision: Int64
+    @NSManaged var household: Household?
+    @NSManaged var needs: Set<Need>?
 }
 
 @objc(Store)
@@ -99,6 +110,7 @@ final class Need: IdentifiedManagedObject {
     @NSManaged var item: Item?
     @NSManaged var oneTimeCategory: Category?
     @NSManaged var oneTimeStores: Set<Store>?
+    @NSManaged var person: Person?
 }
 
 @objc(ClearOperation)
@@ -118,6 +130,12 @@ extension Household {
 extension Store {
     @nonobjc class func fetchRequest() -> NSFetchRequest<Store> {
         NSFetchRequest(entityName: "Store")
+    }
+}
+
+extension Person {
+    @nonobjc class func fetchRequest() -> NSFetchRequest<Person> {
+        NSFetchRequest(entityName: "Person")
     }
 }
 

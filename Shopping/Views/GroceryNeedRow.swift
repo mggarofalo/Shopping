@@ -7,6 +7,7 @@ struct GroceryNeedRow: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.hapticFeedback) private var hapticFeedback
+    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @ObservedObject var need: Need
     let activeStores: [Store]
     var onEdit: ((Need) -> Void)? = nil
@@ -160,6 +161,11 @@ struct GroceryNeedRow: View {
                 Label("One-time", systemImage: "1.circle")
                     .font(.caption).foregroundStyle(Color.grocerySecondary)
             }
+            if let personLabel {
+                Label(personLabel, systemImage: "person")
+                    .font(.caption).foregroundStyle(Color.grocerySecondary)
+                    .accessibilityIdentifier("shopping.grocery.personLabel.\(need.id.uuidString)")
+            }
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -170,11 +176,18 @@ struct GroceryNeedRow: View {
 
     private var title: String { need.item?.name ?? need.title }
 
+    private var personLabel: String? {
+        GroceryPersonLabel.text(
+            for: need.person, people: Array(people), household: need.list?.household
+        )
+    }
+
     private var accessibilityDetails: String {
         var values: [String] = []
         if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
         if need.carted { values.append("In cart") }
+        if let personLabel { values.append("For \(personLabel)") }
         if !need.notes.isEmpty { values.append(need.notes) }
         return values.joined(separator: ", ")
     }

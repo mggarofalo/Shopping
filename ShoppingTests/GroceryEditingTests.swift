@@ -566,6 +566,163 @@ final class GroceryEditingTests: XCTestCase {
         XCTAssertFalse(try snapshot(renewed, persistence: persistence).archived)
     }
 
+    func testPersonAssignmentIsTemporaryAndSurvivesClearUndoAndReopen() throws {
+        let url = temporaryStoreURL()
+        var selection: (householdID: UUID, listID: UUID)!
+        var needID: UUID!
+        var personID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: url)
+            let service = NeedService(persistence: persistence)
+            selection = try service.createHousehold()
+            personID = try service.createPerson(
+                name: "Michael", householdID: selection.householdID, listID: selection.listID
+            )
+            needID = try service.createRememberedGrocery(
+                householdID: selection.householdID, listID: selection.listID,
+                catalog: CatalogItemValues(
+                    name: "Coffee", notes: "", categoryID: nil, anyStore: true, storeIDs: []
+                ),
+                personID: personID
+            ).needID
+            try service.setNeedCarted(
+                needID: needID, householdID: selection.householdID,
+                listID: selection.listID, carted: true
+            )
+            let token = try service.captureCarted(
+                householdID: selection.householdID, listID: selection.listID
+            )
+            XCTAssertEqual(try service.clearCarted(using: token), 1)
+            XCTAssertEqual(try service.undoClear(operationID: token.id), 1)
+            XCTAssertEqual(try snapshot(needID, persistence: persistence).personID, personID)
+        }
+
+        let reopened = try PersistenceController(storeURL: url)
+        let saved = try snapshot(needID, persistence: reopened)
+        XCTAssertEqual(saved.personID, personID)
+        XCTAssertEqual(saved.personName, "Michael")
+        XCTAssertFalse(saved.itemHasPersonRelationship)
+    }
+
+    func testReferencedPersonArchivesAndNewOccurrenceDoesNotRememberAssignment() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let personID = try service.createPerson(
+            name: "Alex", householdID: selection.householdID, listID: selection.listID
+        )
+        let created = try service.createRememberedGrocery(
+            householdID: selection.householdID, listID: selection.listID,
+            catalog: CatalogItemValues(
+                name: "Rice", notes: "", categoryID: nil, anyStore: true, storeIDs: []
+            ),
+            personID: personID
+        )
+        XCTAssertEqual(
+            try service.personRemovalAction(
+                personID: personID, householdID: selection.householdID, listID: selection.listID
+            ),
+            .archive
+        )
+        XCTAssertEqual(
+            try service.removePerson(
+                personID: personID, householdID: selection.householdID,
+                listID: selection.listID, confirmedAction: .archive
+            ),
+            .archive
+        )
+        XCTAssertTrue(try personArchived(personID, persistence: persistence))
+        XCTAssertEqual(try snapshot(created.needID, persistence: persistence).personID, personID)
+
+        _ = try service.removeNeed(
+            needID: created.needID, householdID: selection.householdID,
+            listID: selection.listID, expectedRevision: 0
+        )
+        let newNeedID = try service.addRememberedNeed(itemID: created.itemID, listID: selection.listID)
+        XCTAssertNil(try snapshot(newNeedID, persistence: persistence).personID)
+    }
+
+    func testPeopleManagementAndOneTimeAssignmentRespectHouseholdScope() async throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold()
+        let foreign = try service.createHousehold()
+        let first = try service.createPerson(
+            name: "  Sam  ", householdID: local.householdID, listID: local.listID
+        )
+        let second = try service.createPerson(
+            name: "Taylor", householdID: local.householdID, listID: local.listID
+        )
+        let foreignPerson = try service.createPerson(
+            name: "Foreign", householdID: foreign.householdID, listID: foreign.listID
+        )
+        try service.reorderPeople(
+            [second, first], householdID: local.householdID, listID: local.listID
+        )
+        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Taylor", "Sam"])
+
+        let needID = try service.addOneTimeNeed(
+            title: "Treat", personID: first,
+            householdID: local.householdID, listID: local.listID
+        )
+        XCTAssertEqual(try snapshot(needID, persistence: persistence).personID, first)
+        try await service.saveOneTimeGrocery(
+            needID: needID, householdID: local.householdID, listID: local.listID,
+            title: "Treat", categoryID: nil, storeIDs: [], anyStore: true,
+            need: RememberedNeedValues(), personID: nil
+        )
+        XCTAssertNil(try snapshot(needID, persistence: persistence).personID)
+        XCTAssertThrowsError(try service.addOneTimeNeed(
+            title: "Wrong", personID: foreignPerson,
+            householdID: local.householdID, listID: local.listID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+
+        try service.setPersonArchived(
+            true, personID: second, householdID: local.householdID, listID: local.listID
+        )
+        try service.setPersonArchived(
+            false, personID: second, householdID: local.householdID, listID: local.listID
+        )
+        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Sam", "Taylor"])
+    }
+
+    func testPersonLabelMakesDuplicateIdentityExplicit() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let personID = try service.createPerson(
+            name: "Alex", householdID: selection.householdID, listID: selection.listID
+        )
+        let needID = try service.addOneTimeNeed(
+            title: "Snack", personID: personID,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let needRequest = Need.fetchRequest()
+            needRequest.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
+            let need = try XCTUnwrap(context.fetch(needRequest).first)
+            let person = try XCTUnwrap(need.person)
+            let household = try XCTUnwrap(need.list?.household)
+            XCTAssertEqual(
+                GroceryPersonLabel.text(for: person, people: [person], household: household),
+                "Alex"
+            )
+
+            let duplicate = NSEntityDescription.insertNewObject(forEntityName: "Person", into: context) as! Person
+            duplicate.id = personID
+            duplicate.name = "Conflicting Alex"
+            duplicate.household = household
+            if let store = household.objectID.persistentStore { context.assign(duplicate, to: store) }
+            try context.save()
+            let people = try context.fetch(Person.fetchRequest())
+            XCTAssertEqual(
+                GroceryPersonLabel.text(for: person, people: people, household: household),
+                "Person unavailable"
+            )
+        }
+    }
+
     private struct NeedSnapshot: Equatable {
         let itemID: UUID?
         let title: String
@@ -581,6 +738,9 @@ final class GroceryEditingTests: XCTestCase {
         let itemStoreIDs: Set<UUID>
         let oneTimeCategoryID: UUID?
         let oneTimeStoreIDs: Set<UUID>
+        let personID: UUID?
+        let personName: String?
+        let itemHasPersonRelationship: Bool
     }
 
     private func snapshot(_ id: UUID, persistence: PersistenceController) throws -> NeedSnapshot {
@@ -603,8 +763,32 @@ final class GroceryEditingTests: XCTestCase {
                 itemAnyStore: need.item?.anyStore ?? false,
                 itemStoreIDs: Set(need.item?.stores?.map(\.id) ?? []),
                 oneTimeCategoryID: need.oneTimeCategory?.id,
-                oneTimeStoreIDs: Set(need.oneTimeStores?.map(\.id) ?? [])
+                oneTimeStoreIDs: Set(need.oneTimeStores?.map(\.id) ?? []),
+                personID: need.person?.id,
+                personName: need.person?.name,
+                itemHasPersonRelationship: need.item?.entity.relationshipsByName["person"] != nil
             )
+        }
+    }
+
+    private func personArchived(_ id: UUID, persistence: PersistenceController) throws -> Bool {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Person.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            return try XCTUnwrap(context.fetch(request).first).isArchived
+        }
+    }
+
+    private func orderedPersonNames(
+        _ householdID: UUID, persistence: PersistenceController
+    ) throws -> [String] {
+        let context = persistence.simulationContext()
+        return try context.performAndWait {
+            let request = Person.fetchRequest()
+            request.predicate = NSPredicate(format: "household.id == %@ AND isArchived == NO", householdID as CVarArg)
+            request.sortDescriptors = [NSSortDescriptor(key: "displayOrder", ascending: true)]
+            return try context.fetch(request).map(\.name)
         }
     }
 

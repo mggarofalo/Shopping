@@ -9,12 +9,14 @@ struct GroceryEditorTarget: Identifiable {
     let originalCategoryID: UUID?
     let prefilledName: String
     let initiallyRemembered: Bool
+    let prefilledPersonID: UUID?
 
     init(
         scope: GroceryAddScope,
         need: Need?,
         prefilledName: String = "",
-        initiallyRemembered: Bool = true
+        initiallyRemembered: Bool = true,
+        prefilledPersonID: UUID? = nil
     ) {
         self.scope = scope
         self.need = need
@@ -23,6 +25,7 @@ struct GroceryEditorTarget: Identifiable {
             ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
         self.prefilledName = prefilledName
         self.initiallyRemembered = initiallyRemembered
+        self.prefilledPersonID = prefilledPersonID
     }
 }
 
@@ -47,6 +50,7 @@ struct GroceryEditorView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
         FetchedResults<Category>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists:
         FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
@@ -60,6 +64,7 @@ struct GroceryEditorView: View {
     @State private var categoryID: UUID?
     @State private var storeIDs: Set<UUID>
     @State private var anyStore: Bool
+    @State private var personID: UUID?
     @State private var error: Error?
     @State private var allowDuplicate = false
     @State private var isPromotingOneTime = false
@@ -94,6 +99,7 @@ struct GroceryEditorView: View {
         _purchaseNotes = State(initialValue: need?.notes ?? "")
         _quantity = State(initialValue: need?.quantity.map(Int.init))
         _urgency = State(initialValue: NeedUrgency(rawValue: need?.urgency ?? "") ?? .normal)
+        _personID = State(initialValue: need?.person?.id ?? target.prefilledPersonID)
         if let need {
             if let item {
                 _categoryID = State(initialValue: item.category?.id)
@@ -124,6 +130,9 @@ struct GroceryEditorView: View {
             $0.id == needID && $0.objectID == target.need?.objectID && !$0.archived
         }
     }
+    private var scopedPeople: [Person] {
+        GroceryRowScope.validPeople(Array(people), canonicalList: canonicalList)
+    }
     private var scopeValid: Bool {
         guard service != nil, let householdID = target.scope.householdID,
             let listID = target.scope.listID, let canonicalList,
@@ -138,8 +147,14 @@ struct GroceryEditorView: View {
         return need.kind == NeedKind.oneTime.rawValue && need.item == nil
     }
     private var validQuantity: Bool { quantity.map { (1...99).contains($0) } ?? true }
+    private var personSelectionValid: Bool {
+        guard let personID else { return true }
+        if scopedPeople.contains(where: { $0.id == personID && !$0.isArchived }) { return true }
+        return canonicalNeed?.person?.id == personID &&
+            scopedPeople.contains(where: { $0.id == personID && $0.isArchived })
+    }
     private var canSave: Bool {
-        guard scopeValid, validQuantity else { return false }
+        guard scopeValid, validQuantity, personSelectionValid else { return false }
         if isPromotingOneTime && promotionChoice == .existing {
             return selectedCatalogItem != nil
         }
@@ -326,6 +341,27 @@ struct GroceryEditorView: View {
                         set: { urgency = $0 ? .urgent : .normal }
                     ))
                     .accessibilityIdentifier("shopping.grocery.urgency")
+                    Picker("Person", selection: $personID) {
+                        Text("No person").tag(UUID?.none)
+                        ForEach(scopedPeople.filter { !$0.isArchived }, id: \.objectID) { person in
+                            Text(person.name).tag(Optional(person.id))
+                        }
+                        if let personID,
+                           !scopedPeople.contains(where: { $0.id == personID && !$0.isArchived }) {
+                            if let person = scopedPeople.first(where: { $0.id == personID }) {
+                                Text("\(person.name) (archived)").tag(Optional(personID))
+                            } else {
+                                Text("Person unavailable").tag(Optional(personID))
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("shopping.grocery.person")
+                    if !personSelectionValid {
+                        Text("This person is no longer available. Choose another person or No person.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .shoppingMultilineText()
+                            .accessibilityIdentifier("shopping.grocery.personUnavailable")
+                    }
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
                     CategoryPills(
@@ -642,24 +678,27 @@ struct GroceryEditorView: View {
                     try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, catalog: catalog, need: values(),
+                        personID: personID,
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
                     try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
-                        anyStore: anyStore, need: values())
+                        anyStore: anyStore, need: values(), personID: personID)
                 }
                 savedID = needID
             } else if remembered {
                 savedID = try service.createRememberedGrocery(
                     householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
+                    catalog: catalog, need: values(), personID: personID,
+                    allowingCatalogNameCollision: allowDuplicate
                 ).needID
             } else {
                 savedID = try service.addOneTimeNeed(
                     title: name, notes: purchaseNotes,
                     categoryID: categoryID, storeIDs: storeIDs, anyStore: anyStore,
-                    quantity: quantity.map(Int64.init), urgency: urgency, householdID: householdID, listID: listID)
+                    quantity: quantity.map(Int64.init), urgency: urgency, personID: personID,
+                    householdID: householdID, listID: listID)
             }
             hapticFeedback.play(.success)
             onSaved(savedID, categoryID)
@@ -700,14 +739,15 @@ struct GroceryEditorView: View {
                 )
                 _ = try service.rememberOneTimeGroceryCreatingItem(
                     needID: needID, householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), allowingCatalogNameCollision: allowDuplicate
+                    catalog: catalog, need: values(), personID: personID,
+                    allowingCatalogNameCollision: allowDuplicate
                 )
                 savedCategoryID = categoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
                 _ = try service.rememberOneTimeGrocery(
                     needID: needID, householdID: householdID, listID: listID,
-                    existingItemID: item.id, need: values()
+                    existingItemID: item.id, need: values(), personID: personID
                 )
                 savedCategoryID = item.category?.id
             }
@@ -780,7 +820,8 @@ struct GroceryEditorView: View {
                 categoryID: target.scope.categoryID,
                 textFilter: target.scope.textFilter,
                 urgentOnly: target.scope.urgentOnly,
-                renewCarted: renewCarted
+                renewCarted: renewCarted,
+                personID: personID
             ) {
             case .added(let needID), .renewed(let needID):
                 onSaved(needID, item.category?.id)

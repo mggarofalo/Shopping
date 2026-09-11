@@ -143,12 +143,13 @@ struct GroceriesView: View {
                         pendingCatalogCompletion = $0
                         pendingCatalogScope = scope
                     },
-                    onOneTime: { name in
+                    onOneTime: { name, personID in
                         pendingOneTimeTarget = GroceryEditorTarget(
                             scope: scope,
                             need: nil,
                             prefilledName: name,
-                            initiallyRemembered: false
+                            initiallyRemembered: false,
+                            prefilledPersonID: personID
                         )
                     }
                 )
