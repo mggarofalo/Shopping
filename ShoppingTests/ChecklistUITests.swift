@@ -179,6 +179,7 @@ final class ChecklistUITests: XCTestCase {
         app.buttons["shopping.grocery.save"].tap()
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         openCheckout(app: app)
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.buttons["shopping.checkout.undo"].waitForExistence(timeout: 3))
