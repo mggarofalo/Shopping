@@ -5,8 +5,9 @@ final class CategoryManagementUITests: XCTestCase {
 
     func testCategoryCreateStagedRenameAndImmediateUndoableRemoval() {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+        let storePath = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingCategoryUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = storePath
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
@@ -48,9 +49,17 @@ final class CategoryManagementUITests: XCTestCase {
         dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
         XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
-        app.navigationBars["Categories"].buttons.firstMatch.tap()
-        app.tabBars.buttons["Groceries"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Dry goods deleted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.categories.undoDelete"].waitForNonExistence(timeout: 12))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Categories"].tap()
+        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["shopping.categories.undoDelete"].exists)
+        XCTAssertFalse(categoryRow(named: "Dry goods", in: app).exists)
     }
 
     func testCategoryMergeAndDeleteMigrationUseAnchoredDestinationMenus() {
@@ -79,7 +88,7 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertFalse(produce.exists)
     }
 
-    func testCategoryBatchSelectAllPresentsOneRedDeleteConfirmation() {
+    func testCategorySelectionDeleteRequiresOneSourceAndOffersMigrationWithoutConfirmation() {
         let app = launchPopulated()
         app.tabBars.buttons["Settings"].tap()
         app.buttons["Categories"].tap()
@@ -92,18 +101,18 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["0 Selected"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["shopping.categories.selectAll"].tap()
-        let delete = app.buttons["shopping.categories.batchDelete"]
+        var delete = app.buttons["shopping.categories.batchDelete"]
+        XCTAssertFalse(delete.isEnabled)
+        app.buttons["shopping.categories.selectAll"].tap()
+        app.staticTexts["Produce"].tap()
+        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        delete = app.buttons["shopping.categories.batchDelete"]
         XCTAssertTrue(delete.isEnabled)
         delete.tap()
-        let confirmation = app.sheets["Delete selected categories?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
-        XCTAssertTrue(confirmation.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "will be permanently deleted")
-        ).firstMatch.exists)
-        XCTAssertTrue(confirmation.buttons["Delete"].exists)
-        confirmation.buttons["Delete"].tap()
-        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["OK"].tap()
+        XCTAssertFalse(app.sheets["Delete selected categories?"].exists)
+        XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
+        app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
     }
 
     func testStoreAndCatalogBatchActionsReflectSelectedState() {
@@ -220,7 +229,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.staticTexts["Pantry"].tap()
         XCTAssertTrue(app.staticTexts["2 Selected"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchEdit"].isEnabled)
-        XCTAssertTrue(app.buttons["shopping.categories.batchDelete"].isEnabled)
+        XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["Done"].tap()
 
         app.navigationBars["Categories"].buttons.firstMatch.tap()

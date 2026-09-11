@@ -1326,6 +1326,34 @@ final class NeedService: @unchecked Sendable {
                 destination = nil
                 destinationAvailable = true
             }
+            let categoryRequest = Category.fetchRequest()
+            let orderPeers = try context.fetch(categoryRequest).filter {
+                $0.household == household &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore &&
+                    $0.isArchived == token.sourceIsArchived &&
+                    $0.displayOrder >= token.sourceDisplayOrder
+            }
+            guard !orderPeers.contains(where: { $0.id == PersistenceModel.unsetID }),
+                  Set(orderPeers.map(\.id)).count == orderPeers.count else {
+                throw NeedServiceError.scopeChanged
+            }
+            for category in orderPeers {
+                guard let canonical = try self.category(id: category.id, in: context),
+                      canonical === category else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
+            if orderPeers.contains(where: { $0.displayOrder == token.sourceDisplayOrder }) {
+                guard orderPeers.allSatisfy({
+                    $0.displayOrder < Int64.max && $0.revision < Int64.max
+                }) else {
+                    throw NeedServiceError.scopeChanged
+                }
+                for category in orderPeers {
+                    category.displayOrder += 1
+                    try self.advanceRevision(of: category)
+                }
+            }
             let source: Category = self.insert("Category", in: context)
             source.id = token.sourceCategoryID
             source.name = token.sourceName
