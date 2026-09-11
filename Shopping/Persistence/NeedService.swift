@@ -1,6 +1,40 @@
 import CoreData
 import os
 
+struct CategoryMergeToken: Codable, Equatable {
+    let id: UUID
+    let householdID: UUID
+    let listID: UUID
+    let sourceCategoryID: UUID
+    let destinationCategoryID: UUID?
+    let sourceName: String
+    let sourceDisplayOrder: Int64
+    let sourceIsArchived: Bool
+    let sourceRevision: Int64
+    let references: [ManagementBatchReference]
+    let archivedOneTimeNeedIDs: Set<UUID>
+}
+
+struct CategoryMergePreview: Equatable {
+    let token: CategoryMergeToken
+    let catalogItemCount: Int
+    let oneTimeNeedCount: Int
+
+    var referenceCount: Int { catalogItemCount + oneTimeNeedCount }
+}
+
+struct CategoryMergeResult: Equatable {
+    let catalogItemCount: Int
+    let oneTimeNeedCount: Int
+}
+
+struct CategoryMergeUndoResult: Equatable {
+    let restoredCatalogItemCount: Int
+    let restoredOneTimeNeedCount: Int
+    let changedCount: Int
+    let missingCount: Int
+}
+
 enum ShoppingPerformanceTrace {
     static let log = OSLog(subsystem: "com.mggarofalo.shopping", category: .pointsOfInterest)
 }
@@ -1166,6 +1200,195 @@ final class NeedService: @unchecked Sendable {
                 throw NeedServiceError.scopeChanged
             }
             try self.detachAndDelete(category, in: context)
+        }
+    }
+
+    func captureCategoryMerge(
+        sourceCategoryID: UUID,
+        destinationCategoryID: UUID?,
+        householdID: UUID,
+        listID: UUID
+    ) throws -> CategoryMergePreview {
+        try readOnWriter { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            guard let source = try self.category(id: sourceCategoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard self.belongs(source, to: household) else {
+                throw NeedServiceError.scopeChanged
+            }
+            if let destinationCategoryID {
+                guard destinationCategoryID != sourceCategoryID,
+                      let destination = try self.category(id: destinationCategoryID, in: context),
+                      self.belongs(destination, to: household) else {
+                    throw NeedServiceError.scopeChanged
+                }
+            }
+            let references = try self.validatedCategoryMergeReferences(
+                source, household: household, in: context
+            )
+            return CategoryMergePreview(
+                token: CategoryMergeToken(
+                    id: UUID(), householdID: householdID, listID: listID,
+                    sourceCategoryID: source.id,
+                    destinationCategoryID: destinationCategoryID,
+                    sourceName: source.name,
+                    sourceDisplayOrder: source.displayOrder,
+                    sourceIsArchived: source.isArchived,
+                    sourceRevision: source.revision,
+                    references: references,
+                    archivedOneTimeNeedIDs: Set(
+                        (source.oneTimeNeeds ?? []).filter(\.archived).map(\.id)
+                    )
+                ),
+                catalogItemCount: references.count { $0.kind == .catalogItem },
+                oneTimeNeedCount: references.count { $0.kind == .oneTimeNeed }
+            )
+        }
+    }
+
+    func applyCategoryMerge(_ token: CategoryMergeToken) throws -> CategoryMergeResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: token.householdID, listID: token.listID, in: context
+            )
+            guard let source = try self.category(id: token.sourceCategoryID, in: context) else {
+                throw NeedServiceError.categoryNotFound
+            }
+            guard self.belongs(source, to: household),
+                  source.revision == token.sourceRevision,
+                  source.name == token.sourceName,
+                  source.displayOrder == token.sourceDisplayOrder,
+                  source.isArchived == token.sourceIsArchived,
+                  try self.validatedCategoryMergeReferences(
+                    source, household: household, in: context
+                  ) == token.references,
+                  Set((source.oneTimeNeeds ?? []).filter(\.archived).map(\.id)) ==
+                    token.archivedOneTimeNeedIDs else {
+                throw NeedServiceError.scopeChanged
+            }
+            let destination: Category?
+            if let destinationID = token.destinationCategoryID {
+                guard destinationID != source.id,
+                      let resolved = try self.category(id: destinationID, in: context),
+                      self.belongs(resolved, to: household) else {
+                    throw NeedServiceError.scopeChanged
+                }
+                destination = resolved
+            } else {
+                destination = nil
+            }
+            guard token.references.allSatisfy({ $0.revision < Int64.max }) else {
+                throw NeedServiceError.scopeChanged
+            }
+            for item in source.items ?? [] {
+                item.category = destination
+                try self.advanceRevision(of: item)
+            }
+            for need in source.oneTimeNeeds ?? [] {
+                need.oneTimeCategory = destination
+                if !need.archived {
+                    try self.advanceRevision(of: need)
+                    need.clearOperationID = nil
+                }
+            }
+            context.delete(source)
+            return CategoryMergeResult(
+                catalogItemCount: token.references.count { $0.kind == .catalogItem },
+                oneTimeNeedCount: token.references.count { $0.kind == .oneTimeNeed }
+            )
+        }
+    }
+
+    func undoCategoryMerge(_ token: CategoryMergeToken) throws -> CategoryMergeUndoResult {
+        try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: token.householdID, listID: token.listID, in: context
+            )
+            guard try self.category(id: token.sourceCategoryID, in: context) == nil,
+                  token.sourceRevision < Int64.max else {
+                throw NeedServiceError.scopeChanged
+            }
+            let destination: Category?
+            let destinationAvailable: Bool
+            if let destinationID = token.destinationCategoryID {
+                if let resolved = try self.category(id: destinationID, in: context),
+                   self.belongs(resolved, to: household) {
+                    destination = resolved
+                    destinationAvailable = true
+                } else {
+                    destination = nil
+                    destinationAvailable = false
+                }
+            } else {
+                destination = nil
+                destinationAvailable = true
+            }
+            let source: Category = self.insert("Category", in: context)
+            source.id = token.sourceCategoryID
+            source.name = token.sourceName
+            source.displayOrder = token.sourceDisplayOrder
+            source.isArchived = token.sourceIsArchived
+            source.revision = token.sourceRevision + 1
+            self.route(source, with: household, in: context)
+            source.household = household
+
+            let itemReferences = token.references.filter { $0.kind == .catalogItem }
+            let needReferences = token.references.filter { $0.kind == .oneTimeNeed }
+            let items = try self.fetchBatch(
+                ids: Set(itemReferences.map(\.id)), request: Item.fetchRequest(), id: \.id,
+                in: context, identityError: .invalidCatalogIdentity
+            )
+            let needs = try self.fetchBatch(
+                ids: Set(needReferences.map(\.id)), request: Need.fetchRequest(), id: \.id,
+                in: context, identityError: .invalidOccurrenceIdentity
+            )
+            var restoredItems = 0
+            var restoredNeeds = 0
+            var changed = 0
+            var missing = 0
+            for reference in itemReferences {
+                guard let item = items[reference.id] else { missing += 1; continue }
+                guard item.household == household,
+                      item.objectID.persistentStore == household.objectID.persistentStore,
+                      destinationAvailable,
+                      item.category == destination,
+                      reference.revision < Int64.max - 1,
+                      item.revision == reference.revision + 1 else {
+                    changed += 1; continue
+                }
+                item.category = source
+                try self.advanceRevision(of: item)
+                restoredItems += 1
+            }
+            for reference in needReferences {
+                guard let need = needs[reference.id] else { missing += 1; continue }
+                let wasArchived = token.archivedOneTimeNeedIDs.contains(reference.id)
+                let expectedRevision = wasArchived ? reference.revision : reference.revision + 1
+                guard reference.revision < (wasArchived ? Int64.max : Int64.max - 1),
+                      need.list?.household == household,
+                      need.objectID.persistentStore == household.objectID.persistentStore,
+                      destinationAvailable,
+                      need.oneTimeCategory == destination,
+                      need.archived == wasArchived,
+                      need.revision == expectedRevision else {
+                    changed += 1; continue
+                }
+                need.oneTimeCategory = source
+                if !wasArchived {
+                    try self.advanceRevision(of: need)
+                    need.clearOperationID = nil
+                }
+                restoredNeeds += 1
+            }
+            return CategoryMergeUndoResult(
+                restoredCatalogItemCount: restoredItems,
+                restoredOneTimeNeedCount: restoredNeeds,
+                changedCount: changed,
+                missingCount: missing
+            )
         }
     }
 
@@ -2651,6 +2874,44 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    private func validatedCategoryMergeReferences(
+        _ category: Category,
+        household: Household,
+        in context: NSManagedObjectContext
+    ) throws -> [ManagementBatchReference] {
+        let references = categoryReferences(category)
+        let itemIDs = Set(references.filter { $0.kind == .catalogItem }.map(\.id))
+        let needIDs = Set(references.filter { $0.kind == .oneTimeNeed }.map(\.id))
+        guard !itemIDs.contains(PersistenceModel.unsetID),
+              !needIDs.contains(PersistenceModel.unsetID),
+              itemIDs.count + needIDs.count == references.count else {
+            throw NeedServiceError.scopeChanged
+        }
+        let items = try fetchBatch(
+            ids: itemIDs, request: Item.fetchRequest(), id: \.id, in: context,
+            identityError: .invalidCatalogIdentity
+        )
+        let needs = try fetchBatch(
+            ids: needIDs, request: Need.fetchRequest(), id: \.id, in: context,
+            identityError: .invalidOccurrenceIdentity
+        )
+        guard items.count == itemIDs.count,
+              needs.count == needIDs.count,
+              items.values.allSatisfy({
+                  $0.household == household &&
+                      $0.objectID.persistentStore == household.objectID.persistentStore &&
+                      $0.category == category
+              }),
+              needs.values.allSatisfy({
+                  $0.list?.household == household &&
+                      $0.objectID.persistentStore == household.objectID.persistentStore &&
+                      $0.oneTimeCategory == category
+              }) else {
+            throw NeedServiceError.scopeChanged
+        }
+        return references
+    }
+
     private func advanceRevision(of store: Store) throws {
         let (revision, overflow) = store.revision.addingReportingOverflow(1)
         guard !overflow else { throw NeedServiceError.scopeChanged }
@@ -2673,6 +2934,12 @@ final class NeedService: @unchecked Sendable {
         let (revision, overflow) = item.revision.addingReportingOverflow(1)
         guard !overflow else { throw NeedServiceError.scopeChanged }
         item.revision = revision
+    }
+
+    private func advanceRevision(of need: Need) throws {
+        let (revision, overflow) = need.revision.addingReportingOverflow(1)
+        guard !overflow else { throw NeedServiceError.scopeChanged }
+        need.revision = revision
     }
 
     private func detachAndDelete(_ category: Category, in context: NSManagedObjectContext) throws {

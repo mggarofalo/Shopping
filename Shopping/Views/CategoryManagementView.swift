@@ -37,12 +37,12 @@ struct CategoryManagementView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var editor: CategoryEditorSession?
     @State private var editorName = ""
-    @State private var removingCategory: Category?
     @State private var error: Error?
     @State private var selectedIDs: Set<UUID> = []
     @State private var editMode: EditMode = .inactive
@@ -142,6 +142,16 @@ struct CategoryManagementView: View {
                         .disabled(selectedCategories.count != 1)
                         .accessibilityIdentifier("shopping.categories.batchEdit")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                    Menu {
+                        if let source = selectedCategories.first {
+                            mergeDestinationButtons(for: source)
+                        }
+                    } label: {
+                        Label("Merge Into", systemImage: "arrow.triangle.merge")
+                    }
+                    .disabled(selectedCategories.count != 1 || householdCategories.count < 2)
+                    .accessibilityIdentifier("shopping.categories.merge")
+                    .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .labelStyle(.iconOnly)
                     .padding(.horizontal, 8)
@@ -243,12 +253,23 @@ struct CategoryManagementView: View {
             .tint(category.isArchived ? .green : .orange)
             .disabled(!selectionAvailable)
             .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
-            Button(role: .destructive) { removingCategory = category } label: {
-                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            if categoryHasReferences(category) {
+                Menu {
+                    deleteMigrationButtons(for: category)
+                } label: {
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+                }
+                .tint(.red)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
+            } else {
+                Button(role: .destructive) { merge(category, into: nil) } label: {
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+                }
+                .tint(.red)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
             }
-            .tint(.red)
-            .disabled(!selectionAvailable)
-            .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
         }
         .contextMenu {
             if !editMode.isEditing {
@@ -257,30 +278,41 @@ struct CategoryManagementView: View {
                 Button(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox") {
                     setArchived(category, !category.isArchived)
                 }
-                Button("Delete", systemImage: "trash", role: .destructive) {
-                    removingCategory = category
+                if householdCategories.count > 1 {
+                    Menu("Merge Into", systemImage: "arrow.triangle.merge") {
+                        mergeDestinationButtons(for: category)
+                    }
+                }
+                if categoryHasReferences(category) {
+                    Menu("Delete", systemImage: "trash") {
+                        deleteMigrationButtons(for: category)
+                    }
+                } else {
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        merge(category, into: nil)
+                    }
                 }
             }
         }
-        .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
-        .accessibilityAction(named: Text("\(category.isArchived ? "Restore" : "Archive") \(category.name)")) {
-            setArchived(category, !category.isArchived)
-        }
-        .accessibilityAction(named: Text("Delete \(category.name)")) {
-            removingCategory = category
-        }
-        .confirmationDialog(
-            "Delete \(category.name)?",
-            isPresented: Binding(
-                get: { removingCategory?.objectID == category.objectID },
-                set: { if !$0 { removingCategory = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete category", role: .destructive) { remove(category) }
-            Button("Cancel", role: .cancel) { removingCategory = nil }
-        } message: {
-            Text("Groceries and catalog items will remain and become Uncategorized.")
+        .accessibilityActions {
+            Button("Edit \(category.name)") { beginRename(category) }
+            Button("\(category.isArchived ? "Restore" : "Archive") \(category.name)") {
+                setArchived(category, !category.isArchived)
+            }
+            ForEach(householdCategories.filter { $0 != category }, id: \.objectID) { destination in
+                Button(
+                    destination.isArchived
+                        ? "Merge into \(destination.name), Archived"
+                        : "Merge into \(destination.name)"
+                ) { merge(category, into: destination) }
+            }
+            if categoryHasReferences(category) {
+                Button("Move items to Uncategorized and delete \(category.name)") {
+                    merge(category, into: nil)
+                }
+            } else {
+                Button("Delete \(category.name)") { merge(category, into: nil) }
+            }
         }
     }
 
@@ -342,16 +374,78 @@ struct CategoryManagementView: View {
         } catch { self.error = error }
     }
 
-    private func remove(_ category: Category) {
+    private func categoryHasReferences(_ category: Category) -> Bool {
+        !(category.items ?? []).isEmpty || !(category.oneTimeNeeds ?? []).isEmpty
+    }
+
+    @ViewBuilder
+    private func mergeDestinationButtons(for source: Category) -> some View {
+        ForEach(householdCategories.filter { $0 != source }, id: \.objectID) { destination in
+            Button(destination.isArchived ? "\(destination.name) (Archived)" : destination.name) {
+                merge(source, into: destination)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deleteMigrationButtons(for source: Category) -> some View {
+        Section("Move items to") {
+            mergeDestinationButtons(for: source)
+        }
+        Button("Uncategorized", role: .destructive) { merge(source, into: nil) }
+            .accessibilityIdentifier("shopping.categories.deleteUncategorized")
+    }
+
+    private func merge(_ source: Category, into destination: Category?) {
         guard selectionAvailable, let service, let householdID = selection.householdID,
               let listID = selection.listID else { return }
         do {
-            try service.removeCategory(
-                categoryID: category.id, householdID: householdID, listID: listID
+            let preview = try service.captureCategoryMerge(
+                sourceCategoryID: source.id, destinationCategoryID: destination?.id,
+                householdID: householdID, listID: listID
             )
+            _ = try service.applyCategoryMerge(preview.token)
+            let destinationName = destination?.name
+            let message: String
+            if preview.referenceCount == 0 {
+                message = "\(preview.token.sourceName) deleted"
+            } else if let destinationName {
+                message = "\(preview.token.sourceName) merged into \(destinationName)"
+            } else {
+                message = "\(preview.token.sourceName) deleted; items moved to Uncategorized"
+            }
+            clearSelection()
             hapticFeedback.play(.warning)
-            removingCategory = nil
+            toastCenter?.show(
+                message,
+                duration: .undo,
+                action: ShoppingToastAction(
+                    title: "Undo",
+                    accessibilityIdentifier: "shopping.categories.undoDelete"
+                ) { undoMerge(preview.token) }
+            )
         } catch { self.error = error }
+    }
+
+    private func undoMerge(_ token: CategoryMergeToken) -> Bool {
+        guard let service,
+              selection.householdID == token.householdID,
+              selection.listID == token.listID,
+              canonicalList != nil else { return false }
+        do {
+            let result = try service.undoCategoryMerge(token)
+            if result.changedCount > 0 || result.missingCount > 0 {
+                toastCenter?.show(
+                    "Category restored. Some newer item changes were kept.",
+                    duration: .attention
+                )
+            }
+            hapticFeedback.play(.success)
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
