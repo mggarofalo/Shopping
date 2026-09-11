@@ -3,6 +3,7 @@ import SwiftUI
 
 struct CatalogSaveResult {
     let itemID: UUID
+    let itemName: String
     let wasCreated: Bool
 }
 
@@ -27,12 +28,12 @@ struct CatalogEditorView: View {
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
     let onSaved: (CatalogSaveResult) -> Void
-    let onAddToList: (UUID) -> Void
+    let onAddToList: (CatalogSaveResult) -> String?
 
     init(
         session: CatalogEditSession,
         onSaved: @escaping (CatalogSaveResult) -> Void,
-        onAddToList: @escaping (UUID) -> Void = { _ in }
+        onAddToList: @escaping (CatalogSaveResult) -> String? = { _ in nil }
     ) {
         self.session = session
         self.onSaved = onSaved
@@ -152,12 +153,13 @@ struct CatalogEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     HStack {
-                        if itemID != nil {
-                            Button("Add to list", systemImage: "note.text.badge.plus") { save(addToList: true) }
-                                .labelStyle(.iconOnly)
-                                .disabled(!canSave || currentItem?.isArchived == true)
-                                .accessibilityIdentifier("shopping.catalog.editorAddToList")
+                        Button("Save and Add to List", systemImage: "note.text.badge.plus") {
+                            save(addToList: true)
                         }
+                        .labelStyle(.iconOnly)
+                        .disabled(!canSave || currentItem?.isArchived == true)
+                        .accessibilityLabel("Save and Add to List")
+                        .accessibilityIdentifier("shopping.catalog.saveAndAddToList")
                         Button("Save", systemImage: "checkmark") { save() }
                             .disabled(!canSave)
                             .accessibilityIdentifier("shopping.catalog.save")
@@ -213,9 +215,19 @@ struct CatalogEditorView: View {
                     allowingNameCollision: allowingNameCollision
                 )
             }
+            let result = CatalogSaveResult(
+                itemID: savedItemID,
+                itemName: values.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                wasCreated: wasCreated
+            )
+            onSaved(result)
+            if addToList, let addError = onAddToList(result) {
+                itemID = savedItemID
+                errorMessage = "Saved to Catalog, but couldn’t add to the list. \(addError)"
+                hapticFeedback.play(.warning)
+                return
+            }
             hapticFeedback.play(.success)
-            onSaved(CatalogSaveResult(itemID: savedItemID, wasCreated: wasCreated))
-            if addToList { onAddToList(savedItemID) }
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
@@ -228,7 +240,7 @@ struct CatalogEditorView: View {
                 itemID: itemID, householdID: householdID, listID: listID,
                 archived: archived
             )
-            onSaved(CatalogSaveResult(itemID: itemID, wasCreated: false))
+            onSaved(CatalogSaveResult(itemID: itemID, itemName: values.name, wasCreated: false))
             dismiss()
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }

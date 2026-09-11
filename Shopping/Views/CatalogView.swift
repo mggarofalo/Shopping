@@ -204,8 +204,10 @@ struct CatalogView: View {
             .sheet(item: $editor) { session in
                 CatalogEditorView(session: session, onSaved: { result in
                     catalogItemSaved(result.itemID, wasCreated: result.wasCreated)
-                }) { itemID in
-                    if let item = scopedItems.first(where: { $0.id == itemID }) { prepareIndividualAdd(item) }
+                }) { result in
+                    let message = prepareIndividualAdd(itemID: result.itemID, itemName: result.itemName)
+                    if message != nil { errorMessage = nil }
+                    return message
                 }
             }
             .confirmationDialog(
@@ -234,6 +236,17 @@ struct CatalogView: View {
                 Button("OK", role: .cancel) { removalNotice = nil }
             } message: {
                 Text(removalNotice ?? "")
+            }
+            .alert(
+                "Couldn’t update Catalog",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "Unknown error")
             }
             .modifier(CatalogBatchDialogs(
                 preview: $batchPreview, apply: applyBatch
@@ -631,19 +644,30 @@ struct CatalogView: View {
     }
 
     private func prepareIndividualAdd(_ item: Item) {
-        guard let preview = captureCatalogAdd(ids: [item.id]) else { return }
+        _ = prepareIndividualAdd(itemID: item.id, itemName: item.name)
+    }
+
+    private func prepareIndividualAdd(itemID: UUID, itemName: String) -> String? {
+        guard let preview = captureCatalogAdd(ids: [itemID]) else {
+            return errorMessage ?? "The catalog item or household is no longer available."
+        }
         guard let entry = preview.token.entries.first else {
             showCatalogNotice("This catalog item is no longer available.", duration: .attention)
-            return
+            return nil
         }
         switch entry.disposition {
         case .add:
-            applyCatalogAdd(preview.token, renewCarted: false)
+            guard applyCatalogAddResult(preview.token, renewCarted: false) != nil else {
+                return errorMessage ?? "The catalog item could not be added."
+            }
         case .focusExisting:
             let result = applyCatalogAddResult(preview.token, renewCarted: false)
-            if let id = result?.existingNeedIDs.first { viewNeed(id) }
+            guard let result else {
+                return errorMessage ?? "The existing grocery could not be opened."
+            }
+            if let id = result.existingNeedIDs.first { viewNeed(id) }
         case .needAgain:
-            addConfirmation = CatalogAddConfirmation(preview: preview, itemName: item.name)
+            addConfirmation = CatalogAddConfirmation(preview: preview, itemName: itemName)
         case .archived:
             showCatalogNotice("Restore this catalog item before adding it.", duration: .attention)
         case .ineligible:
@@ -652,6 +676,7 @@ struct CatalogView: View {
                 duration: .attention
             )
         }
+        return nil
     }
 
     private func prepareBatchAdd() {
