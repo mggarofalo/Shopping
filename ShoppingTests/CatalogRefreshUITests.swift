@@ -101,7 +101,14 @@ final class CatalogRefreshUITests: XCTestCase {
         let confirmation = app.sheets["Need Blueberries again?"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 3))
         XCTAssertFalse(row.exists, "The renamed item should no longer match the active search")
-        app.buttons["Cancel"].tap()
+        let scopedCancel = confirmation.buttons["Cancel"]
+        if scopedCancel.exists {
+            scopedCancel.tap()
+        } else {
+            let visibleCancel = app.buttons.matching(identifier: "Cancel")
+            XCTAssertEqual(visibleCancel.count, 1)
+            visibleCancel.element(boundBy: 0).tap()
+        }
         XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
     }
 

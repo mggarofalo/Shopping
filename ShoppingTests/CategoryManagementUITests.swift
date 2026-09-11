@@ -72,7 +72,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.staticTexts["Produce"].tap()
         let merge = app.buttons["shopping.categories.merge"]
         XCTAssertTrue(merge.isEnabled)
-        merge.tap()
+        tapVisibleControlWithoutAXScroll(merge, in: app)
         app.buttons["Pantry"].tap()
         XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Produce"].exists)
@@ -108,7 +108,7 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
         delete = app.buttons["shopping.categories.batchDelete"]
         XCTAssertTrue(delete.isEnabled)
-        delete.tap()
+        tapVisibleControlWithoutAXScroll(delete, in: app)
         XCTAssertFalse(app.sheets["Delete selected categories?"].exists)
         XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
         app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
@@ -174,8 +174,10 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
         let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.swipeLeft()
@@ -301,6 +303,21 @@ final class CategoryManagementUITests: XCTestCase {
             predicate: NSPredicate(format: "isHittable == true"), object: element
         )
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func tapVisibleControlWithoutAXScroll(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        let frame = element.frame
+        XCTAssertTrue(usable(frame) && app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+            .tap()
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
     private func replaceText(in field: XCUIElement, with text: String) {
