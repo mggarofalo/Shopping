@@ -656,10 +656,15 @@ final class GroceryEditingTests: XCTestCase {
         let foreignPerson = try service.createPerson(
             name: "Foreign", householdID: foreign.householdID, listID: foreign.listID
         )
+        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Sam", "Taylor"])
+        try service.renamePerson(
+            name: "  Morgan  ", personID: first,
+            householdID: local.householdID, listID: local.listID
+        )
         try service.reorderPeople(
             [second, first], householdID: local.householdID, listID: local.listID
         )
-        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Taylor", "Sam"])
+        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Taylor", "Morgan"])
 
         let needID = try service.addOneTimeNeed(
             title: "Treat", personID: first,
@@ -683,7 +688,7 @@ final class GroceryEditingTests: XCTestCase {
         try service.setPersonArchived(
             false, personID: second, householdID: local.householdID, listID: local.listID
         )
-        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Sam", "Taylor"])
+        XCTAssertEqual(try orderedPersonNames(local.householdID, persistence: persistence), ["Morgan", "Taylor"])
     }
 
     func testPersonLabelMakesDuplicateIdentityExplicit() throws {
