@@ -173,6 +173,14 @@ enum CatalogAddDisposition: String, Codable, Equatable {
 
 enum CatalogAddDestination { case list, cart }
 
+struct CatalogAddScopeConstraint: Equatable {
+    let purchaseFilter: PurchaseFilter
+    let categoryID: UUID?
+    let textFilters: [String]
+    let urgentOnly: Bool
+    let newNeedUrgency: NeedUrgency
+}
+
 struct CatalogAddEntry: Codable, Equatable {
     let itemID: UUID
     let itemRevision: Int64
@@ -482,7 +490,8 @@ final class NeedService: @unchecked Sendable {
         itemIDs: Set<UUID>,
         householdID: UUID,
         listID: UUID,
-        selectedStoreID: UUID?
+        selectedStoreID: UUID?,
+        scopeConstraint: CatalogAddScopeConstraint? = nil
     ) throws -> CatalogAddPreview {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add preview", signpostID: signpostID)
@@ -503,6 +512,7 @@ final class NeedService: @unchecked Sendable {
             let needsByItemID = try self.activeRememberedNeeds(
                 itemIDs: itemIDs, listID: listID, in: context
             )
+            let activeStoreIDs = try self.activeStoreIDs(household: household, in: context)
             var entries: [CatalogAddEntry] = []
             var addCount = 0
             var existingCount = 0
@@ -524,6 +534,15 @@ final class NeedService: @unchecked Sendable {
                     disposition = .archived
                     archivedCount += 1
                 } else if !self.catalogItem(item, isEligibleFor: selectedStore) {
+                    disposition = .ineligible
+                    ineligibleCount += 1
+                } else if let scopeConstraint,
+                          !self.catalogItem(
+                            item,
+                            need: need,
+                            matches: scopeConstraint,
+                            activeStoreIDs: activeStoreIDs
+                          ) {
                     disposition = .ineligible
                     ineligibleCount += 1
                 } else if let need, need.carted {
@@ -557,7 +576,8 @@ final class NeedService: @unchecked Sendable {
     func applyCatalogAdd(
         _ token: CatalogAddToken,
         renewCarted: Bool,
-        destination: CatalogAddDestination = .list
+        destination: CatalogAddDestination = .list,
+        scopeConstraint: CatalogAddScopeConstraint? = nil
     ) throws -> CatalogAddResult {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog add apply", signpostID: signpostID)
@@ -583,6 +603,7 @@ final class NeedService: @unchecked Sendable {
             let needsByItemID = try self.activeRememberedNeeds(
                 itemIDs: itemIDs, listID: token.listID, in: context
             )
+            let activeStoreIDs = try self.activeStoreIDs(household: household, in: context)
             var added: [UUID] = []
             var existing: [UUID] = []
             var renewed: [UUID] = []
@@ -607,6 +628,15 @@ final class NeedService: @unchecked Sendable {
                 guard self.catalogItem(item, isEligibleFor: selectedStore) else {
                     ineligible += 1; continue
                 }
+                if let scopeConstraint,
+                   !self.catalogItem(
+                    item,
+                    need: need,
+                    matches: scopeConstraint,
+                    activeStoreIDs: activeStoreIDs
+                   ) {
+                    ineligible += 1; continue
+                }
                 switch entry.disposition {
                 case .add:
                     guard need == nil else { changed += 1; continue }
@@ -614,7 +644,7 @@ final class NeedService: @unchecked Sendable {
                     created.kind = NeedKind.remembered.rawValue
                     created.item = item
                     created.notes = item.notes
-                    created.urgency = NeedUrgency.normal.rawValue
+                    created.urgency = (scopeConstraint?.newNeedUrgency ?? .normal).rawValue
                     self.setCartedState(destination == .cart, for: created)
                     added.append(created.id)
                 case .focusExisting:
@@ -2326,6 +2356,26 @@ final class NeedService: @unchecked Sendable {
         if item.anyStore || stores.isEmpty { return true }
         guard let selectedStore else { return true }
         return stores.contains(selectedStore)
+    }
+
+    private func catalogItem(
+        _ item: Item,
+        need: Need?,
+        matches constraint: CatalogAddScopeConstraint,
+        activeStoreIDs: Set<UUID>
+    ) -> Bool {
+        let purchaseRules = PurchaseRuleValue(
+            explicitStoreIDs: Set(item.stores?.map(\.id) ?? []),
+            anyStore: item.anyStore
+        )
+        guard constraint.purchaseFilter.matches(purchaseRules, activeStoreIDs: activeStoreIDs),
+              constraint.categoryID == nil || item.category?.id == constraint.categoryID,
+              constraint.textFilters.allSatisfy({
+                CatalogProjection.textMatches(item.name, query: $0)
+              }) else { return false }
+        guard constraint.urgentOnly else { return true }
+        return need.map { $0.urgency == NeedUrgency.urgent.rawValue }
+            ?? (constraint.newNeedUrgency == .urgent)
     }
 
     private func validatedStores(

@@ -622,6 +622,70 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertFalse(item.anyStore)
     }
 
+    func testScopedCatalogAddCannotWidenFiltersAndCreatesUrgentNeed() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let pantry = try service.createCategory(name: "Pantry", householdID: selection.householdID)
+        let produce = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let market = try service.createStore(name: "Market", householdID: selection.householdID)
+        let other = try service.createStore(name: "Other", householdID: selection.householdID)
+        let matching = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Oat milk", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongText = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Bread", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongCategory = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Milk apples", notes: "", categoryID: produce,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongStore = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Milk local", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [other]
+            ),
+            householdID: selection.householdID
+        )
+        let constraint = CatalogAddScopeConstraint(
+            purchaseFilter: PurchaseFilter(includedStoreIDs: [market]),
+            categoryID: pantry,
+            textFilters: ["milk"],
+            urgentOnly: true,
+            newNeedUrgency: .urgent
+        )
+
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [matching, wrongText, wrongCategory, wrongStore],
+            householdID: selection.householdID,
+            listID: selection.listID,
+            selectedStoreID: nil,
+            scopeConstraint: constraint
+        )
+        XCTAssertEqual(preview.addCount, 1)
+        XCTAssertEqual(preview.ineligibleCount, 3)
+        let result = try service.applyCatalogAdd(
+            preview.token,
+            renewCarted: false,
+            scopeConstraint: constraint
+        )
+        let needID = try XCTUnwrap(result.addedNeedIDs.first)
+        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.ineligibleCount, 3)
+        XCTAssertEqual(try needSnapshot(needID, persistence: persistence).urgency, NeedUrgency.urgent.rawValue)
+    }
+
     func testCatalogAddToCartCreatesOrMovesOneActiveRememberedNeed() throws {
         let persistence = try PersistenceController(storeURL: temporaryStoreURL())
         let service = NeedService(persistence: persistence)

@@ -19,6 +19,10 @@ struct GroceriesView: View {
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
     @State private var showingStorePicker = false
+    @State private var addPickerScope: GroceryAddScope?
+    @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
+    @State private var pendingCatalogScope: GroceryAddScope?
+    @State private var pendingOneTimeTarget: GroceryEditorTarget?
     @State private var editor: GroceryEditorTarget?
     @State private var pendingSavedNeed: PendingSavedNeed?
     @State private var error: Error?
@@ -131,6 +135,23 @@ struct GroceriesView: View {
                     onRemoved: removed
                 )
                     .id(target.id)
+            }
+            .sheet(item: $addPickerScope, onDismiss: completeCatalogAdd) { scope in
+                GroceryCatalogAddView(
+                    scope: scope,
+                    onCompleted: {
+                        pendingCatalogCompletion = $0
+                        pendingCatalogScope = scope
+                    },
+                    onOneTime: { name in
+                        pendingOneTimeTarget = GroceryEditorTarget(
+                            scope: scope,
+                            need: nil,
+                            prefilledName: name,
+                            initiallyRemembered: false
+                        )
+                    }
+                )
             }
             .alert("Couldn’t load groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -369,7 +390,7 @@ struct GroceriesView: View {
     private func presentAdd() {
         guard let canonicalList, let householdID = canonicalList.household?.id else { return }
         let selectedStore = activeStores.first { $0.id == navigation.selectedStoreID }
-        editor = GroceryEditorTarget(scope: GroceryAddScope(
+        addPickerScope = GroceryAddScope(
             householdID: householdID,
             listID: canonicalList.id,
             selectedStoreID: selectedStore?.id,
@@ -379,7 +400,33 @@ struct GroceriesView: View {
             categoryID: navigation.categoryID,
             textFilter: searchText,
             urgentOnly: navigation.urgentOnly
-        ), need: nil)
+        )
+    }
+
+    private func completeCatalogAdd() {
+        if let target = pendingOneTimeTarget {
+            pendingOneTimeTarget = nil
+            editor = target
+            return
+        }
+        guard let completion = pendingCatalogCompletion, let scope = pendingCatalogScope else { return }
+        pendingCatalogCompletion = nil
+        pendingCatalogScope = nil
+        switch completion {
+        case .added(let id):
+            pendingSavedNeed = PendingSavedNeed(
+                id: id,
+                scope: scope,
+                expectsUncarted: true,
+                originalCategoryID: nil,
+                savedCategoryID: nil,
+                wasEditing: false
+            )
+            refreshProjection()
+            completeSaveFeedback()
+        case .focusExisting(let id):
+            requestFocus(id)
+        }
     }
 
     private func focus(_ need: Need) {

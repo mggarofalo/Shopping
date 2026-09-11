@@ -353,7 +353,10 @@ final class GroceryEditingUITests: XCTestCase {
 
     private func openAdd(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.addOneTime"].tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        setSwitch(app.switches["shopping.grocery.remembered"], on: true, app: app)
     }
 
     private func enterName(_ name: String, in app: XCUIApplication) {

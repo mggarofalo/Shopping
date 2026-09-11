@@ -7,13 +7,22 @@ struct GroceryEditorTarget: Identifiable {
     let need: Need?
     let needID: UUID?
     let originalCategoryID: UUID?
+    let prefilledName: String
+    let initiallyRemembered: Bool
 
-    init(scope: GroceryAddScope, need: Need?) {
+    init(
+        scope: GroceryAddScope,
+        need: Need?,
+        prefilledName: String = "",
+        initiallyRemembered: Bool = true
+    ) {
         self.scope = scope
         self.need = need
         self.needID = need?.id
         self.originalCategoryID = need?.item?.category?.id
             ?? (need?.kind == NeedKind.oneTime.rawValue ? need?.oneTimeCategory?.id : nil)
+        self.prefilledName = prefilledName
+        self.initiallyRemembered = initiallyRemembered
     }
 }
 
@@ -78,8 +87,9 @@ struct GroceryEditorView: View {
         self.onRemoved = onRemoved
         let need = target.need
         let item = need?.item
-        _remembered = State(initialValue: need?.kind != NeedKind.oneTime.rawValue)
-        _name = State(initialValue: item?.name ?? need?.title ?? "")
+        _remembered = State(initialValue: need.map { $0.kind != NeedKind.oneTime.rawValue }
+            ?? target.initiallyRemembered)
+        _name = State(initialValue: item?.name ?? need?.title ?? target.prefilledName)
         _catalogNotes = State(initialValue: item?.notes ?? "")
         _purchaseNotes = State(initialValue: need?.notes ?? "")
         _quantity = State(initialValue: need?.quantity.map(Int.init))

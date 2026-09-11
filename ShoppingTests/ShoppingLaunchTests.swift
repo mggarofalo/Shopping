@@ -809,6 +809,8 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.addOneTime"].tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         setSwitch(named: "shopping.grocery.remembered", on: false, in: app)
         let name = app.textFields["shopping.grocery.name"]

@@ -12,6 +12,8 @@ final class ClearInterruptionUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.addOneTime"].tap()
         let name = app.textFields["shopping.grocery.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 2))
         name.tap()

@@ -27,15 +27,18 @@ struct CatalogEditorView: View {
     @State private var requestedArchived = true
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
+    let allowsSaveWithoutAdding: Bool
     let onSaved: (CatalogSaveResult) -> Void
     let onAddToList: (CatalogSaveResult) -> String?
 
     init(
         session: CatalogEditSession,
+        allowsSaveWithoutAdding: Bool = true,
         onSaved: @escaping (CatalogSaveResult) -> Void,
         onAddToList: @escaping (CatalogSaveResult) -> String? = { _ in nil }
     ) {
         self.session = session
+        self.allowsSaveWithoutAdding = allowsSaveWithoutAdding
         self.onSaved = onSaved
         self.onAddToList = onAddToList
         _itemID = State(initialValue: session.itemID)
@@ -160,9 +163,11 @@ struct CatalogEditorView: View {
                         .disabled(!canSave || currentItem?.isArchived == true)
                         .accessibilityLabel("Save and Add to List")
                         .accessibilityIdentifier("shopping.catalog.saveAndAddToList")
-                        Button("Save", systemImage: "checkmark") { save() }
-                            .disabled(!canSave)
-                            .accessibilityIdentifier("shopping.catalog.save")
+                        if allowsSaveWithoutAdding {
+                            Button("Save", systemImage: "checkmark") { save() }
+                                .disabled(!canSave)
+                                .accessibilityIdentifier("shopping.catalog.save")
+                        }
                     }
                 }
                 ToolbarItemGroup(placement: .keyboard) {

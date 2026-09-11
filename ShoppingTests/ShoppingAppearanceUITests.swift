@@ -22,6 +22,8 @@ final class ShoppingAppearanceUITests: XCTestCase {
                 attach("Grocery filters \(appearance) \(size)", app)
                 app.buttons["Done"].tap()
                 app.buttons["shopping.addGrocery"].tap()
+                XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 3))
+                app.buttons["shopping.grocery.addOneTime"].tap()
                 XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 3))
                 attach("Grocery editor \(appearance) \(size)", app)
                 app.buttons["shopping.grocery.cancel"].tap()

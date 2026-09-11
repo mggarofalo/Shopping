@@ -163,6 +163,8 @@ final class ChecklistUITests: XCTestCase {
     func testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering() {
         let app = launchApp()
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.addOneTime"].tap()
         let name = app.textFields["shopping.grocery.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 2))
         name.tap()
