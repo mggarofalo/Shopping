@@ -289,7 +289,7 @@ final class GroceryNavigationStateTests: XCTestCase {
         }
     }
 
-    func testDuplicateForeignCategoryIdentityGroupsOwnUrgentNeedAsUncategorizedWithoutMutation() throws {
+    func testDuplicateForeignCategoryIdentityGroupsOwnUrgentNeedAsUnavailableWithoutMutation() throws {
         let persistence = try PersistenceController(
             storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]
         )
@@ -318,8 +318,9 @@ final class GroceryNavigationStateTests: XCTestCase {
                     listID: selection.listID
                 )
             ))
+            let allCategories = try context.fetch(Shopping.Category.fetchRequest())
             let categories = GroceryRowScope.validCategories(
-                try context.fetch(Shopping.Category.fetchRequest()),
+                allCategories,
                 canonicalList: list
             )
             XCTAssertTrue(categories.isEmpty, "A globally duplicated category UUID cannot identify either row")
@@ -328,12 +329,12 @@ final class GroceryNavigationStateTests: XCTestCase {
             let need = try XCTUnwrap(context.fetch(needRequest).first)
             let groups = CategoryGrouping.groups(
                 needs: [need],
-                categories: categories,
+                categories: allCategories,
                 household: list.household
             )
 
             XCTAssertEqual(groups.map(\.urgency), [.urgent])
-            XCTAssertEqual(groups[0].categories.map(\.title), ["Uncategorized"])
+            XCTAssertEqual(groups[0].categories.map(\.title), ["Unavailable category"])
             XCTAssertEqual(groups[0].categories[0].needs.map(\.id), [needID])
             XCTAssertEqual(need.quantity, 4)
             XCTAssertEqual(need.notes, "Honeycrisp")

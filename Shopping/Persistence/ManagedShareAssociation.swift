@@ -12,6 +12,22 @@ protocol ShareAssociationJournal {
     func acknowledge(householdURI: URL, objectURIs: Set<URL>) throws
 }
 
+enum ShareAssociationScope {
+    static func household(for object: NSManagedObject) -> Household? {
+        switch object {
+        case let household as Household: return household
+        case let store as Store: return store.household
+        case let category as Category: return category.household
+        case let person as Person: return person.household
+        case let item as Item: return item.household
+        case let list as GroceryList: return list.household
+        case let need as Need: return need.list?.household
+        case let operation as ClearOperation: return operation.household
+        default: return nil
+        }
+    }
+}
+
 final class FileShareAssociationJournal: ShareAssociationJournal {
     private let url: URL
     private let lock = NSLock()
@@ -22,7 +38,7 @@ final class FileShareAssociationJournal: ShareAssociationJournal {
         let grouped = Dictionary(grouping: objects.compactMap { object -> (URL, URL)? in
             guard let store = object.objectID.persistentStore,
                   controller.role(of: store) == .ownerPrivate,
-                  let household = Self.household(for: object) else { return nil }
+                  let household = ShareAssociationScope.household(for: object) else { return nil }
             return (household.objectID.uriRepresentation(), object.objectID.uriRepresentation())
         }, by: { $0.0 })
         guard !grouped.isEmpty else { return }
@@ -62,18 +78,6 @@ final class FileShareAssociationJournal: ShareAssociationJournal {
         try JSONEncoder().encode(entries).write(to: url, options: .atomic)
     }
 
-    private static func household(for object: NSManagedObject) -> Household? {
-        switch object {
-        case let household as Household: return household
-        case let store as Store: return store.household
-        case let category as Category: return category.household
-        case let item as Item: return item.household
-        case let list as GroceryList: return list.household
-        case let need as Need: return need.list?.household
-        case let operation as ClearOperation: return operation.household
-        default: return nil
-        }
-    }
 }
 
 enum ManagedShareAssociationError: Error {
@@ -157,7 +161,7 @@ actor ManagedShareAssociationWorker {
                         }
                         do {
                             let object = try context.existingObject(with: id)
-                            guard Self.household(for: object)?.objectID == householdID else { continue }
+                            guard ShareAssociationScope.household(for: object)?.objectID == householdID else { continue }
                             idsByURI[uri] = id
                         } catch let error as NSError where error.domain == NSCocoaErrorDomain
                             && error.code == NSManagedObjectReferentialIntegrityError {
@@ -201,7 +205,7 @@ actor ManagedShareAssociationWorker {
                         var validURIs: Set<URL> = []
                         let objects = unassociated.compactMap { uri, id -> NSManagedObject? in
                             guard let object = try? context.existingObject(with: id),
-                                  Self.household(for: object)?.objectID == householdID else { return nil }
+                                  ShareAssociationScope.household(for: object)?.objectID == householdID else { return nil }
                             validURIs.insert(uri)
                             return object
                         }
@@ -228,16 +232,4 @@ actor ManagedShareAssociationWorker {
         if let firstError { throw firstError }
     }
 
-    private static func household(for object: NSManagedObject) -> Household? {
-        switch object {
-        case let household as Household: return household
-        case let store as Store: return store.household
-        case let category as Category: return category.household
-        case let item as Item: return item.household
-        case let list as GroceryList: return list.household
-        case let need as Need: return need.list?.household
-        case let operation as ClearOperation: return operation.household
-        default: return nil
-        }
-    }
 }

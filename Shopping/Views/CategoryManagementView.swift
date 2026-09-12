@@ -37,16 +37,15 @@ struct CategoryManagementView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var editor: CategoryEditorSession?
     @State private var editorName = ""
-    @State private var removingCategory: Category?
     @State private var error: Error?
     @State private var selectedIDs: Set<UUID> = []
     @State private var editMode: EditMode = .inactive
-    @State private var batchPreview: ManagementBatchPreview?
     @State private var batchNotice: String?
 
     private var canonicalList: GroceryList? {
@@ -111,11 +110,7 @@ struct CategoryManagementView: View {
             if editMode.isEditing {
                 Divider()
                 HStack(spacing: 4) {
-                    Button("Delete", systemImage: "trash", role: .destructive) { prepareBatch(.delete) }
-                        .tint(.red)
-                        .disabled(selectedIDs.isEmpty)
-                        .accessibilityIdentifier("shopping.categories.batchDelete")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                    selectedCategoryDeleteControl
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedCategories.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.categories.batchArchive")
@@ -128,6 +123,16 @@ struct CategoryManagementView: View {
                         .disabled(selectedCategories.count != 1)
                         .accessibilityIdentifier("shopping.categories.batchEdit")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                    Menu {
+                        if let source = selectedCategories.first {
+                            mergeDestinationButtons(for: source)
+                        }
+                    } label: {
+                        Label("Merge Into", systemImage: "arrow.triangle.merge")
+                    }
+                    .disabled(selectedCategories.count != 1 || householdCategories.count < 2)
+                    .accessibilityIdentifier("shopping.categories.merge")
+                    .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .labelStyle(.iconOnly)
                     .padding(.horizontal, 8)
@@ -152,37 +157,9 @@ struct CategoryManagementView: View {
                 onCancel: { editor = nil }
             )
         }
-        .confirmationDialog(
-            "Delete \(removingCategory?.name ?? "category")?",
-            isPresented: Binding(get: { removingCategory != nil }, set: { if !$0 { removingCategory = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let category = removingCategory {
-                Button("Delete category", role: .destructive) { remove(category) }
-            }
-            Button("Cancel", role: .cancel) { removingCategory = nil }
-        } message: {
-            Text("Groceries and catalog items will remain and become Uncategorized.")
-        }
         .alert("Couldn’t update categories", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error?.localizedDescription ?? "Unknown error") }
-        .confirmationDialog(
-            batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected categories?",
-            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let preview = batchPreview {
-                Button(batchActionLabel(preview.token.action), role: preview.token.action == .delete ? .destructive : nil) {
-                    applyBatch(preview.token)
-                }
-            }
-            Button("Cancel", role: .cancel) { batchPreview = nil }
-        } message: {
-            if let preview = batchPreview {
-                Text(ManagementBatchCopy.message(preview) + (preview.token.action == .delete ? " Groceries and catalog items remain Uncategorized." : ""))
-            }
-        }
         .alert("Batch update complete", isPresented: Binding(
             get: { batchNotice != nil }, set: { if !$0 { batchNotice = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(batchNotice ?? "") }
@@ -257,12 +234,23 @@ struct CategoryManagementView: View {
             .tint(category.isArchived ? .green : .orange)
             .disabled(!selectionAvailable)
             .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
-            Button(role: .destructive) { removingCategory = category } label: {
-                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            if categoryHasReferences(category) {
+                Menu {
+                    deleteMigrationButtons(for: category)
+                } label: {
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+                }
+                .tint(.red)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
+            } else {
+                Button(role: .destructive) { deleteUnused(category) } label: {
+                    Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+                }
+                .tint(.red)
+                .disabled(!selectionAvailable)
+                .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
             }
-            .tint(.red)
-            .disabled(!selectionAvailable)
-            .accessibilityIdentifier("shopping.categories.delete.\(category.id.uuidString)")
         }
         .contextMenu {
             if !editMode.isEditing {
@@ -271,17 +259,41 @@ struct CategoryManagementView: View {
                 Button(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox") {
                     setArchived(category, !category.isArchived)
                 }
-                Button("Delete", systemImage: "trash", role: .destructive) {
-                    removingCategory = category
+                if householdCategories.count > 1 {
+                    Menu("Merge Into", systemImage: "arrow.triangle.merge") {
+                        mergeDestinationButtons(for: category)
+                    }
+                }
+                if categoryHasReferences(category) {
+                    Menu("Delete", systemImage: "trash") {
+                        deleteMigrationButtons(for: category)
+                    }
+                } else {
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        deleteUnused(category)
+                    }
                 }
             }
         }
-        .accessibilityAction(named: Text("Edit \(category.name)")) { beginRename(category) }
-        .accessibilityAction(named: Text("\(category.isArchived ? "Restore" : "Archive") \(category.name)")) {
-            setArchived(category, !category.isArchived)
-        }
-        .accessibilityAction(named: Text("Delete \(category.name)")) {
-            removingCategory = category
+        .accessibilityActions {
+            Button("Edit \(category.name)") { beginRename(category) }
+            Button("\(category.isArchived ? "Restore" : "Archive") \(category.name)") {
+                setArchived(category, !category.isArchived)
+            }
+            ForEach(householdCategories.filter { $0 != category }, id: \.objectID) { destination in
+                Button(
+                    destination.isArchived
+                        ? "Merge into \(destination.name), Archived"
+                        : "Merge into \(destination.name)"
+                ) { merge(category, into: destination) }
+            }
+            if categoryHasReferences(category) {
+                Button("Move items to Uncategorized and delete \(category.name)") {
+                    merge(category, into: nil)
+                }
+            } else {
+                Button("Delete \(category.name)") { deleteUnused(category) }
+            }
         }
     }
 
@@ -301,6 +313,35 @@ struct CategoryManagementView: View {
 
     private var selectedCategories: [Category] {
         householdCategories.filter { selectedIDs.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private var selectedCategoryDeleteControl: some View {
+        if selectedCategories.count == 1, let source = selectedCategories.first {
+            if categoryHasReferences(source) {
+                Menu {
+                    deleteMigrationButtons(for: source)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .tint(.red)
+                .accessibilityIdentifier("shopping.categories.batchDelete")
+                .frame(maxWidth: .infinity, minHeight: 44)
+            } else {
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    deleteUnused(source)
+                }
+                .tint(.red)
+                .accessibilityIdentifier("shopping.categories.batchDelete")
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+        } else {
+            Button("Delete", systemImage: "trash", role: .destructive) {}
+                .tint(.red)
+                .disabled(true)
+                .accessibilityIdentifier("shopping.categories.batchDelete")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
     }
 
     private func beginSelection(with categoryID: UUID) {
@@ -343,16 +384,119 @@ struct CategoryManagementView: View {
         } catch { self.error = error }
     }
 
-    private func remove(_ category: Category) {
+    private func categoryHasReferences(_ category: Category) -> Bool {
+        !(category.items ?? []).isEmpty || !(category.oneTimeNeeds ?? []).isEmpty
+    }
+
+    @ViewBuilder
+    private func mergeDestinationButtons(for source: Category) -> some View {
+        ForEach(householdCategories.filter { $0 != source }, id: \.objectID) { destination in
+            Button(destination.isArchived ? "\(destination.name) (Archived)" : destination.name) {
+                merge(source, into: destination)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deleteMigrationButtons(for source: Category) -> some View {
+        Section("Move items to") {
+            mergeDestinationButtons(for: source)
+        }
+        Button("Uncategorized", role: .destructive) { merge(source, into: nil) }
+            .accessibilityIdentifier("shopping.categories.deleteUncategorized")
+    }
+
+    private func merge(_ source: Category, into destination: Category?) {
         guard selectionAvailable, let service, let householdID = selection.householdID,
               let listID = selection.listID else { return }
         do {
-            try service.removeCategory(
-                categoryID: category.id, householdID: householdID, listID: listID
+            let preview = try service.captureCategoryMerge(
+                sourceCategoryID: source.id, destinationCategoryID: destination?.id,
+                householdID: householdID, listID: listID
+            )
+            _ = try service.applyCategoryMerge(preview.token)
+            let destinationName = destination?.name
+            let message: String
+            if preview.referenceCount == 0 {
+                message = "\(preview.token.sourceName) deleted"
+            } else if let destinationName {
+                message = "\(preview.token.sourceName) merged into \(destinationName)"
+            } else {
+                message = "\(preview.token.sourceName) deleted; items moved to Uncategorized"
+            }
+            clearSelection()
+            hapticFeedback.play(.warning)
+            toastCenter?.show(
+                message,
+                duration: .undo,
+                action: ShoppingToastAction(
+                    title: "Undo",
+                    accessibilityIdentifier: "shopping.categories.undoDelete"
+                ) { undoMerge(preview.token) }
+            )
+        } catch { self.error = error }
+    }
+
+    private func deleteUnused(_ source: Category) {
+        guard selectionAvailable, let service, let householdID = selection.householdID,
+              let listID = selection.listID else { return }
+        do {
+            let preview = try service.captureCategoryMerge(
+                sourceCategoryID: source.id, destinationCategoryID: nil,
+                householdID: householdID, listID: listID
+            )
+            guard preview.referenceCount == 0 else {
+                toastCenter?.show(
+                    "\(preview.token.sourceName) now has items. Delete again to choose where to move them.",
+                    duration: .attention
+                )
+                return
+            }
+            _ = try service.applyCategoryMerge(preview.token)
+            clearSelection()
+            hapticFeedback.play(.warning)
+            toastCenter?.show(
+                "\(preview.token.sourceName) deleted",
+                duration: .undo,
+                action: ShoppingToastAction(
+                    title: "Undo",
+                    accessibilityIdentifier: "shopping.categories.undoDelete"
+                ) { undoMerge(preview.token) }
+            )
+        } catch NeedServiceError.scopeChanged {
+            toastCenter?.show(
+                "Category changed. Delete again to choose what happens to its items.",
+                duration: .attention
+            )
+        } catch { self.error = error }
+    }
+
+    private func undoMerge(_ token: CategoryMergeToken) -> Bool {
+        guard let service,
+              selection.householdID == token.householdID,
+              selection.listID == token.listID,
+              canonicalList != nil else { return false }
+        do {
+            let result = try service.undoCategoryMerge(token)
+            if result.changedCount > 0 || result.missingCount > 0 {
+                toastCenter?.show(
+                    "Category restored. Some newer item changes were kept.",
+                    duration: .attention
+                )
+            }
+            hapticFeedback.play(.success)
+            return true
+        } catch NeedServiceError.scopeChanged {
+            toastCenter?.show(
+                "Couldn’t undo. A newer category change was kept.",
+                duration: .attention
             )
             hapticFeedback.play(.warning)
-            removingCategory = nil
-        } catch { self.error = error }
+            return true
+        } catch {
+            self.error = error
+            return false
+        }
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
@@ -372,21 +516,20 @@ struct CategoryManagementView: View {
                 entity: .category, action: action, ids: selectedIDs,
                 householdID: householdID, listID: listID
             )
-            if action == .delete { batchPreview = preview } else { applyBatch(preview.token) }
+            applyBatch(preview.token)
         } catch { self.error = error }
     }
 
     private func applyBatch(_ token: ManagementBatchToken) {
         guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
-            batchPreview = nil; clearSelection(); return
+            clearSelection(); return
         }
         do {
             let result = try service.applyManagementBatch(token)
-            batchPreview = nil
             clearSelection()
             batchNotice = ManagementBatchCopy.result(result)
-            hapticFeedback.play(token.action == .delete ? .warning : .success)
-        } catch { batchPreview = nil; self.error = error }
+            hapticFeedback.play(.success)
+        } catch { self.error = error }
     }
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }
@@ -399,9 +542,6 @@ struct CategoryManagementView: View {
         } catch { self.error = error }
     }
 
-    private func batchActionLabel(_ action: ManagementBatchAction) -> String {
-        switch action { case .archive: "Archive"; case .restore: "Restore"; case .delete: "Delete" }
-    }
 }
 
 private struct CategoryEditorSession: Identifiable {

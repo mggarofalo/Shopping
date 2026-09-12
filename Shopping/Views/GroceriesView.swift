@@ -18,7 +18,10 @@ struct GroceriesView: View {
     @State private var searchText = ""
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
-    @State private var showingStorePicker = false
+    @State private var addPickerScope: GroceryAddScope?
+    @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
+    @State private var pendingCatalogScope: GroceryAddScope?
+    @State private var pendingOneTimeTarget: GroceryEditorTarget?
     @State private var editor: GroceryEditorTarget?
     @State private var pendingSavedNeed: PendingSavedNeed?
     @State private var error: Error?
@@ -114,15 +117,6 @@ struct GroceriesView: View {
                     onReset: resetView
                 )
             }
-            .confirmationDialog(
-                "Choose store",
-                isPresented: $showingStorePicker,
-                titleVisibility: .visible
-            ) {
-                ForEach(activeStores, id: \.objectID) { store in
-                    Button(store.name) { navigation.selectStore(store.id) }
-                }
-            }
             .sheet(item: $editor, onDismiss: completeSaveFeedback) { target in
                 GroceryEditorView(
                     target: target,
@@ -131,6 +125,24 @@ struct GroceriesView: View {
                     onRemoved: removed
                 )
                     .id(target.id)
+            }
+            .sheet(item: $addPickerScope, onDismiss: completeCatalogAdd) { scope in
+                GroceryCatalogAddView(
+                    scope: scope,
+                    onCompleted: {
+                        pendingCatalogCompletion = $0
+                        pendingCatalogScope = scope
+                    },
+                    onOneTime: { name, personID in
+                        pendingOneTimeTarget = GroceryEditorTarget(
+                            scope: scope,
+                            need: nil,
+                            prefilledName: name,
+                            initiallyRemembered: false,
+                            prefilledPersonID: personID
+                        )
+                    }
+                )
             }
             .alert("Couldn’t load groceries", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -298,7 +310,19 @@ struct GroceriesView: View {
 
     private var storeMenu: some View {
         HStack(spacing: 0) {
-            Button { showingStorePicker = true } label: {
+            Menu {
+                ForEach(activeStores, id: \.objectID) { store in
+                    Button {
+                        navigation.selectStore(store.id)
+                    } label: {
+                        if navigation.selectedStoreID == store.id {
+                            Label(store.name, systemImage: "checkmark")
+                        } else {
+                            Text(store.name)
+                        }
+                    }
+                }
+            } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "storefront").accessibilityHidden(true)
                     Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
@@ -306,7 +330,9 @@ struct GroceriesView: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
+            .menuStyle(.button)
             .accessibilityLabel(selectedStoreName)
+            .accessibilityHint("Choose a store")
             .accessibilityIdentifier("shopping.store.menu")
             if navigation.selectedStoreID != nil {
                 Button { navigation.selectAll() } label: {
@@ -369,7 +395,7 @@ struct GroceriesView: View {
     private func presentAdd() {
         guard let canonicalList, let householdID = canonicalList.household?.id else { return }
         let selectedStore = activeStores.first { $0.id == navigation.selectedStoreID }
-        editor = GroceryEditorTarget(scope: GroceryAddScope(
+        addPickerScope = GroceryAddScope(
             householdID: householdID,
             listID: canonicalList.id,
             selectedStoreID: selectedStore?.id,
@@ -379,7 +405,33 @@ struct GroceriesView: View {
             categoryID: navigation.categoryID,
             textFilter: searchText,
             urgentOnly: navigation.urgentOnly
-        ), need: nil)
+        )
+    }
+
+    private func completeCatalogAdd() {
+        if let target = pendingOneTimeTarget {
+            pendingOneTimeTarget = nil
+            editor = target
+            return
+        }
+        guard let completion = pendingCatalogCompletion, let scope = pendingCatalogScope else { return }
+        pendingCatalogCompletion = nil
+        pendingCatalogScope = nil
+        switch completion {
+        case .added(let id):
+            pendingSavedNeed = PendingSavedNeed(
+                id: id,
+                scope: scope,
+                expectsUncarted: true,
+                originalCategoryID: nil,
+                savedCategoryID: nil,
+                wasEditing: false
+            )
+            refreshProjection()
+            completeSaveFeedback()
+        case .focusExisting(let id):
+            requestFocus(id)
+        }
     }
 
     private func focus(_ need: Need) {
@@ -598,11 +650,9 @@ struct GroceriesView: View {
     }
 
     private func sorted(_ values: [Need]) -> [Need] {
-        values.sorted {
-            if $0.urgency != $1.urgency { return $0.urgency == NeedUrgency.urgent.rawValue }
-            let comparison = ($0.item?.name ?? $0.title).localizedCaseInsensitiveCompare($1.item?.name ?? $1.title)
-            return comparison == .orderedSame ? $0.id.uuidString < $1.id.uuidString : comparison == .orderedAscending
-        }
+        CategoryGrouping.orderedNeeds(
+            values, categories: Array(categories), household: canonicalList?.household
+        )
     }
 
     private func shoppingRows(_ values: [Need]) -> some View {

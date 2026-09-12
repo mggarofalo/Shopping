@@ -622,6 +622,70 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertFalse(item.anyStore)
     }
 
+    func testScopedCatalogAddCannotWidenFiltersAndCreatesUrgentNeed() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let pantry = try service.createCategory(name: "Pantry", householdID: selection.householdID)
+        let produce = try service.createCategory(name: "Produce", householdID: selection.householdID)
+        let market = try service.createStore(name: "Market", householdID: selection.householdID)
+        let other = try service.createStore(name: "Other", householdID: selection.householdID)
+        let matching = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Oat milk", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongText = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Bread", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongCategory = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Milk apples", notes: "", categoryID: produce,
+                anyStore: false, storeIDs: [market]
+            ),
+            householdID: selection.householdID
+        )
+        let wrongStore = try service.createCatalogItem(
+            values: CatalogItemValues(
+                name: "Milk local", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [other]
+            ),
+            householdID: selection.householdID
+        )
+        let constraint = CatalogAddScopeConstraint(
+            purchaseFilter: PurchaseFilter(includedStoreIDs: [market]),
+            categoryID: pantry,
+            textFilters: ["milk"],
+            urgentOnly: true,
+            newNeedUrgency: .urgent
+        )
+
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [matching, wrongText, wrongCategory, wrongStore],
+            householdID: selection.householdID,
+            listID: selection.listID,
+            selectedStoreID: nil,
+            scopeConstraint: constraint
+        )
+        XCTAssertEqual(preview.addCount, 1)
+        XCTAssertEqual(preview.ineligibleCount, 3)
+        let result = try service.applyCatalogAdd(
+            preview.token,
+            renewCarted: false,
+            scopeConstraint: constraint
+        )
+        let needID = try XCTUnwrap(result.addedNeedIDs.first)
+        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.ineligibleCount, 3)
+        XCTAssertEqual(try needSnapshot(needID, persistence: persistence).urgency, NeedUrgency.urgent.rawValue)
+    }
+
     func testCatalogAddToCartCreatesOrMovesOneActiveRememberedNeed() throws {
         let persistence = try PersistenceController(storeURL: temporaryStoreURL())
         let service = NeedService(persistence: persistence)
@@ -643,6 +707,41 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertTrue(try needSnapshot(try XCTUnwrap(result.addedNeedIDs.first), persistence: persistence).carted)
         XCTAssertTrue(try needSnapshot(existingNeed, persistence: persistence).carted)
         XCTAssertEqual(try service.activeRememberedNeedID(itemID: fresh, listID: selection.listID), result.addedNeedIDs.first)
+    }
+
+    func testCatalogAddAndSuggestionPersistTemporaryPersonAtomically() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let personID = try service.createPerson(
+            name: "Sam", householdID: selection.householdID, listID: selection.listID
+        )
+        let firstItem = try service.createItem(name: "Apples", householdID: selection.householdID)
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [firstItem], householdID: selection.householdID,
+            listID: selection.listID, selectedStoreID: nil
+        )
+        let firstResult = try service.applyCatalogAdd(
+            preview.token, renewCarted: false, personID: personID
+        )
+        XCTAssertEqual(
+            try needSnapshot(XCTUnwrap(firstResult.addedNeedIDs.first), persistence: persistence).personID,
+            personID
+        )
+
+        let secondItem = try service.createItem(name: "Pears", householdID: selection.householdID)
+        let secondRevision = try itemRevision(secondItem, persistence: persistence)
+        let secondResult = try service.applyCatalogSuggestion(
+            itemID: secondItem, itemRevision: secondRevision,
+            expectedNeedID: nil, expectedNeedRevision: nil,
+            listID: selection.listID, householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(), categoryID: nil, textFilter: "",
+            urgentOnly: false, renewCarted: false, personID: personID
+        )
+        guard case .added(let secondNeedID) = secondResult else {
+            return XCTFail("Expected suggestion to create a need")
+        }
+        XCTAssertEqual(try needSnapshot(secondNeedID, persistence: persistence).personID, personID)
     }
 
     func testCatalogSuggestionAtomicallyRevalidatesStatusAndItemRevision() throws {
@@ -676,6 +775,30 @@ final class CatalogManagementTests: XCTestCase {
         XCTAssertEqual(
             try needSnapshot(collaboratorNeedID, persistence: persistence).urgency,
             NeedUrgency.urgent.rawValue
+        )
+
+        let personID = try service.createPerson(
+            name: "Sam", householdID: selection.householdID, listID: selection.listID
+        )
+        let current = try needSnapshot(collaboratorNeedID, persistence: persistence)
+        XCTAssertEqual(try service.applyCatalogSuggestion(
+            itemID: itemID,
+            itemRevision: displayedItemRevision,
+            expectedNeedID: collaboratorNeedID,
+            expectedNeedRevision: current.revision,
+            listID: selection.listID,
+            householdID: selection.householdID,
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilter: "",
+            urgentOnly: false,
+            renewCarted: false,
+            personID: personID,
+            applyPersonToFocusedNeed: true
+        ), .focusExisting(collaboratorNeedID))
+        XCTAssertEqual(
+            try needSnapshot(collaboratorNeedID, persistence: persistence).personID,
+            personID
         )
 
         try service.setCarted(true, needID: collaboratorNeedID)
@@ -856,6 +979,7 @@ final class CatalogManagementTests: XCTestCase {
         let isArchived: Bool
         let revision: Int64
         let clearOperationID: UUID?
+        let personID: UUID?
     }
 
     private func itemSnapshot(_ itemID: UUID, persistence: PersistenceController) throws -> ItemSnapshot {
@@ -910,7 +1034,8 @@ final class CatalogManagementTests: XCTestCase {
                 notes: need.notes,
                 isArchived: need.archived,
                 revision: need.revision,
-                clearOperationID: need.clearOperationID
+                clearOperationID: need.clearOperationID,
+                personID: need.person?.id
             )
         }
     }

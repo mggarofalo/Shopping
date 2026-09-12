@@ -3,12 +3,12 @@ import CoreData
 enum CategoryGrouping {
     static func ordered(_ categories: [Category], household: Household?) -> [Category] {
         guard let household, let persistentStore = household.objectID.persistentStore else { return [] }
+        let counts = Dictionary(grouping: categories, by: \.id).mapValues(\.count)
         let scoped = categories.filter {
             $0.household == household && $0.objectID.persistentStore == persistentStore &&
-                $0.id != PersistenceModel.unsetID
+                $0.id != PersistenceModel.unsetID && counts[$0.id] == 1
         }
-        let counts = Dictionary(grouping: scoped, by: \.id).mapValues(\.count)
-        return scoped.filter { counts[$0.id] == 1 }.sorted {
+        return scoped.sorted {
             if $0.displayOrder != $1.displayOrder { return $0.displayOrder < $1.displayOrder }
             return $0.id.uuidString < $1.id.uuidString
         }
@@ -27,6 +27,15 @@ enum CategoryGrouping {
             validObjects: Set(settingsOrdered.map(\.objectID)),
             sort: sortedForShoppingList
         )
+    }
+
+    static func orderedNeeds(
+        _ needs: [Need],
+        categories: [Category],
+        household: Household?
+    ) -> [Need] {
+        listGroups(needs: needs, categories: categories, household: household)
+            .flatMap(\.needs)
     }
 
     static func groups(
@@ -62,15 +71,28 @@ enum CategoryGrouping {
         for category in orderedCategories {
             let matching = remaining.filter { categoryObject(for: $0)?.objectID == category.objectID }
             guard !matching.isEmpty else { continue }
-            groups.append(CategoryNeedGroup(categoryID: category.id, title: category.name, needs: sort(matching)))
+            groups.append(CategoryNeedGroup(
+                id: .category(category.id), categoryID: category.id,
+                title: category.name, needs: sort(matching)
+            ))
             remaining.removeAll { categoryObject(for: $0)?.objectID == category.objectID }
         }
-        let uncategorized = remaining.filter {
-            guard let category = categoryObject(for: $0) else { return true }
+        let unavailable = remaining.filter {
+            guard let category = categoryObject(for: $0) else { return false }
             return !validObjects.contains(category.objectID)
         }
+        if !unavailable.isEmpty {
+            groups.append(CategoryNeedGroup(
+                id: .unavailable, categoryID: nil,
+                title: "Unavailable category", needs: sort(unavailable)
+            ))
+        }
+        let uncategorized = remaining.filter { categoryObject(for: $0) == nil }
         if !uncategorized.isEmpty {
-            groups.append(CategoryNeedGroup(categoryID: nil, title: "Uncategorized", needs: sort(uncategorized)))
+            groups.append(CategoryNeedGroup(
+                id: .uncategorized, categoryID: nil,
+                title: "Uncategorized", needs: sort(uncategorized)
+            ))
         }
         return groups
     }

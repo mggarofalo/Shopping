@@ -3,10 +3,11 @@ import XCTest
 final class CategoryManagementUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    func testCategoryCreateStagedRenameAndConfirmedRemoval() {
+    func testCategoryCreateStagedRenameAndImmediateUndoableRemoval() {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+        let storePath = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingCategoryUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = storePath
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
@@ -41,18 +42,53 @@ final class CategoryManagementUITests: XCTestCase {
 
         dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
-        let confirmation = app.sheets["Delete Dry goods?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
-        XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
-            "Groceries and catalog items will remain and become Uncategorized.")).firstMatch.exists)
-        confirmation.buttons["Delete category"].firstMatch.tap()
         XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
-        app.navigationBars["Categories"].buttons.firstMatch.tap()
-        app.tabBars.buttons["Groceries"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Dry goods deleted"].waitForExistence(timeout: 2))
+        app.buttons["shopping.categories.undoDelete"].tap()
+        XCTAssertTrue(dryGoods.waitForExistence(timeout: 2))
+        dryGoods.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Dry goods deleted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.categories.undoDelete"].waitForNonExistence(timeout: 12))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Categories"].tap()
+        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["shopping.categories.undoDelete"].exists)
+        XCTAssertFalse(categoryRow(named: "Dry goods", in: app).exists)
     }
 
-    func testCategoryBatchSelectAllPresentsOneRedDeleteConfirmation() {
+    func testCategoryMergeAndDeleteMigrationUseAnchoredDestinationMenus() {
+        let app = launchPopulated()
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Categories"].tap()
+        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+
+        enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
+        app.staticTexts["Produce"].tap()
+        let merge = app.buttons["shopping.categories.merge"]
+        XCTAssertTrue(merge.isEnabled)
+        tapVisibleControlWithoutAXScroll(merge, in: app)
+        app.buttons["Pantry"].tap()
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Produce"].exists)
+        app.buttons["shopping.categories.undoDelete"].tap()
+        XCTAssertTrue(categoryRow(named: "Produce", in: app).waitForExistence(timeout: 3))
+
+        let produce = categoryRow(named: "Produce", in: app)
+        produce.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
+        app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
+        XCTAssertFalse(produce.exists)
+    }
+
+    func testCategorySelectionDeleteRequiresOneSourceAndOffersMigrationWithoutConfirmation() {
         let app = launchPopulated()
         app.tabBars.buttons["Settings"].tap()
         app.buttons["Categories"].tap()
@@ -65,18 +101,18 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["0 Selected"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["shopping.categories.selectAll"].tap()
-        let delete = app.buttons["shopping.categories.batchDelete"]
+        var delete = app.buttons["shopping.categories.batchDelete"]
+        XCTAssertFalse(delete.isEnabled)
+        app.buttons["shopping.categories.selectAll"].tap()
+        app.staticTexts["Produce"].tap()
+        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        delete = app.buttons["shopping.categories.batchDelete"]
         XCTAssertTrue(delete.isEnabled)
-        delete.tap()
-        let confirmation = app.sheets["Delete selected categories?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
-        XCTAssertTrue(confirmation.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", "will be permanently deleted")
-        ).firstMatch.exists)
-        XCTAssertTrue(confirmation.buttons["Delete"].exists)
-        confirmation.buttons["Delete"].tap()
-        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
-        app.alerts.buttons["OK"].tap()
+        tapVisibleControlWithoutAXScroll(delete, in: app)
+        XCTAssertFalse(app.sheets["Delete selected categories?"].exists)
+        XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
+        app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
     }
 
     func testStoreAndCatalogBatchActionsReflectSelectedState() {
@@ -138,8 +174,10 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
         let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
         XCTAssertTrue(carted.waitForExistence(timeout: 3))
         carted.swipeLeft()
@@ -193,7 +231,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.staticTexts["Pantry"].tap()
         XCTAssertTrue(app.staticTexts["2 Selected"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchEdit"].isEnabled)
-        XCTAssertTrue(app.buttons["shopping.categories.batchDelete"].isEnabled)
+        XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["Done"].tap()
 
         app.navigationBars["Categories"].buttons.firstMatch.tap()
@@ -265,6 +303,21 @@ final class CategoryManagementUITests: XCTestCase {
             predicate: NSPredicate(format: "isHittable == true"), object: element
         )
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func tapVisibleControlWithoutAXScroll(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        let frame = element.frame
+        XCTAssertTrue(usable(frame) && app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+            .tap()
+    }
+
+    private func usable(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isEmpty
+            && frame.minX.isFinite && frame.minY.isFinite
+            && frame.maxX.isFinite && frame.maxY.isFinite
     }
 
     private func replaceText(in field: XCUIElement, with text: String) {

@@ -117,8 +117,9 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Archive"].exists)
         XCTAssertTrue(app.buttons["Delete"].exists)
         app.buttons["Delete"].tap()
-        XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
-        app.buttons["Delete store"].tap()
+        let deleteStore = app.buttons["Delete store"]
+        XCTAssertTrue(deleteStore.waitForExistence(timeout: 2))
+        deleteStore.tap()
         XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
     }
 
@@ -187,7 +188,7 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
 
         openStoreManagement(in: app)
-        XCTAssertTrue(app.staticTexts["Corner Shop"].waitForExistence(timeout: 2))
+        XCTAssertTrue(storeManagementRow(named: "Corner Shop", in: app).waitForExistence(timeout: 2))
     }
 
     func testCategoryAndUrgentFilterChipsNarrowThenBroadenTheExistingGroceries() {
@@ -319,8 +320,9 @@ final class ShoppingLaunchTests: XCTestCase {
         )).firstMatch
         XCTAssertTrue(delete.exists)
         delete.tap()
-        XCTAssertTrue(app.staticTexts["Delete Saved coffee edit?"].waitForExistence(timeout: 2))
-        app.buttons["Delete item"].tap()
+        let deleteItem = app.buttons["Delete item"]
+        XCTAssertTrue(deleteItem.waitForExistence(timeout: 2))
+        deleteItem.tap()
         XCTAssertFalse(app.staticTexts["Saved coffee edit"].waitForExistence(timeout: 2))
     }
 
@@ -809,6 +811,11 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        let addOneTime = app.buttons["shopping.grocery.addOneTime"]
+        reveal(addOneTime, in: app)
+        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        addOneTime.tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         setSwitch(named: "shopping.grocery.remembered", on: false, in: app)
         let name = app.textFields["shopping.grocery.name"]

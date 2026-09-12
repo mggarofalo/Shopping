@@ -39,6 +39,9 @@ final class AppPresentationTests: XCTestCase {
 
         XCTAssertEqual(scheduledDelay, 5)
         XCTAssertTrue(center.toasts.isEmpty)
+
+        let relaunchedCenter = ShoppingToastCenter()
+        XCTAssertTrue(relaunchedCenter.toasts.isEmpty)
     }
 
     @MainActor
