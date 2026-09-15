@@ -15,7 +15,6 @@ struct GroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @ObservedObject var navigation: GroceryNavigationState
-    @State private var searchText = ""
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var showingFilters = false
     @State private var addPickerScope: GroceryAddScope?
@@ -47,9 +46,11 @@ struct GroceriesView: View {
         }
     }
 
-    private var groceryCategoryGroups: [CategoryNeedGroup] {
-        CategoryGrouping.listGroups(
+    private var grocerySections: [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
+        GroceryCollectionProjection.sections(
             needs: visibleNeeds,
+            selectedStoreID: navigation.selectedStoreID,
+            activeStores: activeStores,
             categories: Array(categories),
             household: canonicalList?.household
         )
@@ -62,7 +63,7 @@ struct GroceriesView: View {
     }
 
     private var hasViewNarrowing: Bool {
-        navigation.selectedStoreID != nil || navigation.activeFilterCount > 0 || !searchText.isEmpty
+        navigation.selectedStoreID != nil || navigation.activeFilterCount > 0 || !navigation.searchText.isEmpty
     }
 
     var body: some View {
@@ -72,9 +73,9 @@ struct GroceriesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .searchable(text: $searchText, prompt: "Search groceries")
+            .searchable(text: $navigation.searchText, prompt: "Search groceries")
             .onSubmit(of: .search, refreshProjection)
-            .onChange(of: searchText) { _, _ in refreshProjection() }
+            .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink(value: GroceryDestination.recentlyCleared) {
@@ -95,6 +96,7 @@ struct GroceriesView: View {
                 switch destination {
                 case .carted:
                     CartedGroceriesView(
+                        navigation: navigation,
                         onEdit: focus,
                         onUncarted: uncarted,
                         onRemoved: { operationID, householdID, listID in
@@ -175,46 +177,32 @@ struct GroceriesView: View {
     }
 
     private var groceryContent: some View {
-            Group {
-                if visibleNeeds.isEmpty {
-                    ScrollView {
-                        VStack(spacing: 16) { scopeControls; emptyState }
-                    }
-                } else {
-                    List {
-                        Section {
-                            scopeControls
-                                .buttonStyle(.borderless)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                .listRowBackground(Color.clear)
-                        }
-                        if let selectedStoreID = navigation.selectedStoreID {
-                            let mustBuy = storePartition(.mustBuyHere, selectedStoreID: selectedStoreID)
-                            let flexible = storePartition(.flexibleHere, selectedStoreID: selectedStoreID)
-                            if !mustBuy.isEmpty {
-                                Section("Only buy here") {
-                                    shoppingRows(mustBuy)
-                                }
-                            }
-                            if !flexible.isEmpty {
-                                Section("Can buy here") {
-                                    shoppingRows(flexible)
-                                }
-                            }
-                        } else {
-                            ForEach(groceryCategoryGroups) { group in
-                                Section(group.title) {
-                                    shoppingRows(group.needs)
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .contentMargins(
-                        .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
-                    )
+        Group {
+            if visibleNeeds.isEmpty {
+                ScrollView {
+                    VStack(spacing: 16) { scopeControls; emptyState }
                 }
+            } else {
+                List {
+                    Section {
+                        scopeControls
+                            .buttonStyle(.borderless)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
+                    ItemCollectionSections(
+                        sections: grocerySections,
+                        itemID: \.objectID
+                    ) { _, need in
+                        shoppingRow(need)
+                    }
+                }
+                .listStyle(.plain)
+                .contentMargins(
+                    .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
+                )
             }
+        }
     }
 
     private var emptyState: some View {
@@ -246,118 +234,12 @@ struct GroceriesView: View {
 
     @ViewBuilder
     private var scopeControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
-                : AnyLayout(HStackLayout(spacing: 8))
-            layout {
-                allButton
-                storeMenu
-                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-                filtersButton
-            }
-            activeFilterChips
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 4)
-    }
-
-    @ViewBuilder
-    private var activeFilterChips: some View {
-        if navigation.activeFilterCount > 0 {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if navigation.urgentOnly {
-                        filterChip("Urgent") { navigation.urgentOnly = false }
-                    }
-                    if let categoryID = navigation.categoryID,
-                       let category = activeCategories.first(where: { $0.id == categoryID }) {
-                        filterChip(category.name) { navigation.categoryID = nil }
-                    }
-                    ForEach(activeStores.filter { navigation.includedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                        filterChip("Includes \(store.name)") { navigation.setIncluded(false, storeID: store.id) }
-                    }
-                    ForEach(activeStores.filter { navigation.excludedStoreIDs.contains($0.id) }, id: \.objectID) { store in
-                        filterChip("Excludes \(store.name)") { navigation.setExcluded(false, storeID: store.id) }
-                    }
-                }
-            }
-        }
-    }
-
-    private func filterChip(_ title: String, remove: @escaping () -> Void) -> some View {
-        Button(action: remove) {
-            Label(title, systemImage: "xmark")
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Remove \(title) filter")
-    }
-
-    private var allButton: some View {
-        SelectionPill(
-            title: "All",
-            isSelected: navigation.selectedStoreID == nil,
-            identifier: "shopping.store.all"
-        ) { navigation.selectAll() }
-    }
-
-    private var storeMenu: some View {
-        HStack(spacing: 0) {
-            Menu {
-                ForEach(activeStores, id: \.objectID) { store in
-                    Button {
-                        navigation.selectStore(store.id)
-                    } label: {
-                        if navigation.selectedStoreID == store.id {
-                            Label(store.name, systemImage: "checkmark")
-                        } else {
-                            Text(store.name)
-                        }
-                    }
-                }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "storefront").accessibilityHidden(true)
-                    Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .accessibilityLabel(selectedStoreName)
-            .accessibilityHint("Choose a store")
-            .accessibilityIdentifier("shopping.store.menu")
-            if navigation.selectedStoreID != nil {
-                Button { navigation.selectAll() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Clear selected store")
-                .accessibilityIdentifier("shopping.store.clear")
-            }
-        }
-    }
-
-    private var filtersButton: some View {
-        Button { showingFilters = true } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "line.3.horizontal.decrease.circle").accessibilityHidden(true)
-                Text(filterLabel).fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .accessibilityLabel(filterLabel)
-        .accessibilityIdentifier("shopping.filters")
+        GroceryScopeControls(
+            navigation: navigation,
+            stores: activeStores,
+            categories: activeCategories,
+            showFilters: { showingFilters = true }
+        )
     }
 
     @ViewBuilder
@@ -371,10 +253,6 @@ struct GroceriesView: View {
     private var selectedStoreName: String {
         guard let id = navigation.selectedStoreID else { return "Choose store" }
         return activeStores.first(where: { $0.id == id })?.name ?? "Choose store"
-    }
-
-    private var filterLabel: String {
-        navigation.activeFilterCount == 0 ? "Filters" : "Filters \(navigation.activeFilterCount)"
     }
 
     private var cartedCount: Int {
@@ -403,7 +281,7 @@ struct GroceriesView: View {
             includedStoreIDs: navigation.includedStoreIDs,
             excludedStoreIDs: navigation.excludedStoreIDs,
             categoryID: navigation.categoryID,
-            textFilter: searchText,
+            textFilter: navigation.searchText,
             urgentOnly: navigation.urgentOnly
         )
     }
@@ -636,56 +514,34 @@ struct GroceriesView: View {
                 includedStoreIDs: navigation.includedStoreIDs,
                 excludedStoreIDs: navigation.excludedStoreIDs
             ),
-            text: searchText,
+            text: navigation.searchText,
             categoryID: navigation.categoryID,
             urgency: navigation.urgentOnly ? NeedUrgency.urgent.rawValue : nil
         )
     }
 
     private func resetView() {
-        searchText = ""
+        navigation.searchText = ""
         navigation.selectAll()
         navigation.resetFilters()
         refreshProjection()
     }
 
-    private func sorted(_ values: [Need]) -> [Need] {
-        CategoryGrouping.orderedNeeds(
-            values, categories: Array(categories), household: canonicalList?.household
+    private func shoppingRow(_ need: Need) -> some View {
+        GroceryNeedRow(
+            need: need,
+            activeStores: activeStores,
+            onEdit: focus,
+            onCartedChange: setCarted,
+            onQuantityChange: setQuantity,
+            onRemoved: { operationID, householdID, listID in
+                removed(operationID, scope: GroceryAddScope(
+                    householdID: householdID, listID: listID,
+                    selectedStoreID: nil, selectedStoreName: nil
+                ))
+            }
         )
-    }
-
-    private func shoppingRows(_ values: [Need]) -> some View {
-        ForEach(sorted(values), id: \.objectID) { need in
-            GroceryNeedRow(
-                need: need,
-                activeStores: activeStores,
-                onEdit: focus,
-                onCartedChange: setCarted,
-                onQuantityChange: setQuantity,
-                onRemoved: { operationID, householdID, listID in
-                    removed(operationID, scope: GroceryAddScope(
-                        householdID: householdID, listID: listID,
-                        selectedStoreID: nil, selectedStoreName: nil
-                    ))
-                }
-            )
-            .shoppingListRowInsets()
-        }
-    }
-
-    private func storePartition(_ availability: PurchaseAvailability, selectedStoreID: UUID) -> [Need] {
-        let activeIDs = Set(activeStores.map(\.id))
-        return sorted(visibleNeeds.filter { need in
-            let item = need.item
-            let oneTime = need.kind == NeedKind.oneTime.rawValue
-            let value = PurchaseRuleValue(
-                explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) } ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
-                anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
-                hasResolvedIdentity: item != nil || oneTime
-            )
-            return PurchaseFilter().availability(of: value, selectedStoreID: selectedStoreID, activeStoreIDs: activeIDs) == availability
-        })
+        .shoppingListRowInsets()
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {

@@ -2,11 +2,7 @@ import CoreData
 import os
 import SwiftUI
 
-private struct CatalogItemGroup: Identifiable {
-    let id: String
-    let title: String?
-    let items: [Item]
-}
+private typealias CatalogItemGroup = ItemCollectionSection<String, Item>
 
 private struct CatalogGroupKey: Hashable {
     let id: String
@@ -35,7 +31,6 @@ struct CatalogView: View {
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
     @State private var showingFilters = false
-    @State private var grouping = CatalogGrouping.category
     @State private var renderedGroups: [CatalogItemGroup] = []
     @State private var editor: CatalogEditSession?
     @State private var removalTarget: CatalogRemovalTarget?
@@ -79,22 +74,9 @@ struct CatalogView: View {
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID)
         defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID) }
         let sortedItems = items.sorted(by: catalogItemComesFirst)
-        switch grouping {
-        case .none:
-            return [CatalogItemGroup(id: "all", title: nil, items: sortedItems)]
-        case .category:
-            let validCategoryIDs = Set(scopedCategories.map(\.id))
-            return groups(items: sortedItems) {
-                categoryGroupKey(for: $0, validCategoryIDs: validCategoryIDs)
-            }
-        case .store:
-            var grouped: [CatalogGroupKey: [Item]] = [:]
-            for item in sortedItems {
-                for key in storeGroupKeys(for: item, validStores: validStores) {
-                    grouped[key, default: []].append(item)
-                }
-            }
-            return catalogGroups(from: grouped)
+        let validCategoryIDs = Set(scopedCategories.map(\.id))
+        return groups(items: sortedItems) {
+            categoryGroupKey(for: $0, validCategoryIDs: validCategoryIDs)
         }
     }
 
@@ -289,7 +271,6 @@ struct CatalogView: View {
             .onAppear(perform: refresh)
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
-            .onChange(of: grouping) { _, _ in rebuildRenderedGroups() }
             .onChange(of: catalogRefreshKeys) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
@@ -326,32 +307,29 @@ struct CatalogView: View {
                 .listRowBackground(Color.clear)
             }
         } else {
-            ForEach(renderedGroups) { group in
-                Section {
-                    ForEach(group.items, id: \.objectID) { item in
-                        let source = CatalogRowSource(groupID: group.id, itemID: item.id)
-                        Group {
-                            if editMode.isEditing {
-                                CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                    .shoppingListRowInsets()
-                                    .tag(item.id)
-                                    .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
-                            } else {
-                                catalogRow(item, source: source)
-                                    .tag(item.id)
-                            }
+            ItemCollectionSections(
+                sections: renderedGroups,
+                itemID: \.objectID
+            ) { groupID, item in
+                let source = CatalogRowSource(groupID: groupID, itemID: item.id)
+                Group {
+                    if editMode.isEditing {
+                        CatalogItemRow(item: item, validStores: validStores)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .shoppingListRowInsets()
+                            .tag(item.id)
+                            .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
+                    } else {
+                        catalogRow(item, source: source)
+                            .tag(item.id)
                         }
-                        .id(source)
-                        .listRowBackground(
-                            highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : Color.clear
-                        )
-                        .accessibilityValue(highlightedItemID == item.id ? "Recently added" : "")
-                    }
-                } header: {
-                    if let title = group.title { Text(title) }
                 }
+                .id(source)
+                .listRowBackground(
+                    highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : Color.clear
+                )
+                .accessibilityValue(highlightedItemID == item.id ? "Recently added" : "")
             }
         }
     }
@@ -369,43 +347,6 @@ struct CatalogView: View {
                     systemImage: "line.3.horizontal.decrease.circle",
                     identifier: "shopping.catalog.filters"
                 ) { showingFilters = true }
-                Menu {
-                    ForEach(CatalogGrouping.allCases) { choice in
-                        Button {
-                            grouping = choice
-                        } label: {
-                            if grouping == choice {
-                                Label(choice.title, systemImage: "checkmark")
-                            } else {
-                                Text(choice.title)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "rectangle.3.group")
-                        Text("Group: \(grouping.title)")
-                    }
-                    .font(.subheadline)
-                    .fontWeight(grouping == .none ? .regular : .semibold)
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(grouping == .none ? Color.secondary.opacity(0.1) : Color.groceryAccent.opacity(0.18))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(grouping == .none ? Color.secondary.opacity(0.35) : Color.groceryAccent)
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-                }
-                .menuStyle(.button)
-                .accessibilityLabel("Group: \(grouping.title)")
-                .accessibilityHint("Choose catalog grouping")
-                .accessibilityIdentifier("shopping.catalog.grouping")
             }
             if filters.count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -430,7 +371,7 @@ struct CatalogView: View {
 
     private func catalogRow(_ item: Item, source: CatalogRowSource) -> some View {
         Button { edit(item) } label: {
-            CatalogItemRow(item: item, grouping: grouping, validStores: validStores)
+            CatalogItemRow(item: item, validStores: validStores)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
@@ -521,22 +462,6 @@ struct CatalogView: View {
         return CatalogGroupKey(
             id: "category:\(category.id.uuidString)", title: category.name, order: category.displayOrder
         )
-    }
-
-    private func storeGroupKeys(for item: Item, validStores: [Store]) -> [CatalogGroupKey] {
-        if item.anyStore || (item.stores ?? []).isEmpty {
-            return [CatalogGroupKey(id: "store:any", title: "Any store", order: -1)]
-        }
-        let assignedStores = item.stores ?? []
-        var keys = validStores.filter { assignedStores.contains($0) }.map {
-            CatalogGroupKey(id: "store:\($0.id.uuidString)", title: $0.name, order: $0.displayOrder)
-        }
-        if keys.count < assignedStores.count {
-            keys.append(CatalogGroupKey(id: "store:unavailable", title: "Unavailable stores", order: Int64.max))
-        }
-        return keys.isEmpty
-            ? [CatalogGroupKey(id: "store:unavailable", title: "Unavailable stores", order: Int64.max)]
-            : keys
     }
 
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View {

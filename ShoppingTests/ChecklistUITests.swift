@@ -126,7 +126,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(item.label.contains("Any Store"))
     }
 
-    func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
+    func testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems() {
         let app = launchApp(fixture: "populated")
         selectStore("Publix", app: app)
         XCTAssertTrue(cartedLink(count: 0, app: app).waitForExistence(timeout: 2))
@@ -135,14 +135,18 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertTrue(row("Strawberries", app: app).exists)
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Publix")
+        XCTAssertTrue(app.buttons["shopping.filters"].exists)
+        XCTAssertTrue(row("Birthday candles", app: app).exists)
+        XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
+        XCTAssertFalse(row("Strawberries", app: app).exists)
 
         openCheckout(app: app)
-        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("2"))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Birthday candles")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Chipotles in adobo")).firstMatch.exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
-        attachScreenshot("All-items checkout preview", app: app)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
+        attachScreenshot("Filtered cart checkout preview", app: app)
         app.buttons["shopping.checkout.cancel"].tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 2))
         XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
@@ -156,7 +160,12 @@ final class ChecklistUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 3))
         reveal(row("Chipotles in adobo", app: app), app: app)
+        app.buttons["shopping.store.clear"].tap()
         reveal(row("Strawberries", app: app), app: app)
+        XCTAssertTrue(row("Strawberries", app: app).exists)
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Choose store")
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }
 

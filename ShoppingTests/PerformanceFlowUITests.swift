@@ -73,11 +73,6 @@ final class PerformanceFlowUITests: XCTestCase {
         let list = app.collectionViews["shopping.catalog.list"]
         XCTAssertTrue(list.waitForExistence(timeout: 3))
 
-        app.buttons["shopping.catalog.grouping"].tap()
-        app.buttons["Store"].tap()
-        app.buttons["shopping.catalog.grouping"].tap()
-        app.buttons["Category"].tap()
-
         app.buttons["shopping.catalog.filters"].tap()
         app.buttons["shopping.catalog.filters.include.\(storeID(named: "Store 04", in: app))"].tap()
         app.buttons["Done"].tap()

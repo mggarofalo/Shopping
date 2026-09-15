@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CatalogItemRow: View {
     @ObservedObject var item: Item
-    let grouping: CatalogGrouping
     let validStores: [Store]
 
     var body: some View {
@@ -34,14 +33,7 @@ struct CatalogItemRow: View {
     }
 
     private var metadata: String {
-        var values: [String] = []
-        if grouping != .category {
-            values.append(item.category?.name ?? "Uncategorized")
-        }
-        if grouping != .store {
-            values.append(storeSummary)
-        }
-        return values.joined(separator: " · ")
+        storeSummary
     }
 
     private var storeSummary: String {

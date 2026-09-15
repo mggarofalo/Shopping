@@ -1,4 +1,105 @@
 import CoreData
+import SwiftUI
+
+struct ItemCollectionSection<SectionID: Hashable, Item>: Identifiable {
+    let id: SectionID
+    let title: String
+    let items: [Item]
+}
+
+struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: View>: View {
+    let sections: [ItemCollectionSection<SectionID, Item>]
+    let itemID: KeyPath<Item, ItemID>
+    @ViewBuilder let row: (SectionID, Item) -> Row
+
+    var body: some View {
+        ForEach(sections) { section in
+            Section(section.title) {
+                ForEach(section.items, id: itemID) { item in
+                    row(section.id, item)
+                }
+            }
+        }
+    }
+}
+
+enum GroceryCollectionSectionID: Hashable {
+    case category(CategoryNeedGroupID)
+    case onlyBuyHere
+    case canBuyHere
+}
+
+enum GroceryCollectionProjection {
+    static func sections(
+        needs: [Need],
+        selectedStoreID: UUID?,
+        activeStores: [Store],
+        categories: [Category],
+        household: Household?
+    ) -> [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
+        guard let selectedStoreID else {
+            return CategoryGrouping.listGroups(
+                needs: needs,
+                categories: categories,
+                household: household
+            ).map {
+                ItemCollectionSection(
+                    id: .category($0.id),
+                    title: $0.title,
+                    items: $0.needs
+                )
+            }
+        }
+
+        let activeStoreIDs = Set(activeStores.map(\.id))
+        let orderedNeeds = CategoryGrouping.orderedNeeds(
+            needs,
+            categories: categories,
+            household: household
+        )
+        let onlyBuyHere = orderedNeeds.filter {
+            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
+                == .mustBuyHere
+        }
+        let canBuyHere = orderedNeeds.filter {
+            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
+                == .flexibleHere
+        }
+
+        return [
+            onlyBuyHere.isEmpty ? nil : ItemCollectionSection(
+                id: .onlyBuyHere,
+                title: "Only buy here",
+                items: onlyBuyHere
+            ),
+            canBuyHere.isEmpty ? nil : ItemCollectionSection(
+                id: .canBuyHere,
+                title: "Can buy here",
+                items: canBuyHere
+            )
+        ].compactMap { $0 }
+    }
+
+    private static func availability(
+        of need: Need,
+        selectedStoreID: UUID,
+        activeStoreIDs: Set<UUID>
+    ) -> PurchaseAvailability {
+        let item = need.item
+        let oneTime = need.kind == NeedKind.oneTime.rawValue
+        let value = PurchaseRuleValue(
+            explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
+                ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
+            anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
+            hasResolvedIdentity: item != nil || oneTime
+        )
+        return PurchaseFilter().availability(
+            of: value,
+            selectedStoreID: selectedStoreID,
+            activeStoreIDs: activeStoreIDs
+        )
+    }
+}
 
 enum CategoryGrouping {
     static func ordered(_ categories: [Category], household: Household?) -> [Category] {

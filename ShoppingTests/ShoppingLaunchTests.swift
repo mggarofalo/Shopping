@@ -326,13 +326,16 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Saved coffee edit"].waitForExistence(timeout: 2))
     }
 
-    func testCatalogGroupingDefaultsToCategoryAndUngroupedItemsSortAlphabetically() {
+    func testCatalogUsesCategorySectionsWithoutAnAlternateGroupingMode() {
         let app = launchApp(fixture: "populated")
         openCatalog(in: app)
 
-        let grouping = app.buttons["shopping.catalog.grouping"]
-        XCTAssertTrue(grouping.waitForExistence(timeout: 3))
-        XCTAssertEqual(grouping.label, "Group: Category")
+        XCTAssertFalse(app.buttons["shopping.catalog.grouping"].exists)
+        for category in ["Produce", "Pantry", "Bakery"] {
+            let heading = app.staticTexts[category]
+            reveal(heading, in: app)
+            XCTAssertTrue(heading.exists, "Expected category section \(category)")
+        }
         attachScreenshot(named: "Catalog grouped by category", app: app)
 
         let chipotles = app.staticTexts["Chipotles in adobo"]
@@ -373,42 +376,6 @@ final class ShoppingLaunchTests: XCTestCase {
         )).firstMatch.exists)
         attachScreenshot(named: "Catalog top row swipe", app: app)
         visibleChipotlesRow.swipeRight()
-
-        reveal(grouping, in: app)
-        grouping.tap()
-        XCTAssertTrue(app.buttons["None"].waitForExistence(timeout: 2))
-        app.buttons["None"].tap()
-        XCTAssertTrue(waitForLabel("Group: None", on: grouping))
-
-        let expected = [
-            "Bananas", "Chipotles in adobo", "Dinner rolls",
-            "Granola", "Local honey", "Strawberries"
-        ]
-        let rows = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
-        )).allElementsBoundByIndex
-        XCTAssertEqual(rows.count, expected.count)
-        XCTAssertEqual(rows.compactMap { row in expected.first { row.label.contains($0) } }, expected)
-        let ungroupedChipotles = rows.first { $0.label.contains("Chipotles in adobo") }
-        XCTAssertTrue(ungroupedChipotles?.label.contains("Pantry") == true)
-        XCTAssertTrue(ungroupedChipotles?.label.contains("Publix") == true)
-
-        grouping.tap()
-        XCTAssertTrue(app.buttons["Store"].waitForExistence(timeout: 2))
-        app.buttons["Store"].tap()
-        XCTAssertTrue(waitForLabel("Group: Store", on: grouping))
-        let expectedGroups = ["Any store", "Costco", "Neighborhood Market (closed)", "Publix", "Walmart"]
-        for title in expectedGroups {
-            let heading = app.staticTexts[title]
-            reveal(heading, in: app)
-            XCTAssertTrue(heading.exists, "Expected store group \(title)")
-        }
-        let groupedStoreRow = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.catalog.item.", "Chipotles in adobo"
-        )).firstMatch
-        reveal(groupedStoreRow, in: app)
-        XCTAssertTrue(groupedStoreRow.label.contains("Pantry"))
-        XCTAssertFalse(groupedStoreRow.label.contains("Publix"))
     }
 
     func testCatalogCategoryFiltersAllowMultipleSelections() {

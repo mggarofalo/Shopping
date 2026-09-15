@@ -65,6 +65,21 @@ final class GroceryNavigationStateTests: XCTestCase {
         XCTAssertEqual(state.categoryID, category)
     }
 
+    func testSearchIsSharedAcrossGroceryDestinationsButResetsForAnotherHousehold() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let firstHousehold = UUID()
+        let secondHousehold = UUID()
+        let state = GroceryNavigationState(defaults: defaults, keyPrefix: "test.filter")
+
+        state.configure(householdID: firstHousehold, activeStoreIDs: [])
+        state.searchText = "milk"
+        state.configure(householdID: firstHousehold, activeStoreIDs: [])
+        XCTAssertEqual(state.searchText, "milk")
+
+        state.configure(householdID: secondHousehold, activeStoreIDs: [])
+        XCTAssertEqual(state.searchText, "")
+    }
+
     func testSanitizeRemovesMissingAndArchivedStoreIDs() throws {
         let suite = "GroceryNavigationStateTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
