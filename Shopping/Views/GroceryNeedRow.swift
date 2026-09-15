@@ -10,6 +10,7 @@ struct GroceryNeedRow: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @ObservedObject var need: Need
     let activeStores: [Store]
+    let selectedStoreID: UUID?
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
@@ -100,6 +101,15 @@ struct GroceryNeedRow: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
+            if let storeIndicator {
+                Image(systemName: storeIndicator.symbol)
+                    .imageScale(.small)
+                    .foregroundStyle(Color.grocerySecondary)
+                    .accessibilityLabel(storeIndicator.title)
+                    .accessibilityIdentifier(
+                        "shopping.grocery.storeRule.\(storeIndicator.identifierComponent).\(need.id.uuidString)"
+                    )
+            }
             if let quantity = need.quantity {
                 if let onQuantityChange {
                     quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
@@ -176,6 +186,14 @@ struct GroceryNeedRow: View {
 
     private var title: String { need.item?.name ?? need.title }
 
+    private var storeIndicator: GroceryStoreScopeIndicator? {
+        GroceryStoreScopeIndicator.value(
+            for: need,
+            selectedStoreID: selectedStoreID,
+            activeStoreIDs: Set(activeStores.map(\.id))
+        )
+    }
+
     private var personLabel: String? {
         GroceryPersonLabel.text(
             for: need.person, people: Array(people), household: need.list?.household
@@ -187,6 +205,7 @@ struct GroceryNeedRow: View {
         if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
         if need.carted { values.append("In cart") }
+        if let storeIndicator { values.append(storeIndicator.title) }
         if let personLabel { values.append("For \(personLabel)") }
         if !need.notes.isEmpty { values.append(need.notes) }
         return values.joined(separator: ", ")

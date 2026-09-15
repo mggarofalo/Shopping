@@ -111,9 +111,9 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertEqual(row.label, "Edit Granola")
         let value = row.value as? String ?? ""
         XCTAssertTrue(value.contains("Urgent"))
-        XCTAssertFalse(value.contains("Only buy at Costco"))
+        XCTAssertTrue(value.contains("Only buy here"))
         XCTAssertTrue(value.contains("Low sugar"))
-        let header = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Only buy here")).firstMatch
+        let header = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Pantry")).firstMatch
         XCTAssertTrue(header.exists)
         XCTAssertTrue(header.isHittable)
     }

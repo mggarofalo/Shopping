@@ -4,7 +4,7 @@ import XCTest
 @testable import Shopping
 
 final class ChecklistSafetyTests: XCTestCase {
-    func testGroceryCollectionProjectionUsesCategorySectionsAndStoreBuyingGroups() throws {
+    func testStoreProjectionKeepsCategorySectionsAndExposesRowIndicators() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
@@ -50,9 +50,27 @@ final class ChecklistSafetyTests: XCTestCase {
                 categories: categories,
                 household: household
             )
-            XCTAssertEqual(storeSections.map(\.title), ["Only buy here", "Can buy here"])
-            XCTAssertEqual(storeSections[0].items.map(\.id), [applesNeed])
-            XCTAssertEqual(storeSections[1].items.map(\.id), [riceNeed])
+            XCTAssertEqual(storeSections.map(\.title), ["Produce", "Pantry"])
+            XCTAssertEqual(storeSections.flatMap(\.items).map(\.id), [applesNeed, riceNeed])
+            let activeStoreIDs = Set(stores.map(\.id))
+            let applesObject = try XCTUnwrap(needs.first { $0.id == applesNeed })
+            let riceObject = try XCTUnwrap(needs.first { $0.id == riceNeed })
+            XCTAssertEqual(
+                GroceryStoreScopeIndicator.value(
+                    for: applesObject,
+                    selectedStoreID: costco,
+                    activeStoreIDs: activeStoreIDs
+                ),
+                .onlyBuyHere
+            )
+            XCTAssertEqual(
+                GroceryStoreScopeIndicator.value(
+                    for: riceObject,
+                    selectedStoreID: costco,
+                    activeStoreIDs: activeStoreIDs
+                ),
+                .canBuyHere
+            )
 
             let unavailable = GroceryCollectionProjection.sections(
                 needs: needs,
@@ -61,8 +79,18 @@ final class ChecklistSafetyTests: XCTestCase {
                 categories: categories,
                 household: household
             )
-            XCTAssertEqual(unavailable.map(\.title), ["Can buy here"])
+            XCTAssertEqual(unavailable.map(\.title), ["Pantry"])
             XCTAssertEqual(unavailable[0].items.map(\.id), [riceNeed])
+            XCTAssertNil(GroceryStoreScopeIndicator.value(
+                for: applesObject,
+                selectedStoreID: publix,
+                activeStoreIDs: activeStoreIDs
+            ))
+            XCTAssertNil(GroceryStoreScopeIndicator.value(
+                for: riceObject,
+                selectedStoreID: nil,
+                activeStoreIDs: activeStoreIDs
+            ))
         }
     }
 
@@ -152,6 +180,76 @@ final class ChecklistSafetyTests: XCTestCase {
                 household: household
             ).map(\.id), expected)
             XCTAssertNotNil(values.first { $0.id == normalProduce }?.cartedAt)
+        }
+    }
+
+    func testListAndCartStoreProjectionsUseIdenticalCategoryAndItemOrdering() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let storeID = try service.createStore(
+            name: "Market", householdID: selection.householdID
+        )
+        let produce = try service.createCategory(
+            name: "Produce", householdID: selection.householdID, displayOrder: 0
+        )
+        let bakery = try service.createCategory(
+            name: "Bakery", householdID: selection.householdID, displayOrder: 1
+        )
+        let rows: [(name: String, categoryID: UUID?)] = [
+            ("Zucchini", produce),
+            ("Apples", produce),
+            ("Bread", bakery),
+            ("Ice", nil),
+        ]
+        for carted in [false, true] {
+            for (name, categoryID) in rows {
+                let id = try service.addOneTimeNeed(
+                    title: name,
+                    categoryID: categoryID,
+                    anyStore: true,
+                    householdID: selection.householdID,
+                    listID: selection.listID
+                )
+                if carted {
+                    try service.setNeedCarted(
+                        needID: id,
+                        householdID: selection.householdID,
+                        listID: selection.listID,
+                        carted: true
+                    )
+                }
+            }
+        }
+        try service.setCategoryArchived(
+            true, categoryID: bakery,
+            householdID: selection.householdID, listID: selection.listID
+        )
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let needs = try context.fetch(Need.fetchRequest())
+            let categories = try context.fetch(Shopping.Category.fetchRequest())
+            let stores = try context.fetch(Store.fetchRequest())
+            func projection(carted: Bool) -> [(String, [String])] {
+                GroceryCollectionProjection.sections(
+                    needs: needs.filter { $0.carted == carted },
+                    selectedStoreID: storeID,
+                    activeStores: stores,
+                    categories: categories,
+                    household: household
+                ).map { section in
+                    (section.title, section.items.map { $0.item?.name ?? $0.title })
+                }
+            }
+
+            let list = projection(carted: false)
+            let cart = projection(carted: true)
+            XCTAssertEqual(list.map(\.0), ["Produce", "Bakery", "Uncategorized"])
+            XCTAssertEqual(list.map(\.0), cart.map(\.0))
+            XCTAssertEqual(list.map(\.1), cart.map(\.1))
+            XCTAssertEqual(list[0].1, ["Apples", "Zucchini"])
         }
     }
 

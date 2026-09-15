@@ -26,6 +26,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 9: Final UI Polish | `057e0be9-d3bc-4019-b440-1526654bf8e3` | Final product-directed Settings, feedback, and scope cleanup. |
 | Phase 10: Interaction and Layout Polish | `75a6a861-8c43-4987-887b-5dcdfef81d1f` | Native management-row editing and spacing corrections for Settings and recovery UI. |
 | Phase 11: Add Flow and List Consistency | `9e045e46-508a-46d1-99d8-489c8022622f` | Catalog/list add flows, temporary person assignment, anchored presentations, and category-consistent ordering. |
+| Phase 12: Settings Integrity and Store-Scope Polish | `7f63b8f0-37f3-437c-b348-2020fdc37aa5` | Durable Settings data, store ordering, and category-first store-scoped grocery presentation. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
@@ -48,7 +49,7 @@ An obsolete SHOPPING-27 blocked-by-SHOPPING-10 relation was identified during th
 
 The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
 
-For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. `Only buy here` means `S` is the only explicit active store and the item is not `Any store`; other eligible items appear under `Can buy here`. Those are the only shopping group headings in a selected-store view. All groups needs by category in the active order configured in Settings, followed by archived categories and then Uncategorized. Rows omit repeated purchase-rule labels and never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
+For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. Grocery List and In cart always group by category in the active order configured in Settings, followed by archived categories and then Uncategorized. In a selected-store view, each eligible row uses a compact accessible symbol to distinguish `Only buy here`—where `S` is the only explicit active store and the item is not `Any store`—from `Can buy here`; those purchase rules are not section headings. Rows never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
 
 Ordinary re-add reuses the catalog item's purchase rules, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
 

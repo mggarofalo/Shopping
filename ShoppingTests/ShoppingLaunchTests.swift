@@ -35,19 +35,21 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
-        let flexibleSection = shoppingHeading("Can buy here", in: app)
-        for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
+        let bakerySection = shoppingHeading("Bakery", in: app)
+        for _ in 0..<8 where !bakerySection.exists || !bakerySection.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(flexibleSection.exists)
-        XCTAssertTrue(flexibleSection.isHittable)
+        XCTAssertTrue(bakerySection.exists)
+        XCTAssertTrue(bakerySection.isHittable)
+        XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+        XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
     }
 
-    func testCompactStoreGroupsOmitRepeatedPurchaseRulesInBothAppearances() {
+    func testStoreScopeUsesCategorySectionsAndRowIndicatorsInBothAppearances() {
         for appearance in ["light", "dark"] {
             let app = launchApp(fixture: "populated", appearance: appearance)
             XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
@@ -55,16 +57,26 @@ final class ShoppingLaunchTests: XCTestCase {
             XCTAssertFalse(app.staticTexts["Needs store"].exists)
             app.buttons["shopping.store.menu"].tap()
             app.buttons["Costco"].tap()
-            XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
-            let canBuy = shoppingHeading("Can buy here", in: app)
-            reveal(canBuy, in: app)
-            XCTAssertTrue(canBuy.isHittable)
-            XCTAssertFalse(app.staticTexts["Pantry"].exists)
-            XCTAssertFalse(app.staticTexts["Produce"].exists)
+            XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
+            let pantry = shoppingHeading("Pantry", in: app)
+            reveal(pantry, in: app)
+            XCTAssertTrue(pantry.isHittable)
+            XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
+            XCTAssertFalse(shoppingHeading("Can buy here", in: app).exists)
+            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+            XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
             XCTAssertFalse(app.staticTexts["Buy at any store"].exists)
             XCTAssertFalse(app.staticTexts["Only buy at Costco"].exists)
             XCTAssertFalse(app.buttons["Edit Chipotles in adobo"].exists)
             XCTAssertFalse(app.buttons["Edit Local honey"].exists)
+
+            app.buttons.matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "In cart")
+            ).firstMatch.tap()
+            XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
+            XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
+            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+            XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
             attachScreenshot(named: "Compact Costco \(appearance)", app: app)
             app.terminate()
         }
@@ -646,6 +658,12 @@ final class ShoppingLaunchTests: XCTestCase {
     private func shoppingHeading(_ title: String, in app: XCUIApplication) -> XCUIElement {
         // iOS 18 uppercases native section headers; iOS 26 keeps sentence case.
         app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
+    }
+
+    private func storeRuleIndicator(_ rule: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.storeRule.\(rule)."
+        )).firstMatch
     }
 
     private func waitForLabel(_ label: String, on element: XCUIElement, timeout: TimeInterval = 2) -> Bool {
