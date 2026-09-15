@@ -137,7 +137,8 @@ struct CartedGroceriesView: View {
 
     private func row(_ need: Need, activeStores: [Store]) -> some View {
         GroceryNeedRow(
-            need: need, activeStores: activeStores, onEdit: onEdit,
+            need: need, activeStores: activeStores,
+            selectedStoreID: navigation.selectedStoreID, onEdit: onEdit,
             onCartedChange: setCarted, onQuantityChange: setQuantity,
             onRemoved: onRemoved
         )

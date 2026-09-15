@@ -25,8 +25,6 @@ struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: 
 
 enum GroceryCollectionSectionID: Hashable {
     case category(CategoryNeedGroupID)
-    case onlyBuyHere
-    case canBuyHere
 }
 
 enum GroceryCollectionProjection {
@@ -37,50 +35,35 @@ enum GroceryCollectionProjection {
         categories: [Category],
         household: Household?
     ) -> [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
-        guard let selectedStoreID else {
-            return CategoryGrouping.listGroups(
-                needs: needs,
-                categories: categories,
-                household: household
-            ).map {
-                ItemCollectionSection(
-                    id: .category($0.id),
-                    title: $0.title,
-                    items: $0.needs
+        let projectedNeeds: [Need]
+        if let selectedStoreID {
+            let activeStoreIDs = Set(activeStores.map(\.id))
+            projectedNeeds = needs.filter {
+                let value = availability(
+                    of: $0,
+                    selectedStoreID: selectedStoreID,
+                    activeStoreIDs: activeStoreIDs
                 )
+                return value == .mustBuyHere || value == .flexibleHere
             }
+        } else {
+            projectedNeeds = needs
         }
 
-        let activeStoreIDs = Set(activeStores.map(\.id))
-        let orderedNeeds = CategoryGrouping.orderedNeeds(
-            needs,
+        return CategoryGrouping.listGroups(
+            needs: projectedNeeds,
             categories: categories,
             household: household
-        )
-        let onlyBuyHere = orderedNeeds.filter {
-            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
-                == .mustBuyHere
-        }
-        let canBuyHere = orderedNeeds.filter {
-            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
-                == .flexibleHere
-        }
-
-        return [
-            onlyBuyHere.isEmpty ? nil : ItemCollectionSection(
-                id: .onlyBuyHere,
-                title: "Only buy here",
-                items: onlyBuyHere
-            ),
-            canBuyHere.isEmpty ? nil : ItemCollectionSection(
-                id: .canBuyHere,
-                title: "Can buy here",
-                items: canBuyHere
+        ).map {
+            ItemCollectionSection(
+                id: .category($0.id),
+                title: $0.title,
+                items: $0.needs
             )
-        ].compactMap { $0 }
+        }
     }
 
-    private static func availability(
+    static func availability(
         of need: Need,
         selectedStoreID: UUID,
         activeStoreIDs: Set<UUID>
@@ -98,6 +81,49 @@ enum GroceryCollectionProjection {
             selectedStoreID: selectedStoreID,
             activeStoreIDs: activeStoreIDs
         )
+    }
+}
+
+enum GroceryStoreScopeIndicator: Equatable {
+    case onlyBuyHere
+    case canBuyHere
+
+    var title: String {
+        switch self {
+        case .onlyBuyHere: "Only buy here"
+        case .canBuyHere: "Can buy here"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .onlyBuyHere: "lock.fill"
+        case .canBuyHere: "checkmark.circle"
+        }
+    }
+
+    var identifierComponent: String {
+        switch self {
+        case .onlyBuyHere: "onlyBuyHere"
+        case .canBuyHere: "canBuyHere"
+        }
+    }
+
+    static func value(
+        for need: Need,
+        selectedStoreID: UUID?,
+        activeStoreIDs: Set<UUID>
+    ) -> GroceryStoreScopeIndicator? {
+        guard let selectedStoreID else { return nil }
+        switch GroceryCollectionProjection.availability(
+            of: need,
+            selectedStoreID: selectedStoreID,
+            activeStoreIDs: activeStoreIDs
+        ) {
+        case .mustBuyHere: return .onlyBuyHere
+        case .flexibleHere: return .canBuyHere
+        case .unavailable, .needsStore: return nil
+        }
     }
 }
 

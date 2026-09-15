@@ -16,7 +16,9 @@ struct PersonManagementView: View {
         GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
     }
     private var householdPeople: [Person] {
-        GroceryRowScope.validPeople(Array(people), canonicalList: canonicalList)
+        GroceryRowScope.validPeople(
+            Array(people), households: Array(households), selection: selection
+        )
     }
     private var activePeople: [Person] { householdPeople.filter { !$0.isArchived } }
     private var archivedPeople: [Person] { householdPeople.filter(\.isArchived) }

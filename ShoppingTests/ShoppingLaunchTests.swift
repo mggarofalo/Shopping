@@ -35,19 +35,21 @@ final class ShoppingLaunchTests: XCTestCase {
         let costco = app.buttons["Costco"]
         XCTAssertTrue(costco.waitForExistence(timeout: 2))
         costco.tap()
-        XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
+        XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "In cart")).firstMatch.exists)
-        let flexibleSection = shoppingHeading("Can buy here", in: app)
-        for _ in 0..<8 where !flexibleSection.exists || !flexibleSection.isHittable {
+        let bakerySection = shoppingHeading("Bakery", in: app)
+        for _ in 0..<8 where !bakerySection.exists || !bakerySection.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(flexibleSection.exists)
-        XCTAssertTrue(flexibleSection.isHittable)
+        XCTAssertTrue(bakerySection.exists)
+        XCTAssertTrue(bakerySection.isHittable)
+        XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+        XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
     }
 
-    func testCompactStoreGroupsOmitRepeatedPurchaseRulesInBothAppearances() {
+    func testStoreScopeUsesCategorySectionsAndRowIndicatorsInBothAppearances() {
         for appearance in ["light", "dark"] {
             let app = launchApp(fixture: "populated", appearance: appearance)
             XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
@@ -55,16 +57,26 @@ final class ShoppingLaunchTests: XCTestCase {
             XCTAssertFalse(app.staticTexts["Needs store"].exists)
             app.buttons["shopping.store.menu"].tap()
             app.buttons["Costco"].tap()
-            XCTAssertTrue(shoppingHeading("Only buy here", in: app).waitForExistence(timeout: 2))
-            let canBuy = shoppingHeading("Can buy here", in: app)
-            reveal(canBuy, in: app)
-            XCTAssertTrue(canBuy.isHittable)
-            XCTAssertFalse(app.staticTexts["Pantry"].exists)
-            XCTAssertFalse(app.staticTexts["Produce"].exists)
+            XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
+            let pantry = shoppingHeading("Pantry", in: app)
+            reveal(pantry, in: app)
+            XCTAssertTrue(pantry.isHittable)
+            XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
+            XCTAssertFalse(shoppingHeading("Can buy here", in: app).exists)
+            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+            XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
             XCTAssertFalse(app.staticTexts["Buy at any store"].exists)
             XCTAssertFalse(app.staticTexts["Only buy at Costco"].exists)
             XCTAssertFalse(app.buttons["Edit Chipotles in adobo"].exists)
             XCTAssertFalse(app.buttons["Edit Local honey"].exists)
+
+            app.buttons.matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "In cart")
+            ).firstMatch.tap()
+            XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
+            XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
+            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+            XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
             attachScreenshot(named: "Compact Costco \(appearance)", app: app)
             app.terminate()
         }
@@ -121,6 +133,26 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(deleteStore.waitForExistence(timeout: 2))
         deleteStore.tap()
         XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
+    }
+
+    func testPeopleRemainVisibleAfterRelaunch() {
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingPeopleUITest-\(UUID().uuidString).sqlite")
+        let app = launchApp(storeURL: storeURL)
+        openPeopleManagement(in: app)
+        app.buttons["shopping.people.add"].tap()
+        XCTAssertTrue(app.navigationBars["Add person"].waitForExistence(timeout: 2))
+        let name = app.textFields["shopping.people.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 2))
+        name.typeText("Taylor")
+        app.buttons["Save person"].tap()
+        XCTAssertTrue(app.buttons["Taylor"].waitForExistence(timeout: 2))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        openPeopleManagement(in: app)
+        XCTAssertTrue(app.buttons["Taylor"].waitForExistence(timeout: 3))
     }
 
     func testStoreManagementArchivesReferencedStoreHidesItAndResetsSelectedStore() {
@@ -514,10 +546,17 @@ final class ShoppingLaunchTests: XCTestCase {
         return button
     }
 
-    private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false, appearance: String? = nil) -> XCUIApplication {
+    private func launchApp(
+        fixture: String? = nil,
+        accessibilitySize: Bool = false,
+        appearance: String? = nil,
+        storeURL: URL? = nil
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = (
+            storeURL ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite")
+        ).path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         if let appearance { app.launchArguments += ["-shopping.appearance", appearance] }
         if accessibilitySize {
@@ -532,6 +571,13 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
         app.buttons["Stores"].tap()
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
+    }
+
+    private func openPeopleManagement(in app: XCUIApplication) {
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
+        app.buttons["People"].tap()
+        XCTAssertTrue(app.navigationBars["People"].waitForExistence(timeout: 2))
     }
 
     private func storeManagementRow(named name: String, in app: XCUIApplication) -> XCUIElement {
@@ -612,6 +658,12 @@ final class ShoppingLaunchTests: XCTestCase {
     private func shoppingHeading(_ title: String, in app: XCUIApplication) -> XCUIElement {
         // iOS 18 uppercases native section headers; iOS 26 keeps sentence case.
         app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
+    }
+
+    private func storeRuleIndicator(_ rule: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.storeRule.\(rule)."
+        )).firstMatch
     }
 
     private func waitForLabel(_ label: String, on element: XCUIElement, timeout: TimeInterval = 2) -> Bool {

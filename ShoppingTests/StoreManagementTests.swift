@@ -354,6 +354,54 @@ final class StoreManagementTests: XCTestCase {
         }
     }
 
+    func testStoresAppendOnCreateAndRestoreAndOrderSurvivesReopen() throws {
+        let url = temporaryStoreURL()
+        var selection: (householdID: UUID, listID: UUID)!
+        var expected: [UUID] = []
+        do {
+            let persistence = try PersistenceController(storeURL: url)
+            let service = NeedService(persistence: persistence)
+            selection = try service.createHousehold()
+            let first = try service.createStore(
+                name: "First", householdID: selection.householdID, listID: selection.listID
+            )
+            let second = try service.createStore(
+                name: "Second", householdID: selection.householdID, listID: selection.listID
+            )
+            let third = try service.createStore(
+                name: "Third", householdID: selection.householdID, listID: selection.listID
+            )
+            XCTAssertEqual(
+                try activeOrderedStoreIDs(selection.householdID, persistence: persistence),
+                [first, second, third]
+            )
+
+            try service.reorderStores(
+                [third, first, second],
+                householdID: selection.householdID,
+                listID: selection.listID
+            )
+            try service.setStoreArchived(
+                true, storeID: first,
+                householdID: selection.householdID, listID: selection.listID
+            )
+            try service.setStoreArchived(
+                false, storeID: first,
+                householdID: selection.householdID, listID: selection.listID
+            )
+            expected = [third, second, first]
+            XCTAssertEqual(
+                try activeOrderedStoreIDs(selection.householdID, persistence: persistence),
+                expected
+            )
+        }
+
+        let reopened = try PersistenceController(storeURL: url)
+        XCTAssertEqual(
+            try activeOrderedStoreIDs(selection.householdID, persistence: reopened), expected
+        )
+    }
+
     func testReorderRejectsZeroAndImportedDuplicateStoreIdentitiesWithoutMutation() throws {
         for importedID in [PersistenceModel.unsetID, UUID()] {
             let persistence = try makePersistence()

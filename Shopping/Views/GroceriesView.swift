@@ -531,6 +531,7 @@ struct GroceriesView: View {
         GroceryNeedRow(
             need: need,
             activeStores: activeStores,
+            selectedStoreID: navigation.selectedStoreID,
             onEdit: focus,
             onCartedChange: setCarted,
             onQuantityChange: setQuantity,
