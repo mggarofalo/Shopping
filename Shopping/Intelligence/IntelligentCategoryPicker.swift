@@ -1,0 +1,293 @@
+import CoreData
+import SwiftUI
+
+struct IntelligentCategoryPicker: View {
+    static func requestMatchesCurrentDraft(
+        _ request: CategoryIntelligenceRequest,
+        itemName: String,
+        requestedSelection: UUID?,
+        currentSelection: UUID?
+    ) -> Bool {
+        CatalogProjection.normalizedName(request.itemName) ==
+            CatalogProjection.normalizedName(itemName) &&
+            requestedSelection == currentSelection
+    }
+
+    @Environment(\.hapticFeedback) private var hapticFeedback
+    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.needService) private var service
+    @Environment(\.persistenceSelection) private var persistenceSelection
+    @Binding var selection: UUID?
+    let itemName: String
+    let categories: [Category]
+    let householdID: UUID?
+    let listID: UUID?
+    var includeUnavailable = false
+    var onAddCategory: (() -> Void)?
+
+    @State private var requestGeneration = 0
+    @State private var pendingRequest: CategoryIntelligenceRequest?
+    @State private var selectionAtRequest: UUID?
+    @State private var result: ResultState = .idle
+
+    var body: some View {
+        Section {
+            recommendationResult
+            CategoryPills(
+                selection: $selection,
+                categories: categories,
+                includeUnavailable: includeUnavailable,
+                onAddCategory: onAddCategory
+            )
+        } header: {
+            HStack {
+                Text("Category")
+                Spacer()
+                if result == .running {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("Recommending category")
+                        .accessibilityIdentifier("shopping.category.recommendation.progress")
+                } else {
+                    Button(action: requestRecommendation) {
+                        Label("Suggest", systemImage: "sparkles")
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canRequestRecommendation)
+                    .accessibilityLabel("Suggest category")
+                    .accessibilityHint(recommendationHint)
+                    .accessibilityIdentifier("shopping.category.recommendation")
+                }
+            }
+        }
+        .task(id: requestGeneration) {
+            guard requestGeneration > 0, let pendingRequest, result == .running else { return }
+            await runRecommendation(pendingRequest)
+        }
+        .onChange(of: normalizedItemName) { _, _ in
+            dismissRecommendation()
+        }
+        .onChange(of: selection) { _, newSelection in
+            guard pendingRequest != nil, newSelection != selectionAtRequest else { return }
+            dismissRecommendation()
+        }
+    }
+
+    private var intelligenceAvailable: Bool {
+        FoundationModelCategoryClassifier.availability().allowsSuggestions
+    }
+
+    private var canRequestRecommendation: Bool {
+        intelligenceAvailable && result != .running &&
+            !normalizedItemName.isEmpty
+    }
+
+    private var recommendationHint: String {
+        intelligenceAvailable
+            ? "Uses Apple Intelligence on this device"
+            : "Apple Intelligence is not available on this device"
+    }
+
+    private var normalizedItemName: String {
+        CatalogProjection.normalizedName(itemName)
+    }
+
+    @ViewBuilder
+    private var recommendationResult: some View {
+        switch result {
+        case .idle, .running:
+            EmptyView()
+        case .existing(let categoryID, let categoryName):
+            recommendationRow(
+                title: categoryName,
+                subtitle: "Existing category",
+                actionTitle: "Use \(categoryName)"
+            ) {
+                useExistingCategory(categoryID)
+            }
+        case .newCategory(let categoryName):
+            recommendationRow(
+                title: categoryName,
+                subtitle: "New category",
+                actionTitle: "Create \(categoryName)"
+            ) {
+                createCategory(named: categoryName)
+            }
+        case .abstained:
+            recommendationRow(
+                title: "No recommendation",
+                subtitle: "Choose a category below or leave this item uncategorized."
+            )
+        case .failed(let message):
+            recommendationRow(title: "Recommendation unavailable", subtitle: message)
+        }
+    }
+
+    private func recommendationRow(
+        title: String,
+        subtitle: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .shoppingMultilineText()
+            }
+            Spacer(minLength: 8)
+            if let actionTitle, let action {
+                Button(shortActionTitle(for: actionTitle), action: action)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("shopping.category.recommendation.accept")
+            }
+        }
+        .accessibilityIdentifier("shopping.category.recommendation.result")
+    }
+
+    private func shortActionTitle(for actionTitle: String) -> String {
+        actionTitle.hasPrefix("Create ") ? "Create" : "Use"
+    }
+
+    private func requestRecommendation() {
+        guard canRequestRecommendation else { return }
+        guard FoundationModelCategoryClassifier.availability().allowsSuggestions else {
+            dismissRecommendation()
+            return
+        }
+        do {
+            let snapshot = try CategoryIntelligenceCandidateLoader().load(
+                from: viewContext,
+                selection: persistenceSelection
+            )
+            guard snapshot.candidates.count <= FoundationModelCategoryClassifier.maximumCategoryCount else {
+                result = .failed("There are too many active categories to make a recommendation.")
+                return
+            }
+            pendingRequest = CategoryIntelligenceRequest(
+                itemName: itemName,
+                candidates: snapshot.candidates
+            )
+            selectionAtRequest = selection
+            result = .running
+            requestGeneration += 1
+        } catch {
+            result = .failed("The current household categories could not be read.")
+        }
+    }
+
+    private func dismissRecommendation() {
+        pendingRequest = nil
+        selectionAtRequest = nil
+        result = .idle
+        requestGeneration += 1
+    }
+
+    private func useExistingCategory(_ categoryID: UUID) {
+        guard recommendationMatchesCurrentItem else {
+            result = .failed("The item name changed. Request another recommendation.")
+            return
+        }
+        guard categories.contains(where: { $0.id == categoryID && !$0.isArchived }) else {
+            result = .failed("That category is no longer available. Request another recommendation.")
+            return
+        }
+        selection = categoryID
+        hapticFeedback.play(.lightImpact)
+    }
+
+    private func createCategory(named name: String) {
+        guard recommendationMatchesCurrentItem else {
+            result = .failed("The item name changed. Request another recommendation.")
+            return
+        }
+        guard let service, let householdID, let listID,
+              persistenceSelection.householdID == householdID,
+              persistenceSelection.listID == listID else {
+            result = .failed("The household changed. Request another recommendation.")
+            return
+        }
+        do {
+            let snapshot = try CategoryIntelligenceCandidateLoader().load(
+                from: viewContext,
+                selection: persistenceSelection
+            )
+            guard snapshot.candidates.filter({
+                CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(name)
+            }).count < 2 else {
+                result = .failed("Matching categories have conflicting identities. Choose one manually.")
+                return
+            }
+            let categoryID = try service.createOrReuseActiveCategory(
+                name: name, householdID: householdID, listID: listID
+            )
+            selection = categoryID
+            result = .existing(categoryID, name)
+            hapticFeedback.play(.success)
+        } catch {
+            result = .failed("The category could not be created. Your item draft is unchanged.")
+        }
+    }
+
+    @MainActor
+    private func runRecommendation(_ request: CategoryIntelligenceRequest) async {
+        do {
+            let proposal = try await FoundationModelCategoryClassifier().classify(request)
+            try Task.checkCancellation()
+            guard pendingRequest == request,
+                  Self.requestMatchesCurrentDraft(
+                    request,
+                    itemName: itemName,
+                    requestedSelection: selectionAtRequest,
+                    currentSelection: selection
+                  ) else {
+                return
+            }
+            switch proposal {
+            case .category(let categoryID):
+                guard let category = request.candidates.first(where: { $0.id == categoryID }) else {
+                    result = .failed("The recommended category is no longer available.")
+                    return
+                }
+                result = .existing(categoryID, category.name)
+            case .newCategory(let categoryName):
+                result = .newCategory(categoryName)
+            case .abstain:
+                result = .abstained
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            result = .failed("Choose a category manually or try again.")
+        }
+    }
+
+    private var recommendationMatchesCurrentItem: Bool {
+        guard let pendingRequest else { return false }
+        return Self.requestMatchesCurrentDraft(
+            pendingRequest,
+            itemName: itemName,
+            requestedSelection: selectionAtRequest,
+            currentSelection: selection
+        )
+    }
+
+    private enum ResultState: Equatable {
+        case idle
+        case running
+        case existing(UUID, String)
+        case newCategory(String)
+        case abstained
+        case failed(String)
+    }
+}

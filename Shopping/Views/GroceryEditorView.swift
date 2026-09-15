@@ -364,9 +364,12 @@ struct GroceryEditorView: View {
                     }
                 }
                 if !isPromotingOneTime || promotionChoice == .create {
-                    CategoryPills(
+                    IntelligentCategoryPicker(
                         selection: $categoryID,
+                        itemName: name,
                         categories: scopedCategories,
+                        householdID: target.scope.householdID,
+                        listID: target.scope.listID,
                         onAddCategory: { showingCategoryCreation = true }
                     )
                     PurchaseRulesPicker(

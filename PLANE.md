@@ -27,6 +27,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 10: Interaction and Layout Polish | `75a6a861-8c43-4987-887b-5dcdfef81d1f` | Native management-row editing and spacing corrections for Settings and recovery UI. |
 | Phase 11: Add Flow and List Consistency | `9e045e46-508a-46d1-99d8-489c8022622f` | Catalog/list add flows, temporary person assignment, anchored presentations, and category-consistent ordering. |
 | Phase 12: Settings Integrity and Store-Scope Polish | `7f63b8f0-37f3-437c-b348-2020fdc37aa5` | Durable Settings data, store ordering, and category-first store-scoped grocery presentation. |
+| Phase 13: Restore Category Intelligence | `50e324b6-35d2-4e47-826a-5288ceeca70c` | Restore on-device category suggestions and category-fill surfaces across the current UI. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
