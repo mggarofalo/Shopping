@@ -123,6 +123,26 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
     }
 
+    func testPeopleRemainVisibleAfterRelaunch() {
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingPeopleUITest-\(UUID().uuidString).sqlite")
+        let app = launchApp(storeURL: storeURL)
+        openPeopleManagement(in: app)
+        app.buttons["shopping.people.add"].tap()
+        XCTAssertTrue(app.navigationBars["Add person"].waitForExistence(timeout: 2))
+        let name = app.textFields["shopping.people.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 2))
+        name.typeText("Taylor")
+        app.buttons["Save person"].tap()
+        XCTAssertTrue(app.buttons["Taylor"].waitForExistence(timeout: 2))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        openPeopleManagement(in: app)
+        XCTAssertTrue(app.buttons["Taylor"].waitForExistence(timeout: 3))
+    }
+
     func testStoreManagementArchivesReferencedStoreHidesItAndResetsSelectedStore() {
         let app = launchApp(fixture: "populated")
         app.buttons["shopping.store.menu"].tap()
@@ -514,10 +534,17 @@ final class ShoppingLaunchTests: XCTestCase {
         return button
     }
 
-    private func launchApp(fixture: String? = nil, accessibilitySize: Bool = false, appearance: String? = nil) -> XCUIApplication {
+    private func launchApp(
+        fixture: String? = nil,
+        accessibilitySize: Bool = false,
+        appearance: String? = nil,
+        storeURL: URL? = nil
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = (
+            storeURL ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite")
+        ).path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         if let appearance { app.launchArguments += ["-shopping.appearance", appearance] }
         if accessibilitySize {
@@ -532,6 +559,13 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
         app.buttons["Stores"].tap()
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 2))
+    }
+
+    private func openPeopleManagement(in app: XCUIApplication) {
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 2))
+        app.buttons["People"].tap()
+        XCTAssertTrue(app.navigationBars["People"].waitForExistence(timeout: 2))
     }
 
     private func storeManagementRow(named name: String, in app: XCUIApplication) -> XCUIElement {

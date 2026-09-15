@@ -222,14 +222,14 @@ struct StoreManagementView: View {
 
     private var standardList: some View {
         List {
-            storeSection(nil, stores: activeStores)
+            storeSection(nil, stores: activeStores, canReorder: true)
             if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
         }
     }
 
     private var selectableList: some View {
         List(selection: $selectedIDs) {
-            storeSection(nil, stores: activeStores)
+            storeSection(nil, stores: activeStores, canReorder: true)
             if !archivedStores.isEmpty { storeSection("Archived", stores: archivedStores) }
         }
     }
@@ -237,19 +237,35 @@ struct StoreManagementView: View {
     private var selectedStores: [Store] { householdStores.filter { selectedIDs.contains($0.id) } }
 
     @ViewBuilder
-    private func storeSection(_ title: String?, stores: [Store]) -> some View {
+    private func storeSection(
+        _ title: String?,
+        stores: [Store],
+        canReorder: Bool = false
+    ) -> some View {
         Section {
-            ForEach(stores, id: \.objectID) { store in
-                if editMode.isEditing {
-                    storeRow(store)
-                        .shoppingListRowInsets()
-                        .tag(store.id)
-                } else {
-                    storeRow(store)
-                        .shoppingListRowInsets()
+            if canReorder {
+                ForEach(stores, id: \.objectID) { store in
+                    storeListRow(store)
+                }
+                .onMove(perform: reorder)
+            } else {
+                ForEach(stores, id: \.objectID) { store in
+                    storeListRow(store)
                 }
             }
         } header: { if let title { Text(title) } }
+    }
+
+    @ViewBuilder
+    private func storeListRow(_ store: Store) -> some View {
+        if editMode.isEditing {
+            storeRow(store)
+                .shoppingListRowInsets()
+                .tag(store.id)
+        } else {
+            storeRow(store)
+                .shoppingListRowInsets()
+        }
     }
 
     @ViewBuilder
@@ -355,6 +371,20 @@ struct StoreManagementView: View {
             hapticFeedback.play(.success)
             editor = nil
         } catch { self.error = error }
+    }
+
+    private func reorder(from offsets: IndexSet, to destination: Int) {
+        guard let service,
+              let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
+        var ids = activeStores.map(\.id)
+        ids.move(fromOffsets: offsets, toOffset: destination)
+        do {
+            try service.reorderStores(
+                ids, householdID: scope.householdID, listID: scope.listID
+            )
+        } catch {
+            self.error = error
+        }
     }
 
     private var removalTitle: String {

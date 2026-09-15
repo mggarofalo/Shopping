@@ -101,6 +101,25 @@ enum GroceryRowScope {
     static func validPeople(_ people: [Person], canonicalList: GroceryList?) -> [Person] {
         guard let household = canonicalList?.household,
               let persistentStore = household.objectID.persistentStore else { return [] }
+        return validPeople(people, household: household, persistentStore: persistentStore)
+    }
+
+    static func validPeople(
+        _ people: [Person],
+        households: [Household],
+        selection: PersistenceSelection
+    ) -> [Person] {
+        guard let householdID = selection.householdID,
+              householdID != PersistenceModel.unsetID else { return [] }
+        let matches = households.filter { $0.id == householdID }
+        guard matches.count == 1,
+              let persistentStore = matches[0].objectID.persistentStore else { return [] }
+        return validPeople(people, household: matches[0], persistentStore: persistentStore)
+    }
+
+    private static func validPeople(
+        _ people: [Person], household: Household, persistentStore: NSPersistentStore
+    ) -> [Person] {
         let counts = Dictionary(grouping: people, by: \.id).mapValues(\.count)
         return people.filter {
             $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&

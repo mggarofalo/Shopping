@@ -777,7 +777,7 @@ final class NeedService: @unchecked Sendable {
         name: String,
         householdID: UUID,
         listID: UUID? = nil,
-        displayOrder: Int64 = 0
+        displayOrder: Int64? = nil
     ) throws -> UUID {
         let name = try validatedName(name)
         return try write { context in
@@ -787,7 +787,7 @@ final class NeedService: @unchecked Sendable {
             let store: Store = self.insert("Store", in: context)
             store.id = UUID()
             store.name = name
-            store.displayOrder = displayOrder
+            store.displayOrder = displayOrder ?? self.nextActiveStoreOrder(in: household)
             store.isArchived = false
             self.route(store, with: household, in: context)
             store.household = household
@@ -1052,7 +1052,11 @@ final class NeedService: @unchecked Sendable {
                   store.objectID.persistentStore == household.objectID.persistentStore else {
                 throw NeedServiceError.scopeChanged
             }
+            guard store.isArchived != archived else { return }
             store.isArchived = archived
+            if !archived {
+                store.displayOrder = self.nextActiveStoreOrder(in: household, excluding: store)
+            }
             try self.advanceRevision(of: store)
         }
     }
@@ -2752,6 +2756,18 @@ final class NeedService: @unchecked Sendable {
     ) -> Int64 {
         let used = Set((household.people ?? []).filter {
             $0 !== person && !$0.isArchived
+        }.map(\.displayOrder))
+        if let maximum = used.max(), maximum < Int64.max { return maximum + 1 }
+        var candidate: Int64 = 0
+        while used.contains(candidate), candidate < Int64.max { candidate += 1 }
+        return candidate
+    }
+
+    private func nextActiveStoreOrder(
+        in household: Household, excluding store: Store? = nil
+    ) -> Int64 {
+        let used = Set((household.stores ?? []).filter {
+            $0 !== store && !$0.isArchived
         }.map(\.displayOrder))
         if let maximum = used.max(), maximum < Int64.max { return maximum + 1 }
         var candidate: Int64 = 0

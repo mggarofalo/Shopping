@@ -604,6 +604,42 @@ final class GroceryEditingTests: XCTestCase {
         XCTAssertFalse(saved.itemHasPersonRelationship)
     }
 
+    func testUnassignedPeopleAndTheirOrderSurviveReopen() throws {
+        let url = temporaryStoreURL()
+        var householdID: UUID!
+        do {
+            let persistence = try PersistenceController(storeURL: url)
+            let service = NeedService(persistence: persistence)
+            let selection = try service.createHousehold()
+            householdID = selection.householdID
+            let michael = try service.createPerson(
+                name: "Michael", householdID: householdID, listID: selection.listID
+            )
+            let beka = try service.createPerson(
+                name: "Beka", householdID: householdID, listID: selection.listID
+            )
+            try service.reorderPeople(
+                [beka, michael], householdID: householdID, listID: selection.listID
+            )
+        }
+
+        let reopened = try PersistenceController(storeURL: url)
+        XCTAssertEqual(
+            try orderedPersonNames(householdID, persistence: reopened), ["Beka", "Michael"]
+        )
+        let context = reopened.simulationContext()
+        let visibleNames = try context.performAndWait {
+            let people = try context.fetch(NavigationFetchRequests.people())
+            let households = try context.fetch(NavigationFetchRequests.households())
+            return GroceryRowScope.validPeople(
+                people,
+                households: households,
+                selection: PersistenceSelection(householdID: householdID, listID: nil)
+            ).map(\.name)
+        }
+        XCTAssertEqual(visibleNames, ["Beka", "Michael"])
+    }
+
     func testReferencedPersonArchivesAndNewOccurrenceDoesNotRememberAssignment() throws {
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
