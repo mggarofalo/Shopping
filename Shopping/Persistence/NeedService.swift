@@ -824,6 +824,41 @@ final class NeedService: @unchecked Sendable {
     }
 
     @discardableResult
+    func createOrReuseActiveCategory(
+        name: String,
+        householdID: UUID,
+        listID: UUID? = nil
+    ) throws -> UUID {
+        let name = try validatedName(name)
+        let normalizedName = CatalogProjection.normalizedName(name)
+        return try write { context in
+            let household = try self.validatedCommandHousehold(
+                householdID: householdID, listID: listID, in: context
+            )
+            let allCategories = try context.fetch(Category.fetchRequest())
+            let identityCounts = Dictionary(grouping: allCategories, by: \.id).mapValues(\.count)
+            let matches = allCategories.filter {
+                $0.household == household && !$0.isArchived &&
+                    $0.id != PersistenceModel.unsetID && identityCounts[$0.id] == 1 &&
+                    $0.objectID.persistentStore == household.objectID.persistentStore &&
+                    CatalogProjection.normalizedName($0.name) == normalizedName
+            }
+            guard matches.count < 2 else { throw NeedServiceError.scopeChanged }
+            if let existing = matches.first { return existing.id }
+
+            let category: Category = self.insert("Category", in: context)
+            category.id = UUID()
+            category.name = name
+            category.isArchived = false
+            let currentMaximum = household.categories?.map(\.displayOrder).max() ?? -1
+            category.displayOrder = currentMaximum == Int64.max ? Int64.max : currentMaximum + 1
+            self.route(category, with: household, in: context)
+            category.household = household
+            return category.id
+        }
+    }
+
+    @discardableResult
     func createPerson(
         name: String,
         householdID: UUID,
@@ -2083,6 +2118,7 @@ final class NeedService: @unchecked Sendable {
         householdID: UUID,
         purchaseFilter: PurchaseFilter,
         categoryID: UUID?,
+        expectedCategoryRevision: Int64? = nil,
         textFilter: String,
         urgentOnly: Bool,
         renewCarted: Bool,
@@ -2102,6 +2138,13 @@ final class NeedService: @unchecked Sendable {
             let selectedStore = try self.validatedCatalogAddStore(
                 id: purchaseFilter.selectedStoreID, household: household, in: context
             )
+            let category = try self.validatedCategory(
+                id: categoryID, household: household, in: context
+            )
+            if let expectedCategoryRevision,
+               category?.revision != expectedCategoryRevision {
+                throw NeedServiceError.scopeChanged
+            }
             guard let item = try self.item(id: itemID, in: context) else {
                 throw NeedServiceError.itemNotFound
             }

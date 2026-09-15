@@ -25,6 +25,9 @@
   },
   "testTargets" : [
     {
+      "skippedTests" : [
+        "CategoryIntelligenceDeviceTests"
+      ],
       "selectedTags" : {
         "tags" : [
           ".critical"

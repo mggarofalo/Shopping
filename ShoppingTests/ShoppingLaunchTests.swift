@@ -26,6 +26,23 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(version.label.contains("5"))
     }
 
+    func testCategorySuggestionIsVisibleInCatalogAndGroceryEditors() {
+        let app = launchApp()
+
+        app.tabBars.buttons["Catalog"].tap()
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.category.recommendation"].waitForExistence(timeout: 2))
+        app.buttons["Cancel"].firstMatch.tap()
+
+        app.tabBars.buttons["Groceries"].tap()
+        app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        app.buttons["shopping.grocery.addOneTime"].tap()
+        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.category.recommendation"].waitForExistence(timeout: 2))
+    }
+
     func testPopulatedCostcoNavigationAtAccessibilitySize() {
         let app = launchApp(fixture: "populated", accessibilitySize: true)
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
