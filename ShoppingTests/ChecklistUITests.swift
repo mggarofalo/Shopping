@@ -109,12 +109,9 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(row("Bananas", app: app).exists)
         app.tabBars.buttons["Catalog"].tap()
         app.buttons["shopping.catalog.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
         let archived = app.buttons["shopping.catalog.archived"]
-        for _ in 0..<3 where !archived.exists || !archived.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(archived.waitForExistence(timeout: 2))
-        XCTAssertTrue(archived.isHittable)
+        reveal(archived, app: app)
         archived.tap()
         app.buttons["Done"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))

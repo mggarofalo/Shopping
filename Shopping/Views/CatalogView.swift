@@ -147,6 +147,10 @@ struct CatalogView: View {
                 .listStyle(.plain)
                 .contentMargins(.top, 0, for: .scrollContent)
                 .accessibilityIdentifier("shopping.catalog.list")
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    filterHeader
+                        .background(.bar)
+                }
                 .onChange(of: pendingRevealID) { _, _ in revealPendingItem(with: proxy) }
                 .onChange(of: renderedItemIDs) { _, _ in revealPendingItem(with: proxy) }
             }
@@ -289,11 +293,6 @@ struct CatalogView: View {
 
     @ViewBuilder
     private var catalogListRows: some View {
-        Section {
-            filterHeader
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                .listRowBackground(Color.clear)
-        }
         if visibleItems.isEmpty {
             Section {
                 ContentUnavailableView {

@@ -643,11 +643,7 @@ final class ShoppingLaunchTests: XCTestCase {
     private func enableArchivedItems(in app: XCUIApplication) {
         XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
         let archived = app.buttons["shopping.catalog.archived"]
-        for _ in 0..<3 where !archived.exists || !archived.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(archived.waitForExistence(timeout: 2))
-        XCTAssertTrue(archived.isHittable)
+        reveal(archived, in: app)
         archived.tap()
         XCTAssertTrue(archived.isSelected)
     }
