@@ -278,7 +278,7 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
     }
 
-    func testCartedUncartOffersShowAllWhenCurrentStoreHidesTheGrocery() {
+    func testCartInheritsStoreFilterAndResetRevealsHiddenGrocery() {
         let app = launchApp(fixture: "populated")
         app.buttons["shopping.store.menu"].tap()
         app.buttons["Publix"].tap()
@@ -286,21 +286,24 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(carted.waitForExistence(timeout: 2))
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        groceryRow(named: "Strawberries", app: app).tap()
+        XCTAssertTrue(app.staticTexts["No matching cart items"].waitForExistence(timeout: 2))
+        let resetFilters = app.buttons["Reset filters"]
+        XCTAssertTrue(resetFilters.waitForExistence(timeout: 2))
+        resetFilters.tap()
+
+        let strawberries = groceryRow(named: "Strawberries", app: app)
+        XCTAssertTrue(strawberries.waitForExistence(timeout: 2))
+        strawberries.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertTrue(groceryRow(named: "Strawberries", app: app).exists)
-        groceryRow(named: "Strawberries", app: app).swipeLeft()
+        XCTAssertTrue(strawberries.exists)
+        strawberries.swipeLeft()
         app.buttons["Remove from cart"].tap()
-        let showAll = app.buttons["shopping.grocery.showAll"]
-        XCTAssertTrue(showAll.waitForExistence(timeout: 3))
-        showAll.tap()
         XCTAssertTrue(app.staticTexts["Nothing in cart"].waitForExistence(timeout: 3))
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
         reveal(groceryRow(named: "Strawberries", app: app), in: app)
-        XCTAssertFalse(showAll.exists)
     }
 
     func testCategoryMoveAndCartFeedbackAcknowledgeRowsLeavingTheView() {
