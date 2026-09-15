@@ -22,7 +22,7 @@ final class ShoppingAppearanceUITests: XCTestCase {
                 attach("Grocery filters \(appearance) \(size)", app)
                 app.buttons["Done"].tap()
                 app.buttons["shopping.addGrocery"].tap()
-                XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 3))
                 let addOneTime = app.buttons["shopping.grocery.addOneTime"]
                 for _ in 0..<8 where !addOneTime.isHittable { app.swipeUp() }
                 XCTAssertTrue(addOneTime.waitForExistence(timeout: 3))

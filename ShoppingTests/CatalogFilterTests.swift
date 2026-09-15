@@ -3,6 +3,81 @@ import XCTest
 @testable import Shopping
 
 final class CatalogFilterTests: XCTestCase {
+    func testGroceryCatalogCreateNameNormalizesWhitespaceAndCapitalizesFirstCharacter() {
+        let locale = Locale(identifier: "en_US_POSIX")
+        XCTAssertEqual(
+            GroceryCatalogAddView.proposedCatalogName(from: "  rice   vinegar  ", locale: locale),
+            "Rice vinegar"
+        )
+        XCTAssertEqual(
+            GroceryCatalogAddView.proposedCatalogName(from: "Already Named", locale: locale),
+            "Already Named"
+        )
+        XCTAssertEqual(GroceryCatalogAddView.proposedCatalogName(from: "   ", locale: locale), "")
+    }
+
+    func testCatalogProjectionUsesSettingsCategoryOrderAndDeterministicItemOrder() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let archivedCategory = try service.createCategory(
+            name: "Archived", householdID: selection.householdID, displayOrder: 0
+        )
+        let produce = try service.createCategory(
+            name: "Produce", householdID: selection.householdID, displayOrder: 1
+        )
+        let pantry = try service.createCategory(
+            name: "Pantry", householdID: selection.householdID, displayOrder: 2
+        )
+        _ = try service.createItem(
+            name: "Old favorite", categoryID: archivedCategory, householdID: selection.householdID
+        )
+        _ = try service.createItem(name: "Apple 10", categoryID: produce, householdID: selection.householdID)
+        _ = try service.createItem(name: "Apple 2", categoryID: produce, householdID: selection.householdID)
+        _ = try service.createItem(name: "Rice", categoryID: pantry, householdID: selection.householdID)
+        _ = try service.createItem(name: "Loose item", householdID: selection.householdID)
+        let unavailableItemID = try service.createItem(name: "Imported", householdID: selection.householdID)
+        try service.setCategoryArchived(
+            true,
+            categoryID: archivedCategory,
+            householdID: selection.householdID,
+            listID: selection.listID
+        )
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let householdRequest = Household.fetchRequest()
+            householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
+            let household = try XCTUnwrap(context.fetch(householdRequest).first)
+            let unavailableCategory = NSEntityDescription.insertNewObject(
+                forEntityName: "Category", into: context
+            ) as! Shopping.Category
+            unavailableCategory.id = PersistenceModel.unsetID
+            unavailableCategory.name = "Imported category"
+            unavailableCategory.household = household
+            let unavailableItem = try XCTUnwrap(
+                context.fetch(Item.fetchRequest()).first { $0.id == unavailableItemID }
+            )
+            unavailableItem.category = unavailableCategory
+
+            let sections = CatalogCollectionProjection.sections(
+                items: try context.fetch(Item.fetchRequest()),
+                categories: try context.fetch(Shopping.Category.fetchRequest()),
+                household: household
+            )
+
+            XCTAssertEqual(
+                sections.map(\.title),
+                ["Produce", "Pantry", "Archived", "Unavailable category", "Uncategorized"]
+            )
+            XCTAssertEqual(sections[0].items.map(\.name), ["Apple 2", "Apple 10"])
+            XCTAssertEqual(sections[1].items.map(\.name), ["Rice"])
+            XCTAssertEqual(sections[2].items.map(\.name), ["Old favorite"])
+            XCTAssertEqual(sections[3].items.map(\.name), ["Imported"])
+            XCTAssertEqual(sections[4].items.map(\.name), ["Loose item"])
+        }
+    }
+
     func testCatalogMetadataRoundTripsAndTagEditDoesNotChangeDemand() throws {
         let url = temporaryStoreURL()
         var householdID: UUID!, itemID: UUID!, needID: UUID!, costcoID: UUID!, publixID: UUID!

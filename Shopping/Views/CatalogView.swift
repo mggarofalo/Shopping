@@ -2,16 +2,8 @@ import CoreData
 import os
 import SwiftUI
 
-private typealias CatalogItemGroup = ItemCollectionSection<String, Item>
-
-private struct CatalogGroupKey: Hashable {
-    let id: String
-    let title: String
-    let order: Int64
-}
-
 private struct CatalogRowSource: Hashable {
-    let groupID: String
+    let groupID: CatalogCollectionSectionID
     let itemID: UUID
 }
 
@@ -31,7 +23,7 @@ struct CatalogView: View {
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
     @State private var showingFilters = false
-    @State private var renderedGroups: [CatalogItemGroup] = []
+    @State private var renderedGroups: [ItemCollectionSection<CatalogCollectionSectionID, Item>] = []
     @State private var editor: CatalogEditSession?
     @State private var removalTarget: CatalogRemovalTarget?
     @State private var removalNotice: String?
@@ -69,30 +61,17 @@ struct CatalogView: View {
         scopedItems.map { CatalogRefreshKey(id: $0.id, revision: $0.revision, archived: $0.isArchived) }
             .sorted { $0.id.uuidString < $1.id.uuidString }
     }
-    private func makeVisibleGroups(from items: [Item]) -> [CatalogItemGroup] {
+    private func makeVisibleGroups(
+        from items: [Item]
+    ) -> [ItemCollectionSection<CatalogCollectionSectionID, Item>] {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID)
         defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Catalog grouping", signpostID: signpostID) }
-        let sortedItems = items.sorted(by: catalogItemComesFirst)
-        let validCategoryIDs = Set(scopedCategories.map(\.id))
-        return groups(items: sortedItems) {
-            categoryGroupKey(for: $0, validCategoryIDs: validCategoryIDs)
-        }
-    }
-
-    private func groups(items: [Item], key: (Item) -> CatalogGroupKey) -> [CatalogItemGroup] {
-        catalogGroups(from: Dictionary(grouping: items, by: key))
-    }
-
-    private func catalogGroups(from grouped: [CatalogGroupKey: [Item]]) -> [CatalogItemGroup] {
-        grouped.keys.sorted(by: groupComesFirst).map { key in
-            CatalogItemGroup(id: key.id, title: key.title, items: grouped[key] ?? [])
-        }
-    }
-
-    private func groupComesFirst(_ lhs: CatalogGroupKey, _ rhs: CatalogGroupKey) -> Bool {
-        if lhs.order != rhs.order { return lhs.order < rhs.order }
-        return lhs.id < rhs.id
+        return CatalogCollectionProjection.sections(
+            items: items,
+            categories: scopedCategories,
+            household: household
+        )
     }
 
     private var hasNarrowing: Bool {
@@ -429,12 +408,6 @@ struct CatalogView: View {
         ))
     }
 
-    private func catalogItemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
-        if alphabetically(lhs.name, rhs.name) { return true }
-        if alphabetically(rhs.name, lhs.name) { return false }
-        return lhs.id.uuidString < rhs.id.uuidString
-    }
-
     private func beginSelection(with itemID: UUID) {
         guard !editMode.isEditing, household != nil, service != nil,
               visibleItemIDs.contains(itemID) else { return }
@@ -446,21 +419,6 @@ struct CatalogView: View {
         lhs.compare(
             rhs, options: [.caseInsensitive, .diacriticInsensitive, .numeric], locale: .current
         ) == .orderedAscending
-    }
-
-    private func categoryGroupKey(
-        for item: Item,
-        validCategoryIDs: Set<UUID>
-    ) -> CatalogGroupKey {
-        guard let category = item.category else {
-            return CatalogGroupKey(id: "category:none", title: "Uncategorized", order: Int64.max - 1)
-        }
-        guard validCategoryIDs.contains(category.id) else {
-            return CatalogGroupKey(id: "category:unavailable", title: "Unavailable category", order: Int64.max)
-        }
-        return CatalogGroupKey(
-            id: "category:\(category.id.uuidString)", title: category.name, order: category.displayOrder
-        )
     }
 
     private func chip(_ title: String, remove: @escaping () -> Void) -> some View {
