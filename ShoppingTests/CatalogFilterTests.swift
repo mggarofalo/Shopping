@@ -13,7 +13,50 @@ final class CatalogFilterTests: XCTestCase {
             GroceryCatalogAddView.proposedCatalogName(from: "Already Named", locale: locale),
             "Already Named"
         )
+        let turkish = Locale(identifier: "tr_TR")
+        let compatibilitySafe = GroceryCatalogAddView.proposedCatalogName(
+            from: "ıspanak", locale: turkish
+        )
+        XCTAssertEqual(compatibilitySafe, "ıspanak")
+        XCTAssertTrue(CatalogProjection.textMatches(compatibilitySafe, query: "ıspanak"))
         XCTAssertEqual(GroceryCatalogAddView.proposedCatalogName(from: "   ", locale: locale), "")
+    }
+
+    func testUnicodeSafeCreateNameStillPassesSearchScopeAndAddsToList() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let searchText = "ıspanak"
+        let proposedName = GroceryCatalogAddView.proposedCatalogName(
+            from: searchText,
+            locale: Locale(identifier: "tr_TR")
+        )
+        let itemID = try service.createItem(name: proposedName, householdID: selection.householdID)
+        let constraint = CatalogAddScopeConstraint(
+            purchaseFilter: PurchaseFilter(),
+            categoryID: nil,
+            textFilters: [searchText],
+            urgentOnly: false,
+            newNeedUrgency: .normal
+        )
+
+        let preview = try service.captureCatalogAdd(
+            itemIDs: [itemID],
+            householdID: selection.householdID,
+            listID: selection.listID,
+            selectedStoreID: nil,
+            scopeConstraint: constraint
+        )
+        XCTAssertEqual(preview.addCount, 1)
+        XCTAssertEqual(preview.ineligibleCount, 0)
+
+        let result = try service.applyCatalogAdd(
+            preview.token,
+            renewCarted: false,
+            scopeConstraint: constraint
+        )
+        XCTAssertEqual(result.addedNeedIDs.count, 1)
+        XCTAssertEqual(result.ineligibleCount, 0)
     }
 
     func testCatalogProjectionUsesSettingsCategoryOrderAndDeterministicItemOrder() throws {

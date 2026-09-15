@@ -117,6 +117,7 @@ struct GroceryCatalogAddView: View {
     private var normalizedSearch: String { CatalogProjection.normalizedName(searchText) }
 
     var body: some View {
+        let activeNeedIndex = activeNeedsByItemID
         NavigationStack {
             List {
                 if !activePeople.isEmpty || personID != nil {
@@ -160,16 +161,17 @@ struct GroceryCatalogAddView: View {
                         sections: catalogSections,
                         itemID: \.objectID
                     ) { _, item in
+                        let activeNeed = activeNeedIndex[item.id]
                         Button { select(item) } label: {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.name)
-                                    Text(summary(for: item))
+                                    Text(summary(for: item, activeNeed: activeNeed))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: activeNeedsByItemID[item.id] == nil
+                                Image(systemName: activeNeed == nil
                                       ? "plus.circle"
                                       : "arrow.forward.circle")
                                     .foregroundStyle(.tint)
@@ -180,7 +182,7 @@ struct GroceryCatalogAddView: View {
                         .buttonStyle(.plain)
                         .frame(minHeight: 44)
                         .disabled(!personSelectionValid)
-                        .accessibilityHint(activeNeedsByItemID[item.id] == nil
+                        .accessibilityHint(activeNeed == nil
                                            ? "Adds this saved item to Groceries"
                                            : "Opens the existing grocery item")
                         .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
@@ -243,7 +245,11 @@ struct GroceryCatalogAddView: View {
     static func proposedCatalogName(from searchText: String, locale: Locale = .current) -> String {
         let normalized = searchText.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
         guard !normalized.isEmpty else { return "" }
-        return normalized.prefix(1).uppercased(with: locale) + normalized.dropFirst()
+        let capitalized = normalized.prefix(1).uppercased(with: locale) + normalized.dropFirst()
+        guard CatalogProjection.normalizedName(capitalized) == CatalogProjection.normalizedName(normalized) else {
+            return normalized
+        }
+        return capitalized
     }
 
     private var canCreateNew: Bool {
@@ -261,10 +267,10 @@ struct GroceryCatalogAddView: View {
         )
     }
 
-    private func summary(for item: Item) -> String {
+    private func summary(for item: Item, activeNeed: Need?) -> String {
         let needState: String
-        if let need = activeNeedsByItemID[item.id] {
-            needState = need.carted ? "In cart" : "On grocery list"
+        if let activeNeed {
+            needState = activeNeed.carted ? "In cart" : "On grocery list"
         } else {
             needState = "Saved in Catalog"
         }
