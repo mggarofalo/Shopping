@@ -23,6 +23,68 @@ struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: 
     }
 }
 
+enum CatalogCollectionSectionID: Hashable {
+    case category(UUID)
+    case unavailable
+    case uncategorized
+}
+
+enum CatalogCollectionProjection {
+    static func sections(
+        items: [Item],
+        categories: [Category],
+        household: Household?
+    ) -> [ItemCollectionSection<CatalogCollectionSectionID, Item>] {
+        let globallyOrdered = CategoryGrouping.ordered(categories, household: household)
+        let settingsOrdered = globallyOrdered.filter { !$0.isArchived } + globallyOrdered.filter(\.isArchived)
+        let validCategoryObjects = Set(settingsOrdered.map(\.objectID))
+        var remaining = items
+        var sections: [ItemCollectionSection<CatalogCollectionSectionID, Item>] = []
+
+        for category in settingsOrdered {
+            let matching = remaining.filter { $0.category?.objectID == category.objectID }
+            guard !matching.isEmpty else { continue }
+            sections.append(ItemCollectionSection(
+                id: .category(category.id),
+                title: category.name,
+                items: sorted(matching)
+            ))
+            remaining.removeAll { $0.category?.objectID == category.objectID }
+        }
+
+        let unavailable = remaining.filter {
+            guard let category = $0.category else { return false }
+            return !validCategoryObjects.contains(category.objectID)
+        }
+        if !unavailable.isEmpty {
+            sections.append(ItemCollectionSection(
+                id: .unavailable,
+                title: "Unavailable category",
+                items: sorted(unavailable)
+            ))
+        }
+
+        let uncategorized = remaining.filter { $0.category == nil }
+        if !uncategorized.isEmpty {
+            sections.append(ItemCollectionSection(
+                id: .uncategorized,
+                title: "Uncategorized",
+                items: sorted(uncategorized)
+            ))
+        }
+        return sections
+    }
+
+    private static func sorted(_ items: [Item]) -> [Item] {
+        items.sorted {
+            let comparison = $0.name.localizedStandardCompare($1.name)
+            return comparison == .orderedSame
+                ? $0.id.uuidString < $1.id.uuidString
+                : comparison == .orderedAscending
+        }
+    }
+}
+
 enum GroceryCollectionSectionID: Hashable {
     case category(CategoryNeedGroupID)
 }

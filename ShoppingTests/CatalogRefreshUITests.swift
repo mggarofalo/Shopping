@@ -144,8 +144,12 @@ final class CatalogRefreshUITests: XCTestCase {
     func testGroceryAddNewPrefillsCatalogEditorAndOneTimeRemainsExplicit() {
         let app = launchApp(named: "ShoppingGroceryPrefillUITest")
         openCatalogChooser(in: app)
-        searchFor("Rice vinegar", in: app)
-        app.buttons["shopping.grocery.catalogAddNew"].tap()
+        XCTAssertFalse(app.buttons["shopping.grocery.catalogAddNew"].exists)
+        searchFor("rice vinegar", in: app)
+        let create = app.buttons["shopping.grocery.catalogAddNew"]
+        XCTAssertTrue(create.waitForExistence(timeout: 2))
+        XCTAssertEqual(create.label, "Create “Rice vinegar”")
+        create.tap()
         XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, "Rice vinegar")
         app.buttons["shopping.catalog.saveAndAddToList"].tap()
@@ -176,7 +180,8 @@ final class CatalogRefreshUITests: XCTestCase {
 
     private func openCatalogChooser(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.searchFields["Search catalog"].waitForExistence(timeout: 2))
     }
 
     private func searchFor(_ text: String, in app: XCUIApplication) {

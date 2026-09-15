@@ -356,7 +356,7 @@ final class GroceryEditingUITests: XCTestCase {
 
     private func openAdd(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
         let addOneTime = app.buttons["shopping.grocery.addOneTime"]
         reveal(addOneTime, in: app)
         XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))

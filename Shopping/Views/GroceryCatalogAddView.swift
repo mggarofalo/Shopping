@@ -14,6 +14,7 @@ struct GroceryCatalogAddView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
@@ -44,6 +45,10 @@ struct GroceryCatalogAddView: View {
 
     private var scopedItems: [Item] {
         GroceryRowScope.validItems(Array(items), canonicalList: canonicalList)
+    }
+
+    private var scopedCategories: [Category] {
+        GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList)
     }
 
     private var activeStores: [Store] {
@@ -99,12 +104,20 @@ struct GroceryCatalogAddView: View {
                 CatalogProjection.textMatches($0.name, query: scope.textFilter) &&
                     CatalogProjection.textMatches($0.name, query: searchText)
             }
-            .sorted(by: itemComesFirst)
+    }
+
+    private var catalogSections: [ItemCollectionSection<CatalogCollectionSectionID, Item>] {
+        CatalogCollectionProjection.sections(
+            items: visibleItems,
+            categories: scopedCategories,
+            household: canonicalList?.household
+        )
     }
 
     private var normalizedSearch: String { CatalogProjection.normalizedName(searchText) }
 
     var body: some View {
+        let activeNeedIndex = activeNeedsByItemID
         NavigationStack {
             List {
                 if !activePeople.isEmpty || personID != nil {
@@ -129,33 +142,53 @@ struct GroceryCatalogAddView: View {
                         }
                     }
                 }
-                if visibleItems.isEmpty {
+                if canCreateNew {
+                    Section {
+                        Button(action: createCatalogItem) {
+                            Label("Create “\(proposedCatalogName)”", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                        .disabled(!personSelectionValid)
+                        .accessibilityHint("Opens a new catalog item and adds it to this grocery list after saving")
+                        .accessibilityIdentifier("shopping.grocery.catalogAddNew")
+                    }
+                }
+                if catalogSections.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                         .listRowBackground(Color.clear)
                 } else {
-                    Section("Catalog") {
-                        ForEach(visibleItems, id: \.objectID) { item in
-                            Button { select(item) } label: {
+                    ItemCollectionSections(
+                        sections: catalogSections,
+                        itemID: \.objectID
+                    ) { _, item in
+                        let activeNeed = activeNeedIndex[item.id]
+                        Button { select(item) } label: {
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.name)
-                                    Text(summary(for: item))
+                                    Text(summary(for: item, activeNeed: activeNeed))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
+                                Image(systemName: activeNeed == nil
+                                      ? "plus.circle"
+                                      : "arrow.forward.circle")
+                                    .foregroundStyle(.tint)
+                                    .accessibilityHidden(true)
                             }
-                            .buttonStyle(.plain)
-                            .frame(minHeight: 44)
-                            .disabled(!personSelectionValid)
-                            .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .frame(minHeight: 44)
+                        .disabled(!personSelectionValid)
+                        .accessibilityHint(activeNeed == nil
+                                           ? "Adds this saved item to Groceries"
+                                           : "Opens the existing grocery item")
+                        .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
                     }
                 }
-                Section("Other options") {
-                    Button("Add New “\(displaySearch)”", systemImage: "plus") { createCatalogItem() }
-                        .disabled(!canCreateNew || !personSelectionValid)
-                        .accessibilityIdentifier("shopping.grocery.catalogAddNew")
+                Section("One-time") {
                     Button("Add One-Time Item", systemImage: "1.circle") {
                         onOneTime(displaySearch, personID)
                         dismiss()
@@ -165,9 +198,13 @@ struct GroceryCatalogAddView: View {
                 }
             }
             .listStyle(.plain)
-            .navigationTitle("Add from Catalog")
+            .navigationTitle("Add to Groceries")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search catalog")
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search catalog"
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
@@ -201,6 +238,20 @@ struct GroceryCatalogAddView: View {
         searchText.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
     }
 
+    private var proposedCatalogName: String {
+        Self.proposedCatalogName(from: searchText)
+    }
+
+    static func proposedCatalogName(from searchText: String, locale: Locale = .current) -> String {
+        let normalized = searchText.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
+        guard !normalized.isEmpty else { return "" }
+        let capitalized = normalized.prefix(1).uppercased(with: locale) + normalized.dropFirst()
+        guard CatalogProjection.normalizedName(capitalized) == CatalogProjection.normalizedName(normalized) else {
+            return normalized
+        }
+        return capitalized
+    }
+
     private var canCreateNew: Bool {
         !normalizedSearch.isEmpty &&
             CatalogProjection.textMatches(displaySearch, query: scope.textFilter)
@@ -216,17 +267,10 @@ struct GroceryCatalogAddView: View {
         )
     }
 
-    private func itemComesFirst(_ lhs: Item, _ rhs: Item) -> Bool {
-        let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-        return comparison == .orderedSame
-            ? lhs.id.uuidString < rhs.id.uuidString
-            : comparison == .orderedAscending
-    }
-
-    private func summary(for item: Item) -> String {
+    private func summary(for item: Item, activeNeed: Need?) -> String {
         let needState: String
-        if let need = activeNeedsByItemID[item.id] {
-            needState = need.carted ? "In cart" : "On grocery list"
+        if let activeNeed {
+            needState = activeNeed.carted ? "In cart" : "On grocery list"
         } else {
             needState = "Saved in Catalog"
         }
@@ -237,7 +281,7 @@ struct GroceryCatalogAddView: View {
             savedStoreLabels: storeLabels,
             hasSavedStores: !assigned.isEmpty
         )
-        return "\(item.category?.name ?? "Uncategorized") · \(storeSummary) · \(needState)"
+        return "\(storeSummary) · \(needState)"
     }
 
     private func select(_ item: Item) {
@@ -284,7 +328,7 @@ struct GroceryCatalogAddView: View {
             selection: selection,
             itemID: nil,
             values: CatalogItemValues(
-                name: displaySearch,
+                name: proposedCatalogName,
                 notes: "",
                 categoryID: scope.categoryID,
                 anyStore: contextualStoreIDs.isEmpty,
@@ -340,7 +384,7 @@ struct GroceryCatalogAddView: View {
     }
 }
 
-#Preview("Add from Catalog") {
+#Preview("Add to Groceries") {
     ShoppingPreviewHost(.populated) {
         GroceryCatalogAddView(
             scope: GroceryAddScope(

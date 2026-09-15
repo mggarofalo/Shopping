@@ -37,7 +37,7 @@ final class ShoppingLaunchTests: XCTestCase {
 
         app.tabBars.buttons["Groceries"].tap()
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.addOneTime"].tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.category.recommendation"].waitForExistence(timeout: 2))
@@ -843,7 +843,7 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
         let addOneTime = app.buttons["shopping.grocery.addOneTime"]
         reveal(addOneTime, in: app)
         XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
