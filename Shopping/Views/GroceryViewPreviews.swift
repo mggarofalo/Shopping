@@ -62,5 +62,9 @@ private struct GroceryFiltersPreview: View {
     )
 }
 #Preview("Grocery filters") { ShoppingPreviewHost(.populated) { GroceryFiltersPreview() } }
-#Preview("Groceries in cart") { ShoppingPreviewHost(.populated) { NavigationStack { CartedGroceriesView() } } }
+#Preview("Groceries in cart") {
+    ShoppingPreviewHost(.populated) {
+        NavigationStack { CartedGroceriesView(navigation: GroceryNavigationState()) }
+    }
+}
 #Preview("Recently cleared") { ShoppingPreviewHost(.populated) { NavigationStack { RecentlyClearedView() } } }

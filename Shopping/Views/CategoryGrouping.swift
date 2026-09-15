@@ -1,14 +1,115 @@
 import CoreData
+import SwiftUI
+
+struct ItemCollectionSection<SectionID: Hashable, Item>: Identifiable {
+    let id: SectionID
+    let title: String
+    let items: [Item]
+}
+
+struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: View>: View {
+    let sections: [ItemCollectionSection<SectionID, Item>]
+    let itemID: KeyPath<Item, ItemID>
+    @ViewBuilder let row: (SectionID, Item) -> Row
+
+    var body: some View {
+        ForEach(sections) { section in
+            Section(section.title) {
+                ForEach(section.items, id: itemID) { item in
+                    row(section.id, item)
+                }
+            }
+        }
+    }
+}
+
+enum GroceryCollectionSectionID: Hashable {
+    case category(CategoryNeedGroupID)
+    case onlyBuyHere
+    case canBuyHere
+}
+
+enum GroceryCollectionProjection {
+    static func sections(
+        needs: [Need],
+        selectedStoreID: UUID?,
+        activeStores: [Store],
+        categories: [Category],
+        household: Household?
+    ) -> [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
+        guard let selectedStoreID else {
+            return CategoryGrouping.listGroups(
+                needs: needs,
+                categories: categories,
+                household: household
+            ).map {
+                ItemCollectionSection(
+                    id: .category($0.id),
+                    title: $0.title,
+                    items: $0.needs
+                )
+            }
+        }
+
+        let activeStoreIDs = Set(activeStores.map(\.id))
+        let orderedNeeds = CategoryGrouping.orderedNeeds(
+            needs,
+            categories: categories,
+            household: household
+        )
+        let onlyBuyHere = orderedNeeds.filter {
+            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
+                == .mustBuyHere
+        }
+        let canBuyHere = orderedNeeds.filter {
+            availability(of: $0, selectedStoreID: selectedStoreID, activeStoreIDs: activeStoreIDs)
+                == .flexibleHere
+        }
+
+        return [
+            onlyBuyHere.isEmpty ? nil : ItemCollectionSection(
+                id: .onlyBuyHere,
+                title: "Only buy here",
+                items: onlyBuyHere
+            ),
+            canBuyHere.isEmpty ? nil : ItemCollectionSection(
+                id: .canBuyHere,
+                title: "Can buy here",
+                items: canBuyHere
+            )
+        ].compactMap { $0 }
+    }
+
+    private static func availability(
+        of need: Need,
+        selectedStoreID: UUID,
+        activeStoreIDs: Set<UUID>
+    ) -> PurchaseAvailability {
+        let item = need.item
+        let oneTime = need.kind == NeedKind.oneTime.rawValue
+        let value = PurchaseRuleValue(
+            explicitStoreIDs: item.map { Set($0.stores?.map(\.id) ?? []) }
+                ?? (oneTime ? Set(need.oneTimeStores?.map(\.id) ?? []) : []),
+            anyStore: item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
+            hasResolvedIdentity: item != nil || oneTime
+        )
+        return PurchaseFilter().availability(
+            of: value,
+            selectedStoreID: selectedStoreID,
+            activeStoreIDs: activeStoreIDs
+        )
+    }
+}
 
 enum CategoryGrouping {
     static func ordered(_ categories: [Category], household: Household?) -> [Category] {
         guard let household, let persistentStore = household.objectID.persistentStore else { return [] }
+        let counts = Dictionary(grouping: categories, by: \.id).mapValues(\.count)
         let scoped = categories.filter {
             $0.household == household && $0.objectID.persistentStore == persistentStore &&
-                $0.id != PersistenceModel.unsetID
+                $0.id != PersistenceModel.unsetID && counts[$0.id] == 1
         }
-        let counts = Dictionary(grouping: scoped, by: \.id).mapValues(\.count)
-        return scoped.filter { counts[$0.id] == 1 }.sorted {
+        return scoped.sorted {
             if $0.displayOrder != $1.displayOrder { return $0.displayOrder < $1.displayOrder }
             return $0.id.uuidString < $1.id.uuidString
         }
@@ -27,6 +128,15 @@ enum CategoryGrouping {
             validObjects: Set(settingsOrdered.map(\.objectID)),
             sort: sortedForShoppingList
         )
+    }
+
+    static func orderedNeeds(
+        _ needs: [Need],
+        categories: [Category],
+        household: Household?
+    ) -> [Need] {
+        listGroups(needs: needs, categories: categories, household: household)
+            .flatMap(\.needs)
     }
 
     static func groups(
@@ -62,15 +172,28 @@ enum CategoryGrouping {
         for category in orderedCategories {
             let matching = remaining.filter { categoryObject(for: $0)?.objectID == category.objectID }
             guard !matching.isEmpty else { continue }
-            groups.append(CategoryNeedGroup(categoryID: category.id, title: category.name, needs: sort(matching)))
+            groups.append(CategoryNeedGroup(
+                id: .category(category.id), categoryID: category.id,
+                title: category.name, needs: sort(matching)
+            ))
             remaining.removeAll { categoryObject(for: $0)?.objectID == category.objectID }
         }
-        let uncategorized = remaining.filter {
-            guard let category = categoryObject(for: $0) else { return true }
+        let unavailable = remaining.filter {
+            guard let category = categoryObject(for: $0) else { return false }
             return !validObjects.contains(category.objectID)
         }
+        if !unavailable.isEmpty {
+            groups.append(CategoryNeedGroup(
+                id: .unavailable, categoryID: nil,
+                title: "Unavailable category", needs: sort(unavailable)
+            ))
+        }
+        let uncategorized = remaining.filter { categoryObject(for: $0) == nil }
         if !uncategorized.isEmpty {
-            groups.append(CategoryNeedGroup(categoryID: nil, title: "Uncategorized", needs: sort(uncategorized)))
+            groups.append(CategoryNeedGroup(
+                id: .uncategorized, categoryID: nil,
+                title: "Uncategorized", needs: sort(uncategorized)
+            ))
         }
         return groups
     }

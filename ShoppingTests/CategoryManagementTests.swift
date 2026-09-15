@@ -353,6 +353,7 @@ final class CategoryManagementTests: XCTestCase {
         let normal = try service.addRememberedNeed(itemID: normalItem, listID: selection.listID)
         let urgent = try service.addRememberedNeed(itemID: urgentItem, listID: selection.listID, urgency: .urgent)
         let archived = try service.addRememberedNeed(itemID: archivedItem, listID: selection.listID)
+        let unavailable = try service.addOneTimeNeed(title: "Mystery", listID: selection.listID)
         let uncategorized = try service.addOneTimeNeed(title: "Ice", listID: selection.listID)
 
         let context = persistence.simulationContext()
@@ -360,16 +361,277 @@ final class CategoryManagementTests: XCTestCase {
             let householdRequest = Household.fetchRequest()
             householdRequest.predicate = NSPredicate(format: "id == %@", selection.householdID as CVarArg)
             let household = try XCTUnwrap(context.fetch(householdRequest).first)
+            let unresolved = NSEntityDescription.insertNewObject(
+                forEntityName: "Category", into: context
+            ) as! Shopping.Category
+            unresolved.id = PersistenceModel.unsetID
+            unresolved.name = "Imported category"
+            unresolved.displayOrder = 0
+            unresolved.isArchived = false
+            unresolved.revision = 0
+            unresolved.household = household
+            let unavailableNeed = try XCTUnwrap(
+                context.fetch(Need.fetchRequest()).first { $0.id == unavailable }
+            )
+            unavailableNeed.oneTimeCategory = unresolved
             let groups = CategoryGrouping.listGroups(
                 needs: try context.fetch(Need.fetchRequest()),
                 categories: try context.fetch(Shopping.Category.fetchRequest()),
                 household: household
             )
 
-            XCTAssertEqual(groups.map(\.title), ["Bakery", "Dairy", "Uncategorized"])
+            XCTAssertEqual(
+                groups.map(\.title),
+                ["Bakery", "Dairy", "Unavailable category", "Uncategorized"]
+            )
+            XCTAssertEqual(
+                groups.map(\.id),
+                [.category(bakery), .category(dairy), .unavailable, .uncategorized]
+            )
             XCTAssertEqual(groups[0].needs.map(\.id), [urgent, normal])
             XCTAssertEqual(groups[1].needs.map(\.id), [archived])
-            XCTAssertEqual(groups[2].needs.map(\.id), [uncategorized])
+            XCTAssertEqual(groups[2].needs.map(\.id), [unavailable])
+            XCTAssertEqual(groups[3].needs.map(\.id), [uncategorized])
+        }
+    }
+
+    func testCategoryMergeMovesCatalogAndOneTimeReferencesAndUndoRestoresExactSource() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let drinks = try service.createCategory(
+            name: "Drinks", householdID: selection.householdID, displayOrder: 2
+        )
+        let beverages = try service.createCategory(
+            name: "Beverages", householdID: selection.householdID, displayOrder: 7
+        )
+        try service.setCategoryArchived(
+            true, categoryID: beverages,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        let itemID = try service.createItem(
+            name: "Tea", categoryID: drinks, householdID: selection.householdID
+        )
+        let needID = try service.addOneTimeNeed(
+            title: "Ice", categoryID: drinks, listID: selection.listID
+        )
+
+        let preview = try service.captureCategoryMerge(
+            sourceCategoryID: drinks, destinationCategoryID: beverages,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.catalogItemCount, 1)
+        XCTAssertEqual(preview.oneTimeNeedCount, 1)
+        XCTAssertEqual(
+            try service.applyCategoryMerge(preview.token),
+            CategoryMergeResult(catalogItemCount: 1, oneTimeNeedCount: 1)
+        )
+        try assertCategoryAssignments(
+            itemID: itemID, needID: needID, categoryID: beverages,
+            missingCategoryID: drinks, persistence: persistence
+        )
+
+        let undo = try service.undoCategoryMerge(preview.token)
+        XCTAssertEqual(
+            undo,
+            CategoryMergeUndoResult(
+                restoredCatalogItemCount: 1, restoredOneTimeNeedCount: 1,
+                changedCount: 0, missingCount: 0
+            )
+        )
+        try assertCategoryAssignments(
+            itemID: itemID, needID: needID, categoryID: drinks,
+            missingCategoryID: nil, persistence: persistence
+        )
+        let restored = try categoryStates(selection.householdID, persistence: persistence)
+            .first { $0.id == drinks }
+        XCTAssertEqual(restored, CategoryState(id: drinks, name: "Drinks", order: 2))
+    }
+
+    func testUnusedCategoryDeleteUndoRestoresIdentityMetadataAndRejectsConflict() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let source = try service.createCategory(
+            name: "Drinks", householdID: selection.householdID, displayOrder: 6
+        )
+        try service.setCategoryArchived(
+            true, categoryID: source,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        let preview = try service.captureCategoryMerge(
+            sourceCategoryID: source, destinationCategoryID: nil,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        XCTAssertEqual(preview.referenceCount, 0)
+
+        _ = try service.applyCategoryMerge(preview.token)
+        XCTAssertFalse(try categoryStates(selection.householdID, persistence: persistence).contains { $0.id == source })
+        _ = try service.undoCategoryMerge(preview.token)
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let restored = try fetch(Shopping.Category.self, entity: "Category", id: source, in: context)
+            XCTAssertEqual(restored.name, "Drinks")
+            XCTAssertEqual(restored.displayOrder, 6)
+            XCTAssertTrue(restored.isArchived)
+        }
+
+        let conflictingPreview = try service.captureCategoryMerge(
+            sourceCategoryID: source, destinationCategoryID: nil,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        _ = try service.applyCategoryMerge(conflictingPreview.token)
+        try insertCategory(
+            id: source, name: "Newer imported category", order: 2,
+            householdID: selection.householdID, persistence: persistence
+        )
+        XCTAssertThrowsError(try service.undoCategoryMerge(conflictingPreview.token)) {
+            XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
+        }
+        XCTAssertEqual(try categoryName(source, persistence: persistence), "Newer imported category")
+    }
+
+    func testUnusedCategoryUndoPreservesNewerRelativeOrderWithoutDuplicatePositions() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let bakery = try service.createCategory(
+            name: "Bakery", householdID: selection.householdID, displayOrder: 0
+        )
+        let drinks = try service.createCategory(
+            name: "Drinks", householdID: selection.householdID, displayOrder: 1
+        )
+        let produce = try service.createCategory(
+            name: "Produce", householdID: selection.householdID, displayOrder: 2
+        )
+        let preview = try service.captureCategoryMerge(
+            sourceCategoryID: drinks, destinationCategoryID: nil,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        _ = try service.applyCategoryMerge(preview.token)
+        try service.reorderCategories(
+            [produce, bakery], householdID: selection.householdID, listID: selection.listID
+        )
+
+        _ = try service.undoCategoryMerge(preview.token)
+
+        let states = try categoryStates(selection.householdID, persistence: persistence)
+        XCTAssertEqual(states.map(\.name), ["Produce", "Drinks", "Bakery"])
+        XCTAssertEqual(states.map(\.order), [0, 1, 2])
+    }
+
+    func testCategoryMergeRejectsChangedReferencesAndForeignDestinationAtomically() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold()
+        let foreign = try service.createHousehold()
+        let source = try service.createCategory(name: "Drinks", householdID: local.householdID)
+        let destination = try service.createCategory(name: "Beverages", householdID: local.householdID)
+        let foreignDestination = try service.createCategory(name: "Other", householdID: foreign.householdID)
+        let itemID = try service.createItem(
+            name: "Tea", categoryID: source, householdID: local.householdID
+        )
+        let preview = try service.captureCategoryMerge(
+            sourceCategoryID: source, destinationCategoryID: destination,
+            householdID: local.householdID, listID: local.listID
+        )
+        try service.setCategory(itemID: itemID, categoryID: destination)
+
+        XCTAssertThrowsError(try service.applyCategoryMerge(preview.token)) {
+            XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
+        }
+        XCTAssertThrowsError(try service.captureCategoryMerge(
+            sourceCategoryID: source, destinationCategoryID: foreignDestination,
+            householdID: local.householdID, listID: local.listID
+        )) { XCTAssertEqual($0 as? NeedServiceError, .scopeChanged) }
+        XCTAssertNotNil(try categoryStates(local.householdID, persistence: persistence).first { $0.id == source })
+    }
+
+    func testCategoryMergeUndoSkipsNewerReferenceChangesWithoutOverwritingThem() throws {
+        let persistence = try makePersistence()
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let source = try service.createCategory(name: "Drinks", householdID: selection.householdID)
+        let destination = try service.createCategory(name: "Beverages", householdID: selection.householdID)
+        let itemID = try service.createItem(
+            name: "Tea", categoryID: source, householdID: selection.householdID
+        )
+        let needID = try service.addOneTimeNeed(
+            title: "Ice", categoryID: source, listID: selection.listID
+        )
+        let preview = try service.captureCategoryMerge(
+            sourceCategoryID: source, destinationCategoryID: destination,
+            householdID: selection.householdID, listID: selection.listID
+        )
+        _ = try service.applyCategoryMerge(preview.token)
+        try service.setCategory(itemID: itemID, categoryID: nil)
+
+        let undo = try service.undoCategoryMerge(preview.token)
+        XCTAssertEqual(undo.restoredCatalogItemCount, 0)
+        XCTAssertEqual(undo.restoredOneTimeNeedCount, 1)
+        XCTAssertEqual(undo.changedCount, 1)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            XCTAssertNil(try fetch(Item.self, entity: "Item", id: itemID, in: context).category)
+            XCTAssertEqual(
+                try fetch(Need.self, entity: "Need", id: needID, in: context).oneTimeCategory?.id,
+                source
+            )
+        }
+    }
+
+    func testCategoryMergePreservesClearedOneTimeRecoveryBeforeAndAfterMergeUndo() throws {
+        for undoMergeFirst in [false, true] {
+            let persistence = try makePersistence()
+            let service = NeedService(persistence: persistence)
+            let selection = try service.createHousehold()
+            let source = try service.createCategory(
+                name: "Drinks", householdID: selection.householdID
+            )
+            let destination = try service.createCategory(
+                name: "Beverages", householdID: selection.householdID
+            )
+            let needID = try service.addOneTimeNeed(
+                title: "Ice", categoryID: source, listID: selection.listID
+            )
+            try service.setCarted(true, needID: needID)
+            let clearToken = try service.captureCarted(
+                householdID: selection.householdID, listID: selection.listID
+            )
+            XCTAssertEqual(try service.clearCarted(using: clearToken), 1)
+            let merge = try service.captureCategoryMerge(
+                sourceCategoryID: source, destinationCategoryID: destination,
+                householdID: selection.householdID, listID: selection.listID
+            )
+            _ = try service.applyCategoryMerge(merge.token)
+
+            if undoMergeFirst {
+                let result = try service.undoCategoryMerge(merge.token)
+                XCTAssertEqual(result.restoredOneTimeNeedCount, 1)
+                XCTAssertEqual(try service.undoClear(operationID: clearToken.id), 1)
+                let context = persistence.simulationContext()
+                try context.performAndWait {
+                    XCTAssertEqual(
+                        try fetch(Need.self, entity: "Need", id: needID, in: context)
+                            .oneTimeCategory?.id,
+                        source
+                    )
+                }
+            } else {
+                XCTAssertEqual(try service.undoClear(operationID: clearToken.id), 1)
+                let result = try service.undoCategoryMerge(merge.token)
+                XCTAssertEqual(result.restoredOneTimeNeedCount, 0)
+                XCTAssertEqual(result.changedCount, 1)
+                let context = persistence.simulationContext()
+                try context.performAndWait {
+                    XCTAssertEqual(
+                        try fetch(Need.self, entity: "Need", id: needID, in: context)
+                            .oneTimeCategory?.id,
+                        destination
+                    )
+                }
+            }
         }
     }
 
@@ -377,6 +639,31 @@ final class CategoryManagementTests: XCTestCase {
         let id: UUID
         let name: String
         let order: Int64
+    }
+
+    private func assertCategoryAssignments(
+        itemID: UUID,
+        needID: UUID,
+        categoryID: UUID,
+        missingCategoryID: UUID?,
+        persistence: PersistenceController
+    ) throws {
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            XCTAssertEqual(
+                try fetch(Item.self, entity: "Item", id: itemID, in: context).category?.id,
+                categoryID
+            )
+            XCTAssertEqual(
+                try fetch(Need.self, entity: "Need", id: needID, in: context).oneTimeCategory?.id,
+                categoryID
+            )
+            if let missingCategoryID {
+                XCTAssertFalse(try context.fetch(Shopping.Category.fetchRequest()).contains {
+                    $0.id == missingCategoryID
+                })
+            }
+        }
     }
 
     private func categoryStates(_ householdID: UUID, persistence: PersistenceController) throws -> [CategoryState] {

@@ -10,6 +10,7 @@ final class GroceryNavigationState: ObservableObject {
     @Published var excludedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var urgentOnly: Bool { didSet { persist() } }
     @Published var categoryID: UUID? { didSet { persist() } }
+    @Published var searchText = ""
     @Published private(set) var pendingNeedFocusID: UUID?
 
     private struct SavedFilter: Codable, Equatable {
@@ -51,6 +52,7 @@ final class GroceryNavigationState: ObservableObject {
         }
         isRestoring = true
         self.householdID = householdID
+        searchText = ""
         if let householdID,
            let data = defaults.data(forKey: key(for: householdID)),
            let saved = try? JSONDecoder().decode(SavedFilter.self, from: data) {

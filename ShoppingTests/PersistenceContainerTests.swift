@@ -171,6 +171,23 @@ final class PersistenceContainerTests: XCTestCase {
         ])
     }
 
+    func testPersonResolvesToHouseholdForManagedShareAssociation() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let selection = try service.createHousehold()
+        let personID = try service.createPerson(
+            name: "Sam", householdID: selection.householdID, listID: selection.listID
+        )
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let request = Person.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", personID as CVarArg)
+            let person = try XCTUnwrap(context.fetch(request).first)
+            XCTAssertEqual(ShareAssociationScope.household(for: person), person.household)
+            XCTAssertEqual(ShareAssociationScope.household(for: person)?.id, selection.householdID)
+        }
+    }
+
 
     func testPartialImportedGraphDoesNotBecomeSelectionOrTriggerReplacementEligibility() throws {
         let persistence = try PersistenceController(storeURL: temporaryURL("partial-import.sqlite"))

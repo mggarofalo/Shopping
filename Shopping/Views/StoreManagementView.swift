@@ -125,6 +125,18 @@ struct StoreManagementView: View {
                         .disabled(selectedIDs.isEmpty)
                         .accessibilityIdentifier("shopping.stores.batchDelete")
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .confirmationDialog(
+                            batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected stores?",
+                            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
+                            titleVisibility: .visible
+                        ) {
+                            if let preview = batchPreview {
+                                Button("Delete", role: .destructive) { applyBatch(preview.token) }
+                            }
+                            Button("Cancel", role: .cancel) { batchPreview = nil }
+                        } message: {
+                            if let preview = batchPreview { Text(ManagementBatchCopy.message(preview)) }
+                        }
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedStores.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.stores.batchArchive")
@@ -161,10 +173,19 @@ struct StoreManagementView: View {
                 onCancel: { editor = nil }
             )
         }
-        .confirmationDialog(
+        .alert("Store archived", isPresented: Binding(
+            get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) { removalNotice = nil }
+        } message: {
+            Text(removalNotice ?? "")
+        }
+        .alert(
             removalTitle,
-            isPresented: Binding(get: { removingStore != nil }, set: { if !$0 { clearRemoval() } }),
-            titleVisibility: .visible
+            isPresented: Binding(
+                get: { removingStore != nil },
+                set: { if !$0 { clearRemoval() } }
+            )
         ) {
             if removalAction == .archive {
                 Button("Archive store", action: remove)
@@ -181,13 +202,6 @@ struct StoreManagementView: View {
                 Text("This store has no catalog or one-time grocery references and will be removed.")
             }
         }
-        .alert("Store archived", isPresented: Binding(
-            get: { removalNotice != nil }, set: { if !$0 { removalNotice = nil } }
-        )) {
-            Button("OK", role: .cancel) { removalNotice = nil }
-        } message: {
-            Text(removalNotice ?? "")
-        }
         .alert(
             "Couldn’t update stores",
             isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
@@ -196,18 +210,6 @@ struct StoreManagementView: View {
         } message: {
             Text(error?.localizedDescription ?? "Unknown error")
         }
-        .confirmationDialog(
-            batchPreview.map(ManagementBatchCopy.title) ?? "Update selected stores?",
-            isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let preview = batchPreview {
-                Button(batchActionLabel(preview.token.action), role: preview.token.action == .delete ? .destructive : nil) {
-                    applyBatch(preview.token)
-                }
-            }
-            Button("Cancel", role: .cancel) { batchPreview = nil }
-        } message: { if let preview = batchPreview { Text(ManagementBatchCopy.message(preview)) } }
         .alert("Batch update complete", isPresented: Binding(
             get: { batchNotice != nil }, set: { if !$0 { batchNotice = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(batchNotice ?? "") }
@@ -450,7 +452,4 @@ struct StoreManagementView: View {
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }
 
-    private func batchActionLabel(_ action: ManagementBatchAction) -> String {
-        switch action { case .archive: "Archive"; case .restore: "Restore"; case .delete: "Delete" }
-    }
 }

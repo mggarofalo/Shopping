@@ -117,8 +117,9 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Archive"].exists)
         XCTAssertTrue(app.buttons["Delete"].exists)
         app.buttons["Delete"].tap()
-        XCTAssertTrue(app.staticTexts["Delete Local Market?"].waitForExistence(timeout: 2))
-        app.buttons["Delete store"].tap()
+        let deleteStore = app.buttons["Delete store"]
+        XCTAssertTrue(deleteStore.waitForExistence(timeout: 2))
+        deleteStore.tap()
         XCTAssertFalse(localMarket.waitForExistence(timeout: 2))
     }
 
@@ -187,7 +188,7 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
 
         openStoreManagement(in: app)
-        XCTAssertTrue(app.staticTexts["Corner Shop"].waitForExistence(timeout: 2))
+        XCTAssertTrue(storeManagementRow(named: "Corner Shop", in: app).waitForExistence(timeout: 2))
     }
 
     func testCategoryAndUrgentFilterChipsNarrowThenBroadenTheExistingGroceries() {
@@ -319,18 +320,22 @@ final class ShoppingLaunchTests: XCTestCase {
         )).firstMatch
         XCTAssertTrue(delete.exists)
         delete.tap()
-        XCTAssertTrue(app.staticTexts["Delete Saved coffee edit?"].waitForExistence(timeout: 2))
-        app.buttons["Delete item"].tap()
+        let deleteItem = app.buttons["Delete item"]
+        XCTAssertTrue(deleteItem.waitForExistence(timeout: 2))
+        deleteItem.tap()
         XCTAssertFalse(app.staticTexts["Saved coffee edit"].waitForExistence(timeout: 2))
     }
 
-    func testCatalogGroupingDefaultsToCategoryAndUngroupedItemsSortAlphabetically() {
+    func testCatalogUsesCategorySectionsWithoutAnAlternateGroupingMode() {
         let app = launchApp(fixture: "populated")
         openCatalog(in: app)
 
-        let grouping = app.buttons["shopping.catalog.grouping"]
-        XCTAssertTrue(grouping.waitForExistence(timeout: 3))
-        XCTAssertEqual(grouping.label, "Group: Category")
+        XCTAssertFalse(app.buttons["shopping.catalog.grouping"].exists)
+        for category in ["Produce", "Pantry", "Bakery"] {
+            let heading = app.staticTexts[category]
+            reveal(heading, in: app)
+            XCTAssertTrue(heading.exists, "Expected category section \(category)")
+        }
         attachScreenshot(named: "Catalog grouped by category", app: app)
 
         let chipotles = app.staticTexts["Chipotles in adobo"]
@@ -371,42 +376,6 @@ final class ShoppingLaunchTests: XCTestCase {
         )).firstMatch.exists)
         attachScreenshot(named: "Catalog top row swipe", app: app)
         visibleChipotlesRow.swipeRight()
-
-        reveal(grouping, in: app)
-        grouping.tap()
-        XCTAssertTrue(app.buttons["None"].waitForExistence(timeout: 2))
-        app.buttons["None"].tap()
-        XCTAssertTrue(waitForLabel("Group: None", on: grouping))
-
-        let expected = [
-            "Bananas", "Chipotles in adobo", "Dinner rolls",
-            "Granola", "Local honey", "Strawberries"
-        ]
-        let rows = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@", "shopping.catalog.item."
-        )).allElementsBoundByIndex
-        XCTAssertEqual(rows.count, expected.count)
-        XCTAssertEqual(rows.compactMap { row in expected.first { row.label.contains($0) } }, expected)
-        let ungroupedChipotles = rows.first { $0.label.contains("Chipotles in adobo") }
-        XCTAssertTrue(ungroupedChipotles?.label.contains("Pantry") == true)
-        XCTAssertTrue(ungroupedChipotles?.label.contains("Publix") == true)
-
-        grouping.tap()
-        XCTAssertTrue(app.buttons["Store"].waitForExistence(timeout: 2))
-        app.buttons["Store"].tap()
-        XCTAssertTrue(waitForLabel("Group: Store", on: grouping))
-        let expectedGroups = ["Any store", "Costco", "Neighborhood Market (closed)", "Publix", "Walmart"]
-        for title in expectedGroups {
-            let heading = app.staticTexts[title]
-            reveal(heading, in: app)
-            XCTAssertTrue(heading.exists, "Expected store group \(title)")
-        }
-        let groupedStoreRow = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.catalog.item.", "Chipotles in adobo"
-        )).firstMatch
-        reveal(groupedStoreRow, in: app)
-        XCTAssertTrue(groupedStoreRow.label.contains("Pantry"))
-        XCTAssertFalse(groupedStoreRow.label.contains("Publix"))
     }
 
     func testCatalogCategoryFiltersAllowMultipleSelections() {
@@ -674,11 +643,7 @@ final class ShoppingLaunchTests: XCTestCase {
     private func enableArchivedItems(in app: XCUIApplication) {
         XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
         let archived = app.buttons["shopping.catalog.archived"]
-        for _ in 0..<3 where !archived.exists || !archived.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(archived.waitForExistence(timeout: 2))
-        XCTAssertTrue(archived.isHittable)
+        reveal(archived, in: app)
         archived.tap()
         XCTAssertTrue(archived.isSelected)
     }
@@ -809,6 +774,11 @@ final class ShoppingLaunchTests: XCTestCase {
     private func openOneTimeAdd(in app: XCUIApplication, groceryName: String) {
         XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        let addOneTime = app.buttons["shopping.grocery.addOneTime"]
+        reveal(addOneTime, in: app)
+        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        addOneTime.tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
         setSwitch(named: "shopping.grocery.remembered", on: false, in: app)
         let name = app.textFields["shopping.grocery.name"]

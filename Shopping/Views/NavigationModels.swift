@@ -27,6 +27,12 @@ enum NavigationFetchRequests {
         return request
     }
 
+    static func people() -> NSFetchRequest<Person> {
+        let request = configured(Person.fetchRequest(), sortKey: "displayOrder")
+        request.sortDescriptors?.append(NSSortDescriptor(key: "id", ascending: true))
+        return request
+    }
+
     static func lists() -> NSFetchRequest<GroceryList> {
         configured(GroceryList.fetchRequest(), sortKey: "id")
     }
@@ -87,6 +93,16 @@ enum GroceryRowScope {
               let persistentStore = household.objectID.persistentStore else { return [] }
         let counts = Dictionary(grouping: categories, by: \.id).mapValues(\.count)
         return categories.filter {
+            $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&
+                $0.household == household && $0.objectID.persistentStore == persistentStore
+        }
+    }
+
+    static func validPeople(_ people: [Person], canonicalList: GroceryList?) -> [Person] {
+        guard let household = canonicalList?.household,
+              let persistentStore = household.objectID.persistentStore else { return [] }
+        let counts = Dictionary(grouping: people, by: \.id).mapValues(\.count)
+        return people.filter {
             $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&
                 $0.household == household && $0.objectID.persistentStore == persistentStore
         }
@@ -166,6 +182,21 @@ enum GroceryRowScope {
 }
 
 enum GroceryDestination: Hashable { case carted, recentlyCleared }
+
+enum GroceryPersonLabel {
+    static func text(for person: Person?, people: [Person], household: Household?) -> String? {
+        guard let person else { return nil }
+        let identityMatches = people.filter { $0.id == person.id }
+        guard person.id != PersistenceModel.unsetID,
+              identityMatches.count == 1, identityMatches[0] == person,
+              let household,
+              person.household == household,
+              person.objectID.persistentStore == household.objectID.persistentStore else {
+            return "Person unavailable"
+        }
+        return person.isArchived ? "\(person.name) (archived)" : person.name
+    }
+}
 
 enum GroceryPurchaseRuleLabel {
     static func text(anyStore: Bool, stores: Set<Store>, activeStores: [Store]) -> String? {

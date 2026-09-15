@@ -109,12 +109,9 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(row("Bananas", app: app).exists)
         app.tabBars.buttons["Catalog"].tap()
         app.buttons["shopping.catalog.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 2))
         let archived = app.buttons["shopping.catalog.archived"]
-        for _ in 0..<3 where !archived.exists || !archived.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(archived.waitForExistence(timeout: 2))
-        XCTAssertTrue(archived.isHittable)
+        reveal(archived, app: app)
         archived.tap()
         app.buttons["Done"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
@@ -123,10 +120,10 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertFalse(item.exists)
         app.buttons["Remove filter: Archived"].tap()
         XCTAssertTrue(item.waitForExistence(timeout: 3))
-        XCTAssertTrue(item.label.contains("Any store"))
+        XCTAssertTrue(item.label.contains("Any Store"))
     }
 
-    func testFilteredCheckoutCapturesAllCartedItemsAndCancelThenUndoAreSafe() {
+    func testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems() {
         let app = launchApp(fixture: "populated")
         selectStore("Publix", app: app)
         XCTAssertTrue(cartedLink(count: 0, app: app).waitForExistence(timeout: 2))
@@ -135,14 +132,18 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertTrue(row("Strawberries", app: app).exists)
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Publix")
+        XCTAssertTrue(app.buttons["shopping.filters"].exists)
+        XCTAssertTrue(row("Birthday candles", app: app).exists)
+        XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
+        XCTAssertFalse(row("Strawberries", app: app).exists)
 
         openCheckout(app: app)
-        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("3"))
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("2"))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Birthday candles")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Chipotles in adobo")).firstMatch.exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
-        attachScreenshot("All-items checkout preview", app: app)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Strawberries")).firstMatch.exists)
+        attachScreenshot("Filtered cart checkout preview", app: app)
         app.buttons["shopping.checkout.cancel"].tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 2))
         XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
@@ -156,13 +157,23 @@ final class ChecklistUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(row("Birthday candles", app: app).waitForExistence(timeout: 3))
         reveal(row("Chipotles in adobo", app: app), app: app)
+        app.buttons["shopping.store.clear"].tap()
         reveal(row("Strawberries", app: app), app: app)
+        XCTAssertTrue(row("Strawberries", app: app).exists)
+        app.navigationBars["In cart"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Choose store")
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }
 
     func testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering() {
         let app = launchApp()
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        let addOneTime = app.buttons["shopping.grocery.addOneTime"]
+        reveal(addOneTime, app: app)
+        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        addOneTime.tap()
         let name = app.textFields["shopping.grocery.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 2))
         name.tap()
@@ -174,6 +185,7 @@ final class ChecklistUITests: XCTestCase {
         app.buttons["shopping.grocery.save"].tap()
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
         openCheckout(app: app)
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.buttons["shopping.checkout.undo"].waitForExistence(timeout: 3))
@@ -236,6 +248,27 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
+    }
+
+    func testAllAndStoreGroupsUseCategoryOrder() throws {
+        let app = launchApp(fixture: "populated")
+        var names = groceryRowLabels(app: app)
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Bananas") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") })
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Chipotles in adobo") })
+        )
+
+        selectStore("Costco", app: app)
+        XCTAssertTrue(row("Dinner rolls", app: app).waitForExistence(timeout: 2))
+        names = groceryRowLabels(app: app)
+        XCTAssertLessThan(
+            try XCTUnwrap(names.firstIndex { $0.contains("Granola") }),
+            try XCTUnwrap(names.firstIndex { $0.contains("Dinner rolls") })
+        )
     }
 
     func testChecklistControlsRemainUsableAtAccessibilityTextSize() {
@@ -320,11 +353,19 @@ final class ChecklistUITests: XCTestCase {
         )).firstMatch
     }
 
+    private func groceryRowLabels(app: XCUIApplication) -> [String] {
+        app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.row."
+        )).allElementsBoundByIndex.map(\.label)
+    }
+
     private func openCheckout(app: XCUIApplication) {
         let checkout = app.buttons["shopping.checkout.start"]
-        reveal(checkout, app: app)
+        XCTAssertTrue(checkout.waitForExistence(timeout: 2))
+        XCTAssertTrue(checkout.isHittable)
         checkout.tap()
-        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.checkout.confirm"].waitForExistence(timeout: 3))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {

@@ -9,12 +9,18 @@ struct CartedGroceriesView: View {
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.shoppingToastCenter) private var toastCenter
+    @Environment(\.managedObjectContext) private var viewContext
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists:
         FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households:
         FetchedResults<Household>
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
+        FetchedResults<Category>
+    @ObservedObject var navigation: GroceryNavigationState
+    @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
+    @State private var showingFilters = false
     @State private var checkoutDraft: CheckoutDraft?
     @State private var clearErrorMessage: String?
     @State private var error: Error?
@@ -23,47 +29,99 @@ struct CartedGroceriesView: View {
     var onRemoved: ((UUID, UUID, UUID) -> Void)?
 
     init(
+        navigation: GroceryNavigationState,
         onEdit: ((Need) -> Void)? = nil,
         onUncarted: ((UUID, UUID, UUID) -> Void)? = nil,
         onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
     ) {
+        self.navigation = navigation
         self.onEdit = onEdit
         self.onUncarted = onUncarted
         self.onRemoved = onRemoved
     }
 
     var body: some View {
-        let allCarted = allScopedCarted
+        let visibleCarted = visibleCartedNeeds
         let activeStores = validActiveStores
         List {
-            Section { rows(allCarted, activeStores: activeStores) }
-        }
-        .listStyle(.plain)
-        .overlay {
-            if allCarted.isEmpty {
-                ContentUnavailableView("Nothing in cart", systemImage: "cart")
-                    .allowsHitTesting(false)
+            Section {
+                GroceryScopeControls(
+                    navigation: navigation,
+                    stores: activeStores,
+                    categories: activeCategories,
+                    showFilters: { showingFilters = true }
+                )
+                .buttonStyle(.borderless)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+            }
+            if visibleCarted.isEmpty {
+                Section {
+                    ContentUnavailableView {
+                        Label(hasViewNarrowing ? "No matching cart items" : "Nothing in cart", systemImage: "cart")
+                    } description: {
+                        if hasViewNarrowing {
+                            Text("Your filters may hide items already in the cart.")
+                        }
+                    } actions: {
+                        if hasViewNarrowing {
+                            Button("Reset filters", action: resetView)
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                }
+            } else {
+                ItemCollectionSections(
+                    sections: grocerySections,
+                    itemID: \.objectID
+                ) { _, need in
+                    row(need, activeStores: activeStores)
+                }
             }
         }
+        .listStyle(.plain)
         .navigationTitle("In cart")
+        .searchable(text: $navigation.searchText, prompt: "Search groceries")
+        .sheet(isPresented: $showingFilters) {
+            GroceryFiltersView(
+                navigation: navigation,
+                stores: activeStores,
+                categories: activeCategories,
+                onReset: resetView
+            )
+        }
         .sheet(item: $checkoutDraft, content: checkoutSheet)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !allCarted.isEmpty {
+            if !visibleCarted.isEmpty {
                 HStack {
                     Spacer()
                     Button { prepareCheckout() } label: {
-                        Label(checkoutLabel(count: allCarted.count), systemImage: "checkmark")
+                        Label(checkoutLabel(count: visibleCarted.count), systemImage: "checkmark")
                             .labelStyle(.iconOnly)
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
-                    .accessibilityLabel(checkoutLabel(count: allCarted.count))
+                    .accessibilityLabel(checkoutLabel(count: visibleCarted.count))
                     .accessibilityIdentifier("shopping.checkout.start")
                     .padding(.trailing)
                     .padding(.bottom, 8)
                 }
             }
+        }
+        .onAppear(perform: configureAndRefresh)
+        .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
+        .onChange(of: navigation.selectedStoreID) { _, _ in refreshProjection() }
+        .onChange(of: navigation.includedStoreIDs) { _, _ in refreshProjection() }
+        .onChange(of: navigation.excludedStoreIDs) { _, _ in refreshProjection() }
+        .onChange(of: navigation.urgentOnly) { _, _ in refreshProjection() }
+        .onChange(of: navigation.categoryID) { _, _ in refreshProjection() }
+        .onChange(of: needs.count) { _, _ in refreshProjection() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .NSManagedObjectContextObjectsDidChange,
+            object: viewContext
+        )) { _ in
+            configureAndRefresh()
         }
         .alert(
             "Couldn’t update groceries in cart",
@@ -77,16 +135,13 @@ struct CartedGroceriesView: View {
         }
     }
 
-    @ViewBuilder
-    private func rows(_ values: [Need], activeStores: [Store]) -> some View {
-        ForEach(values, id: \.objectID) { need in
-            GroceryNeedRow(
-                need: need, activeStores: activeStores, onEdit: onEdit,
-                onCartedChange: setCarted, onQuantityChange: setQuantity,
-                onRemoved: onRemoved
-            )
-            .shoppingListRowInsets()
-        }
+    private func row(_ need: Need, activeStores: [Store]) -> some View {
+        GroceryNeedRow(
+            need: need, activeStores: activeStores, onEdit: onEdit,
+            onCartedChange: setCarted, onQuantityChange: setQuantity,
+            onRemoved: onRemoved
+        )
+        .shoppingListRowInsets()
     }
 
     private func checkoutSheet(_ draft: CheckoutDraft) -> some View {
@@ -153,11 +208,83 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private var allScopedCarted: [Need] {
-        CartedNeedOrdering.ordered(
-            GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-                .filter { $0.carted && !$0.archived }
+    private var activeCategories: [Category] {
+        GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).filter {
+            !$0.isArchived
+        }
+    }
+
+    private var allScopedCartedNeeds: [Need] {
+        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).filter {
+            $0.carted && !$0.archived
+        }
+    }
+
+    private var visibleCartedNeeds: [Need] {
+        allScopedCartedNeeds.filter { visibleNeedObjectIDs.contains($0.objectID) }
+    }
+
+    private var grocerySections: [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
+        GroceryCollectionProjection.sections(
+            needs: visibleCartedNeeds,
+            selectedStoreID: navigation.selectedStoreID,
+            activeStores: validActiveStores,
+            categories: Array(categories),
+            household: canonicalList?.household
         )
+    }
+
+    private var hasViewNarrowing: Bool {
+        navigation.selectedStoreID != nil || navigation.activeFilterCount > 0 || !navigation.searchText.isEmpty
+    }
+
+    private var currentNeedFilter: GroceryNeedFilter {
+        GroceryNeedFilter(
+            purchase: PurchaseFilter(
+                selectedStoreID: navigation.selectedStoreID,
+                includedStoreIDs: navigation.includedStoreIDs,
+                excludedStoreIDs: navigation.excludedStoreIDs
+            ),
+            text: navigation.searchText,
+            categoryID: navigation.categoryID,
+            carted: true,
+            urgency: navigation.urgentOnly ? NeedUrgency.urgent.rawValue : nil
+        )
+    }
+
+    private func configureAndRefresh() {
+        navigation.configure(
+            householdID: selection.householdID,
+            activeStoreIDs: Set(validActiveStores.map(\.id)),
+            activeCategoryIDs: Set(activeCategories.map(\.id))
+        )
+        refreshProjection()
+    }
+
+    private func refreshProjection() {
+        guard let service, let householdID = selection.householdID, canonicalList != nil else {
+            visibleNeedObjectIDs = []
+            return
+        }
+        do {
+            let matchingIDs = Set(try service.filteredActiveNeedIDs(
+                householdID: householdID,
+                filter: currentNeedFilter
+            ))
+            visibleNeedObjectIDs = Set(allScopedCartedNeeds.filter {
+                matchingIDs.contains($0.id)
+            }.map(\.objectID))
+        } catch {
+            self.error = error
+            visibleNeedObjectIDs = []
+        }
+    }
+
+    private func resetView() {
+        navigation.searchText = ""
+        navigation.selectAll()
+        navigation.resetFilters()
+        refreshProjection()
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {
@@ -165,7 +292,10 @@ struct CartedGroceriesView: View {
             try service.setNeedCarted(
                 needID: needID, householdID: householdID, listID: listID, carted: carted)
             if !carted { onUncarted?(needID, householdID, listID) }
-        }) { hapticFeedback.play(.lightImpact) }
+        }) {
+            hapticFeedback.play(.lightImpact)
+            refreshProjection()
+        }
     }
 
     private func setQuantity(_ need: Need, _ quantity: Int64?) {
@@ -198,7 +328,12 @@ struct CartedGroceriesView: View {
         }
         do {
             clearErrorMessage = nil
-            let preview = try service.prepareCheckout(householdID: householdID, listID: list.id)
+            let preview = try service.prepareClearCarted(
+                householdID: householdID,
+                listID: list.id,
+                filter: currentNeedFilter,
+                restrictedToNeedIDs: Set(visibleCartedNeeds.map(\.id))
+            )
             checkoutDraft = CheckoutDraft(
                 preview: preview,
                 householdID: householdID, listID: list.id)
@@ -287,5 +422,7 @@ struct CartedGroceriesView: View {
 }
 
 #Preview("Checklist") {
-    ShoppingPreviewHost(.populated) { NavigationStack { CartedGroceriesView() } }
+    ShoppingPreviewHost(.populated) {
+        NavigationStack { CartedGroceriesView(navigation: GroceryNavigationState()) }
+    }
 }

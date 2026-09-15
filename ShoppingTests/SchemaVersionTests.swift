@@ -3,12 +3,12 @@ import XCTest
 @testable import Shopping
 
 final class SchemaVersionTests: XCTestCase {
-    func testBundledV5ModelPreservesProductionSchemaContract() throws {
+    func testBundledV6ModelPreservesProductionSchemaContract() throws {
         let model = try PersistenceModel.make()
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
         XCTAssertEqual(Set(model.entities.compactMap(\.name)), [
-            "Household", "Store", "Category", "Item", "GroceryList", "Need", "ClearOperation"
+            "Household", "Store", "Category", "Person", "Item", "GroceryList", "Need", "ClearOperation"
         ])
 
         let need = try XCTUnwrap(model.entitiesByName["Need"])
@@ -50,6 +50,14 @@ final class SchemaVersionTests: XCTestCase {
         XCTAssertEqual(try attribute("anyStore", in: item).defaultValue as? Bool, true)
         XCTAssertEqual(try attribute("isArchived", in: item).defaultValue as? Bool, false)
         XCTAssertEqual(try attribute("revision", in: item).defaultValue as? Int64, 0)
+        let person = try XCTUnwrap(model.entitiesByName["Person"])
+        assertMissingIDStorage(in: person)
+        XCTAssertEqual(try attribute("name", in: person).defaultValue as? String, "")
+        XCTAssertEqual(try attribute("displayOrder", in: person).defaultValue as? Int64, 0)
+        XCTAssertEqual(try attribute("isArchived", in: person).defaultValue as? Bool, false)
+        XCTAssertEqual(try attribute("revision", in: person).defaultValue as? Int64, 0)
+        XCTAssertNotNil(need.relationshipsByName["person"])
+        XCTAssertNil(item.relationshipsByName["person"])
         let groceryList = try XCTUnwrap(model.entitiesByName["GroceryList"])
         assertMissingIDStorage(in: groceryList)
         let operation = try XCTUnwrap(model.entitiesByName["ClearOperation"])

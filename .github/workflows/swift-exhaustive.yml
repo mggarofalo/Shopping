@@ -45,7 +45,7 @@ jobs:
     name: Full UI or performance suite
     needs: preflight
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       TEST_PLAN: ${{ github.event_name == 'workflow_dispatch' && inputs.suite == 'performance' && 'ShoppingPerformance' || 'ShoppingFull' }}
 

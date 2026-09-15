@@ -62,7 +62,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "cafe")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
-        XCTAssertTrue((suggestion.value as? String)?.contains("Uncategorized · Any store · Saved in Catalog") == true)
+        XCTAssertTrue((suggestion.value as? String)?.contains("Uncategorized · Any Store · Saved in Catalog") == true)
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].waitForExistence(timeout: 2))
 
@@ -97,7 +97,7 @@ final class GroceryEditingUITests: XCTestCase {
         reveal(suggestion, in: app)
         XCTAssertTrue(suggestion.waitForExistence(timeout: 2))
         XCTAssertTrue(suggestion.isHittable)
-        XCTAssertTrue((suggestion.value as? String)?.contains("Produce · Any store · On grocery list") == true)
+        XCTAssertTrue((suggestion.value as? String)?.contains("Produce · Any Store · On grocery list") == true)
         attachScreenshot(named: "Catalog suggestion at accessibility text size", app: app)
         let name = app.textFields["shopping.grocery.name"]
         revealAbove(name, in: app)
@@ -278,7 +278,7 @@ final class GroceryEditingUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
     }
 
-    func testCartedUncartOffersShowAllWhenCurrentStoreHidesTheGrocery() {
+    func testCartInheritsStoreFilterAndResetRevealsHiddenGrocery() {
         let app = launchApp(fixture: "populated")
         app.buttons["shopping.store.menu"].tap()
         app.buttons["Publix"].tap()
@@ -286,21 +286,24 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(carted.waitForExistence(timeout: 2))
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        groceryRow(named: "Strawberries", app: app).tap()
+        XCTAssertTrue(app.staticTexts["No matching cart items"].waitForExistence(timeout: 2))
+        let resetFilters = app.buttons["Reset filters"]
+        XCTAssertTrue(resetFilters.waitForExistence(timeout: 2))
+        resetFilters.tap()
+
+        let strawberries = groceryRow(named: "Strawberries", app: app)
+        XCTAssertTrue(strawberries.waitForExistence(timeout: 2))
+        strawberries.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
-        XCTAssertTrue(groceryRow(named: "Strawberries", app: app).exists)
-        groceryRow(named: "Strawberries", app: app).swipeLeft()
+        XCTAssertTrue(strawberries.exists)
+        strawberries.swipeLeft()
         app.buttons["Remove from cart"].tap()
         XCTAssertTrue(app.staticTexts["Nothing in cart"].waitForExistence(timeout: 3))
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
-        let showAll = app.buttons["shopping.grocery.showAll"]
-        XCTAssertTrue(showAll.waitForExistence(timeout: 3))
-        showAll.tap()
         reveal(groceryRow(named: "Strawberries", app: app), in: app)
-        XCTAssertFalse(showAll.exists)
     }
 
     func testCategoryMoveAndCartFeedbackAcknowledgeRowsLeavingTheView() {
@@ -353,7 +356,13 @@ final class GroceryEditingUITests: XCTestCase {
 
     private func openAdd(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
+        XCTAssertTrue(app.navigationBars["Add from Catalog"].waitForExistence(timeout: 2))
+        let addOneTime = app.buttons["shopping.grocery.addOneTime"]
+        reveal(addOneTime, in: app)
+        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        addOneTime.tap()
         XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        setSwitch(app.switches["shopping.grocery.remembered"], on: true, app: app)
     }
 
     private func enterName(_ name: String, in app: XCUIApplication) {

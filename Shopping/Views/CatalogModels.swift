@@ -19,22 +19,6 @@ struct CatalogFilterState: Equatable {
     }
 }
 
-enum CatalogGrouping: String, CaseIterable, Identifiable {
-    case category
-    case store
-    case none
-
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .category: "Category"
-        case .store: "Store"
-        case .none: "None"
-        }
-    }
-}
-
-
 enum CatalogScope {
     static func canonicalList(
         lists: [GroceryList],
