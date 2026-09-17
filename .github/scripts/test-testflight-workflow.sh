@@ -42,6 +42,7 @@ done
 
 assert_contains "trap cleanup EXIT" "$UPLOAD_SCRIPT_PATH"
 assert_contains 'security delete-keychain "$KEYCHAIN_PATH"' "$UPLOAD_SCRIPT_PATH"
+assert_contains 'Library/Developer/Xcode/UserData/Provisioning Profiles' "$UPLOAD_SCRIPT_PATH"
 assert_contains "-t agg" "$UPLOAD_SCRIPT_PATH"
 assert_contains 'PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID"' "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --validate-app" "$UPLOAD_SCRIPT_PATH"
