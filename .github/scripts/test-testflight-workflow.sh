@@ -13,7 +13,7 @@ assert_contains() {
     local expected="$1"
     local path="$2"
 
-    if ! grep -Fq "$expected" "$path"; then
+    if ! grep -Fq -- "$expected" "$path"; then
         echo "$path must contain: $expected" >&2
         exit 1
     fi
@@ -42,6 +42,7 @@ done
 
 assert_contains "trap cleanup EXIT" "$UPLOAD_SCRIPT_PATH"
 assert_contains 'security delete-keychain "$KEYCHAIN_PATH"' "$UPLOAD_SCRIPT_PATH"
+assert_contains "-t agg" "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --validate-app" "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --upload-app" "$UPLOAD_SCRIPT_PATH"
 

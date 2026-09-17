@@ -121,7 +121,7 @@ security import "$CERTIFICATE_PATH" \
     -k "$KEYCHAIN_PATH" \
     -P "$APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD" \
     -A \
-    -t cert \
+    -t agg \
     -f pkcs12
 security set-key-partition-list \
     -S apple-tool:,apple: \
@@ -157,7 +157,7 @@ xcodebuild archive \
     DEVELOPMENT_TEAM="$PROFILE_TEAM_ID" \
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="Apple Distribution" \
-    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 xcodebuild -exportArchive \
