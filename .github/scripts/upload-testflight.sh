@@ -107,7 +107,7 @@ if [[ "$(profile_value :ProvisionsAllDevices 2>/dev/null || true)" == "true" ]];
     exit 1
 fi
 
-readonly PROFILES_DIRECTORY="$HOME/Library/MobileDevice/Provisioning Profiles"
+readonly PROFILES_DIRECTORY="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 mkdir -p "$PROFILES_DIRECTORY"
 INSTALLED_PROFILE_PATH="$PROFILES_DIRECTORY/$PROFILE_UUID.mobileprovision"
 cp "$PROFILE_PATH" "$INSTALLED_PROFILE_PATH"
