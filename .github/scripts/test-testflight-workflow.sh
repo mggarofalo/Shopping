@@ -43,8 +43,14 @@ done
 assert_contains "trap cleanup EXIT" "$UPLOAD_SCRIPT_PATH"
 assert_contains 'security delete-keychain "$KEYCHAIN_PATH"' "$UPLOAD_SCRIPT_PATH"
 assert_contains "-t agg" "$UPLOAD_SCRIPT_PATH"
+assert_contains 'PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID"' "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --validate-app" "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --upload-app" "$UPLOAD_SCRIPT_PATH"
+
+if grep -Fq -- "PROFILE_NAME" "$UPLOAD_SCRIPT_PATH"; then
+    echo "$UPLOAD_SCRIPT_PATH must use the validated profile UUID, not a command-parsed profile name." >&2
+    exit 1
+fi
 
 if missing_output="$(env -i PATH="$PATH" bash "$UPLOAD_SCRIPT_PATH" 2>&1)"; then
     echo "$UPLOAD_SCRIPT_PATH must reject missing configuration." >&2
