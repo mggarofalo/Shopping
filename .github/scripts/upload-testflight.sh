@@ -76,7 +76,6 @@ profile_value() {
     /usr/libexec/PlistBuddy -c "Print $1" "$PROFILE_PLIST_PATH"
 }
 
-readonly PROFILE_NAME="$(profile_value :Name)"
 readonly PROFILE_UUID="$(profile_value :UUID)"
 readonly PROFILE_TEAM_ID="$(profile_value :TeamIdentifier:0)"
 readonly PROFILE_APPLICATION_IDENTIFIER_PREFIX="$(profile_value :ApplicationIdentifierPrefix:0)"
@@ -144,7 +143,7 @@ fi
 /usr/bin/plutil -insert manageAppVersionAndBuildNumber -bool false "$EXPORT_OPTIONS_PATH"
 /usr/bin/plutil -insert provisioningProfiles -xml '<dict/>' "$EXPORT_OPTIONS_PATH"
 /usr/libexec/PlistBuddy \
-    -c "Add :provisioningProfiles:$BUNDLE_IDENTIFIER string '$PROFILE_NAME'" \
+    -c "Add :provisioningProfiles:$BUNDLE_IDENTIFIER string $PROFILE_UUID" \
     "$EXPORT_OPTIONS_PATH"
 
 xcodebuild archive \
@@ -157,7 +156,7 @@ xcodebuild archive \
     DEVELOPMENT_TEAM="$PROFILE_TEAM_ID" \
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="Apple Distribution" \
-    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 xcodebuild -exportArchive \
