@@ -1,8 +1,9 @@
-# Folded-paper grocery icon
+# Milk & Bananas folded-paper icon
 
-Selected by Michael on September 6, 2026 from three candidates for SHOPPING-50.
-Candidate C depicts a kraft paper grocery bag, folded green leaves, a red apple
-and a baguette on a pale sage background.
+Selected by Michael on September 18, 2026 for SHOPPING-96. Proposal A,
+Sculpted Origami, depicts a milk carton and bananas in front of a kraft
+grocery bag with vegetables on a pale sage background. It replaces the
+SHOPPING-50 apple-and-baguette artwork.
 
 The production master is
 `Shopping/Assets.xcassets/AppIcon.appiconset/AppIcon.png`: a 1024 × 1024 opaque
@@ -17,9 +18,23 @@ candidate was resized to 1024 × 1024 using macOS `sips -z 1024 1024`;
 the composition and artwork were otherwise retained.
 
 Original generation filename:
-`exec-36cb6178-2050-40fc-911e-4b25898b26a2.png`.
+`exec-f7c3cde0-8c98-42f0-a814-5cc1ba5efb63.png`.
 
-Prompt:
+Selected proposal prompt direction:
+
+> Sculpted origami icon for Milk & Bananas. A large creamy white milk carton
+> and golden-yellow banana bunch are foreground heroes; a smaller kraft
+> grocery bag with folded green vegetable leaves and a carrot sits behind.
+> Refined three-dimensional paper sculpture, angular folded planes, delicate
+> paper grain, soft contact shadows, full-bleed pale sage background, deep
+> grocery green coordinated with #1A523B. Compact triangular silhouette,
+> slight three-quarter view, strong small-size readability. No text, logos,
+> watermark, border, rounded outer corners, or device mockup.
+
+## Previous artwork provenance (SHOPPING-50)
+
+Original filename: `exec-36cb6178-2050-40fc-911e-4b25898b26a2.png`.
+Previous prompt:
 
 > Create a single polished iOS app icon candidate for Shopping, a household
 > grocery list app. Square 1024x1024 composition, fully opaque full-bleed
