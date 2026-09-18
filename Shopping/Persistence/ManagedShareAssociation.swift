@@ -124,6 +124,7 @@ actor ManagedShareAssociationWorker {
     private func drainOnce() async throws {
         guard let cloud = persistence.container as? NSPersistentCloudKitContainer,
               let privateStore = persistence.store(for: .ownerPrivate) else { return }
+        let privateStoreIdentifier = privateStore.identifier
         var firstError: Error?
         for entry in try journal.pending() {
             guard let householdID = persistence.container.persistentStoreCoordinator
@@ -155,7 +156,7 @@ actor ManagedShareAssociationWorker {
                     for uri in entry.objectURIs {
                         guard let id = self.persistence.container.persistentStoreCoordinator
                             .managedObjectID(forURIRepresentation: uri),
-                              id.persistentStore == privateStore else {
+                              id.persistentStore?.identifier == privateStoreIdentifier else {
                             staleURIs.insert(uri)
                             continue
                         }
