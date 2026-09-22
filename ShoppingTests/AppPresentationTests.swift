@@ -2,21 +2,34 @@ import XCTest
 @testable import Shopping
 
 final class AppPresentationTests: XCTestCase {
-    func testAppVersionIncludesMarketingVersionAndBuild() {
+    func testAppVersionUsesSourceCommitInsteadOfBuildNumber() {
+        let commit = "0123456789abcdef0123456789abcdef01234567"
         let version = AppVersion(infoDictionary: [
             "CFBundleShortVersionString": "2.4.1",
             "CFBundleVersion": "37"
-        ])
+        ], sourceCommit: commit + "\n")
 
-        XCTAssertEqual(version.displayValue, "2.4.1 (37)")
+        XCTAssertEqual(version.sourceCommit, commit)
+        XCTAssertEqual(version.displayValue, "2.4.1 (01234567)")
+        XCTAssertEqual(
+            AppVersion(infoDictionary: nil, sourceCommit: commit + "-dirty").displayValue,
+            "01234567-dirty"
+        )
     }
 
     func testAppVersionGracefullyHandlesMissingBundleValues() {
         XCTAssertEqual(AppVersion(infoDictionary: nil).displayValue, "Unknown")
-        XCTAssertEqual(
-            AppVersion(infoDictionary: ["CFBundleVersion": "37"]).displayValue,
-            "Build 37"
-        )
+        XCTAssertEqual(AppVersion(infoDictionary: ["CFBundleVersion": "37"]).displayValue, "Unknown")
+        for commit in [nil, "", "37", "not-a-commit", String(repeating: "g", count: 40)] {
+            XCTAssertEqual(
+                AppVersion(infoDictionary: ["CFBundleShortVersionString": "2.4.1"], sourceCommit: commit).displayValue,
+                "2.4.1 (Unknown commit)"
+            )
+        }
+    }
+
+    func testBuiltAppContainsSourceCommit() {
+        XCTAssertNotNil(AppVersion.current.sourceCommit)
     }
 
     @MainActor

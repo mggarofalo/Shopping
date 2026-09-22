@@ -1,6 +1,6 @@
 name: Upload to TestFlight
 
-run-name: TestFlight build ${{ inputs.build_number }} from ${{ github.ref_name }}
+run-name: TestFlight ${{ github.sha }}
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ concurrency:
 jobs:
   upload:
     name: Archive & Upload
-    if: ${{ inputs.confirm_upload }}
+    if: ${{ inputs.confirm_upload && github.ref == 'refs/heads/main' }}
     runs-on: macos-15
     timeout-minutes: 30
     environment: testflight
