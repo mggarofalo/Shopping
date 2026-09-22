@@ -4,6 +4,11 @@ SHOPPING-94 defines the release automation before the Apple signing account is r
 
 ## Rollout
 
+The upload workflow pins Xcode 26.3 on macos-15 independently of test CI.
+Apple requires Xcode 26 or later and the iOS 26 SDK or later for uploads
+since April 28, 2026; the older Xcode 16.4 CI pin is not suitable for release
+uploads. See [Apple's SDK requirements](https://developer.apple.com/news/upcoming-requirements/?id=04282026a).
+
 1. Merge and statically validate the manual workflow without configuring or exposing signing material.
 2. Finish Apple Developer and App Store Connect setup under SHOPPING-10. Register `com.mggarofalo.shopping`, enable the required iCloud/CloudKit capabilities, create the App Store Connect app record, and create the distribution assets below.
 3. Create and protect the GitHub `testflight` environment, then add its secrets. Restrict deployments to the intended release branch and require review before the job can access secrets.

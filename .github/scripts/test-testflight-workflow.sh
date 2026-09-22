@@ -24,6 +24,7 @@ assert_contains 'if: ${{ inputs.confirm_upload }}' "$WORKFLOW_PATH"
 assert_contains "environment: testflight" "$WORKFLOW_PATH"
 assert_contains "contents: read" "$WORKFLOW_PATH"
 assert_contains "cancel-in-progress: false" "$WORKFLOW_PATH"
+assert_contains '/Applications/Xcode_26.3.app' "$WORKFLOW_PATH"
 
 if grep -Eq '^[[:space:]]+(push|pull_request|schedule):' "$WORKFLOW_PATH"; then
     echo "$WORKFLOW_PATH must remain manually dispatched only." >&2
