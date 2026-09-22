@@ -1,0 +1,48 @@
+name: Upload to TestFlight
+
+run-name: TestFlight build ${{ inputs.build_number }} from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: App Store Connect build number (must be a positive integer)
+        required: true
+        type: string
+      confirm_upload:
+        description: Archive, validate, and upload this commit to TestFlight
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopping-testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Archive & Upload
+    if: ${{ inputs.confirm_upload }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: testflight
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
+      - name: Archive, validate, and upload
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: .github/scripts/upload-testflight.sh
