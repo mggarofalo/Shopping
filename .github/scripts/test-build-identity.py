@@ -55,6 +55,11 @@ with tempfile.TemporaryDirectory() as temporary:
     run('git', 'worktree', 'add', '-b', 'development', str(worktree), cwd=repo)
     env['SRCROOT'] = str(worktree)
     write(sha)
+    snapshot = Path(temporary) / 'snapshot'
+    run('git', 'clone', '--shared', '--no-checkout', str(worktree), str(snapshot), cwd=repo)
+    run('git', 'checkout', '--detach', sha, cwd=snapshot)
+    env['SRCROOT'] = str(snapshot)
+    write(sha)
     missing = Path(temporary) / 'no-git'
     missing.mkdir()
     env['SRCROOT'] = str(missing)
