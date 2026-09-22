@@ -160,7 +160,7 @@ private extension FoundationModelCategoryClassifier {
             response = try await session.respond(
                 to: "Item name: \(itemName)",
                 schema: schema,
-                options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 30)
+                options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 30)
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -184,4 +184,3 @@ private extension FoundationModelCategoryClassifier {
     }
 }
 #endif
-
