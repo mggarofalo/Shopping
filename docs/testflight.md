@@ -60,6 +60,9 @@ After the workflow reaches the repository's default branch:
    waits for App Store Connect processing, then copies the tester groups from
    known available build 6 before reporting success. Update
    `DISTRIBUTE_FROM_BUILD` if the intended tester groups change.
+   For a build that already uploaded, run the workflow with `confirm_upload`
+   cleared and `verify_only` selected. This retries the distribution check
+   without spending another build number.
 5. Approve the `testflight` environment deployment when GitHub requests it.
 6. Confirm any required export-compliance or external beta review in App Store
    Connect. The workflow reports the internal and external beta states after
