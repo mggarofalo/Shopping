@@ -6,6 +6,8 @@ require "net/http"
 require "openssl"
 require "uri"
 
+$stdout.sync = true
+
 class AppStoreConnect
   def initialize
     key_data = Base64.decode64(ENV.fetch("APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64"))
@@ -82,6 +84,9 @@ source_groups = groups.select do |group|
 end
 raise "Source build #{source_number} has no tester groups to copy" if source_groups.empty?
 puts "Source tester groups: #{source_groups.map { |group| group.dig('attributes', 'name') }.join(', ')}"
+source_groups.each do |group|
+  puts "#{group.dig('attributes', 'name')} automatically receives all builds" if group.dig("attributes", "hasAccessToAllBuilds")
+end
 
 target = nil
 24.times do
@@ -93,17 +98,30 @@ target = nil
   sleep 30
 end
 raise "Build #{target_number} was not processed within 12 minutes" unless target&.dig("attributes", "processingState") == "VALID"
+initial_detail = client.request("/v1/builds/#{target.fetch('id')}/buildBetaDetail").fetch("data")
+initial_internal_state = initial_detail.dig("attributes", "internalBuildState")
+puts "Build #{target_number} initial internal state: #{initial_internal_state}"
+if %w[MISSING_EXPORT_COMPLIANCE PROCESSING_EXCEPTION EXPIRED].include?(initial_internal_state)
+  raise "Build #{target_number} cannot reach internal testers: #{initial_internal_state}"
+end
 
 source_groups.each do |group|
   group_id = group.fetch("id")
   next if group_build_ids(client, group_id).include?(target.fetch("id"))
+  next if group.dig("attributes", "hasAccessToAllBuilds")
   body = { data: [{ type: "builds", id: target.fetch("id") }] }
   client.request("/v1/betaGroups/#{group_id}/relationships/builds", method: :post, body: body)
   puts "Added build #{target_number} to #{group.dig('attributes', 'name')}"
 end
 
-source_groups.each do |group|
-  raise "Build #{target_number} is absent from #{group.dig('attributes', 'name')}" unless group_build_ids(client, group.fetch("id")).include?(target.fetch("id"))
+24.times do |attempt|
+  missing = source_groups.reject do |group|
+    group_build_ids(client, group.fetch("id")).include?(target.fetch("id"))
+  end
+  break if missing.empty?
+  raise "Build #{target_number} is absent from #{missing.map { |group| group.dig('attributes', 'name') }.join(', ')} after 12 minutes" if attempt == 23
+  puts "Waiting for build #{target_number} in #{missing.map { |group| group.dig('attributes', 'name') }.join(', ')}"
+  sleep 30
 end
 beta_detail = client.request("/v1/builds/#{target.fetch('id')}/buildBetaDetail").fetch("data")
 internal_state = beta_detail.dig("attributes", "internalBuildState")
