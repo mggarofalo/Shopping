@@ -23,7 +23,9 @@ final class ShoppingLaunchTests: XCTestCase {
         let version = app.descendants(matching: .any)["shopping.settings.version"]
         XCTAssertTrue(version.waitForExistence(timeout: 2))
         XCTAssertTrue(version.label.contains("1.2.0"))
-        XCTAssertTrue(version.label.contains("5"))
+        XCTAssertNotNil(version.label.range(
+            of: #"\([0-9a-f]{8}(?:-dirty)?\)"#, options: .regularExpression
+        ))
     }
 
     func testCategorySuggestionIsVisibleInCatalogAndGroceryEditors() {
@@ -61,8 +63,8 @@ final class ShoppingLaunchTests: XCTestCase {
         }
         XCTAssertTrue(bakerySection.exists)
         XCTAssertTrue(bakerySection.isHittable)
-        XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
-        XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
+        XCTAssertTrue(storeRuleRow("Only buy here", in: app).exists)
+        XCTAssertTrue(storeRuleRow("Can buy here", in: app).exists)
         attachScreenshot(named: "Populated Costco Accessibility Large", app: app)
     }
 
@@ -80,8 +82,8 @@ final class ShoppingLaunchTests: XCTestCase {
             XCTAssertTrue(pantry.isHittable)
             XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
             XCTAssertFalse(shoppingHeading("Can buy here", in: app).exists)
-            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
-            XCTAssertTrue(storeRuleIndicator("canBuyHere", in: app).exists)
+            XCTAssertTrue(storeRuleRow("Only buy here", in: app).exists)
+            XCTAssertTrue(storeRuleRow("Can buy here", in: app).exists)
             XCTAssertFalse(app.staticTexts["Buy at any store"].exists)
             XCTAssertFalse(app.staticTexts["Only buy at Costco"].exists)
             XCTAssertFalse(app.buttons["Edit Chipotles in adobo"].exists)
@@ -92,7 +94,7 @@ final class ShoppingLaunchTests: XCTestCase {
             ).firstMatch.tap()
             XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
             XCTAssertTrue(shoppingHeading("Produce", in: app).waitForExistence(timeout: 2))
-            XCTAssertTrue(storeRuleIndicator("onlyBuyHere", in: app).exists)
+            XCTAssertTrue(storeRuleRow("Only buy here", in: app).exists)
             XCTAssertFalse(shoppingHeading("Only buy here", in: app).exists)
             attachScreenshot(named: "Compact Costco \(appearance)", app: app)
             app.terminate()
@@ -677,9 +679,10 @@ final class ShoppingLaunchTests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", title)).firstMatch
     }
 
-    private func storeRuleIndicator(_ rule: String, in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier BEGINSWITH %@", "shopping.grocery.storeRule.\(rule)."
+    private func storeRuleRow(_ rule: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND value CONTAINS %@",
+            "shopping.grocery.row.", rule
         )).firstMatch
     }
 

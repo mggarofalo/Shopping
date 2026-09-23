@@ -48,6 +48,17 @@ final class ShoppingDeviceUITests: XCTestCase {
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
         selectCostco(in: app)
         screenshot("Compact Costco before accessibility audit", app: app)
+        // Purchase rules are announced with their grocery row, not as tiny duplicate targets.
+        XCTAssertFalse(app.images["Only buy here"].exists)
+        XCTAssertFalse(app.images["Can buy here"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND value CONTAINS %@",
+            "shopping.grocery.row.", "Only buy here"
+        )).firstMatch.exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND value CONTAINS %@",
+            "shopping.grocery.row.", "Can buy here"
+        )).firstMatch.exists)
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
 
         app.tabBars.buttons["Catalog"].tap()

@@ -105,10 +105,8 @@ struct GroceryNeedRow: View {
                 Image(systemName: storeIndicator.symbol)
                     .imageScale(.small)
                     .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel(storeIndicator.title)
-                    .accessibilityIdentifier(
-                        "shopping.grocery.storeRule.\(storeIndicator.identifierComponent).\(need.id.uuidString)"
-                    )
+                    // The row's accessibility value already announces this rule.
+                    .accessibilityHidden(true)
             }
             if let quantity = need.quantity {
                 if let onQuantityChange {

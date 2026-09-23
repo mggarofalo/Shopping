@@ -10,7 +10,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = storePath
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
         app.buttons["shopping.categories.add"].tap()
@@ -55,7 +55,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["shopping.categories.undoDelete"].exists)
@@ -64,7 +64,7 @@ final class CategoryManagementUITests: XCTestCase {
 
     func testCategoryMergeAndDeleteMigrationUseAnchoredDestinationMenus() {
         let app = launchPopulated()
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
 
@@ -90,7 +90,7 @@ final class CategoryManagementUITests: XCTestCase {
 
     func testCategorySelectionDeleteRequiresOneSourceAndOffersMigrationWithoutConfirmation() {
         let app = launchPopulated()
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
@@ -117,7 +117,7 @@ final class CategoryManagementUITests: XCTestCase {
 
     func testStoreAndCatalogBatchActionsReflectSelectedState() {
         let app = launchPopulated()
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Stores"].tap()
         XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Stores", identifier: "shopping.stores.select")
@@ -194,7 +194,7 @@ final class CategoryManagementUITests: XCTestCase {
     func testSelectionControlsStayVisibleAtAccessibilityTextSize() {
         let app = launchPopulated(accessibilitySize: true)
 
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
         app.buttons["shopping.categories.selectAll"].tap()
@@ -220,7 +220,7 @@ final class CategoryManagementUITests: XCTestCase {
     func testTouchAndHoldOffersSelectThenKeepsNativeMultiSelection() {
         let app = launchPopulated()
 
-        app.tabBars.buttons["Settings"].tap()
+        openSettings(in: app)
         app.buttons["Categories"].tap()
         categoryRow(named: "Produce", in: app).press(forDuration: 0.7)
         app.buttons.matching(
@@ -273,6 +273,18 @@ final class CategoryManagementUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
         return app
+    }
+
+    private func openSettings(in app: XCUIApplication) {
+        let settings = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in settings.isHittable && settings.isEnabled },
+            object: settings
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
     private func enterSelectionMode(_ app: XCUIApplication, navigationTitle: String, identifier: String) {
