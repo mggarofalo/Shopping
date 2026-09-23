@@ -11,13 +11,15 @@ PNG with a full-bleed square background. iOS applies the corner mask. Xcode
 generates the smaller iPhone icons from the single iOS master for the iOS 17+
 deployment target. The same artwork is used in all appearances.
 
-SHOPPING-99 corrects the sideways master by rotating it 90 degrees clockwise.
-The carton and grocery bag now stand upright; the artwork, dimensions, and
+SHOPPING-99 rotated the source pixels 90 degrees clockwise, but the resulting
+artwork still showed the carton and bag lying sideways. SHOPPING-105 rotates
+those pixels 90 degrees counterclockwise. The carton cap and the groceries in
+the bag now point toward the top of the icon; the artwork, dimensions, and
 opaque background are retained.
 
-SHOPPING-104 removes the original EXIF and XMP orientation tags. Those tags
-survived the pixel rotation, causing Xcode to rotate the generated iPhone icon
-again. The master pixels are unchanged by this metadata correction.
+SHOPPING-104 removed the original EXIF and XMP orientation tags. The resulting
+Xcode-generated iPhone icon was still sideways because its source pixels were
+sideways. The SHOPPING-105 master has no orientation tags.
 
 ## Generation provenance
 
