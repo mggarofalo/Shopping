@@ -56,9 +56,14 @@ After the workflow reaches the repository's default branch:
 1. Open **Actions → Upload to TestFlight → Run workflow**.
 2. Select `main`. Releases from other branches or tags are rejected.
 3. Enter a positive build number that has never been uploaded for the current marketing version.
-4. Select the upload confirmation checkbox and run the workflow.
+4. Select the upload confirmation checkbox and run the workflow. The workflow
+   waits for App Store Connect processing, then copies the tester groups from
+   known available build 6 before reporting success. Update
+   `DISTRIBUTE_FROM_BUILD` if the intended tester groups change.
 5. Approve the `testflight` environment deployment when GitHub requests it.
-6. Confirm processing and export-compliance status in App Store Connect before assigning the build to testers.
+6. Confirm any required export-compliance or external beta review in App Store
+   Connect. The workflow reports the internal and external beta states after
+   adding the build to the same tester groups as the confirmed build.
 
 The workflow is manual-only, grants the GitHub token read-only repository access, serializes uploads, and never cancels an upload in progress. It creates a random temporary keychain and temporary signing directory on the hosted runner. Its exit trap removes the installed profile, keychain, certificate, private key, archive, and exported IPA whether the job succeeds or fails.
 

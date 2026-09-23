@@ -27,7 +27,7 @@ jobs:
     name: Archive & Upload
     if: ${{ inputs.confirm_upload && github.ref == 'refs/heads/main' }}
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: testflight
 
     steps:
@@ -46,3 +46,12 @@ jobs:
           APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           BUILD_NUMBER: ${{ inputs.build_number }}
         run: .github/scripts/upload-testflight.sh
+
+      - name: Confirm processing and tester distribution
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          DISTRIBUTE_FROM_BUILD: '6'
+        run: ruby .github/scripts/distribute-testflight.rb
