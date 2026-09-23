@@ -186,6 +186,8 @@ final class ChecklistUITests: XCTestCase {
         cart("Weekend ice", app: app)
         cartedLink(count: 1, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
+        // The cart toast can obscure Checkout even when XCTest reports it as hittable.
+        XCTAssertTrue(app.staticTexts["Weekend ice moved to In cart."].waitForNonExistence(timeout: 5))
         openCheckout(app: app)
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.buttons["shopping.checkout.undo"].existsOrAppears(timeout: 3))

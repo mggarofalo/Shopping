@@ -7,6 +7,8 @@ Read AGENTS.md, .agents/skills/shopping-testing/SKILL.md, and the maintained tes
 
 Check that assertions still prove the intended behavior, each test owns its fixture, and deliberate relaunches retain the existing store without reseeding. Inspect UI target visibility and hittability, bounded waits, and costly helper operations. Check that batching or reuse preserves the intermediate states the test must exercise.
 
+When polling delays are removed, check for transient feedback or navigation transitions that previously finished during those delays. Existence and hittability do not prove that the chosen tap point reaches the intended control. Require bounded waits for concrete obstructions where evidence supports them, preserving the single action and resulting-state assertions; reject blind sleeps or action retries as substitutes.
+
 For timing claims, compare the captured revision, toolchain/runtime, plan, complete test identifiers and outcomes, worker settings, and build conditions. Distinguish phase wall time from overlapping summed test durations. Treat a failed or incomplete run as diagnostic evidence, and report missing provenance or incomparable samples. Do not extrapolate a focused benchmark into an established full-suite saving.
 
 Check that CI preserves command failure status, no-retry behavior, exhaustive assertions, coverage collection and baselines, and the exact-SHA local-attestation preflight. Identify any proposed workflow-policy change separately from an implementation defect.

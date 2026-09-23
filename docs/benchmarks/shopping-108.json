@@ -422,5 +422,95 @@
       ],
       "diagnostic_timeout": false
     }
-  ]
+  ],
+  "validation_attempts": [
+    {
+      "sha": "19a4ccc00aea34b170839a421fa912d54bb1e0b4",
+      "result": "Failed",
+      "counts": {
+        "totalTestCount": 282,
+        "passedTests": 280,
+        "failedTests": 2,
+        "skippedTests": 0
+      },
+      "result_bundle_wall_seconds": 2034.6480000019073,
+      "phases": [
+        {
+          "phase": "snapshot",
+          "wall_seconds": 0.078102,
+          "exit_code": 0
+        },
+        {
+          "phase": "simulator",
+          "wall_seconds": 6.355494,
+          "exit_code": 0
+        },
+        {
+          "phase": "build",
+          "wall_seconds": 25.477222,
+          "exit_code": 0
+        },
+        {
+          "phase": "test",
+          "wall_seconds": 2037.157371,
+          "exit_code": 65
+        },
+        {
+          "phase": "summary",
+          "wall_seconds": 2.379095,
+          "exit_code": 0
+        }
+      ],
+      "failed_tests": [
+        {
+          "identifier": "ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering()",
+          "name": "testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Failed",
+          "duration_seconds": 30.58502507209778,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "name": "testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "bundle": "ShoppingTests",
+          "suite": "ClearInterruptionUITests",
+          "result": "Failed",
+          "duration_seconds": 30.043177008628845,
+          "duration_precision": "exact"
+        }
+      ],
+      "durable_timing_report": "/Users/michael/Source/Shopping/.git/shopping-test-timings/19a4ccc00aea34b170839a421fa912d54bb1e0b4/20260923T220621Z.yOhDmv/Timing.json",
+      "interpretation": "Failed validation, not performance evidence. Two Checkout taps were obstructed by transient cart feedback. No local attestation or remote dispatch. Corrected candidate requires fresh full validation."
+    }
+  ],
+  "correctness_validation": {
+    "products": "shared_wait_candidate plus two bounded exact-cart-feedback disappearance assertions before Checkout; all recovery actions and prior assertions unchanged",
+    "result": "Passed",
+    "tests": [
+      {
+        "identifier": "ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering()",
+        "name": "testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering()",
+        "bundle": "ShoppingTests",
+        "suite": "ChecklistUITests",
+        "result": "Passed",
+        "duration_seconds": 43.6552050113678,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+        "name": "testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+        "bundle": "ShoppingTests",
+        "suite": "ClearInterruptionUITests",
+        "result": "Passed",
+        "duration_seconds": 41.30217003822327,
+        "duration_precision": "exact"
+      }
+    ],
+    "wall_seconds": 101.86,
+    "bundle": "/tmp/shopping-108-evidence/repair-checkout.xcresult",
+    "log": "/tmp/shopping-108-evidence/repair-checkout.log",
+    "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-wait-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\" -resultBundlePath /tmp/shopping-108-evidence/repair-checkout.xcresult"
+  }
 }

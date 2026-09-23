@@ -74,6 +74,16 @@ This evidence locates the delay in post-test CoreSimulator diagnostic collection
 
 The unchanged main branch has the same vulnerable appearance tap as Phase17. The focused `d5ae39ad8053722410a6f71ebfc3dd013c9b834a` patch checks full bottom-edge visibility and hittability, scrolls when necessary, and adds assertions. Copying this fix independently preserves coverage and does not modify Phase17. Keep its runtime effects separate from optimization claims.
 
+## Validation exposed a feedback obstruction
+
+The first committed local candidate, `19a4ccc00aea34b170839a421fa912d54bb1e0b4`, failed two clear-recovery routes at the Checkout tap. Faster positive assertions reached that circular button while the three-second cart feedback toast still occupied the same bottom area. The session logs recorded corner hit points `{324,726}` for both failed taps, versus center points `{352,754}` for passing Checkout taps. Hittability alone did not ensure that the chosen point activated the circular control. This is evidence against treating existence checks as a transition or obstruction wait.
+
+The repair adds bounded disappearance assertions for the exact `Weekend ice moved to In cart.` and `Fresh ice moved to In cart.` messages before the Checkout interactions. It retains every existing assertion, the single tap, forced process exit, relaunch, identity check, restored notes, and catalog-isolation checks. No sleep, retry, or assertion removal is used. The failed run remains in timing history and receives no local attestation; the corrected commit requires fresh local and hosted validation. Session excerpts are retained in `/tmp/shopping-108-evidence/checkout-obstruction-evidence.txt`.
+
+The first full attempt completed with 280 passed, two failed, and no skipped tests; the command returned 65 and the timing framework retained its failed history without creating an attestation. The repaired two-case selection passed completely in 101.86s command time (43.655s and 41.302s per case). These are correctness validation results, not performance comparisons against the aborted failed cases. Both attempts are recorded in the benchmark JSON.
+
+[SHOPPING-109](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/issues/02528008-9153-4102-a3a4-78560164d00a) separately tracks the pre-existing product hit-testing question. The current evidence supports obstruction as an inference; direct visual/manual confirmation and any toast interaction-policy change remain outside this runtime work.
+
 ## Caveats
 
 - Phase17 has 284 tests; main historical baseline has 282. Do not claim exact paired comparison across these revisions.

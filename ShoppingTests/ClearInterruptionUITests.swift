@@ -40,6 +40,8 @@ final class ClearInterruptionUITests: XCTestCase {
         XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.tap()
         XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
+        // The cart toast can obscure Checkout even when XCTest reports it as hittable.
+        XCTAssertTrue(app.staticTexts["Fresh ice moved to In cart."].waitForNonExistence(timeout: 5))
         let checkout = app.buttons["shopping.checkout.start"]
         reveal(checkout, app: app)
         checkout.tap()
