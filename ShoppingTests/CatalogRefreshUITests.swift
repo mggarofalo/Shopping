@@ -10,10 +10,10 @@ final class CatalogRefreshUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingCatalogRefreshUITest-\(UUID().uuidString).sqlite").path
         app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         app.tabBars.buttons["Catalog"].tap()
         app.buttons["shopping.catalog.add"].tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
         app.textFields["shopping.catalog.name"].typeText("Fresh basil")
         app.buttons["shopping.catalog.save"].tap()
 
@@ -21,23 +21,23 @@ final class CatalogRefreshUITests: XCTestCase {
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.catalog.item.", "Fresh basil"
         )).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
         XCTAssertEqual(row.value as? String, "Recently added")
         XCTAssertTrue(row.isHittable, "The newly saved row should be scrolled into view")
         XCTAssertTrue(app.navigationBars["Catalog"].exists)
 
         app.tabBars.buttons["Groceries"].tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(row.waitForExistence(timeout: 2))
+        XCTAssertTrue(row.existsOrAppears(timeout: 2))
         XCTAssertEqual(row.value as? String, "")
 
         app.buttons["shopping.catalog.add"].tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
         app.textFields["shopping.catalog.name"].typeText("Fresh basil")
         app.buttons["Edit Fresh basil"].tap()
-        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
         app.buttons["shopping.catalog.save"].tap()
-        XCTAssertTrue(row.waitForExistence(timeout: 2))
+        XCTAssertTrue(row.existsOrAppears(timeout: 2))
         XCTAssertEqual(row.value as? String, "")
     }
 
@@ -46,21 +46,21 @@ final class CatalogRefreshUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingCatalogSaveAddUITest-\(UUID().uuidString).sqlite").path
         app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         app.tabBars.buttons["Catalog"].tap()
 
         app.buttons["shopping.catalog.add"].tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
         app.textFields["shopping.catalog.name"].typeText("Oat milk")
         let saveAndAdd = app.buttons["shopping.catalog.saveAndAddToList"]
         XCTAssertTrue(saveAndAdd.isEnabled)
         saveAndAdd.tap()
 
-        XCTAssertTrue(app.staticTexts["Added 1."].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Added 1."].existsOrAppears(timeout: 3))
         let view = app.buttons["shopping.catalog.viewNeed"]
         XCTAssertTrue(view.exists)
         view.tap()
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Oat milk")
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertEqual(app.buttons.matching(NSPredicate(
@@ -71,12 +71,12 @@ final class CatalogRefreshUITests: XCTestCase {
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.catalog.item.", "Oat milk"
         )).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
         row.tap()
-        XCTAssertTrue(app.navigationBars["Edit catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
         app.buttons["shopping.catalog.saveAndAddToList"].tap()
 
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertEqual(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.grocery.row."
@@ -91,7 +91,7 @@ final class CatalogRefreshUITests: XCTestCase {
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.catalog.item.", "Strawberries"
         )).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
         row.tap()
 
         let name = app.textFields["shopping.catalog.name"]
@@ -99,7 +99,7 @@ final class CatalogRefreshUITests: XCTestCase {
         app.buttons["shopping.catalog.saveAndAddToList"].tap()
 
         let confirmation = app.sheets["Need Blueberries again?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 3))
+        XCTAssertTrue(confirmation.existsOrAppears(timeout: 3))
         XCTAssertFalse(row.exists, "The renamed item should no longer match the active search")
         let scopedCancel = confirmation.buttons["Cancel"]
         if scopedCancel.exists {
@@ -109,7 +109,7 @@ final class CatalogRefreshUITests: XCTestCase {
             XCTAssertEqual(visibleCancel.count, 1)
             visibleCancel.element(boundBy: 0).tap()
         }
-        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
     }
 
     func testGroceryAddSearchesCatalogAndFocusesExistingNeedWithoutDuplicates() {
@@ -126,15 +126,15 @@ final class CatalogRefreshUITests: XCTestCase {
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.grocery.catalogResult.", "Oat milk"
         )).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 2))
+        XCTAssertTrue(result.existsOrAppears(timeout: 2))
         result.tap()
-        XCTAssertTrue(groceryRow(named: "Oat milk", in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(groceryRow(named: "Oat milk", in: app).existsOrAppears(timeout: 3))
 
         openCatalogChooser(in: app)
         searchFor("Oat", in: app)
-        XCTAssertTrue(result.waitForExistence(timeout: 2))
+        XCTAssertTrue(result.existsOrAppears(timeout: 2))
         result.tap()
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertEqual(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.grocery.row."
@@ -147,22 +147,22 @@ final class CatalogRefreshUITests: XCTestCase {
         XCTAssertFalse(app.buttons["shopping.grocery.catalogAddNew"].exists)
         searchFor("rice vinegar", in: app)
         let create = app.buttons["shopping.grocery.catalogAddNew"]
-        XCTAssertTrue(create.waitForExistence(timeout: 2))
+        XCTAssertTrue(create.existsOrAppears(timeout: 2))
         XCTAssertEqual(create.label, "Create “Rice vinegar”")
         create.tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, "Rice vinegar")
         app.buttons["shopping.catalog.saveAndAddToList"].tap()
-        XCTAssertTrue(groceryRow(named: "Rice vinegar", in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(groceryRow(named: "Rice vinegar", in: app).existsOrAppears(timeout: 3))
 
         openCatalogChooser(in: app)
         searchFor("Birthday candles", in: app)
         app.buttons["shopping.grocery.addOneTime"].tap()
-        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Add item"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Birthday candles")
         XCTAssertEqual(app.switches["shopping.grocery.remembered"].value as? String, "0")
         app.buttons["shopping.grocery.save"].tap()
-        XCTAssertTrue(groceryRow(named: "Birthday candles", in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(groceryRow(named: "Birthday candles", in: app).existsOrAppears(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertFalse(app.staticTexts["Birthday candles"].exists)
@@ -174,19 +174,19 @@ final class CatalogRefreshUITests: XCTestCase {
             .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         return app
     }
 
     private func openCatalogChooser(in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.searchFields["Search catalog"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))
+        XCTAssertTrue(app.searchFields["Search catalog"].existsOrAppears(timeout: 2))
     }
 
     private func searchFor(_ text: String, in app: XCUIApplication) {
         let search = app.searchFields["Search catalog"]
-        XCTAssertTrue(search.waitForExistence(timeout: 2))
+        XCTAssertTrue(search.existsOrAppears(timeout: 2))
         search.tap()
         search.typeText(text)
     }

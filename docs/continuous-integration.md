@@ -22,7 +22,7 @@ The shared `Shopping` scheme exposes 5 plans:
 
 | Plan | Owner | Contents | Normal trigger |
 | --- | --- | --- | --- |
-| `ShoppingFast` | Required pull-request check | 166 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
+| `ShoppingFast` | Required pull-request check | 215 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request and push to `main` or `milestone/**` |
 | `ShoppingCritical` | Semantic local check | 14 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
 | `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus UI, appearance, and simulator device tests | Manual remote dispatch only after the exact commit passes locally |
 | `ShoppingPerformance` | Performance investigation | The 3 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
@@ -107,3 +107,11 @@ SwiftUI rendering dominates the lines uncovered by the fast plan. `ShoppingFull`
 - Workflow-level concurrency cancels an older run when a newer commit targets the same workflow, branch, and exhaustive suite. Manual performance work does not cancel a full regression run.
 
 This split preserves all maintained tests. New deterministic suites should use Swift Testing tags. UI automation stays in XCTest.
+
+## Timing artifacts
+
+Fast and exhaustive jobs retain `*Timing.json`, `*Timing.md`, `*TimingMetadata.json`, and `*Phases.jsonl` alongside their existing summaries for 30 days. The Actions summary shows simulator startup, build, test, coverage, and summary wall time plus the slowest suites and tests. Metadata captures the exact checkout SHA, dirty state, Xcode, host, and Actions run URL before artifact creation; the result supplies simulator details. Failed commands retain their original exit status, and the reporting step runs even when setup or tests fail. A job canceled before a command exits may have incomplete timing; the report states missing data rather than treating it as zero.
+
+The local `run-local-shopping-full.sh` prints two paths. Lightweight `Timing.{json,md}`, `Metadata.json`, `Phases.jsonl`, and `Summary.{json,md}` reports persist in the Git common directory under `shopping-test-timings/<SHA>/<unique-run-id>/` for both successful and failed runs. Each run has a separate directory, including repeated runs of one commit. This history survives temporary-directory cleanup and is shared across worktrees without modifying source files. Large build/test logs and the result bundle stay in the printed temporary artifact directory and may be removed by the operating system. The attestation points to the durable timing report. Each report records the absolute temporary `result_bundle_path`, and logged phases record `log_path`, so failed runs can be traced back to raw artifacts while those temporary paths still exist. It measures source snapshot, simulator startup, build-for-testing, test-without-building, and summary separately. The runner still requires a clean commit, tests an isolated snapshot, checks the original clean SHA again, and records its attestation only after successful tests. Reporting runs on failure too. The remote exact-SHA attestation preflight and coverage gates remain mandatory.
+
+The JSON report uses `schema_version: 1`. `phases[].wall_seconds` is monotonic elapsed command time; build/test phases also retain the exact argument array, including test selection and worker options; `tests[].duration_seconds` and `suites[].summed_test_seconds` are xcresult measurements, which can overlap under parallel execution. Preserve this distinction when comparing runs. Compare the same plan and test inventory on the same toolchain/runtime, and retain the raw reports as evidence. See [runtime measurements](test-strategy.md#runtime-measurements) for focused local commands and [ShoppingFull runtime investigation](shopping-full-runtime.md) for measured bottlenecks and policy recommendations.

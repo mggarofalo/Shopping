@@ -9,32 +9,32 @@ final class CategoryManagementUITests: XCTestCase {
             .appendingPathComponent("ShoppingCategoryUITest-\(UUID().uuidString).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = storePath
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].existsOrAppears(timeout: 5))
         openSettings(in: app)
         app.buttons["Categories"].tap()
-        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Categories"].existsOrAppears(timeout: 3))
         app.buttons["shopping.categories.add"].tap()
-        XCTAssertTrue(app.navigationBars["Add category"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add category"].existsOrAppears(timeout: 2))
         let name = app.textFields["shopping.categories.name"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 2))
         name.typeText("Pantry")
         app.buttons["Save category"].tap()
         let pantry = categoryRow(named: "Pantry", in: app)
-        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
+        XCTAssertTrue(pantry.existsOrAppears(timeout: 2))
 
         pantry.tap()
-        XCTAssertTrue(app.navigationBars["Rename category"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Rename category"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         replaceText(in: app.textFields["shopping.categories.name"], with: "Canceled category")
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(pantry.waitForExistence(timeout: 2))
+        XCTAssertTrue(pantry.existsOrAppears(timeout: 2))
         XCTAssertFalse(app.staticTexts["Canceled category"].exists)
 
         pantry.tap()
         replaceText(in: app.textFields["shopping.categories.name"], with: "Dry goods")
         app.buttons["Save category"].tap()
         let dryGoods = categoryRow(named: "Dry goods", in: app)
-        XCTAssertTrue(dryGoods.waitForExistence(timeout: 2))
+        XCTAssertTrue(dryGoods.existsOrAppears(timeout: 2))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Category management"
         screenshot.lifetime = .keepAlways
@@ -43,21 +43,21 @@ final class CategoryManagementUITests: XCTestCase {
         dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
         XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Dry goods deleted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Dry goods deleted"].existsOrAppears(timeout: 2))
         app.buttons["shopping.categories.undoDelete"].tap()
-        XCTAssertTrue(dryGoods.waitForExistence(timeout: 2))
+        XCTAssertTrue(dryGoods.existsOrAppears(timeout: 2))
         dryGoods.swipeLeft()
         app.buttons["Delete"].tap()
         XCTAssertFalse(dryGoods.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Dry goods deleted"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Dry goods deleted"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.categories.undoDelete"].waitForNonExistence(timeout: 12))
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].existsOrAppears(timeout: 5))
         openSettings(in: app)
         app.buttons["Categories"].tap()
-        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Categories"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.buttons["shopping.categories.undoDelete"].exists)
         XCTAssertFalse(categoryRow(named: "Dry goods", in: app).exists)
     }
@@ -66,7 +66,7 @@ final class CategoryManagementUITests: XCTestCase {
         let app = launchPopulated()
         openSettings(in: app)
         app.buttons["Categories"].tap()
-        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Categories"].existsOrAppears(timeout: 3))
 
         enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
         app.staticTexts["Produce"].tap()
@@ -74,17 +74,17 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(merge.isEnabled)
         tapVisibleControlWithoutAXScroll(merge, in: app)
         app.buttons["Pantry"].tap()
-        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.staticTexts["Produce"].exists)
         app.buttons["shopping.categories.undoDelete"].tap()
-        XCTAssertTrue(categoryRow(named: "Produce", in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(categoryRow(named: "Produce", in: app).existsOrAppears(timeout: 3))
 
         let produce = categoryRow(named: "Produce", in: app)
         produce.swipeLeft()
         app.buttons["Delete"].tap()
-        XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Uncategorized"].existsOrAppears(timeout: 2))
         app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].existsOrAppears(timeout: 3))
         XCTAssertFalse(produce.exists)
     }
 
@@ -92,103 +92,103 @@ final class CategoryManagementUITests: XCTestCase {
         let app = launchPopulated()
         openSettings(in: app)
         app.buttons["Categories"].tap()
-        XCTAssertTrue(app.navigationBars["Categories"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Categories"].existsOrAppears(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Categories", identifier: "shopping.categories.select")
         app.buttons["shopping.categories.selectAll"].tap()
         assertSelectedCountIsVisible(app)
         XCTAssertEqual(app.buttons["shopping.categories.selectAll"].label, "Deselect All")
         app.buttons["shopping.categories.selectAll"].tap()
-        XCTAssertTrue(app.staticTexts["0 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["0 Selected"].existsOrAppears(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["shopping.categories.selectAll"].tap()
         var delete = app.buttons["shopping.categories.batchDelete"]
         XCTAssertFalse(delete.isEnabled)
         app.buttons["shopping.categories.selectAll"].tap()
         app.staticTexts["Produce"].tap()
-        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["1 Selected"].existsOrAppears(timeout: 2))
         delete = app.buttons["shopping.categories.batchDelete"]
         XCTAssertTrue(delete.isEnabled)
         tapVisibleControlWithoutAXScroll(delete, in: app)
         XCTAssertFalse(app.sheets["Delete selected categories?"].exists)
-        XCTAssertTrue(app.buttons["Uncategorized"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Uncategorized"].existsOrAppears(timeout: 2))
         app.buttons.matching(NSPredicate(format: "label == %@", "Pantry")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Produce merged into Pantry"].existsOrAppears(timeout: 3))
     }
 
     func testStoreAndCatalogBatchActionsReflectSelectedState() {
         let app = launchPopulated()
         openSettings(in: app)
         app.buttons["Stores"].tap()
-        XCTAssertTrue(app.navigationBars["Stores"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Stores"].existsOrAppears(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Stores", identifier: "shopping.stores.select")
         app.buttons["shopping.stores.selectAll"].tap()
         assertSelectedCountIsVisible(app)
-        XCTAssertTrue(app.buttons["shopping.stores.batchArchive"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.stores.batchArchive"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.stores.batchDelete"].exists)
         XCTAssertFalse(app.buttons["Move"].exists)
         app.buttons["shopping.stores.batchArchive"].tap()
         XCTAssertFalse(app.sheets["Archive selected stores?"].exists)
-        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.alerts["Batch update complete"].existsOrAppears(timeout: 3))
         app.alerts.buttons["OK"].tap()
 
         enterSelectionMode(app, navigationTitle: "Stores", identifier: "shopping.stores.select")
         app.buttons["shopping.stores.selectAll"].tap()
-        XCTAssertTrue(app.buttons["shopping.stores.batchRestore"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.stores.batchRestore"].existsOrAppears(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.stores.batchArchive"].isEnabled)
         app.buttons["shopping.stores.batchRestore"].tap()
         XCTAssertFalse(app.sheets["Restore selected stores?"].exists)
-        XCTAssertTrue(app.alerts["Batch update complete"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.alerts["Batch update complete"].existsOrAppears(timeout: 3))
         app.alerts.buttons["OK"].tap()
 
         app.navigationBars["Stores"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
         enterSelectionMode(app, navigationTitle: "Catalog", identifier: "shopping.catalog.select")
         XCTAssertFalse(app.buttons["Add Bananas to list"].exists)
         app.buttons["shopping.catalog.selectAll"].tap()
         assertSelectedCountIsVisible(app)
-        XCTAssertTrue(app.buttons["shopping.catalog.batchAdd"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["shopping.catalog.batchAdd"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.catalog.batchArchive"].exists)
         XCTAssertTrue(app.buttons["shopping.catalog.batchDelete"].exists)
         app.buttons["shopping.catalog.batchAdd"].tap()
         let addConfirmation = app.sheets["Add selected items to list?"]
-        XCTAssertTrue(addConfirmation.waitForExistence(timeout: 2))
+        XCTAssertTrue(addConfirmation.existsOrAppears(timeout: 2))
         XCTAssertTrue(addConfirmation.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "in the cart will be needed again")
         ).firstMatch.exists)
         addConfirmation.buttons["Add to list"].tap()
         let feedback = app.staticTexts["shopping.feedback.message"]
-        XCTAssertTrue(feedback.waitForExistence(timeout: 3))
+        XCTAssertTrue(feedback.existsOrAppears(timeout: 3))
         XCTAssertTrue(feedback.label.contains("Needed again 1"))
     }
 
     func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {
         let app = launchPopulated()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
 
         let existingRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bananas")).firstMatch
-        XCTAssertTrue(existingRow.waitForExistence(timeout: 3))
+        XCTAssertTrue(existingRow.existsOrAppears(timeout: 3))
         existingRow.swipeLeft()
         app.buttons["Add to list"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         app.buttons["shopping.grocery.cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
 
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
         let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
-        XCTAssertTrue(carted.waitForExistence(timeout: 3))
+        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.swipeLeft()
         app.buttons["Add to list"].tap()
         let confirmation = app.sheets["Need Strawberries again?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 2))
+        XCTAssertTrue(confirmation.existsOrAppears(timeout: 2))
         confirmation.buttons["Need again"].tap()
-        XCTAssertTrue(app.buttons["View"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["View"].existsOrAppears(timeout: 3))
         app.buttons["View"].tap()
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
     }
 
     func testSelectionControlsStayVisibleAtAccessibilityTextSize() {
@@ -226,10 +226,10 @@ final class CategoryManagementUITests: XCTestCase {
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.categories.contextSelect.")
         ).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["1 Selected"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.categories.batchEdit"].isEnabled)
         app.staticTexts["Pantry"].tap()
-        XCTAssertTrue(app.staticTexts["2 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["2 Selected"].existsOrAppears(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.categories.batchEdit"].isEnabled)
         XCTAssertFalse(app.buttons["shopping.categories.batchDelete"].isEnabled)
         app.buttons["Done"].tap()
@@ -240,7 +240,7 @@ final class CategoryManagementUITests: XCTestCase {
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.stores.contextSelect.")
         ).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["1 Selected"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.stores.batchEdit"].isEnabled)
         app.buttons["Done"].tap()
 
@@ -250,13 +250,13 @@ final class CategoryManagementUITests: XCTestCase {
         app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.contextSelect.")
         ).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["1 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["1 Selected"].existsOrAppears(timeout: 2))
         let granola = app.staticTexts["Granola"]
-        XCTAssertTrue(granola.waitForExistence(timeout: 2))
+        XCTAssertTrue(granola.existsOrAppears(timeout: 2))
         if !granola.isHittable { app.swipeUp() }
         XCTAssertTrue(waitForHittable(granola))
         granola.tap()
-        XCTAssertTrue(app.staticTexts["2 Selected"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["2 Selected"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.buttons["shopping.catalog.batchAdd"].isEnabled)
         XCTAssertTrue(app.buttons["shopping.catalog.batchArchive"].isEnabled)
         XCTAssertTrue(app.buttons["shopping.catalog.batchDelete"].isEnabled)
@@ -271,28 +271,28 @@ final class CategoryManagementUITests: XCTestCase {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
         }
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Settings"].existsOrAppears(timeout: 5))
         return app
     }
 
     private func openSettings(in app: XCUIApplication) {
         let settings = app.tabBars.buttons["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertTrue(settings.existsOrAppears(timeout: 5))
         let ready = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in settings.isHittable && settings.isEnabled },
             object: settings
         )
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
         settings.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 5))
     }
 
     private func enterSelectionMode(_ app: XCUIApplication, navigationTitle: String, identifier: String) {
         let select = app.buttons[identifier]
-        XCTAssertTrue(select.waitForExistence(timeout: 2), "Select must be visible in \(navigationTitle)")
+        XCTAssertTrue(select.existsOrAppears(timeout: 2), "Select must be visible in \(navigationTitle)")
         XCTAssertTrue(select.isHittable, "Select must not be hidden in an overflow menu")
         select.tap()
-        XCTAssertTrue(app.buttons["Select All"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Select All"].existsOrAppears(timeout: 2))
     }
 
     private func categoryRow(named name: String, in app: XCUIApplication) -> XCUIElement {
@@ -307,7 +307,7 @@ final class CategoryManagementUITests: XCTestCase {
         let selectedTitle = app.staticTexts.matching(
             NSPredicate(format: "label ENDSWITH %@ AND label != %@", " Selected", "0 Selected")
         ).firstMatch
-        XCTAssertTrue(selectedTitle.waitForExistence(timeout: 2))
+        XCTAssertTrue(selectedTitle.existsOrAppears(timeout: 2))
     }
 
     private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval = 2) -> Bool {
@@ -318,7 +318,7 @@ final class CategoryManagementUITests: XCTestCase {
     }
 
     private func tapVisibleControlWithoutAXScroll(_ element: XCUIElement, in app: XCUIApplication) {
-        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        XCTAssertTrue(element.existsOrAppears(timeout: 2))
         let frame = element.frame
         XCTAssertTrue(usable(frame) && app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
         app.coordinate(withNormalizedOffset: .zero)

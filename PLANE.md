@@ -29,6 +29,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 12: Settings Integrity and Store-Scope Polish | `7f63b8f0-37f3-437c-b348-2020fdc37aa5` | Durable Settings data, store ordering, and category-first store-scoped grocery presentation. |
 | Phase 13: Restore Category Intelligence | `50e324b6-35d2-4e47-826a-5288ceeca70c` | Restore on-device category suggestions and category-fill surfaces across the current UI. |
 | Phase 14: Inline Grocery Add | `89fc13a2-c014-44e1-a128-b080d3396b82` | Make list-originated catalog search, category browsing, and remembered-item creation fast and coherent. |
+| Phase 18: Full Suite Runtime | `5b9a890a-3d77-4497-b8ed-58bb981cf15b` | SHOPPING-108: measured exhaustive-test runtime improvements, local/CI timing, and repository testing guidance; based independently on `main`. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
@@ -61,7 +62,7 @@ Clear-carted operations must be confirmed and recoverable. They target exact cap
 
 The recommended baseline is SwiftUI + Core Data + `NSPersistentCloudKitContainer` managed private/shared stores. SwiftData private-device sync does not establish household sharing. Treat managed sharing, CloudKit schema readiness, convergence timing, and two-phone behavior as unproven until SHOPPING-30 records real evidence.
 
-The observed developer environment is Xcode 26.6 (17F113) with the iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Fast local validation is `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. Use `ShoppingCritical` for the tag-filtered Swift Testing smoke suite and `ShoppingFull` for exhaustive local UI coverage. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. The fast and full plans collect coverage against the committed ratcheting baseline. `docs/test-strategy.md` and `docs/continuous-integration.md` record ownership, fixtures, coverage, and triggers. Local work may proceed while enrollment is missing, but the app cannot claim release-ready shared MVP behavior without SHOPPING-10 and SHOPPING-30.
+The observed developer environment on September 23 is Xcode 27.0 (27A266a) with the iOS 26.5 iPhone 17 Pro runtime; the app targets iOS 17. Fast local validation is `xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'`. Use `ShoppingCritical` for the tag-filtered Swift Testing smoke suite and `ShoppingFull` for exhaustive local UI coverage. CI pins `macos-15`, `/Applications/Xcode_16.4.app`, and iOS 18.5 on an iPhone 16 Pro. The fast and full plans collect coverage against the committed ratcheting baseline. `docs/test-strategy.md` and `docs/continuous-integration.md` record ownership, fixtures, coverage, and triggers. Local work may proceed while enrollment is missing, but the app cannot claim release-ready shared MVP behavior without SHOPPING-10 and SHOPPING-30.
 
 ## Branching and release
 

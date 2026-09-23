@@ -11,9 +11,9 @@ final class OneTimePromotionUITests: XCTestCase {
         startPromotion(in: app)
         replace(app.textFields["shopping.grocery.name"], with: "Canceled tea")
         app.buttons["shopping.grocery.cancel"].tap()
-        XCTAssertTrue(row("Green tea", in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(row("Green tea", in: app).existsOrAppears(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["No remembered items"].existsOrAppears(timeout: 2))
         app.tabBars.buttons["Groceries"].tap()
         row("Green tea", in: app).tap()
         startPromotion(in: app)
@@ -22,12 +22,12 @@ final class OneTimePromotionUITests: XCTestCase {
         catalogNotes.tap()
         catalogNotes.typeText("Loose leaf")
         app.buttons["shopping.grocery.save"].tap()
-        XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons[originalID].existsOrAppears(timeout: 3))
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons[originalID].existsOrAppears(timeout: 5))
         app.buttons[originalID].tap()
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.catalogNotes"].value as? String, "Loose leaf")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Buy this week")
         let quantity = quantityControls(in: app).value
@@ -36,7 +36,7 @@ final class OneTimePromotionUITests: XCTestCase {
         screenshot("Explicitly remembered grocery", app: app)
         app.buttons["shopping.grocery.cancel"].tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["Green tea"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Green tea"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.staticTexts["Canceled tea"].exists)
     }
 
@@ -47,7 +47,7 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(remove, in: app)
         remove.tap()
         XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
-        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].existsOrAppears(timeout: 3))
         createOneTime("Breakfast cereal", in: app)
         let originalID = row("Breakfast cereal", in: app).identifier
         row("Breakfast cereal", in: app).tap()
@@ -58,7 +58,7 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(original, in: app)
         XCTAssertTrue(original.label.contains("Granola"))
         original.tap()
-        XCTAssertTrue(app.navigationBars["Edit item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
         let purchaseNotes = app.textFields["shopping.grocery.purchaseNotes"]
         reveal(purchaseNotes, in: app)
         XCTAssertEqual(purchaseNotes.value as? String, "Buy this week")
@@ -105,7 +105,7 @@ final class OneTimePromotionUITests: XCTestCase {
         reveal(conflict, in: app)
         XCTAssertTrue(conflict.exists)
         app.buttons["shopping.grocery.cancel"].tap()
-        XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons[originalID].existsOrAppears(timeout: 3))
         XCTAssertTrue(
             (app.buttons[originalID].value as? String ?? "").localizedCaseInsensitiveContains("One-time"))
         app.buttons[originalID].tap()
@@ -114,7 +114,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let distinct = app.buttons["shopping.grocery.createDistinct"]
         reveal(distinct, in: app)
         distinct.tap()
-        XCTAssertTrue(app.buttons[originalID].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons[originalID].existsOrAppears(timeout: 3))
         XCTAssertFalse(
             (app.buttons[originalID].value as? String ?? "").localizedCaseInsensitiveContains("One-time"))
         XCTAssertEqual(
@@ -139,13 +139,13 @@ final class OneTimePromotionUITests: XCTestCase {
         app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (3)")).firstMatch
         for _ in 0..<8 where !carted.exists || !carted.isHittable { app.swipeDown() }
-        XCTAssertTrue(carted.waitForExistence(timeout: 3))
+        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.tap()
-        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
         let granola = row("Granola", in: app)
         let bananas = row("Bananas", in: app)
         let strawberries = row("Strawberries", in: app)
-        XCTAssertTrue(granola.waitForExistence(timeout: 3))
+        XCTAssertTrue(granola.existsOrAppears(timeout: 3))
         XCTAssertTrue(bananas.exists)
         XCTAssertTrue(strawberries.exists)
         XCTAssertLessThan(bananas.frame.minY, strawberries.frame.minY)
@@ -154,7 +154,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let checkout = app.buttons["shopping.checkout.start"]
         reveal(checkout, in: app)
         checkout.tap()
-        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Checkout"].existsOrAppears(timeout: 2))
         let checkoutRows = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.checkout.row."
         )).allElementsBoundByIndex
@@ -173,19 +173,19 @@ final class OneTimePromotionUITests: XCTestCase {
             .appendingPathComponent("ShoppingPromotionUITest-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
-        XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         return app
     }
 
     private func createOneTime(_ name: String, in app: XCUIApplication) {
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))
         let addOneTime = app.buttons["shopping.grocery.addOneTime"]
         reveal(addOneTime, in: app)
-        XCTAssertTrue(addOneTime.waitForExistence(timeout: 2))
+        XCTAssertTrue(addOneTime.existsOrAppears(timeout: 2))
         addOneTime.tap()
-        XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add item"].existsOrAppears(timeout: 2))
         let remembered = app.switches["shopping.grocery.remembered"]
         setSwitch(remembered, on: false, in: app)
         let field = app.textFields["shopping.grocery.name"]
@@ -204,7 +204,7 @@ final class OneTimePromotionUITests: XCTestCase {
         notes.tap()
         notes.typeText("Buy this week")
         app.buttons["shopping.grocery.save"].tap()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
         reveal(row(name, in: app), in: app)
     }
 
@@ -212,7 +212,7 @@ final class OneTimePromotionUITests: XCTestCase {
         let start = app.buttons["shopping.grocery.promotion.start"]
         reveal(start, in: app)
         start.tap()
-        XCTAssertTrue(app.segmentedControls["shopping.grocery.promotion.choice"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.segmentedControls["shopping.grocery.promotion.choice"].existsOrAppears(timeout: 2))
     }
 
     private func chooseExisting(_ name: String, in app: XCUIApplication) {
@@ -278,7 +278,7 @@ final class OneTimePromotionUITests: XCTestCase {
             reveal(addQuantity, in: app)
             XCTAssertTrue(addQuantity.isHittable)
             addQuantity.tap()
-            XCTAssertTrue(quantity.waitForExistence(timeout: 2))
+            XCTAssertTrue(quantity.existsOrAppears(timeout: 2))
         }
         let increments = quantity.buttons.matching(NSPredicate(
             format: "identifier == %@ OR label == %@",
@@ -346,7 +346,7 @@ final class OneTimePromotionUITests: XCTestCase {
             }
         }
         XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
-        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        XCTAssertTrue(element.existsOrAppears(timeout: 2))
         XCTAssertTrue(element.isHittable)
     }
 

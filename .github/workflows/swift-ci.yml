@@ -48,6 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate timing reports
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_test_timing.py'
+
       - name: Validate exhaustive-run gate
         run: .github/scripts/test-shopping-full-gate.sh
 
@@ -66,11 +69,15 @@ jobs:
             exit 1
           fi
 
+      - name: Capture timing metadata
+        run: .github/scripts/test-timing.py init --plan "ShoppingFast" --json FastTimingMetadata.json
+
       - name: Start pinned iOS simulator
         id: simulator
         timeout-minutes: 5
         run: |
           set -euo pipefail
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase simulator -- bash -euo pipefail <<'SH'
           xcrun simctl list runtimes
           shopping_simulator_id="$(xcrun simctl create \
             'Shopping CI iPhone 16 Pro' \
@@ -79,30 +86,26 @@ jobs:
           xcrun simctl boot "$shopping_simulator_id"
           xcrun simctl bootstatus "$shopping_simulator_id" -b
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
+          SH
 
       - name: Build fast test products
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases FastPhases.jsonl --phase build --record-command \
+            --log FastBuild.log --seconds FastBuildSeconds.txt -- \
           xcodebuild build-for-testing \
             -project Shopping.xcodeproj \
             -scheme Shopping \
             -testPlan ShoppingFast \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -quiet 2>&1 | tee FastBuild.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastBuildSeconds.txt
-          exit "$exit_code"
+            -quiet
 
       - name: Run fast deterministic tests
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases FastPhases.jsonl --phase test --record-command \
+            --log FastTest.log --seconds FastTestSeconds.txt -- \
           xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
@@ -110,18 +113,14 @@ jobs:
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
             -resultBundlePath FastResults.xcresult \
-            -quiet 2>&1 | tee FastTest.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastTestSeconds.txt
-          exit "$exit_code"
+            -quiet
 
       - name: Enforce coverage baseline
         if: always() && hashFiles('FastResults.xcresult/**') != ''
         run: |
           set +e
-          .github/scripts/check-coverage.sh \
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase coverage -- \
+            .github/scripts/check-coverage.sh \
             FastResults.xcresult \
             .github/coverage-baseline.json \
             FastCoverage.json \
@@ -134,7 +133,8 @@ jobs:
       - name: Publish fast test summary
         if: always()
         run: |
-          .github/scripts/summarize-xcresult.sh \
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase summary -- \
+            .github/scripts/summarize-xcresult.sh \
             "Fast deterministic tests" \
             FastResults.xcresult \
             FastBuild.log \
@@ -145,6 +145,15 @@ jobs:
             FastTestSeconds.txt
           cat FastSummary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Publish fast timing report
+        if: always()
+        run: |
+          .github/scripts/test-timing.py report \
+            --plan "ShoppingFast" --metadata FastTimingMetadata.json --phases FastPhases.jsonl \
+            --result FastResults.xcresult \
+            --json FastTiming.json --markdown FastTiming.md
+          cat FastTiming.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload fast summary
         if: always()
         uses: actions/upload-artifact@v6
@@ -153,6 +162,10 @@ jobs:
           path: |
             FastSummary.md
             FastSummary.json
+            FastTiming.json
+            FastTimingMetadata.json
+            FastTiming.md
+            FastPhases.jsonl
             FastCoverage.md
             FastCoverage.json
             FastCoverage.raw.json

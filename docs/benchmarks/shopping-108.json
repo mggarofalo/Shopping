@@ -1,0 +1,426 @@
+{
+  "issue": "SHOPPING-108",
+  "date": "2026-09-23",
+  "historical_full_runs": [
+    {
+      "label": "local-main",
+      "sha": "edafe1ca0cf2bc4254bf4f3968ff0f149f24beec",
+      "result_bundle": "/var/folders/46/rfm__t390_j4__pjgy20q29m0000gn/T/shopping-full-edafe1ca0cf2bc4254bf4f3968ff0f149f24beec.jNfh7S.xcresult",
+      "xcode": "27.0 (27A266a)",
+      "summary_wall_seconds": 2785.0879998207092,
+      "result": "Passed",
+      "tests": 282,
+      "passed": 282,
+      "failed": 0,
+      "device": {
+        "architecture": "arm64",
+        "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+        "deviceName": "iPhone 17 Pro",
+        "modelName": "iPhone 17 Pro",
+        "osBuildNumber": "23F77",
+        "osVersion": "26.5",
+        "platform": "iOS Simulator"
+      }
+    },
+    {
+      "label": "local-phase17",
+      "sha": "1179e39bd5b95a7007cef9fd7ef90626cf1a3f9e",
+      "result_bundle": "/var/folders/46/rfm__t390_j4__pjgy20q29m0000gn/T/shopping-full-1179e39bd5b95a7007cef9fd7ef90626cf1a3f9e.66xCJU.xcresult",
+      "xcode": "27.0 (27A266a)",
+      "summary_wall_seconds": 2876.042000055313,
+      "result": "Passed",
+      "tests": 284,
+      "passed": 284,
+      "failed": 0,
+      "device": {
+        "architecture": "arm64",
+        "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+        "deviceName": "iPhone 17 Pro",
+        "modelName": "iPhone 17 Pro",
+        "osBuildNumber": "23F77",
+        "osVersion": "26.5",
+        "platform": "iOS Simulator"
+      }
+    },
+    {
+      "label": "hosted",
+      "sha": "1179e39bd5b95a7007cef9fd7ef90626cf1a3f9e",
+      "result_bundle": "/tmp/shopping-107-full-failure/ExhaustiveResults.xcresult",
+      "xcode": "16.4",
+      "summary_wall_seconds": 3186.3310000896454,
+      "result": "Failed",
+      "tests": 284,
+      "passed": 283,
+      "failed": 1,
+      "device": {
+        "architecture": "arm64",
+        "deviceId": "ADA10085-0DB2-4997-A29A-D72DD4FDFD38",
+        "deviceName": "Shopping exhaustive iPhone 16 Pro",
+        "modelName": "iPhone 16 Pro",
+        "osBuildNumber": "22F77",
+        "osVersion": "18.5",
+        "platform": "iOS Simulator"
+      }
+    }
+  ],
+  "hosted_phases_seconds": {
+    "simulator_start": 150,
+    "build": 149,
+    "tests_command": 3205,
+    "job_total": 3557
+  },
+  "environment": {
+    "xcode": "27.0 (27A266a)",
+    "runtime": "iOS 26.5 (23F77)",
+    "device": "iPhone 17 Pro",
+    "destination": "15066BE0-662A-4573-AA67-12E84FA0C39C"
+  },
+  "method": "Sequential targeted xcodebuild test-without-building commands; identical products for parallel comparisons. Serial comparisons rebuild only after the focused source change. No test retries. Command wall time includes launch and diagnostics overhead; compilation is separate.",
+  "product_revisions": {
+    "baseline": "4233d46e21882c8d0c09801747470e01ea733c71",
+    "delete_candidate": "fb19d79 plus the uncommitted ShoppingLaunchTests.replaceText batching diff committed with this report",
+    "reveal_candidate": "delete_candidate plus the uncommitted GroceryEditingUITests.reveal metadata reuse diff committed with this report",
+    "wait_candidate": "reveal_candidate plus existsOrAppears at the 66 positive GroceryEditingUITests sites; private helper later extracted unchanged and expanded to other Full UI suites",
+    "shared_wait_candidate": "wait_candidate helper extracted unchanged to XCUIElement+Waiting.swift and expanded to 316 additional direct positive assertions (382 total); final source diff committed with this report"
+  },
+  "non_benchmark_attempts": [
+    {
+      "name": "long-serial",
+      "exit_code": 70,
+      "reason": "Incorrect ShoppingUITests target name rejected before tests executed; corrected to ShoppingTests in long-serial-valid",
+      "log": "/tmp/shopping-108-evidence/long-serial.log"
+    }
+  ],
+  "runs": [
+    {
+      "name": "serial-baseline",
+      "products": "baseline",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 4,
+      "wall_seconds": 154.98,
+      "result_bundle_wall_seconds": 153.201,
+      "bundle": "/tmp/shopping-108-evidence/serial-baseline.xcresult",
+      "log": "/tmp/shopping-108-evidence/serial-baseline.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\" \"-only-testing:ShoppingTests/ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch\" -resultBundlePath /tmp/shopping-108-evidence/serial-baseline.xcresult",
+      "tests": [
+        {
+          "identifier": "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "result": "Passed",
+          "duration_seconds": 27.381909012794495
+        },
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "result": "Passed",
+          "duration_seconds": 51.68593990802765
+        },
+        {
+          "identifier": "ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 24.71297800540924
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 26.436648964881897
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "delete-baseline",
+      "products": "baseline",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 2,
+      "wall_seconds": 219.33,
+      "result_bundle_wall_seconds": 217.184,
+      "bundle": "/tmp/shopping-108-evidence/delete-baseline.xcresult",
+      "log": "/tmp/shopping-108-evidence/delete-baseline.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft\" -resultBundlePath /tmp/shopping-108-evidence/delete-baseline.xcresult",
+      "tests": [
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "result": "Passed",
+          "duration_seconds": 141.15562903881073
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "result": "Passed",
+          "duration_seconds": 61.631476044654846
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "delete-candidate",
+      "products": "delete_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 2,
+      "wall_seconds": 169.74,
+      "result_bundle_wall_seconds": 168.015,
+      "bundle": "/tmp/shopping-108-evidence/delete-candidate.xcresult",
+      "log": "/tmp/shopping-108-evidence/delete-candidate.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft\" -resultBundlePath /tmp/shopping-108-evidence/delete-candidate.xcresult",
+      "tests": [
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "result": "Passed",
+          "duration_seconds": 104.59136295318604
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "result": "Passed",
+          "duration_seconds": 50.46559298038483
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "parallel-two",
+      "products": "delete_candidate",
+      "workers": 2,
+      "result": "Passed",
+      "test_count": 4,
+      "wall_seconds": 163.09,
+      "result_bundle_wall_seconds": 157.256,
+      "bundle": "/tmp/shopping-108-evidence/parallel-two.xcresult",
+      "log": "/tmp/shopping-108-evidence/parallel-two.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled YES -parallel-testing-worker-count 2 \"-only-testing:ShoppingTests/CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\" \"-only-testing:ShoppingTests/ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch\" -resultBundlePath /tmp/shopping-108-evidence/parallel-two.xcresult",
+      "tests": [
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "result": "Passed",
+          "duration_seconds": 53.56228494644165
+        },
+        {
+          "identifier": "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "result": "Passed",
+          "duration_seconds": 24.756023049354553
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 27.692100048065186
+        },
+        {
+          "identifier": "ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 23.952177047729492
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "parallel-two-repeat",
+      "products": "delete_candidate",
+      "workers": 2,
+      "result": "Passed",
+      "test_count": 4,
+      "wall_seconds": 749.21,
+      "result_bundle_wall_seconds": 743.476,
+      "bundle": "/tmp/shopping-108-evidence/parallel-two-repeat.xcresult",
+      "log": "/tmp/shopping-108-evidence/parallel-two-repeat.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled YES -parallel-testing-worker-count 2 \"-only-testing:ShoppingTests/CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\" \"-only-testing:ShoppingTests/ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch\" -resultBundlePath /tmp/shopping-108-evidence/parallel-two-repeat.xcresult",
+      "tests": [
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "result": "Passed",
+          "duration_seconds": 53.41689598560333
+        },
+        {
+          "identifier": "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "result": "Passed",
+          "duration_seconds": 24.28701400756836
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testPeopleRemainVisibleAfterRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 26.572318077087402
+        },
+        {
+          "identifier": "ShoppingAppearanceUITests/testAppearanceChoicePersistsAcrossRelaunch()",
+          "result": "Passed",
+          "duration_seconds": 23.81667697429657
+        }
+      ],
+      "diagnostic_timeout": true
+    },
+    {
+      "name": "reveal-baseline",
+      "products": "delete_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 1,
+      "wall_seconds": 150.0,
+      "result_bundle_wall_seconds": 144.928,
+      "bundle": "/tmp/shopping-108-evidence/reveal-baseline.xcresult",
+      "log": "/tmp/shopping-108-evidence/reveal-baseline.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules\" -resultBundlePath /tmp/shopping-108-evidence/reveal-baseline.xcresult",
+      "tests": [
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "result": "Passed",
+          "duration_seconds": 114.26247990131378
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "reveal-candidate",
+      "products": "reveal_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 1,
+      "wall_seconds": 140.99,
+      "result_bundle_wall_seconds": 136.016,
+      "bundle": "/tmp/shopping-108-evidence/reveal-candidate.xcresult",
+      "log": "/tmp/shopping-108-evidence/reveal-candidate.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules\" -resultBundlePath /tmp/shopping-108-evidence/reveal-candidate.xcresult",
+      "tests": [
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "result": "Passed",
+          "duration_seconds": 106.66368198394775
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "appearance-validation",
+      "products": "reveal_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 1,
+      "wall_seconds": 746.86,
+      "result_bundle_wall_seconds": 741.534,
+      "bundle": "/tmp/shopping-108-evidence/appearance-validation.xcresult",
+      "log": "/tmp/shopping-108-evidence/appearance-validation.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ShoppingAppearanceUITests/testPrimaryScreensEditorsAndFiltersInBothAppearances\" -resultBundlePath /tmp/shopping-108-evidence/appearance-validation.xcresult",
+      "tests": [
+        {
+          "identifier": "ShoppingAppearanceUITests/testPrimaryScreensEditorsAndFiltersInBothAppearances()",
+          "result": "Passed",
+          "duration_seconds": 126.35831391811371
+        }
+      ],
+      "diagnostic_timeout": true
+    },
+    {
+      "name": "long-serial-valid",
+      "products": "reveal_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 4,
+      "wall_seconds": 347.79,
+      "result_bundle_wall_seconds": 343.032,
+      "bundle": "/tmp/shopping-108-evidence/long-serial-valid.xcresult",
+      "log": "/tmp/shopping-108-evidence/long-serial-valid.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -resultBundlePath /tmp/shopping-108-evidence/long-serial-valid.xcresult -parallel-testing-enabled NO \"-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\"",
+      "tests": [
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "result": "Passed",
+          "duration_seconds": 52.349920988082886
+        },
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "result": "Passed",
+          "duration_seconds": 105.52230596542358
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "result": "Passed",
+          "duration_seconds": 106.5625159740448
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "result": "Passed",
+          "duration_seconds": 49.80180895328522
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "long-parallel-two",
+      "products": "reveal_candidate",
+      "workers": 2,
+      "result": "Passed",
+      "test_count": 4,
+      "wall_seconds": 861.39,
+      "result_bundle_wall_seconds": 855.796,
+      "bundle": "/tmp/shopping-108-evidence/long-parallel-two.xcresult",
+      "log": "/tmp/shopping-108-evidence/long-parallel-two.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-derived -resultBundlePath /tmp/shopping-108-evidence/long-parallel-two.xcresult -parallel-testing-enabled YES -parallel-testing-worker-count 2 \"-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\"",
+      "tests": [
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "result": "Passed",
+          "duration_seconds": 109.41554796695709
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "result": "Passed",
+          "duration_seconds": 51.687702894210815
+        },
+        {
+          "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+          "result": "Passed",
+          "duration_seconds": 53.273738980293274
+        },
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "result": "Passed",
+          "duration_seconds": 107.87889111042023
+        }
+      ],
+      "diagnostic_timeout": true
+    },
+    {
+      "name": "wait-candidate",
+      "products": "wait_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 1,
+      "wall_seconds": 124.95,
+      "result_bundle_wall_seconds": 119.505,
+      "bundle": "/tmp/shopping-108-evidence/wait-candidate.xcresult",
+      "log": "/tmp/shopping-108-evidence/wait-candidate.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-wait-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules\" -resultBundlePath /tmp/shopping-108-evidence/wait-candidate.xcresult",
+      "tests": [
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "result": "Passed",
+          "duration_seconds": 89.4880360364914
+        }
+      ],
+      "diagnostic_timeout": false
+    },
+    {
+      "name": "shared-wait-candidate",
+      "products": "shared_wait_candidate",
+      "workers": 1,
+      "result": "Passed",
+      "test_count": 2,
+      "wall_seconds": 152.29,
+      "result_bundle_wall_seconds": 147.604,
+      "bundle": "/tmp/shopping-108-evidence/shared-wait-candidate.xcresult",
+      "log": "/tmp/shopping-108-evidence/shared-wait-candidate.log",
+      "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-wait-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries\" \"-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft\" -resultBundlePath /tmp/shopping-108-evidence/shared-wait-candidate.xcresult",
+      "tests": [
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "result": "Passed",
+          "duration_seconds": 82.52256894111633
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "result": "Passed",
+          "duration_seconds": 36.824110984802246
+        }
+      ],
+      "diagnostic_timeout": false
+    }
+  ]
+}

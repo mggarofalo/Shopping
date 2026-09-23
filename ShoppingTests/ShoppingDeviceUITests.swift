@@ -30,7 +30,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         ).firstMatch
         reveal(carted, in: app, towardTop: true)
         carted.tap()
-        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 3))
         let cartedRow = app.buttons["Edit \(longName)"]
         reveal(cartedRow, in: app, fullyVisible: false)
         revealSwipeAction("Remove from cart", for: cartedRow, in: app)
@@ -62,12 +62,12 @@ final class ShoppingDeviceUITests: XCTestCase {
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
 
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
         screenshot("Compact catalog before accessibility audit", app: app)
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
 
         app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 3))
         screenshot("Compact settings before accessibility audit", app: app)
         try audit(app, types: [.elementDetection, .hitRegion, .sufficientElementDescription, .trait])
     }
@@ -76,10 +76,10 @@ final class ShoppingDeviceUITests: XCTestCase {
         let app = launch(fixture: "populated")
         app.tabBars.buttons["Catalog"].tap()
         let search = app.searchFields.firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        XCTAssertTrue(search.existsOrAppears(timeout: 3))
         search.tap()
         search.typeText("Granola\n")
-        XCTAssertTrue(app.staticTexts["Granola"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.item."))
         XCTAssertEqual(rows.count, 1)
@@ -103,7 +103,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         let app = launch(fixture: "populated", largestText: true)
         selectCostco(in: app)
         app.buttons["shopping.filters"].tap()
-        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Filters"].existsOrAppears(timeout: 3))
         let urgent = app.switches["Urgent only"]
         let inner = urgent.switches.firstMatch
         (inner.exists ? inner : urgent).tap()
@@ -136,21 +136,21 @@ final class ShoppingDeviceUITests: XCTestCase {
         reveal(granola, in: app)
         granola.tap()
         let addQuantity = app.buttons["shopping.grocery.quantity.add"]
-        XCTAssertTrue(addQuantity.waitForExistence(timeout: 2))
+        XCTAssertTrue(addQuantity.existsOrAppears(timeout: 2))
         addQuantity.tap()
         XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
         app.buttons["shopping.grocery.save"].tap()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 2))
 
         app.buttons["shopping.filters"].tap()
-        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Filters"].existsOrAppears(timeout: 3))
         let urgent = app.switches["Urgent only"]
         let inner = urgent.switches.firstMatch
         (inner.exists ? inner : urgent).tap()
         app.buttons["Pantry"].tap()
         app.buttons["Done"].tap()
         let removeUrgent = app.buttons["Remove Urgent filter"]
-        XCTAssertTrue(removeUrgent.waitForExistence(timeout: 3))
+        XCTAssertTrue(removeUrgent.existsOrAppears(timeout: 3))
         let clearStore = app.buttons["shopping.store.clear"]
         reveal(clearStore, in: app, towardTop: true)
         XCTAssertEqual(clearStore.label, "Clear selected store")
@@ -211,11 +211,11 @@ final class ShoppingDeviceUITests: XCTestCase {
         reveal(carted, in: app, towardTop: true)
         carted.tap()
         let checkout = app.buttons["shopping.checkout.start"]
-        XCTAssertTrue(checkout.waitForExistence(timeout: 3))
+        XCTAssertTrue(checkout.existsOrAppears(timeout: 3))
         checkout.tap()
 
-        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Strawberries"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Checkout"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Strawberries"].existsOrAppears(timeout: 3))
         screenshot("Checkout at largest text", app: app)
         try audit(app, types: [.textClipped, .sufficientElementDescription])
 
@@ -228,7 +228,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         let temporaryHeading = app.staticTexts["shopping.grocery.purchaseNotesHeading"]
         let reusableNotes = app.textFields["shopping.grocery.catalogNotes"]
         let temporaryNotes = app.textFields["shopping.grocery.purchaseNotes"]
-        XCTAssertTrue(reusableNotes.waitForExistence(timeout: 3))
+        XCTAssertTrue(reusableNotes.existsOrAppears(timeout: 3))
         reveal(temporaryNotes, in: app)
         XCTAssertGreaterThan(reusableHeading.frame.height, 0)
         XCTAssertGreaterThan(temporaryHeading.frame.height, 0)
@@ -239,14 +239,14 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["Sharing Status"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Sharing Status"].existsOrAppears(timeout: 3))
         let sharingValue = app.staticTexts["shopping.settings.sharingStatus"]
         let versionValue = app.staticTexts["shopping.settings.version"]
-        XCTAssertTrue(sharingValue.waitForExistence(timeout: 3))
+        XCTAssertTrue(sharingValue.existsOrAppears(timeout: 3))
         let windowTrailingEdge = app.windows.firstMatch.frame.maxX
         XCTAssertGreaterThanOrEqual(windowTrailingEdge - sharingValue.frame.maxX, 16)
         reveal(versionValue, in: app)
-        XCTAssertTrue(versionValue.waitForExistence(timeout: 3))
+        XCTAssertTrue(versionValue.existsOrAppears(timeout: 3))
         XCTAssertGreaterThanOrEqual(windowTrailingEdge - versionValue.frame.maxX, 16)
         screenshot("Settings multiline text at largest text", app: app)
     }
@@ -256,7 +256,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         // Assert the user-facing copy as well as its layout; the empty-state
         // container keeps a separate identifier for existing launch tests.
         let emptyDescription = emptyApp.staticTexts["Add an item to get started."]
-        XCTAssertTrue(emptyDescription.waitForExistence(timeout: 3))
+        XCTAssertTrue(emptyDescription.existsOrAppears(timeout: 3))
         XCTAssertGreaterThan(emptyDescription.frame.height, 0)
         screenshot("Empty state at largest text", app: emptyApp)
         emptyApp.terminate()
@@ -268,7 +268,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         ]
         errorApp.launch()
         let errorState = errorApp.staticTexts["Groceries unavailable"]
-        XCTAssertTrue(errorState.waitForExistence(timeout: 5))
+        XCTAssertTrue(errorState.existsOrAppears(timeout: 5))
         XCTAssertTrue(errorApp.staticTexts["Your saved data was left unchanged. Try opening it again."].exists)
         assertTouchSize(errorApp.buttons["shopping.persistence.retry"])
         screenshot("Persistence error at largest text", app: errorApp)
@@ -400,7 +400,7 @@ final class ShoppingDeviceUITests: XCTestCase {
             app.launchArguments = ["-UIPreferredContentSizeCategoryName", size]
         }
         app.launch()
-        XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         return app
     }
 
