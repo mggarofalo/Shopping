@@ -15,6 +15,10 @@ SHOPPING-99 corrects the sideways master by rotating it 90 degrees clockwise.
 The carton and grocery bag now stand upright; the artwork, dimensions, and
 opaque background are retained.
 
+SHOPPING-104 removes the original EXIF and XMP orientation tags. Those tags
+survived the pixel rotation, causing Xcode to rotate the generated iPhone icon
+again. The master pixels are unchanged by this metadata correction.
+
 ## Generation provenance
 
 Created with the built-in image generation tool. The selected 1254 × 1254
