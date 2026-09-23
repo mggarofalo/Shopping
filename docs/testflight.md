@@ -63,6 +63,11 @@ After the workflow reaches the repository's default branch:
    For a build that already uploaded, run the workflow with `confirm_upload`
    cleared and `verify_only` selected. This retries the distribution check
    without spending another build number.
+   When a processed build is marked Missing Compliance, the check copies the
+   exempt encryption classification only if known available build 6 has the
+   same classification. The app also declares this classification in its
+   generated Info.plist for future uploads. Any change in encryption use
+   requires a fresh export-compliance review before distribution.
 5. Approve the `testflight` environment deployment when GitHub requests it.
 6. Confirm any required export-compliance or external beta review in App Store
    Connect. The workflow reports the internal and external beta states after
