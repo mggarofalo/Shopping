@@ -18,7 +18,11 @@ class AppStoreConnect
 
   def request(path, method: :get, body: nil)
     uri = URI.join("https://api.appstoreconnect.apple.com", path)
-    request = method == :post ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
+    request = case method
+              when :post then Net::HTTP::Post.new(uri)
+              when :patch then Net::HTTP::Patch.new(uri)
+              else Net::HTTP::Get.new(uri)
+              end
     request["Authorization"] = "Bearer #{token}"
     request["Content-Type"] = "application/json"
     request.body = JSON.generate(body) if body
@@ -77,6 +81,8 @@ app_id = app.fetch("id")
 source = find_build(client, app_id, source_number)
 raise "Source build #{source_number} was not found" unless source
 puts "Source build #{source_number}: #{source.dig('attributes', 'processingState')}"
+source_encryption = source.dig("attributes", "usesNonExemptEncryption")
+puts "Source build #{source_number} uses non-exempt encryption: #{source_encryption.inspect}"
 
 groups = client.list("/v1/apps/#{app_id}/betaGroups?limit=200")
 source_groups = groups.select do |group|
@@ -101,7 +107,14 @@ raise "Build #{target_number} was not processed within 12 minutes" unless target
 initial_detail = client.request("/v1/builds/#{target.fetch('id')}/buildBetaDetail").fetch("data")
 initial_internal_state = initial_detail.dig("attributes", "internalBuildState")
 puts "Build #{target_number} initial internal state: #{initial_internal_state}"
-if %w[MISSING_EXPORT_COMPLIANCE PROCESSING_EXCEPTION EXPIRED].include?(initial_internal_state)
+if initial_internal_state == "MISSING_EXPORT_COMPLIANCE"
+  unless source_encryption == false
+    raise "Build #{target_number} needs export-compliance review; source build #{source_number} is not classified as exempt"
+  end
+  body = { data: { type: "builds", id: target.fetch("id"), attributes: { usesNonExemptEncryption: false } } }
+  client.request("/v1/builds/#{target.fetch('id')}", method: :patch, body: body)
+  puts "Copied exempt encryption classification from build #{source_number} to build #{target_number}"
+elsif %w[PROCESSING_EXCEPTION EXPIRED].include?(initial_internal_state)
   raise "Build #{target_number} cannot reach internal testers: #{initial_internal_state}"
 end
 
