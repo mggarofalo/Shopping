@@ -16,7 +16,9 @@ result_bundle="$(mktemp -d "${TMPDIR:-/tmp}/shopping-full-${commit_sha}.XXXXXX")
 rmdir "$result_bundle"
 snapshot_root="$(mktemp -d "${TMPDIR:-/tmp}/shopping-full-source-${commit_sha}.XXXXXX")"
 trap 'rm -rf "$snapshot_root"' EXIT
-git archive "$commit_sha" | tar -x -C "$snapshot_root"
+# Keep Git provenance available to the app build without modifying the source worktree.
+git clone --shared --no-checkout "$repository_root" "$snapshot_root"
+git -C "$snapshot_root" checkout --detach "$commit_sha"
 cd "$snapshot_root"
 
 xcodebuild test \

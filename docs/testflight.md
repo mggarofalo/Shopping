@@ -11,7 +11,7 @@ uploads. See [Apple's SDK requirements](https://developer.apple.com/news/upcomin
 
 1. Merge and statically validate the manual workflow without configuring or exposing signing material.
 2. Finish Apple Developer and App Store Connect setup under SHOPPING-10. Register `com.mggarofalo.shopping`, enable the required iCloud/CloudKit capabilities, create the App Store Connect app record, and create the distribution assets below.
-3. Create and protect the GitHub `testflight` environment, then add its secrets. Restrict deployments to the intended release branch and require review before the job can access secrets.
+3. Create and protect the GitHub `testflight` environment, then add its secrets. Restrict deployments to `main` and require review before the job can access secrets.
 4. Dispatch one build with a new positive App Store Connect build number. The workflow validates the profile, archives the Release configuration, validates the IPA with Apple, and uploads it. Do not describe this stage as successful until App Store Connect finishes processing the build.
 5. Complete production CloudKit schema and two-iPhone sharing validation under SHOPPING-30 before inviting household testers. Then finish the installation and regression evidence required by SHOPPING-5.
 
@@ -54,7 +54,7 @@ Base64 is transport encoding, not encryption. Keep all six values in the protect
 After the workflow reaches the repository's default branch:
 
 1. Open **Actions → Upload to TestFlight → Run workflow**.
-2. Select the intended release branch or tag.
+2. Select `main`. Releases from other branches or tags are rejected.
 3. Enter a positive build number that has never been uploaded for the current marketing version.
 4. Select the upload confirmation checkbox and run the workflow. The workflow
    waits for App Store Connect processing, then copies the tester groups from
@@ -84,3 +84,18 @@ Run the static contract locally:
 ```
 
 The check parses the YAML, syntax-checks the upload script, verifies the manual/environment/permission guards, verifies all secret references, and checks the validate/upload and cleanup paths. The normal Swift CI workflow runs the same check. A live archive or upload is intentionally out of scope until SHOPPING-10 is complete.
+
+## Build identity
+
+SHOPPING-98 uses the exact checked-out Git SHA as the build identifier. Every
+Xcode build writes the full SHA to `BuildCommit.txt` in the app bundle; Settings
+shows the marketing version and the first 8 SHA characters. Local builds with
+uncommitted changes append `-dirty`. Missing or invalid metadata displays an
+unknown commit, never the integer build number. Builds require a Git checkout.
+The build phase runs on incremental builds too, including after a commit change.
+
+TestFlight uploads are restricted to a clean `main` checkout. On GitHub Actions,
+the checked-out SHA must equal the dispatched `main` SHA, even if `main` moves
+while the run is queued. Workflow runs identify releases by that SHA.
+`CFBundleVersion` remains a positive numeric upload value for Apple distribution;
+it is not the app's source identifier. Continue choosing an unused upload number.

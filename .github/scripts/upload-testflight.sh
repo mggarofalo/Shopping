@@ -37,6 +37,8 @@ if [[ ! "$APP_STORE_CONNECT_API_KEY_ID" =~ ^[[:alnum:]]+$ ]]; then
     exit 1
 fi
 
+bash "$(dirname "${BASH_SOURCE[0]}")/validate-release-source.sh"
+
 readonly TEMP_ROOT="$(mktemp -d "${RUNNER_TEMP:-/tmp}/shopping-testflight.XXXXXX")"
 readonly CERTIFICATE_PATH="$TEMP_ROOT/distribution.p12"
 readonly PROFILE_PATH="$TEMP_ROOT/distribution.mobileprovision"

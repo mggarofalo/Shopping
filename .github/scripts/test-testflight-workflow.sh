@@ -20,7 +20,7 @@ assert_contains() {
 }
 
 assert_contains "workflow_dispatch:" "$WORKFLOW_PATH"
-assert_contains 'if: ${{ inputs.confirm_upload }}' "$WORKFLOW_PATH"
+assert_contains "if: \${{ inputs.confirm_upload && github.ref == 'refs/heads/main' }}" "$WORKFLOW_PATH"
 assert_contains "environment: testflight" "$WORKFLOW_PATH"
 assert_contains "contents: read" "$WORKFLOW_PATH"
 assert_contains "cancel-in-progress: false" "$WORKFLOW_PATH"
@@ -74,5 +74,7 @@ if invalid_build_output="$(env -i \
     exit 1
 fi
 assert_contains "BUILD_NUMBER must be a positive integer." <(printf '%s' "$invalid_build_output")
+
+python3 "$REPOSITORY_ROOT/.github/scripts/test-build-identity.py"
 
 echo "TestFlight workflow checks passed."
