@@ -160,7 +160,7 @@ enum GroceryStoreScopeIndicator: Equatable {
     var symbol: String {
         switch self {
         case .onlyBuyHere: "lock.fill"
-        case .canBuyHere: "checkmark.circle"
+        case .canBuyHere: "lock.open.fill"
         }
     }
 
