@@ -59,16 +59,6 @@ struct ClearCartedPreviewRow: Equatable {
     let oneTime: Bool
 }
 
-enum NeedUrgency: String, Codable, CaseIterable {
-    case normal
-    case urgent
-}
-
-enum NeedKind: String, Codable {
-    case remembered
-    case oneTime
-}
-
 struct RememberedDuplicateGroup: Equatable {
     let itemID: UUID
     let candidates: [RememberedDuplicateCandidate]
@@ -1972,7 +1962,7 @@ final class NeedService: @unchecked Sendable {
                 "list", "list.household", "item", "item.household", "item.stores", "item.category",
                 "oneTimeStores", "oneTimeCategory"
             ]
-            let activeNeeds = try context.fetch(request)
+            let activeNeeds = try self.outstanding(context.fetch(request), in: context)
             try self.validateOccurrenceIdentities(activeNeeds)
             let candidateItemIDs = Set(activeNeeds.compactMap { need -> UUID? in
                 guard let item = need.item, item.id != PersistenceModel.unsetID else { return nil }
@@ -3396,14 +3386,13 @@ final class NeedService: @unchecked Sendable {
         in context: NSManagedObjectContext
     ) throws -> Bool {
         let request = Need.fetchRequest()
-        request.fetchLimit = 1
         request.predicate = NSPredicate(
             format: "item.id == %@ AND list.id == %@ AND id != %@ AND archived == NO",
             itemID as CVarArg,
             listID as CVarArg,
             needID as CVarArg
         )
-        return try !context.fetch(request).isEmpty
+        return try !self.outstanding(context.fetch(request), in: context).isEmpty
     }
 
     private func activeRememberedNeeds(
@@ -3419,7 +3408,7 @@ final class NeedService: @unchecked Sendable {
         )
         let needs = try context.fetch(request)
         try validateOccurrenceIdentities(needs)
-        return needs.sorted { $0.id.uuidString < $1.id.uuidString }
+        return try outstanding(needs, in: context).sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
     private func activeRememberedNeeds(
@@ -3440,13 +3429,23 @@ final class NeedService: @unchecked Sendable {
         let needs = try context.fetch(request)
         try validateOccurrenceIdentities(needs)
         var grouped: [UUID: [Need]] = [:]
-        for need in needs {
+        for need in try outstanding(needs, in: context) {
             guard let itemID = need.item?.id, itemIDs.contains(itemID) else {
                 throw NeedServiceError.scopeChanged
             }
             grouped[itemID, default: []].append(need)
         }
         return grouped.mapValues { $0.sorted { $0.id.uuidString < $1.id.uuidString } }
+    }
+
+    private func outstanding(_ needs: [Need], in context: NSManagedObjectContext) throws -> [Need] {
+        guard persistence.personalCartsEnabled else { return needs }
+        let householdIDs = Set(needs.compactMap { $0.list?.household?.id })
+        var fulfilled: Set<UUID> = []
+        for id in householdIDs {
+            fulfilled.formUnion(try PersonalDemandProjection.fulfilledNeedIDs(householdID: id, persistence: persistence, in: context))
+        }
+        return needs.filter { !fulfilled.contains($0.id) }
     }
 
     private func duplicateGroup(itemID: UUID, needs: [Need]) throws -> RememberedDuplicateGroup {
@@ -3510,6 +3509,10 @@ final class NeedService: @unchecked Sendable {
     }
 
     private func performWrite<T>(_ body: (NSManagedObjectContext) throws -> T) throws -> T {
+        let accountSession = try persistence.personalCartSessionProvider?.currentSession()
+        guard accountSession?.accountBinding == persistence.personalCartInitialBinding else {
+            throw PersonalCartError.accountChanged
+        }
         persistence.writer.reset()
         do {
             let value = try body(persistence.writer)
@@ -3517,6 +3520,9 @@ final class NeedService: @unchecked Sendable {
                 let saveSignpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
                 os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID)
                 defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Core Data save", signpostID: saveSignpostID) }
+                guard try persistence.personalCartSessionProvider?.currentSession() == accountSession else {
+                    throw PersonalCartError.accountChanged
+                }
                 try persistence.prepareForSave(persistence.writer)
                 try persistence.writer.save()
                 if persistence.shareAssociationJournal != nil {

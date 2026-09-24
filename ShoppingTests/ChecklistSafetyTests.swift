@@ -5,6 +5,8 @@ import XCTest
 
 final class ChecklistSafetyTests: XCTestCase {
     func testStoreProjectionKeepsCategorySectionsAndExposesRowIndicators() throws {
+        XCTAssertEqual(GroceryStoreScopeIndicator.onlyBuyHere.symbol, "lock.fill")
+        XCTAssertEqual(GroceryStoreScopeIndicator.canBuyHere.symbol, "lock.open.fill")
         let persistence = try makePersistence()
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()

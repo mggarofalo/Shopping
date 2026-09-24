@@ -43,6 +43,7 @@ extension EnvironmentValues {
 
 @main
 struct ShoppingApp: App {
+    @UIApplicationDelegateAdaptor(ShoppingApplicationDelegate.self) private var applicationDelegate
     @StateObject private var bootstrap: PersistenceBootstrap
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
@@ -59,9 +60,26 @@ struct ShoppingApp: App {
                     ProgressView("Opening groceries…")
                         .accessibilityIdentifier("shopping.persistence.loading")
                 case .ready(let ready):
-                    ContentView()
+                    Group {
+                        if (ready.persistence.configuration.isManaged || ready.personalCartService != nil) && ready.householdID == nil {
+                            NavigationStack {
+                            ContentUnavailableView {
+                                Label("Waiting for your household", systemImage: "icloud")
+                            } description: {
+                                Text("Your existing iCloud groceries will appear after import. An empty cache does not create another household.")
+                            } actions: {
+                                Button("Check again") { bootstrap.applicationDidEnterForeground() }
+                                if let service = ready.personalCartService {
+                                    NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
+                                }
+                            }
+                            }
+                        } else { ContentView() }
+                    }
                         .environment(\.managedObjectContext, ready.persistence.container.viewContext)
                         .environment(\.needService, ready.service)
+                        .environment(\.personalCart, ready.personalCart)
+                        .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
                         .environment(\.persistenceSelection, PersistenceSelection(
                             householdID: ready.householdID,
                             listID: ready.listID

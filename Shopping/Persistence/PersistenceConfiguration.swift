@@ -1,3 +1,4 @@
+import CloudKit
 import CoreData
 
 enum PersistenceStoreRole: String, Codable {

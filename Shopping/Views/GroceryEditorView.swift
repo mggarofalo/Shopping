@@ -43,6 +43,7 @@ private enum GroceryEditorField: Hashable {
 struct GroceryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
+    @Environment(\.personalCart) private var personalCart
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
@@ -170,9 +171,9 @@ struct GroceryEditorView: View {
     private var activeRememberedNeedState: (byItemID: [UUID: Need], ambiguousItemIDs: Set<UUID>) {
         let validItems = Set(scopedItems.map(\.objectID))
         let activeNeeds = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter {
-                !$0.archived && $0.kind == NeedKind.remembered.rawValue &&
-                    $0.item.map { validItems.contains($0.objectID) } == true
+            .filter { need in
+                (personalCart.map { $0.outstandingNeedIDs.contains(need.id) } ?? !need.archived) && need.kind == NeedKind.remembered.rawValue &&
+                    need.item.map { validItems.contains($0.objectID) } == true
             }
             .sorted { $0.id.uuidString < $1.id.uuidString }
         var needsByItemID: [UUID: Need] = [:]
@@ -576,7 +577,7 @@ struct GroceryEditorView: View {
                         )
                         .accessibilityValue(suggestionSummary(item))
                         .accessibilityIdentifier(suggestionIdentifier(item))
-                        if activeRememberedNeedsByItemID[item.id]?.carted == true {
+                        if activeRememberedNeedsByItemID[item.id].map { personalCart?.contains($0.id) ?? $0.carted } == true {
                             needAgainButton(item)
                         }
                     }
@@ -604,7 +605,7 @@ struct GroceryEditorView: View {
     private func suggestionSummary(_ item: Item) -> String {
         let status: String
         if let need = activeRememberedNeedsByItemID[item.id] {
-            status = need.carted ? "In cart" : "On grocery list"
+            status = (personalCart?.contains(need.id) ?? need.carted) ? "In cart" : "On grocery list"
         } else {
             status = "Saved in Catalog"
         }
@@ -823,14 +824,19 @@ struct GroceryEditorView: View {
                 categoryID: target.scope.categoryID,
                 textFilter: target.scope.textFilter,
                 urgentOnly: target.scope.urgentOnly,
-                renewCarted: renewCarted,
+                renewCarted: personalCart == nil && renewCarted,
                 personID: personID
             ) {
             case .added(let needID), .renewed(let needID):
                 onSaved(needID, item.category?.id)
                 dismiss()
             case .focusExisting(let needID):
-                onFocusNeed(needID)
+                if renewCarted, let personalCart,
+                   let entry = personalCart.entries.first(where: { $0.needID == needID }) {
+                    try personalCart.uncart(entry)
+                    onSaved(needID, item.category?.id)
+                    dismiss()
+                } else { onFocusNeed(needID) }
             }
         } catch { self.error = error }
     }

@@ -4,6 +4,7 @@ import UIKit
 
 struct GroceriesView: View {
     @Environment(\.needService) private var service
+    @Environment(\.personalCart) private var personalCart
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.shoppingToastCenter) private var toastCenter
@@ -43,7 +44,7 @@ struct GroceriesView: View {
     private var visibleNeeds: [Need] {
         needs.filter {
             visibleNeedObjectIDs.contains($0.objectID) && GroceryRowScope.matches($0, canonicalList: canonicalList) &&
-                !$0.carted && !$0.archived
+                isOutstanding($0) && !isInMyCart($0)
         }
     }
 
@@ -59,7 +60,7 @@ struct GroceriesView: View {
 
     private var hasActiveUncartedNeeds: Bool {
         GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains {
-            !$0.carted && !$0.archived
+            isOutstanding($0) && !isInMyCart($0)
         }
     }
 
@@ -106,6 +107,9 @@ struct GroceriesView: View {
             .navigationDestination(for: GroceryDestination.self) { destination in
                 switch destination {
                 case .carted:
+                    if let personalCart {
+                        PersonalCartView(cart: personalCart, navigation: navigation)
+                    } else {
                     CartedGroceriesView(
                         navigation: navigation,
                         onEdit: focus,
@@ -119,7 +123,10 @@ struct GroceriesView: View {
                             ))
                         }
                     )
-                case .recentlyCleared: RecentlyClearedView()
+                }
+                case .recentlyCleared:
+                    if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
+                    else { RecentlyClearedView() }
                 }
             }
             .sheet(isPresented: $showingFilters) {
@@ -305,7 +312,10 @@ struct GroceriesView: View {
     }
 
     private var cartedCount: Int {
-        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+        if let personalCart {
+            return personalCart.visibleEntries(filter: currentNeedFilter, activeStoreIDs: Set(activeStores.map(\.id))).count
+        }
+        return GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
             .filter { !$0.archived && $0.carted && visibleNeedObjectIDs.contains($0.objectID) }.count
     }
 
@@ -389,7 +399,7 @@ struct GroceriesView: View {
             pendingSavedNeed = PendingSavedNeed(
                 id: id,
                 scope: scope,
-                expectsUncarted: editor?.need?.carted != true,
+                expectsUncarted: editor?.need.map(isInMyCart) != true,
                 originalCategoryID: editor?.originalCategoryID,
                 savedCategoryID: categoryID,
                 wasEditing: editor?.needID != nil
@@ -411,11 +421,11 @@ struct GroceriesView: View {
             .first(where: { $0.id == pending.id && !$0.archived }) else { return }
         // A writer save can precede its queued main-context merge. Retain the acknowledgement
         // until the renewed occurrence is actually visible to this context.
-        guard !pending.expectsUncarted || !need.carted else { return }
+        guard !pending.expectsUncarted || !isInMyCart(need) else { return }
         guard !pending.wasEditing || categoryID(for: need) == pending.savedCategoryID else { return }
         pendingSavedNeed = nil
         refreshProjection()
-        let savedWhileFiltered = !need.carted && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
+        let savedWhileFiltered = !isInMyCart(need) && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
         let name = need.item?.name ?? need.title
         if pending.wasEditing, pending.originalCategoryID != pending.savedCategoryID {
             let message = "\(name) moved to \(categoryName(for: need))."
@@ -458,7 +468,10 @@ struct GroceriesView: View {
               !need.archived else { return }
         do {
             let id: UUID
-            if let item = need.item {
+            if let personalCart, let entry = personalCart.entries.first(where: { $0.needID == need.id }) {
+                try personalCart.uncart(entry)
+                id = need.id
+            } else if let item = need.item {
                 id = try service.addRememberedNeed(itemID: item.id, listID: canonicalList.id,
                     householdID: householdID)
             } else if need.kind == NeedKind.oneTime.rawValue {
@@ -541,6 +554,7 @@ struct GroceriesView: View {
     }
 
     private func refreshProjection() {
+        personalCart?.refresh()
         guard let householdID = selection.householdID, canonicalList != nil, let service else {
             visibleNeedObjectIDs = []
             return
@@ -581,6 +595,8 @@ struct GroceriesView: View {
             need: need,
             activeStores: activeStores,
             selectedStoreID: navigation.selectedStoreID,
+            personalCarted: personalCart.map { $0.contains(need.id) },
+            presenceNames: personalCart?.presence.filter { $0.needID == need.id }.map { $0.name ?? "Another shopper" } ?? [],
             onEdit: focus,
             onCartedChange: setCarted,
             onQuantityChange: setQuantity,
@@ -600,16 +616,24 @@ struct GroceriesView: View {
         let needID = need.id
         let name = need.item?.name ?? need.title
         do {
-            try service.setNeedCarted(
-                needID: needID,
-                householdID: householdID,
-                listID: canonicalList.id,
-                carted: carted
-            )
+            if let personalCart {
+                if carted { try personalCart.cart(needID) }
+                else if let entry = personalCart.entries.first(where: { $0.needID == needID }) { try personalCart.uncart(entry) }
+            } else {
+                try service.setNeedCarted(needID: needID, householdID: householdID, listID: canonicalList.id, carted: carted)
+            }
             hapticFeedback.play(.lightImpact)
             refreshProjection()
             if carted { showActionFeedback("\(name) moved to In cart.") }
         } catch { self.error = error }
+    }
+
+    private func isInMyCart(_ need: Need) -> Bool {
+        personalCart?.contains(need.id) ?? need.carted
+    }
+
+    private func isOutstanding(_ need: Need) -> Bool {
+        personalCart.map { $0.outstandingNeedIDs.contains(need.id) } ?? !need.archived
     }
 
     private func categoryID(for need: Need) -> UUID? {

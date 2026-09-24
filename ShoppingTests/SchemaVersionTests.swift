@@ -8,7 +8,7 @@ final class SchemaVersionTests: XCTestCase {
 
         XCTAssertEqual(model.versionIdentifiers, [PersistenceModel.versionIdentifier])
         XCTAssertEqual(Set(model.entities.compactMap(\.name)), [
-            "Household", "Store", "Category", "Person", "Item", "GroceryList", "Need", "ClearOperation"
+            "Household", "Store", "Category", "Person", "Item", "GroceryList", "Need", "ClearOperation", "PersonalCartRecord", "HouseholdCartRecord", "LegacyCartReview"
         ])
 
         let need = try XCTUnwrap(model.entitiesByName["Need"])
