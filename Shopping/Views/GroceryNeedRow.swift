@@ -2,6 +2,16 @@ import CoreData
 import SwiftUI
 import UIKit
 
+private struct GroceryTitleAlignment: AlignmentID {
+    static func defaultValue(in dimensions: ViewDimensions) -> CGFloat {
+        dimensions[VerticalAlignment.center]
+    }
+}
+
+private extension VerticalAlignment {
+    static let groceryTitle = VerticalAlignment(GroceryTitleAlignment.self)
+}
+
 struct GroceryNeedRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.needService) private var service
@@ -21,10 +31,12 @@ struct GroceryNeedRow: View {
     var body: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .groceryTitle, spacing: 12))
         layout {
             detailsControl
-            controls.fixedSize(horizontal: true, vertical: false).frame(
+            controls.fixedSize(horizontal: true, vertical: false)
+                .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
+                .frame(
                 maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
                 alignment: .trailing
             )
@@ -100,11 +112,12 @@ struct GroceryNeedRow: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             if let storeIndicator {
                 Image(systemName: storeIndicator.symbol)
                     .imageScale(.small)
                     .foregroundStyle(Color.grocerySecondary)
+                    .frame(width: 20)
                     // The row's accessibility value already announces this rule.
                     .accessibilityHidden(true)
             }
@@ -155,7 +168,7 @@ struct GroceryNeedRow: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title).font(.body)
                 if need.urgency == NeedUrgency.urgent.rawValue {
@@ -165,6 +178,7 @@ struct GroceryNeedRow: View {
                         .accessibilityHidden(true)
                 }
             }
+            .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
             if need.kind == NeedKind.oneTime.rawValue {
                 Label("One-time", systemImage: "1.circle")
                     .font(.caption).foregroundStyle(Color.grocerySecondary)

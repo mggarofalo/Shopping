@@ -216,8 +216,9 @@ struct GroceriesView: View {
                             .buttonStyle(.borderless)
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
-                    ItemCollectionSections(
+                    CompactGrocerySections(
                         sections: grocerySections,
                         itemID: \.objectID
                     ) { _, need in
@@ -225,6 +226,7 @@ struct GroceriesView: View {
                     }
                 }
                 .listStyle(.plain)
+                .listSectionSpacing(.custom(0))
                 .contentMargins(
                     .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
                 )

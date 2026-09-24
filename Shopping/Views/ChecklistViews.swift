@@ -54,6 +54,7 @@ struct CartedGroceriesView: View {
                 .buttonStyle(.borderless)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             if visibleCarted.isEmpty {
                 Section {
@@ -71,7 +72,7 @@ struct CartedGroceriesView: View {
                     .listRowBackground(Color.clear)
                 }
             } else {
-                ItemCollectionSections(
+                CompactGrocerySections(
                     sections: grocerySections,
                     itemID: \.objectID
                 ) { _, need in
@@ -80,6 +81,7 @@ struct CartedGroceriesView: View {
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(.custom(0))
         .navigationTitle("In cart")
         .searchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {

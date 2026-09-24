@@ -54,6 +54,20 @@ private struct GroceryFiltersPreview: View {
     }
 }
 
+private struct CompactCostcoPreview: View {
+    @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
+    @StateObject private var navigation = GroceryNavigationState()
+
+    var body: some View {
+        GroceriesView(navigation: navigation)
+            .onAppear {
+                if let costco = stores.first(where: { $0.name == "Costco" && !$0.isArchived }) {
+                    navigation.selectStore(costco.id)
+                }
+            }
+    }
+}
+
 #Preview("Add one-time item · Costco") { ShoppingPreviewHost(.populated) { AddGroceryPreview() } }
 #Preview("Add one-time item · unavailable") {
     OneTimeGrocerySheet(
@@ -66,5 +80,8 @@ private struct GroceryFiltersPreview: View {
     ShoppingPreviewHost(.populated) {
         NavigationStack { CartedGroceriesView(navigation: GroceryNavigationState()) }
     }
+}
+#Preview("Compact groceries · Costco") {
+    ShoppingPreviewHost(.populated) { CompactCostcoPreview() }
 }
 #Preview("Recently cleared") { ShoppingPreviewHost(.populated) { NavigationStack { RecentlyClearedView() } } }

@@ -109,7 +109,18 @@ enum ShoppingPreviewFixtures {
             householdID: householdID,
             anyStore: true
         )
-        let granola = try service.createItem(name: "Granola", categoryID: pantry, storeIDs: [costco], householdID: householdID, anyStore: false)
+        let michael = try service.createPerson(name: "Michael", householdID: householdID)
+        let granolaGrocery = try service.createRememberedGrocery(
+            householdID: householdID,
+            listID: listID,
+            catalog: CatalogItemValues(
+                name: "Granola", notes: "", categoryID: pantry,
+                anyStore: false, storeIDs: [costco]
+            ),
+            need: RememberedNeedValues(purchaseNotes: "Low sugar", urgency: .urgent),
+            personID: michael
+        )
+        let granola = granolaGrocery.itemID
         let strawberries = try service.createItem(name: "Strawberries", categoryID: produce, storeIDs: [costco], householdID: householdID, anyStore: false)
         let chipotles = try service.createItem(name: "Chipotles in adobo", categoryID: pantry, storeIDs: [publix], householdID: householdID, anyStore: false)
         let rolls = try service.createItem(name: "Dinner rolls", categoryID: bakery, storeIDs: [costco, walmart], householdID: householdID, anyStore: false)
@@ -121,7 +132,7 @@ enum ShoppingPreviewFixtures {
         ]
 
         ids.needIDs["bananas"] = try service.addRememberedNeed(itemID: bananas, listID: listID, quantity: 6)
-        ids.needIDs["granola"] = try service.addRememberedNeed(itemID: granola, listID: listID, notes: "Low sugar", urgency: .urgent)
+        ids.needIDs["granola"] = granolaGrocery.needID
         let strawberriesNeed = try service.addRememberedNeed(itemID: strawberries, listID: listID, quantity: 2)
         try service.setCarted(true, needID: strawberriesNeed)
         ids.needIDs["strawberries"] = strawberriesNeed

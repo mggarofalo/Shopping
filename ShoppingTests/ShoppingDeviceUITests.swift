@@ -6,6 +6,67 @@ final class ShoppingDeviceUITests: XCTestCase {
 
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testCompactGroceryDensityAndSelectedStoreAlignment() {
+        let app = launch(fixture: "populated")
+        let candles = app.buttons["Edit Birthday candles"]
+        let note = app.staticTexts["Number candles: 4 and 0"]
+        XCTAssertTrue(candles.waitForExistence(timeout: 3))
+        XCTAssertTrue(note.exists)
+        XCTAssertTrue(app.staticTexts["Michael"].exists)
+        XCTAssertLessThanOrEqual(note.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        screenshot("SHOPPING-107 All six groceries", app: app)
+
+        selectCostco(in: app)
+        XCTAssertTrue(app.buttons["Edit Granola"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Edit Birthday candles"].exists)
+        XCTAssertTrue(app.staticTexts["Michael"].exists)
+        XCTAssertTrue(app.staticTexts["Low sugar"].exists)
+        screenshot("SHOPPING-107 Costco sparse categories", app: app)
+
+        let granola = app.buttons["Edit Granola"]
+        granola.tap()
+        app.buttons["shopping.grocery.quantity.add"].tap()
+        app.buttons["shopping.grocery.save"].tap()
+        let increase = app.buttons["Increase quantity for Granola"]
+        XCTAssertTrue(increase.waitForExistence(timeout: 3))
+        assertTouchSize(increase)
+        assertTouchSize(app.buttons["Decrease quantity for Granola"])
+        let title = app.staticTexts["Granola"]
+        XCTAssertLessThanOrEqual(abs(title.frame.midY - increase.frame.midY), 5)
+        screenshot("SHOPPING-107 Costco title aligned controls", app: app)
+    }
+
+    func testCompactGroceryMetadataAtAccessibilityTextSize() {
+        let app = launch(fixture: "largeText", largestText: true)
+        let granola = app.buttons["Edit Granola"]
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("For Michael"))
+        XCTAssertTrue((granola.value as? String ?? "").contains("Low sugar"))
+        let bananas = app.buttons["Edit Bananas"]
+        reveal(bananas, in: app)
+        assertTouchSize(app.buttons["Increase quantity for Bananas"])
+        screenshot("SHOPPING-107 accessibility text groceries", app: app)
+        let candles = app.buttons["Edit Birthday candles"]
+        reveal(candles, in: app, fullyVisible: false)
+        XCTAssertTrue((candles.value as? String ?? "").contains("Bring the reusable bags"))
+        XCTAssertTrue((candles.value as? String ?? "").contains("One-time"))
+        screenshot("SHOPPING-107 accessibility wrapped note", app: app)
+        let longNote = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@", "Bring the reusable bags"
+        )).firstMatch
+        XCTAssertTrue(longNote.exists)
+        let increase = app.buttons["Increase quantity for Birthday candles"]
+        XCTAssertTrue(increase.exists)
+        for _ in 0..<18 where longNote.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 ||
+            increase.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 {
+            app.swipeUp()
+        }
+        XCTAssertLessThanOrEqual(longNote.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
+        XCTAssertLessThanOrEqual(increase.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
+        assertTouchSize(increase)
+        screenshot("SHOPPING-107 accessibility final note clear", app: app)
+    }
+
     func testLongNameAtLargestTextKeepsSeparateShoppingControlsReachable() {
         let app = launch(fixture: "longName", largestText: true)
         selectCostco(in: app)
