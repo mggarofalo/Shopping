@@ -422,6 +422,8 @@ final class WatchShoppingUITests: XCTestCase {
             }
             return element.frame.minY >= bounds.top && element.frame.maxY <= bounds.bottom
         }
+        var previousDirection: Bool?
+        var needsFineAlignment = false
         for _ in 0..<24 {
             if isClear() { return }
             let bounds = viewport()
@@ -433,10 +435,14 @@ final class WatchShoppingUITests: XCTestCase {
             if !element.exists { distance = .infinity }
             else if oversized { distance = abs(element.frame.midY - (bounds.top + bounds.bottom) / 2) }
             else { distance = isAbove ? bounds.top - element.frame.minY : element.frame.maxY - bounds.bottom }
-            // Search virtualized rows without skipping them. Near a measured boundary,
-            // make a fine adjustment so a tall row cannot oscillate across its clear range.
+            if element.exists && !oversized {
+                if let previousDirection, previousDirection != isAbove { needsFineAlignment = true }
+                previousDirection = isAbove
+            }
+            // Normal steps cross native list snap points. After overshooting a measured
+            // row, align finely near its boundary without weakening the clear-frame check.
             let rotation = element.exists && !oversized
-                ? (distance <= 15 ? 0.05 : distance > 60 ? 0.6 : 0.3)
+                ? (needsFineAlignment && distance <= 15 ? 0.05 : distance > 60 ? 0.6 : 0.3)
                 : 0.15
             XCUIDevice.shared.rotateDigitalCrown(delta: isAbove ? -rotation : rotation)
         }
