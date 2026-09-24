@@ -84,6 +84,27 @@ The first full attempt completed with 280 passed, two failed, and no skipped tes
 
 [SHOPPING-109](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/issues/02528008-9153-4102-a3a4-78560164d00a) separately tracks the pre-existing product hit-testing question. The current evidence supports obstruction as an inference; direct visual/manual confirmation and any toast interaction-policy change remain outside this runtime work.
 
+## Hosted validation exposed navigation ambiguity
+
+Candidate `4e2b9d4126a82f74ccf5a4f97a900a6d23f1c6c9` passed all 282 local tests. Its result interval was 2059.294s (34m19s), 26.1% below the historical main interval of 2785.088s (46m25s); the test command took 2061.758s. Independent review verified identical test identifiers. This is a historical single-run comparison on Xcode 27.0 / iOS 26.5, not a repeated controlled full-suite benchmark.
+
+The exact-SHA [hosted confirmation](https://github.com/mggarofalo/Shopping/actions/runs/35933324845) then reported 281 passes and one failure in `ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems`. Reading `shopping.store.menu.label` matched two Publix buttons in separate collection views after navigation. Both screens use the same scope control; destination navigation-title existence alone does not prove the outgoing content has left the accessibility snapshot. The test activity checked the destination title about 0.56 seconds after the tap and read the menu about 0.77 seconds after it. The initial sparse failure snapshot contained two menus, while the final failure hierarchy about 1.67 seconds after the tap contained one collection view and one menu: direct evidence that this ambiguity settled during failure reporting. The repair adds a bounded uniqueness assertion before the existing menu-label assertions at both navigation boundaries. It retains the separate expected labels and every filtering, checkout, undo, and recovery assertion; it does not select an arbitrary first match or filter away an incorrect value.
+
+The failed hosted test command took 2471.175s, simulator startup 160.501s, and build 213.125s. Coverage passed unchanged thresholds (app 87.59%, deterministic logic 96.36%), and complete timing reports exported without warnings despite exit 65. These timings are diagnostic evidence, not an accepted passing performance comparison. The corrected commit requires another exact-SHA local pass before remote confirmation.
+
+The repaired complete workflow passed three fixed local iterations with fresh test-runner processes: 30.382s, 29.708s, and 29.699s; the command took 101.455s. No retry-on-failure option was used. This validates the correction on local iOS 26.5; fresh full local and pinned hosted validation remain required. The result bundle and repetition nodes are recorded in the benchmark JSON.
+
+## External runtime expectations
+
+The research found no credible universal runtime budget tied to low-to-medium app complexity. Workflow depth, accessibility queries, waits, launches, host/toolchain, coverage, and concurrency are more informative than app size or total test count.
+
+- [Wirex's firsthand account](https://hackernoon.com/how-to-implement-ios-ui-testing) reports 21 UI tests in eight minutes, with individual cases taking 13–34 seconds.
+- [Grab Engineering](https://engineering.grab.com/tackling-ui-test-execution-time-imbalance-for-xcode-parallel-testing) reports roughly half its UI tests taking 20–40 seconds, and longer multi-flow cases reaching two minutes.
+- [Wealthfront's partitioning report](https://eng.wealthfront.com/2021/02/05/halving-ios-test-time-with-partitioning-in-jenkins-pipelines/) describes 90 UI tests exceeding 90 minutes before three Mac Mini agents reduced the job to about 40 minutes. This is an optimization case study, not an acceptable-time standard.
+- [Wealthfront's wait investigation](https://eng.wealthfront.com/2025/03/17/how-we-sped-up-ios-end-to-end-tests-by-over-50-with-40-lines-of-code/) reports a greater-than-50% improvement from reducing polling overhead, while overly aggressive polling overloaded parallel hosts. It supports measuring waits rather than blindly copying a polling interval or improvement percentage.
+
+These examples differ in age, app scope, machines, coverage, and build accounting. Shopping's historical 67 UI methods averaged 40.7 seconds, while 215 non-UI methods totaled about 12 seconds; sums are not elapsed wall time. Provisional planning goals are 35 minutes for local test execution and 45 minutes hosted / 50 minutes for the whole hosted job. These are engineering targets to calibrate against passing runs, not industry norms or CI gates. Collect several naturally authorized passing runs before setting reporting thresholds; do not run extra full suites just to populate statistics.
+
 ## Caveats
 
 - Phase17 has 284 tests; main historical baseline has 282. Do not claim exact paired comparison across these revisions.

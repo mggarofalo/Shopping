@@ -483,6 +483,102 @@
       ],
       "durable_timing_report": "/Users/michael/Source/Shopping/.git/shopping-test-timings/19a4ccc00aea34b170839a421fa912d54bb1e0b4/20260923T220621Z.yOhDmv/Timing.json",
       "interpretation": "Failed validation, not performance evidence. Two Checkout taps were obstructed by transient cart feedback. No local attestation or remote dispatch. Corrected candidate requires fresh full validation."
+    },
+    {
+      "sha": "4e2b9d4126a82f74ccf5a4f97a900a6d23f1c6c9",
+      "environment": "local",
+      "run_url": null,
+      "result": "Passed",
+      "counts": {
+        "totalTestCount": 282,
+        "passedTests": 282,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_wall_seconds": 2059.2939999103546,
+      "phases": [
+        {
+          "phase": "snapshot",
+          "wall_seconds": 0.075993,
+          "exit_code": 0
+        },
+        {
+          "phase": "simulator",
+          "wall_seconds": 0.220733,
+          "exit_code": 0
+        },
+        {
+          "phase": "build",
+          "wall_seconds": 20.65181,
+          "exit_code": 0
+        },
+        {
+          "phase": "test",
+          "wall_seconds": 2061.758398,
+          "exit_code": 0
+        },
+        {
+          "phase": "summary",
+          "wall_seconds": 2.638791,
+          "exit_code": 0
+        }
+      ],
+      "failed_tests": [],
+      "timing_report": "/Users/michael/Source/Shopping/.git/shopping-test-timings/4e2b9d4126a82f74ccf5a4f97a900a6d23f1c6c9/20260923T224659Z.vXr0ek/Timing.json",
+      "interpretation": "Passing local validation with an exact 282-test inventory match to historical main. Result interval26.1% shorter; historical single-run comparison, not a repeated controlled full benchmark."
+    },
+    {
+      "sha": "4e2b9d4126a82f74ccf5a4f97a900a6d23f1c6c9",
+      "environment": "hosted",
+      "run_url": "https://github.com/mggarofalo/Shopping/actions/runs/35933324845",
+      "result": "Failed",
+      "counts": {
+        "totalTestCount": 282,
+        "passedTests": 281,
+        "failedTests": 1,
+        "skippedTests": 0
+      },
+      "result_bundle_wall_seconds": 2457.582000017166,
+      "phases": [
+        {
+          "phase": "simulator",
+          "wall_seconds": 160.500844,
+          "exit_code": 0
+        },
+        {
+          "phase": "build",
+          "wall_seconds": 213.124622,
+          "exit_code": 0
+        },
+        {
+          "phase": "test",
+          "wall_seconds": 2471.175465,
+          "exit_code": 65
+        },
+        {
+          "phase": "coverage",
+          "wall_seconds": 4.638793,
+          "exit_code": 0
+        },
+        {
+          "phase": "summary",
+          "wall_seconds": 4.971329,
+          "exit_code": 0
+        }
+      ],
+      "failed_tests": [
+        {
+          "identifier": "ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "name": "testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Failed",
+          "duration_seconds": 25.49855101108551,
+          "duration_precision": "exact"
+        }
+      ],
+      "timing_report": "/tmp/shopping-108-evidence/final-full-hosted/ExhaustiveTiming.json",
+      "interpretation": "Failed remote validation, not accepted performance evidence. The store-menu label query matched outgoing and incoming navigation collection views. Coverage passed; failure status and timing export were preserved. Corrected candidate needs fresh exact-SHA validation."
     }
   ],
   "correctness_validation": {
@@ -512,5 +608,55 @@
     "bundle": "/tmp/shopping-108-evidence/repair-checkout.xcresult",
     "log": "/tmp/shopping-108-evidence/repair-checkout.log",
     "xcodebuild_invocation": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull -destination \"platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C\" -derivedDataPath /tmp/shopping-108-wait-derived -parallel-testing-enabled NO \"-only-testing:ShoppingTests/ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering\" \"-only-testing:ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement\" -resultBundlePath /tmp/shopping-108-evidence/repair-checkout.xcresult"
+  },
+  "navigation_correctness_validation": {
+    "products": "4e2b9d4 plus bounded unique-store-menu assertions at push/pop boundaries; all existing assertions unchanged",
+    "result": "Passed",
+    "test": "ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+    "iterations": [
+      {
+        "name": "Repetition 1",
+        "result": "Passed",
+        "durationInSeconds": 30.382068991661072
+      },
+      {
+        "name": "Repetition 2",
+        "result": "Passed",
+        "durationInSeconds": 29.70847499370575
+      },
+      {
+        "name": "Repetition 3",
+        "result": "Passed",
+        "durationInSeconds": 29.699210047721863
+      }
+    ],
+    "wall_seconds": 101.454888,
+    "command": [
+      "xcodebuild",
+      "test-without-building",
+      "-project",
+      "Shopping.xcodeproj",
+      "-scheme",
+      "Shopping",
+      "-testPlan",
+      "ShoppingFull",
+      "-destination",
+      "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+      "-derivedDataPath",
+      "/tmp/shopping-108-wait-derived",
+      "-resultBundlePath",
+      "/tmp/shopping-108-evidence/navigation-repair.xcresult",
+      "-parallel-testing-enabled",
+      "NO",
+      "-only-testing:ShoppingTests/ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems",
+      "-test-iterations",
+      "3",
+      "-test-repetition-relaunch-enabled",
+      "YES",
+      "-quiet"
+    ],
+    "report": "/tmp/shopping-108-evidence/navigation-repair-timing.json",
+    "result_bundle": "/tmp/shopping-108-evidence/navigation-repair.xcresult",
+    "interpretation": "Three fixed fresh-runner iterations, all passed; no retry-on-failure. Correctness validation on local iOS26.5; hosted iOS18.5 confirmation still required."
   }
 }

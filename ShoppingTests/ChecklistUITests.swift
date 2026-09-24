@@ -132,6 +132,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(cartedLink(count: 2, app: app), app: app, upwards: false)
         cartedLink(count: 2, app: app).tap()
         XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
+        assertStoreMenuIsUnique(in: app)
         XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Publix")
         XCTAssertTrue(app.buttons["shopping.filters"].exists)
         XCTAssertTrue(row("Birthday candles", app: app).exists)
@@ -162,6 +163,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(row("Strawberries", app: app).exists)
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 2))
+        assertStoreMenuIsUnique(in: app)
         XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Choose store")
         XCTAssertFalse(app.buttons["Delete all groceries"].exists)
     }
@@ -359,6 +361,20 @@ final class ChecklistUITests: XCTestCase {
         app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.grocery.row."
         )).allElementsBoundByIndex.map(\.label)
+    }
+
+    private func assertStoreMenuIsUnique(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // Outgoing and destination lists can overlap after the navigation title appears.
+        let storeMenus = app.buttons.matching(identifier: "shopping.store.menu")
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in storeMenus.count == 1 },
+            object: storeMenus
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 2), .completed, file: file, line: line)
     }
 
     private func openCheckout(app: XCUIApplication) {

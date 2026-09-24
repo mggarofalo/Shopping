@@ -9,6 +9,8 @@ Check that assertions still prove the intended behavior, each test owns its fixt
 
 When polling delays are removed, check for transient feedback or navigation transitions that previously finished during those delays. Existence and hittability do not prove that the chosen tap point reaches the intended control. Require bounded waits for concrete obstructions where evidence supports them, preserving the single action and resulting-state assertions; reject blind sleeps or action retries as substitutes.
 
+Check navigation boundaries for duplicated controls in outgoing and incoming accessibility snapshots. A destination title alone does not prove unique content readiness. Require a bounded uniqueness condition or proven destination scope before resolving shared controls, while preserving separate expected-value assertions; reject firstMatch or expected-value filtering that hides ambiguity.
+
 For timing claims, compare the captured revision, toolchain/runtime, plan, complete test identifiers and outcomes, worker settings, and build conditions. Distinguish phase wall time from overlapping summed test durations. Treat a failed or incomplete run as diagnostic evidence, and report missing provenance or incomparable samples. Do not extrapolate a focused benchmark into an established full-suite saving.
 
 Check that CI preserves command failure status, no-retry behavior, exhaustive assertions, coverage collection and baselines, and the exact-SHA local-attestation preflight. Identify any proposed workflow-policy change separately from an implementation defect.
