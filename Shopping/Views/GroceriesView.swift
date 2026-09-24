@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct GroceriesView: View {
+    @Environment(\.persistencePresentation) private var presentation
     @Environment(\.needService) private var service
     @Environment(\.personalCart) private var personalCart
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -28,28 +29,33 @@ struct GroceriesView: View {
     @State private var error: Error?
 
     private var activeStores: [Store] {
-        GroceryRowScope.validStores(
+        guard presentation?.isActive != false else { return [] }
+        return GroceryRowScope.validStores(
             Array(stores), canonicalList: canonicalList
         ).filter { !$0.isArchived }
     }
 
     private var activeCategories: [Category] {
-        GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).filter { !$0.isArchived }
+        guard presentation?.isActive != false else { return [] }
+        return GroceryRowScope.validCategories(Array(categories), canonicalList: canonicalList).filter { !$0.isArchived }
     }
 
     private var canonicalList: GroceryList? {
-        GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
+        guard presentation?.isActive != false else { return nil }
+        return GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
     }
 
     private var visibleNeeds: [Need] {
-        needs.filter {
+        guard presentation?.isActive != false else { return [] }
+        return needs.filter {
             visibleNeedObjectIDs.contains($0.objectID) && GroceryRowScope.matches($0, canonicalList: canonicalList) &&
                 isOutstanding($0) && !isInMyCart($0)
         }
     }
 
     private var grocerySections: [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
-        GroceryCollectionProjection.sections(
+        guard presentation?.isActive != false else { return [] }
+        return GroceryCollectionProjection.sections(
             needs: visibleNeeds,
             selectedStoreID: navigation.selectedStoreID,
             activeStores: activeStores,
@@ -59,7 +65,8 @@ struct GroceriesView: View {
     }
 
     private var hasActiveUncartedNeeds: Bool {
-        GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains {
+        guard presentation?.isActive != false else { return false }
+        return GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains {
             isOutstanding($0) && !isInMyCart($0)
         }
     }
@@ -69,6 +76,12 @@ struct GroceriesView: View {
     }
 
     var body: some View {
+        Group {
+            if presentation?.isActive != false { activeBody }
+        }
+    }
+
+    private var activeBody: some View {
         NavigationStack {
             groceryContent
             .navigationTitle("Groceries")
@@ -203,6 +216,7 @@ struct GroceriesView: View {
                 for: .NSManagedObjectContextObjectsDidChange,
                 object: viewContext
             )) { _ in
+                guard presentation?.isActive != false else { return }
                 configureAndRefresh()
                 completeSaveFeedback()
                 focusRequestedNeed()
@@ -349,8 +363,7 @@ struct GroceriesView: View {
         if let target = pendingOneTimeTarget {
             pendingOneTimeTarget = nil
             editor = target
-            return
-        }
+            return }
         guard let completion = pendingCatalogCompletion, let scope = pendingCatalogScope else { return }
         pendingCatalogCompletion = nil
         pendingCatalogScope = nil
@@ -415,8 +428,7 @@ struct GroceriesView: View {
         guard selection.householdID == pending.scope.householdID,
               selection.listID == pending.scope.listID, canonicalList != nil else {
             pendingSavedNeed = nil
-            return
-        }
+            return }
         guard let need = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
             .first(where: { $0.id == pending.id && !$0.archived }) else { return }
         // A writer save can precede its queued main-context merge. Retain the acknowledgement
@@ -545,6 +557,7 @@ struct GroceriesView: View {
     }
 
     private func configureAndRefresh() {
+        guard presentation?.isActive != false else { return }
         navigation.configure(
             householdID: selection.householdID,
             activeStoreIDs: Set(activeStores.map(\.id)),
@@ -554,11 +567,11 @@ struct GroceriesView: View {
     }
 
     private func refreshProjection() {
+        guard presentation?.isActive != false else { return }
         personalCart?.refresh()
         guard let householdID = selection.householdID, canonicalList != nil, let service else {
             visibleNeedObjectIDs = []
-            return
-        }
+            return }
         do {
             let matchingIDs = Set(try service.filteredActiveNeedIDs(householdID: householdID, filter: currentNeedFilter))
             visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(

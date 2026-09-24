@@ -1,10 +1,19 @@
 import CoreData
+import CryptoKit
 import Foundation
 import SwiftUI
 
 struct PersistenceSelection: Equatable {
     let householdID: UUID?
     let listID: UUID?
+}
+
+private struct SharingStatusEnvironmentKey: EnvironmentKey {
+    static let defaultValue = "Saved on this device. iCloud setup has not been completed."
+}
+
+private struct PersistencePresentationEnvironmentKey: EnvironmentKey {
+    static let defaultValue: PersistenceBootstrap.Presentation? = nil
 }
 
 private struct NeedServiceEnvironmentKey: EnvironmentKey {
@@ -16,6 +25,14 @@ private struct PersistenceSelectionEnvironmentKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    var sharingStatusDescription: String {
+        get { self[SharingStatusEnvironmentKey.self] }
+        set { self[SharingStatusEnvironmentKey.self] = newValue }
+    }
+    var persistencePresentation: PersistenceBootstrap.Presentation? {
+        get { self[PersistencePresentationEnvironmentKey.self] }
+        set { self[PersistencePresentationEnvironmentKey.self] = newValue }
+    }
     var needService: NeedService? {
         get { self[NeedServiceEnvironmentKey.self] }
         set { self[NeedServiceEnvironmentKey.self] = newValue }
@@ -33,7 +50,14 @@ final class PersistenceBootstrap: ObservableObject {
     private static let retainedUITestStoreLimit = 12
     private static let retainedUITestHistoryTokenLimit = 24
 
+    final class Presentation {
+        let id = UUID()
+        private(set) var isActive = true
+        func retire() { isActive = false }
+    }
+
     struct ReadyState {
+        let presentation = Presentation()
         let persistence: PersistenceController
         let service: NeedService
         let householdID: UUID?
@@ -48,6 +72,19 @@ final class PersistenceBootstrap: ObservableObject {
         case failed(Error)
     }
 
+    private struct Transition {
+        let id = UUID()
+        let previous: ReadyState?
+        let action: () -> Void
+    }
+
+    @Published private(set) var loadingTransitionID: UUID?
+    @Published private(set) var cloudStatus = CloudSyncStatus()
+    private let cloudMonitor = CloudSyncEventMonitor()
+    private var transition: Transition?
+    private var mountedPresentations: Set<UUID> = []
+    private let defaults: UserDefaults
+    private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
     @Published private(set) var state: State = .loading
     @Published private(set) var pendingShareAssociationCount = 0
     @Published private(set) var shareAssociationError: Error?
@@ -64,6 +101,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var personalConfiguration: PersistenceConfiguration?
     private var activeAccountBinding: String?
     private var accountLoadInProgress = false
+    private var pendingRetirement: ReadyState?
     private var personalService: PersonalCartService?
 #if DEBUG
     private var personalFixture = false
@@ -75,10 +113,32 @@ final class PersistenceBootstrap: ObservableObject {
 
     init(
         configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() },
-        preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil
+        preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil,
+        defaults: UserDefaults = .standard,
+        makeAccountProvider: @escaping (URL) throws -> ShopperSessionProvider = PersistenceBootstrap.productionAccountProvider
     ) {
         self.configuration = configuration
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
+        self.defaults = defaults
+        self.makeAccountProvider = makeAccountProvider
+        cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
+    }
+
+    private static func productionAccountProvider(_ base: URL) throws -> ShopperSessionProvider {
+        guard let identifier = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
+              let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String else {
+            throw ShopperSessionError.invalidConfiguration
+        }
+        return try ShopperSessionProvider(containerIdentifier: identifier, environment: environment,
+            cacheDirectory: base.appendingPathComponent("Bindings", isDirectory: true))
+    }
+
+    var sharingStatusDescription: String {
+        guard personalMode else { return "Saved on this device. iCloud setup has not been completed." }
+        guard let accountProvider, (try? accountProvider.currentSession()) != nil else {
+            return "Your iCloud account is not ready. Saved groceries are retained on this device."
+        }
+        return cloudStatus.message
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
@@ -121,12 +181,31 @@ final class PersistenceBootstrap: ObservableObject {
         if let path = processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] {
             do {
                 let storeURL = try uiTestStoreURL(for: path)
+                let identity = SHA256.hash(data: Data(storeURL.standardizedFileURL.path.utf8))
+                    .map { String(format: "%02x", $0) }.joined()
+                let suite = "Shopping.UITestBootstrap." + identity
+                guard let fixtureDefaults = UserDefaults(suiteName: suite) else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                if processInfo.environment["SHOPPING_UI_TEST_FIXTURE"] != nil {
+                    fixtureDefaults.removePersistentDomain(forName: suite)
+                }
+#if DEBUG
+                let unavailableSetup = processInfo.environment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] == "1"
+#else
+                let unavailableSetup = false
+#endif
+                let providerFactory: (URL) throws -> ShopperSessionProvider = { base in
+                    if unavailableSetup { throw ShopperSessionError.temporarilyUnavailable }
+                    return try productionAccountProvider(base)
+                }
                 if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
                     let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
-                        preloadedPreviewEnvironment: environment
+                        preloadedPreviewEnvironment: environment,
+                        defaults: fixtureDefaults, makeAccountProvider: providerFactory
                     )
 #if DEBUG
                     bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
@@ -135,7 +214,9 @@ final class PersistenceBootstrap: ObservableObject {
 #endif
                     return bootstrap
                 }
-                let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+                let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) },
+                    defaults: fixtureDefaults, makeAccountProvider: providerFactory)
+                if unavailableSetup { bootstrap.personalMode = fixtureDefaults.bool(forKey: personalModeKey) }
 #if DEBUG
                 bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
 #endif
@@ -250,17 +331,61 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func start() {
-        guard case .loading = state else { return }
+        guard case .loading = state, transition == nil else { return }
         if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
     }
 
     func retry() {
+        if personalMode { activatePersonalCarts(importLegacy: false) }
+        else { beginTransition { [weak self] in self?.load() } }
+    }
+
+    func isPresentationMounted(_ id: UUID) -> Bool { mountedPresentations.contains(id) }
+
+    func presentationDidAppear(_ id: UUID) { mountedPresentations.insert(id) }
+
+    func presentationDidDisappear(_ id: UUID) {
+        mountedPresentations.remove(id)
+        if let transition, transition.previous?.presentation.id == id {
+            loadingTransitionID = transition.id
+        }
+    }
+
+    // Called only by the loading view's task, after the retired ready hierarchy disappears.
+    func runLoadingTransition() {
+        guard let transition else { start(); return }
+        guard loadingTransitionID == transition.id,
+              transition.previous.map({ !mountedPresentations.contains($0.presentation.id) }) ?? true else { return }
+        self.transition = nil
+        do {
+            try detachStores(transition.previous)
+            pendingRetirement = nil
+            transition.action()
+        } catch {
+            accountLoadInProgress = false
+            state = .failed(error)
+        }
+    }
+
+    private func beginTransition(_ action: @escaping () -> Void) {
+        guard transition == nil else { return }
+        let previous: ReadyState?
+        if case .ready(let ready) = state { previous = ready } else { previous = pendingRetirement }
+        pendingRetirement = previous
+        previous?.presentation.retire()
         generation += 1
+        let next = Transition(previous: previous, action: action)
+        transition = next
+        loadingTransitionID = previous.map { mountedPresentations.contains($0.presentation.id) } == true ? nil : next.id
         state = .loading
-        if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
+    }
+
+    func retireAndFail(_ error: Error) {
+        beginTransition { [weak self] in self?.state = .failed(error) }
     }
 
     func applicationDidEnterForeground() {
+        guard case .ready = state, transition == nil else { return }
         if let accountProvider { Task { await accountProvider.refresh() } }
         if let personalService { try? personalService.resumePending() }
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
@@ -269,30 +394,27 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func activatePersonalCarts(importLegacy: Bool) {
-        guard !accountLoadInProgress else { return }
+        guard !accountLoadInProgress, transition == nil else { return }
         accountLoadInProgress = true
         let sourceURL: URL?
         if importLegacy, case .ready(let ready) = state, !ready.persistence.configuration.isManaged {
             sourceURL = ready.persistence.configuration.stores.first?.url
-            UserDefaults.standard.set(sourceURL?.path, forKey: Self.pendingImportKey)
+            defaults.set(sourceURL?.path, forKey: Self.pendingImportKey)
         } else {
-            sourceURL = UserDefaults.standard.string(forKey: Self.pendingImportKey).map { URL(fileURLWithPath: $0) }
+            sourceURL = defaults.string(forKey: Self.pendingImportKey).map { URL(fileURLWithPath: $0) }
         }
         personalMode = true
-        UserDefaults.standard.set(true, forKey: Self.personalModeKey)
+        defaults.set(true, forKey: Self.personalModeKey)
+        beginTransition { [weak self] in self?.openPersonalStore(sourceURL: sourceURL) }
+    }
+
+    private func openPersonalStore(sourceURL: URL?) {
         do {
-            try detachCurrentStores()
-            state = .loading
             let base = try FileManager.default.url(for: .applicationSupportDirectory,
                 in: .userDomainMask, appropriateFor: nil, create: true)
                 .appendingPathComponent("ShoppingAccounts", isDirectory: true)
-            guard let identifier = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
-                  let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String else {
-                throw ShopperSessionError.invalidConfiguration
-            }
             if accountProvider == nil {
-                let provider = try ShopperSessionProvider(containerIdentifier: identifier, environment: environment,
-                    cacheDirectory: base.appendingPathComponent("Bindings", isDirectory: true))
+                let provider = try makeAccountProvider(base)
                 accountProvider = provider
                 accountObserver = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange,
                     object: provider, queue: nil) { [weak self] _ in
@@ -307,10 +429,10 @@ final class PersistenceBootstrap: ObservableObject {
                     personalConfiguration = try PersonalCartActivation.activate(sourceURL: sourceURL,
                         session: session, baseDirectory: base, importLegacy: sourceURL != nil)
                     guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
-                    UserDefaults.standard.removeObject(forKey: Self.pendingImportKey)
+                    defaults.removeObject(forKey: Self.pendingImportKey)
                     activeAccountBinding = session.accountBinding
                     personalMode = true
-                    UserDefaults.standard.set(true, forKey: Self.personalModeKey)
+                    defaults.set(true, forKey: Self.personalModeKey)
                     load()
                 } catch { state = .failed(error) }
                 accountLoadInProgress = false
@@ -326,24 +448,24 @@ final class PersistenceBootstrap: ObservableObject {
         do {
             let session = try accountProvider.currentSession()
             if session.accountBinding != activeAccountBinding {
-                try detachCurrentStores()
                 activatePersonalCarts(importLegacy: false)
             }
         } catch {
-            do { try detachCurrentStores() } catch { state = .failed(error); return }
-            state = .failed(error)
+            retireAndFail(error)
         }
     }
 
-    private func detachCurrentStores() throws {
+    private func detachStores(_ previous: ReadyState?) throws {
         generation += 1
         if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver); self.remoteObserver = nil }
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver); self.associationObserver = nil }
         historyConsumer = nil
         associationWorker = nil
         personalService = nil
-        if case .ready(let ready) = state {
-            ready.persistence.writer.performAndWait { ready.persistence.writer.reset() }
+        cloudMonitor.reset()
+        if let ready = previous {
+            let writer = ready.persistence.writer
+            writer.performAndWait { writer.reset() }
             ready.persistence.container.viewContext.reset()
             let coordinator = ready.persistence.container.persistentStoreCoordinator
             for store in coordinator.persistentStores { try coordinator.remove(store) }
@@ -442,6 +564,7 @@ final class PersistenceBootstrap: ObservableObject {
                     self.remoteObserver = nil
                 }
             }
+            cloudMonitor.attach(to: persistence.container)
             if let journal = persistence.shareAssociationJournal {
                 associationWorker = ManagedShareAssociationWorker(persistence: persistence, journal: journal)
             }
@@ -511,7 +634,7 @@ final class PersistenceBootstrap: ObservableObject {
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
             } catch {
                 guard generation == requestedGeneration else { return }
-                state = .failed(error)
+                retireAndFail(error)
             }
         }
     }

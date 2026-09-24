@@ -81,7 +81,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let session: ShopperSession
         do { (cart, session) = try await resolve() }
         catch {
-            return WatchShoppingSnapshot(availability: .setupRequired(error.localizedDescription))
+            let message = (error as? ShopperSessionError)?.errorDescription
+                ?? (error as? PersonalCartError)?.errorDescription
+                ?? "Saved shopping data could not be opened. Relaunch Shopping to retry; your data is retained."
+            return WatchShoppingSnapshot(availability: .setupRequired(message))
         }
         bootstrap?.retryPendingAssociations()
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
@@ -93,8 +96,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let savedHousehold = saved?.accountBinding == session.accountBinding ? saved?.householdID : nil
         guard let projection = try WatchPersistentProjection.read(cart: cart,
             preferredHouseholdID: preferredHouseholdID ?? savedHousehold, writable: householdWritable) else {
-            return WatchShoppingSnapshot(availability: .setupRequired("Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."),
-                statusMessage: bootstrap?.accountStatusMessage)
+            return WatchShoppingSnapshot(availability: .setupRequired(bootstrap?.householdWaitingMessage
+                ?? "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."))
         }
         activeHouseholdID = projection.scope.householdID
         if selectedStoreID == nil, let selectionURL,

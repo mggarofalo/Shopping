@@ -2,6 +2,7 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.sharingStatusDescription) private var sharingStatusDescription
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.personalCart) private var personalCart
@@ -25,7 +26,7 @@ struct SettingsView: View {
                 }
                 Section("Household") {
                     LabeledContent("Sharing Status") {
-                        Text("Not Connected")
+                        Text(sharingStatusDescription)
                             .accessibilityIdentifier("shopping.settings.sharingStatus")
                     }
                     if let personalCart {

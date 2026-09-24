@@ -50,6 +50,48 @@ final class PersonalCartUITests: XCTestCase {
             "shopping.personalCart.item.", "Strawberries")).firstMatch.waitForExistence(timeout: 3))
     }
 
+    func testHouseholdSetupCopyRetiresVisibleGroceriesBeforeAccountFailureAndRelaunch() {
+        let app = launch(personalCart: false, unavailableSetup: true)
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Set up personal carts"].tap()
+        XCTAssertTrue(app.navigationBars["Personal carts"].waitForExistence(timeout: 3))
+        app.buttons["Copy this device’s groceries to iCloud"].tap()
+        app.buttons["Copy groceries"].tap()
+        XCTAssertTrue(app.staticTexts["Groceries unavailable"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["shopping.persistence.retry"].exists)
+        app.buttons["Technical details"].tap()
+        XCTAssertTrue(app.staticTexts["Your iCloud account is temporarily unavailable. Try again later."].exists)
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Groceries unavailable"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["shopping.persistence.retry"].exists)
+    }
+
+    func testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute() {
+        let app = launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Review old cart entries"].tap()
+        XCTAssertTrue(app.staticTexts["Strawberries"].waitForExistence(timeout: 3))
+        app.buttons.matching(identifier: "Discard old cart status").firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Old cart status discarded"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Strawberries"].exists)
+        XCTAssertTrue(app.buttons["Earlier cleared groceries"].exists)
+        app.buttons["Earlier cleared groceries"].tap()
+        XCTAssertTrue(app.navigationBars["Recently cleared"].waitForExistence(timeout: 3))
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Review old cart entries"].tap()
+        XCTAssertTrue(app.navigationBars["Old cart entries"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Strawberries"].exists)
+        XCTAssertFalse(app.buttons["Claim as mine"].exists)
+    }
+
     func testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway() {
         let app = launch(purchaseNotice: true)
         XCTAssertTrue(app.buttons["In cart (1)"].waitForExistence(timeout: 8))
@@ -105,13 +147,14 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].waitForExistence(timeout: 3))
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false) -> XCUIApplication {
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
-        app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
+        if personalCart { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1" }
+        if unavailableSetup { app.launchEnvironment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] = "1" }
         if purchaseNotice { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] = "1" }
         if revoked { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_REVOKED"] = "1" }
         app.launch()

@@ -8,6 +8,7 @@ private struct CatalogRowSource: Hashable {
 }
 
 struct CatalogView: View {
+    @Environment(\.persistencePresentation) private var presentation
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
@@ -118,6 +119,10 @@ struct CatalogView: View {
     }
 
     var body: some View {
+        if presentation?.isActive != false { activeBody }
+    }
+
+    private var activeBody: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List(selection: $selectedIDs) {
@@ -257,6 +262,7 @@ struct CatalogView: View {
             .onChange(of: catalogRefreshKeys) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
+                guard presentation?.isActive != false else { return }
                 sanitizeFilters()
                 refreshAndSanitizeSelection()
             }
@@ -427,6 +433,7 @@ struct CatalogView: View {
     }
 
     private func sanitizeFilters() {
+        guard presentation?.isActive != false else { return }
         let ids = Set(activeStores.map(\.id))
         filters.includedStoreIDs.formIntersection(ids)
         filters.excludedStoreIDs.formIntersection(ids)
@@ -434,6 +441,7 @@ struct CatalogView: View {
     }
 
     private func refresh() {
+        guard presentation?.isActive != false else { return }
         guard let service, let householdID = selection.householdID else {
             projectedIDs = []
             renderedGroups = []
@@ -461,6 +469,7 @@ struct CatalogView: View {
     }
 
     private func refreshAndSanitizeSelection() {
+        guard presentation?.isActive != false else { return }
         refresh()
         selectedIDs.formIntersection(visibleItemIDs)
     }

@@ -12,8 +12,37 @@ uploads. See [Apple's SDK requirements](https://developer.apple.com/news/upcomin
 1. Merge and statically validate the manual workflow without configuring or exposing signing material.
 2. Finish Apple Developer and App Store Connect setup under SHOPPING-10. Register `com.mggarofalo.shopping`, enable the required iCloud/CloudKit capabilities, create the App Store Connect app record, and create the distribution assets below.
 3. Create and protect the GitHub `testflight` environment, then add its secrets. Restrict deployments to `main` and require review before the job can access secrets.
-4. Dispatch one build with a new positive App Store Connect build number. The workflow validates the profile, archives the Release configuration, validates the IPA with Apple, and uploads it. Do not describe this stage as successful until App Store Connect finishes processing the build.
+4. Verify the production CloudKit schema against the candidate model as described below, then dispatch one build with a new positive App Store Connect build number. The workflow validates the profile, archives the Release configuration, validates the IPA with Apple, and uploads it. Do not describe this stage as successful until App Store Connect finishes processing the build.
 5. Complete production CloudKit schema and two-iPhone sharing validation under SHOPPING-30 before inviting household testers. Then finish the installation and regression evidence required by SHOPPING-5.
+
+## CloudKit release prerequisite
+
+Before distributing a build that changes the managed model, initialize the
+**Development** schema from that candidate’s compiled `Shopping.momd` using
+`NSPersistentCloudKitContainer.initializeCloudKitSchema(options:)`. Use a signed
+development tool with a fresh, disposable local store and the existing container
+`iCloud.com.mggarofalo.shopping`; never point the initializer at a shopper’s data
+or reset a CloudKit environment. Apple’s initializer creates and removes its own
+representative records to define every model field.
+
+In CloudKit Console, review **Deploy Schema Changes** and deploy the required
+additions to **Production** before inviting testers. Verify the resulting
+production record types and deployment history. Signing entitlements, a valid
+archive, and App Store Connect processing do not verify this prerequisite.
+Record the source SHA, model version, schema deployment timestamp, and observed
+upload/download results in the release issue. A device upload is not evidence
+of another device receiving it; SHOPPING-30 and SHOPPING-122 retain their live
+two-account and phone-independent Watch validation gates.
+
+SHOPPING-133 found an empty production schema after build 13 had been delivered.
+The corrective initialization used build 13’s exact archived model from source
+`bcd8ba3fa2f88d4b6f408365f01ad8148c838f09`, without changing user records. The
+production deployment was confirmed in CloudKit Console at 4:43 PM EDT on
+September 24, 2026. The managed schema contains `CDMR` plus Category, ClearOperation, GroceryList,
+Household, HouseholdCartRecord, Item, LegacyCartReview, Need, Person,
+PersonalCartRecord, and Store record types (with the `CD_` prefix). Confirm both
+fields and indexes on future model changes; matching type names alone is not
+sufficient.
 
 ## Apple assets
 

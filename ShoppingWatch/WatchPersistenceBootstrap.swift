@@ -15,6 +15,7 @@ final class WatchPersistenceBootstrap {
 
     var onAuthorityInvalidated: (() -> Void)?
     var onDataChanged: (() -> Void)?
+    private let cloudSync = CloudSyncEventMonitor()
     private let provider: ShopperSessionProvider
     private let baseDirectory: URL
     private var current: Runtime?
@@ -38,6 +39,7 @@ final class WatchPersistenceBootstrap {
         self.baseDirectory = base
         provider = try ShopperSessionProvider(containerIdentifier: container, environment: environment,
             cacheDirectory: base.appendingPathComponent("Account", isDirectory: true))
+        cloudSync.onChange = { [weak self] _ in self?.onDataChanged?() }
         observer = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange, object: provider, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.accountChanged() }
         }
@@ -55,8 +57,14 @@ final class WatchPersistenceBootstrap {
     }
 
     var accountStatusMessage: String? {
+        if cloudSync.status.hasFailure { return cloudSync.status.message }
         if case .cached = provider.state { return "Using saved data. Changes sync when a connection returns." }
-        return syncMessage
+        return syncMessage ?? cloudSync.status.message
+    }
+
+    var householdWaitingMessage: String {
+        if cloudSync.status.hasFailure { return cloudSync.status.message }
+        return "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."
     }
 
     func runtime() async throws -> Runtime {
@@ -74,6 +82,7 @@ final class WatchPersistenceBootstrap {
         let configuration = try PersonalCartActivation.activate(sourceURL: nil, session: session,
             baseDirectory: baseDirectory.appendingPathComponent("Accounts", isDirectory: true), importLegacy: false)
         let persistence = try PersistenceController(configuration: configuration)
+        cloudSync.attach(to: persistence.container)
         guard try provider.currentSession() == session else { throw PersonalCartError.accountChanged }
         let cart = PersonalCartService(persistence: persistence, sessionProvider: provider)
         let directory = try session.storeDirectory(in: baseDirectory.appendingPathComponent("Accounts", isDirectory: true))
@@ -96,6 +105,8 @@ final class WatchPersistenceBootstrap {
         let next = try? provider.currentSession().accountBinding
         guard binding != nil, next != binding else { return }
         authorityGeneration += 1
+        cloudSync.reset()
+        syncMessage = nil
         onAuthorityInvalidated?()
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
         associationObserver = nil
@@ -174,7 +185,7 @@ final class WatchPersistenceBootstrap {
             syncMessage = "Invitation accepted. Waiting for your household to arrive."
         } catch {
             guard generation == authorityGeneration else { return }
-            syncMessage = "The household invitation could not be accepted: \(error.localizedDescription)"
+            syncMessage = "The household invitation could not be accepted. \(CloudSyncStatus.Failure.classify(error).message)"
         }
         onDataChanged?()
     }

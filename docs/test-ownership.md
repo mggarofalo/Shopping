@@ -116,3 +116,33 @@ The durable Watch UI scenarios use `WatchPersistentTestFixture` with the product
 `PersistentWatchShoppingServiceTests` owns real-adapter SQLite reopening, stale command rejection, retained private cleanup, store restrictions, captured checkout and account invalidation. `PersonalCartPresentationTests` proves malformed shared receipts cannot hide private cart removal/history. `CloudConfigurationTests` runs in both hosted app targets and verifies their packaged container/environment settings, iPhone background mode and Watch independence/sharing configuration. `PersonalCartServiceTests` also verifies detached/account-changed share workers cannot acknowledge pending associations. These are local authority and packaging checks, not live server delivery proof.
 
 Watch tests run in the `ShoppingWatch` scheme separately from iPhone Fast coverage. Existing iPhone acceptance selection and coverage thresholds remain unchanged. Real owner/participant bootstrap, cross-device CloudKit delivery, physical accessibility and phone-powered-off Series 11 behavior remain SHOPPING-30/122 evidence.
+
+## Household setup and legacy review regression (SHOPPING-133)
+
+`PersistenceContainerTests/testActivationRetiresMountedGroceriesBeforeInvalidatingFetchedObjects`
+owns the real `PersistenceRootView`/`GroceriesView` hosting boundary: activation
+retires presentation authority before a queued Core Data callback and waits for
+the loading view’s lifecycle before detaching the old store.
+`testAccountFailureUsesSamePresentationRetirementBoundary` owns the same
+authority ordering during an account failure.
+`testActivationRejectedDuringRetirementDoesNotBlockLaterRetry` covers overlapping
+activation and retirement without permanently blocking retry.
+`testRetiredMountedCartIgnoresContextInvalidationNotifications` retains the actual
+cart screen through context invalidation and verifies its retired callback guard.
+
+`PersonalCartUITests/testHouseholdSetupCopyRetiresVisibleGroceriesBeforeAccountFailureAndRelaunch`
+owns Settings → Set up household → Copy existing groceries, the visible failure
+state, and recovery after relaunch. The fixture supplies legacy data and an
+isolated unavailable account; the UI performs setup itself. It cannot prove
+real CloudKit delivery.
+`testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute`
+owns the discard control, pending-card disappearance, same-store relaunch, and
+separate earlier-history navigation. `PersonalCartServiceTests` owns migration
+selection, equivalent duplicate identities, durable claim/discard receipts,
+late merges, and preserved scoped historical recovery without personal-cart
+ownership. No fixture contains a copy of a shopper’s real records.
+
+`CloudSyncStatusTests` runs in both app targets and owns per-store/per-operation
+error retention, observed success wording, partial-error classification, stale
+event ordering, and account/container reset. Successful engine events are
+never treated as proof that another device received the records.
