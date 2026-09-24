@@ -15,28 +15,37 @@ final class ShoppingAppearanceUITests: XCTestCase {
                     "-shopping.appearance", appearance
                 ]
                 app.launch()
-                XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
                 attach("Groceries \(appearance) \(size)", app)
                 app.buttons["shopping.filters"].tap()
-                XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["Filters"].existsOrAppears(timeout: 3))
                 attach("Grocery filters \(appearance) \(size)", app)
                 app.buttons["Done"].tap()
                 app.buttons["shopping.addGrocery"].tap()
-                XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 3))
                 let addOneTime = app.buttons["shopping.grocery.addOneTime"]
-                for _ in 0..<8 where !addOneTime.isHittable { app.swipeUp() }
-                XCTAssertTrue(addOneTime.waitForExistence(timeout: 3))
+                for _ in 0..<8 {
+                    if addOneTime.exists,
+                       addOneTime.isHittable,
+                       addOneTime.frame.maxY <= app.frame.maxY - 24 {
+                        break
+                    }
+                    app.swipeUp()
+                }
+                XCTAssertTrue(addOneTime.existsOrAppears(timeout: 3))
+                XCTAssertLessThanOrEqual(addOneTime.frame.maxY, app.frame.maxY - 24)
+                XCTAssertTrue(addOneTime.isHittable)
                 addOneTime.tap()
-                XCTAssertTrue(app.navigationBars["Add item"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["Add item"].existsOrAppears(timeout: 3))
                 attach("Grocery editor \(appearance) \(size)", app)
                 app.buttons["shopping.grocery.cancel"].tap()
                 app.tabBars.buttons["Catalog"].tap()
                 app.buttons["shopping.catalog.filters"].tap()
-                XCTAssertTrue(app.navigationBars["Catalog filters"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["Catalog filters"].existsOrAppears(timeout: 3))
                 attach("Catalog filters \(appearance) \(size)", app)
                 app.buttons["Done"].tap()
                 app.buttons["shopping.catalog.add"].tap()
-                XCTAssertTrue(app.navigationBars["New catalog item"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 3))
                 attach("Catalog editor \(appearance) \(size)", app)
                 app.buttons["Cancel"].tap()
                 openSettings(app)
@@ -60,16 +69,16 @@ final class ShoppingAppearanceUITests: XCTestCase {
                     "-shopping.appearance", appearance
                 ]
                 app.launch()
-                XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
                 app.tabBars.buttons["Catalog"].tap()
                 let list = app.collectionViews["shopping.catalog.list"]
-                XCTAssertTrue(list.waitForExistence(timeout: 3))
+                XCTAssertTrue(list.existsOrAppears(timeout: 3))
                 let firstItem = app.buttons.matching(NSPredicate(
                     format: "identifier BEGINSWITH %@", "shopping.catalog.item."
                 )).firstMatch
-                XCTAssertTrue(firstItem.waitForExistence(timeout: 3))
+                XCTAssertTrue(firstItem.existsOrAppears(timeout: 3))
                 let firstCell = list.cells.containing(.button, identifier: firstItem.identifier).firstMatch
-                XCTAssertTrue(firstCell.waitForExistence(timeout: 3))
+                XCTAssertTrue(firstCell.existsOrAppears(timeout: 3))
                 let filters = app.buttons["shopping.catalog.filters"]
                 XCTAssertGreaterThanOrEqual(firstCell.frame.minY - filters.frame.maxY, 12)
                 XCTAssertTrue(firstCell.isHittable)
@@ -93,10 +102,10 @@ final class ShoppingAppearanceUITests: XCTestCase {
             ).path
         defer { select("System", in: app) }
         app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         openSettings(app)
         let scheme = app.segmentedControls["shopping.appearance"]
-        XCTAssertTrue(scheme.waitForExistence(timeout: 3))
+        XCTAssertTrue(scheme.existsOrAppears(timeout: 3))
         scheme.buttons["Light"].tap()
         attach("Light appearance", app)
         scheme.buttons["Dark"].tap()
@@ -104,14 +113,14 @@ final class ShoppingAppearanceUITests: XCTestCase {
         attach("Dark appearance", app)
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         openSettings(app)
         XCTAssertTrue(app.segmentedControls["shopping.appearance"].buttons["Dark"].isSelected)
     }
 
     private func openSettings(_ app: XCUIApplication) {
         app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 3))
     }
 
     private func select(_ appearance: String, in app: XCUIApplication) {

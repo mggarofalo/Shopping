@@ -55,11 +55,15 @@ jobs:
       - name: Select Xcode version
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
 
+      - name: Capture timing metadata
+        run: .github/scripts/test-timing.py init --plan "$TEST_PLAN" --json ExhaustiveTimingMetadata.json
+
       - name: Start pinned iOS simulator
         id: simulator
         timeout-minutes: 5
         run: |
           set -euo pipefail
+          .github/scripts/test-timing.py run --phases ExhaustivePhases.jsonl --phase simulator -- bash -euo pipefail <<'SH'
           xcrun simctl list runtimes
           shopping_simulator_id="$(xcrun simctl create \
             'Shopping exhaustive iPhone 16 Pro' \
@@ -68,30 +72,26 @@ jobs:
           xcrun simctl boot "$shopping_simulator_id"
           xcrun simctl bootstatus "$shopping_simulator_id" -b
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
+          SH
 
       - name: Build exhaustive test products
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases ExhaustivePhases.jsonl --phase build --record-command \
+            --log ExhaustiveBuild.log --seconds ExhaustiveBuildSeconds.txt -- \
           xcodebuild build-for-testing \
             -project Shopping.xcodeproj \
             -scheme Shopping \
             -testPlan "$TEST_PLAN" \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -quiet 2>&1 | tee ExhaustiveBuild.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > ExhaustiveBuildSeconds.txt
-          exit "$exit_code"
+            -quiet
 
       - name: Run exhaustive tests
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases ExhaustivePhases.jsonl --phase test --record-command \
+            --log ExhaustiveTest.log --seconds ExhaustiveTestSeconds.txt -- \
           xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
@@ -99,18 +99,14 @@ jobs:
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
             -resultBundlePath ExhaustiveResults.xcresult \
-            -quiet 2>&1 | tee ExhaustiveTest.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > ExhaustiveTestSeconds.txt
-          exit "$exit_code"
+            -quiet
 
       - name: Export full-plan coverage
         if: always() && env.TEST_PLAN == 'ShoppingFull' && hashFiles('ExhaustiveResults.xcresult/**') != ''
         run: |
           set +e
-          .github/scripts/check-coverage.sh \
+          .github/scripts/test-timing.py run --phases ExhaustivePhases.jsonl --phase coverage -- \
+            .github/scripts/check-coverage.sh \
             ExhaustiveResults.xcresult \
             .github/coverage-baseline.json \
             ExhaustiveCoverage.json \
@@ -123,7 +119,8 @@ jobs:
       - name: Publish exhaustive test summary
         if: always()
         run: |
-          .github/scripts/summarize-xcresult.sh \
+          .github/scripts/test-timing.py run --phases ExhaustivePhases.jsonl --phase summary -- \
+            .github/scripts/summarize-xcresult.sh \
             "$TEST_PLAN" \
             ExhaustiveResults.xcresult \
             ExhaustiveBuild.log \
@@ -134,6 +131,15 @@ jobs:
             ExhaustiveTestSeconds.txt
           cat ExhaustiveSummary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Publish exhaustive timing report
+        if: always()
+        run: |
+          .github/scripts/test-timing.py report \
+            --plan "$TEST_PLAN" --metadata ExhaustiveTimingMetadata.json --phases ExhaustivePhases.jsonl \
+            --result ExhaustiveResults.xcresult \
+            --json ExhaustiveTiming.json --markdown ExhaustiveTiming.md
+          cat ExhaustiveTiming.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload exhaustive summary
         if: always()
         uses: actions/upload-artifact@v6
@@ -142,6 +148,10 @@ jobs:
           path: |
             ExhaustiveSummary.md
             ExhaustiveSummary.json
+            ExhaustiveTiming.json
+            ExhaustiveTimingMetadata.json
+            ExhaustiveTiming.md
+            ExhaustivePhases.jsonl
             ExhaustiveCoverage.md
             ExhaustiveCoverage.json
             ExhaustiveCoverage.raw.json

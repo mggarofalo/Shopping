@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - "milestone/**"
   pull_request:
     branches:
       - main
@@ -48,6 +47,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate timing reports
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_test_timing.py'
+
+      - name: Validate acceptance boundaries
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_acceptance_contract.py'
+
       - name: Validate exhaustive-run gate
         run: .github/scripts/test-shopping-full-gate.sh
 
@@ -66,11 +71,19 @@ jobs:
             exit 1
           fi
 
+      - name: Capture timing metadata
+        run: |
+          .github/scripts/test-timing.py init --plan "ShoppingFast" --json "$RUNNER_TEMP/FastTimingMetadata.json"
+          .github/scripts/test-timing.py init --plan "ShoppingAcceptance (UI selection)" --json "$RUNNER_TEMP/AcceptanceTimingMetadata.json"
+          cp "$RUNNER_TEMP/FastTimingMetadata.json" FastTimingMetadata.json
+          cp "$RUNNER_TEMP/AcceptanceTimingMetadata.json" AcceptanceTimingMetadata.json
+
       - name: Start pinned iOS simulator
         id: simulator
         timeout-minutes: 5
         run: |
           set -euo pipefail
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase simulator -- bash -euo pipefail <<'SH'
           xcrun simctl list runtimes
           shopping_simulator_id="$(xcrun simctl create \
             'Shopping CI iPhone 16 Pro' \
@@ -79,30 +92,29 @@ jobs:
           xcrun simctl boot "$shopping_simulator_id"
           xcrun simctl bootstatus "$shopping_simulator_id" -b
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
+          SH
 
-      - name: Build fast test products
+      - name: Build acceptance test products
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases FastPhases.jsonl --phase build --record-command \
+            --log FastBuild.log --seconds FastBuildSeconds.txt -- \
           xcodebuild build-for-testing \
             -project Shopping.xcodeproj \
             -scheme Shopping \
-            -testPlan ShoppingFast \
+            -testPlan ShoppingAcceptance \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -quiet 2>&1 | tee FastBuild.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastBuildSeconds.txt
-          exit "$exit_code"
+            -quiet
+
+      - name: Verify built acceptance selection
+        run: python3 .github/scripts/check-acceptance-selection.py --products DerivedData/Build/Products
 
       - name: Run fast deterministic tests
         run: |
-          set -uo pipefail
-          started_at="$(date +%s)"
-          set +e
+          .github/scripts/test-timing.py run \
+            --phases FastPhases.jsonl --phase test --record-command \
+            --log FastTest.log --seconds FastTestSeconds.txt -- \
           xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
@@ -110,18 +122,14 @@ jobs:
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
             -resultBundlePath FastResults.xcresult \
-            -quiet 2>&1 | tee FastTest.log
-          exit_code="${PIPESTATUS[0]}"
-          set -e
-          finished_at="$(date +%s)"
-          echo "$((finished_at - started_at))" > FastTestSeconds.txt
-          exit "$exit_code"
+            -quiet
 
       - name: Enforce coverage baseline
         if: always() && hashFiles('FastResults.xcresult/**') != ''
         run: |
           set +e
-          .github/scripts/check-coverage.sh \
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase coverage -- \
+            .github/scripts/check-coverage.sh \
             FastResults.xcresult \
             .github/coverage-baseline.json \
             FastCoverage.json \
@@ -131,10 +139,27 @@ jobs:
           cat FastCoverage.md >> "$GITHUB_STEP_SUMMARY"
           exit "$exit_code"
 
+      - name: Run acceptance UI workflows
+        run: |
+          .github/scripts/test-timing.py run \
+            --phases AcceptancePhases.jsonl --phase test --record-command \
+            --log AcceptanceTest.log --seconds AcceptanceTestSeconds.txt -- \
+          xcodebuild test-without-building \
+            -project Shopping.xcodeproj \
+            -scheme Shopping \
+            -testPlan ShoppingAcceptance \
+            -only-testing:ShoppingTests \
+            -parallel-testing-enabled NO \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -derivedDataPath DerivedData \
+            -resultBundlePath AcceptanceResults.xcresult \
+            -quiet
+
       - name: Publish fast test summary
         if: always()
         run: |
-          .github/scripts/summarize-xcresult.sh \
+          .github/scripts/test-timing.py run --phases FastPhases.jsonl --phase summary -- \
+            .github/scripts/summarize-xcresult.sh \
             "Fast deterministic tests" \
             FastResults.xcresult \
             FastBuild.log \
@@ -145,6 +170,43 @@ jobs:
             FastTestSeconds.txt
           cat FastSummary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Publish fast timing report
+        if: always()
+        run: |
+          .github/scripts/test-timing.py report \
+            --plan "ShoppingFast" --metadata FastTimingMetadata.json --phases FastPhases.jsonl \
+            --result FastResults.xcresult \
+            --json FastTiming.json --markdown FastTiming.md
+          cat FastTiming.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish acceptance test summary
+        if: always()
+        run: |
+          .github/scripts/test-timing.py run --phases AcceptancePhases.jsonl --phase summary -- \
+            .github/scripts/summarize-xcresult.sh \
+            "Acceptance UI workflows (shared build recorded with Fast)" \
+            AcceptanceResults.xcresult \
+            FastBuild.log \
+            AcceptanceTest.log \
+            AcceptanceSummary.md \
+            AcceptanceSummary.json \
+            FastBuildSeconds.txt \
+            AcceptanceTestSeconds.txt
+          cat AcceptanceSummary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish acceptance timing report
+        if: always()
+        run: |
+          .github/scripts/test-timing.py report \
+            --plan "ShoppingAcceptance (UI selection)" --metadata AcceptanceTimingMetadata.json --phases AcceptancePhases.jsonl \
+            --result AcceptanceResults.xcresult \
+            --json AcceptanceTiming.json --markdown AcceptanceTiming.md
+          cat AcceptanceTiming.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify executed acceptance selection
+        if: always() && hashFiles('AcceptanceResults.xcresult/**') != ''
+        run: python3 .github/scripts/check-acceptance-selection.py --report AcceptanceTiming.json
+
       - name: Upload fast summary
         if: always()
         uses: actions/upload-artifact@v6
@@ -153,9 +215,19 @@ jobs:
           path: |
             FastSummary.md
             FastSummary.json
+            FastTiming.json
+            FastTimingMetadata.json
+            FastTiming.md
+            FastPhases.jsonl
             FastCoverage.md
             FastCoverage.json
             FastCoverage.raw.json
+            AcceptanceSummary.md
+            AcceptanceSummary.json
+            AcceptanceTiming.json
+            AcceptanceTimingMetadata.json
+            AcceptanceTiming.md
+            AcceptancePhases.jsonl
           if-no-files-found: error
           retention-days: 30
 
@@ -168,5 +240,8 @@ jobs:
             FastResults.xcresult
             FastBuild.log
             FastTest.log
+            AcceptanceResults.xcresult
+            AcceptanceTest.log
+            DerivedData/Build/Products/*.xctestrun
           if-no-files-found: warn
           retention-days: 14

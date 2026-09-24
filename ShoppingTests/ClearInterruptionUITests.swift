@@ -10,12 +10,12 @@ final class ClearInterruptionUITests: XCTestCase {
             .appendingPathComponent("ShoppingClearInterruption-\(UUID().uuidString).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] = "1"
         app.launch()
-        XCTAssertTrue(app.buttons["shopping.addGrocery"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))
         app.buttons["shopping.grocery.addOneTime"].tap()
         let name = app.textFields["shopping.grocery.name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 2))
+        XCTAssertTrue(name.existsOrAppears(timeout: 2))
         name.tap()
         name.typeText("Fresh ice")
         setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
@@ -32,45 +32,47 @@ final class ClearInterruptionUITests: XCTestCase {
                 format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.grocery.row.", "Fresh ice"
             )
         ).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
         let originalID = row.identifier
         row.swipeLeft()
         app.buttons["In cart"].tap()
         let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
-        XCTAssertTrue(carted.waitForExistence(timeout: 3))
+        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.tap()
-        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
+        // The cart toast can obscure Checkout even when XCTest reports it as hittable.
+        XCTAssertTrue(app.staticTexts["Fresh ice moved to In cart."].waitForNonExistence(timeout: 5))
         let checkout = app.buttons["shopping.checkout.start"]
         reveal(checkout, app: app)
         checkout.tap()
-        XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Checkout"].existsOrAppears(timeout: 2))
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_EXIT_AFTER_CLEAR")
         app.launch()
         let recentlyCleared = app.buttons["Recently cleared"]
-        XCTAssertTrue(recentlyCleared.waitForExistence(timeout: 5))
+        XCTAssertTrue(recentlyCleared.existsOrAppears(timeout: 5))
         recentlyCleared.tap()
         let restore = app.buttons.matching(
             NSPredicate(
                 format: "identifier BEGINSWITH %@", "shopping.recovery.restore."
             )
         ).firstMatch
-        XCTAssertTrue(restore.waitForExistence(timeout: 3))
+        XCTAssertTrue(restore.existsOrAppears(timeout: 3))
         restore.tap()
         app.navigationBars["Recently cleared"].buttons.firstMatch.tap()
-        XCTAssertTrue(carted.waitForExistence(timeout: 3))
+        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.tap()
         let recovered = app.buttons[originalID]
-        XCTAssertTrue(recovered.waitForExistence(timeout: 3))
+        XCTAssertTrue(recovered.existsOrAppears(timeout: 3))
         recovered.tap()
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Keep cold")
         XCTAssertTrue(app.descendants(matching: .any)["shopping.grocery.oneTime"].exists)
         app.buttons["shopping.grocery.cancel"].tap()
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.staticTexts["No remembered items"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["No remembered items"].existsOrAppears(timeout: 3))
     }
 
     private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {
@@ -135,7 +137,7 @@ final class ClearInterruptionUITests: XCTestCase {
             }
         }
         XCTFail("Could not reveal \(element.identifier) above the keyboard and tab bar")
-        XCTAssertTrue(element.waitForExistence(timeout: 2))
+        XCTAssertTrue(element.existsOrAppears(timeout: 2))
         XCTAssertTrue(element.isHittable)
     }
 

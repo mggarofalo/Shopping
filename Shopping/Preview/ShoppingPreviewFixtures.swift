@@ -7,7 +7,11 @@ enum ShoppingPreviewCase: String, CaseIterable {
     case longName
     case largeText
     case archivedStore
+    case archivedCatalogItem
     case pendingRelationship
+    case promotionLinkExisting
+    case promotionConflict
+    case inactiveCatalogSuggestion
     case performance
     case stress
 }
@@ -60,6 +64,15 @@ enum ShoppingPreviewFixtures {
                 persistence: persistence,
                 itemCount: fixture == .performance ? 500 : 1_000,
                 ids: &ids
+            )
+        } else if fixture == .promotionLinkExisting || fixture == .promotionConflict {
+            try populatePromotion(service: service, hasActiveMatch: fixture == .promotionConflict, ids: &ids)
+        } else if fixture == .inactiveCatalogSuggestion {
+            ids.itemIDs["cafe"] = try service.createItem(
+                name: "Café au lait",
+                notes: "Oat milk preferred",
+                householdID: ids.householdID,
+                anyStore: true
             )
         } else {
             try populate(service: service, fixture: fixture, ids: &ids)
@@ -139,6 +152,46 @@ enum ShoppingPreviewFixtures {
         if fixture == .archivedStore {
             try service.setStoreArchived(true, storeID: costco, householdID: householdID)
         }
+        if fixture == .archivedCatalogItem {
+            try service.setCatalogItemArchived(itemID: granola, householdID: householdID, archived: true)
+        }
+    }
+
+    // Start these workflows at their promotion boundary; UI creation is covered
+    // by the cancel/create/relaunch scenario, with its own isolated store.
+    private static func populatePromotion(
+        service: NeedService,
+        hasActiveMatch: Bool,
+        ids: inout ShoppingPreviewIDs
+    ) throws {
+        let costco = try service.createStore(name: "Costco", householdID: ids.householdID)
+        let pantry = try service.createCategory(name: "Pantry", householdID: ids.householdID)
+        let granola = try service.createItem(
+            name: "Granola",
+            categoryID: pantry,
+            storeIDs: [costco],
+            householdID: ids.householdID,
+            anyStore: false
+        )
+        ids.storeIDs["costco"] = costco
+        ids.categoryIDs["pantry"] = pantry
+        ids.itemIDs["granola"] = granola
+        if hasActiveMatch {
+            ids.needIDs["granola"] = try service.addRememberedNeed(
+                itemID: granola,
+                listID: ids.listID,
+                notes: "Low sugar",
+                urgency: .urgent
+            )
+        }
+        ids.needIDs["oneTime"] = try service.addOneTimeNeed(
+            title: hasActiveMatch ? "Granola" : "Breakfast cereal",
+            notes: "Buy this week",
+            anyStore: true,
+            quantity: 2,
+            urgency: .urgent,
+            listID: ids.listID
+        )
     }
 
     private static func insertPendingRelationship(
