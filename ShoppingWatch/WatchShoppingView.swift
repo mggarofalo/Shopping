@@ -17,8 +17,8 @@ struct WatchShoppingView: View {
                     }
                     .modifier(WatchShoppingErrorPresenter(session: session, inSheet: true))
                 }
-                .modifier(WatchShoppingErrorPresenter(session: session, inSheet: false))
         }
+        .modifier(WatchShoppingErrorPresenter(session: session, inSheet: false))
         .task { await session.reload() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await session.reload() } }

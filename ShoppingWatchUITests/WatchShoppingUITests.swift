@@ -433,9 +433,11 @@ final class WatchShoppingUITests: XCTestCase {
             if !element.exists { distance = .infinity }
             else if oversized { distance = abs(element.frame.midY - (bounds.top + bounds.bottom) / 2) }
             else { distance = isAbove ? bounds.top - element.frame.minY : element.frame.maxY - bounds.bottom }
-            // Search virtualized rows with fine movement so they cannot be skipped entirely.
-            // Once measured, ordinary cards need enough movement to cross native snap points.
-            let rotation = element.exists && !oversized ? (distance > 60 ? 0.6 : 0.3) : 0.15
+            // Search virtualized rows without skipping them. Near a measured boundary,
+            // make a fine adjustment so a tall row cannot oscillate across its clear range.
+            let rotation = element.exists && !oversized
+                ? (distance <= 15 ? 0.05 : distance > 60 ? 0.6 : 0.3)
+                : 0.15
             XCUIDevice.shared.rotateDigitalCrown(delta: isAbove ? -rotation : rotation)
         }
         screenshot("Unreachable element", app: app)

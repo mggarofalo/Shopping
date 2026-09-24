@@ -171,7 +171,11 @@ only after an applied snapshot from the same authority; save failure, busy calls
 changed authority and suspended stale results cannot trigger success navigation.
 `WatchShoppingUITests` owns card dismissal after Add using the real isolated SQLite
 adapter, preserved quantity across relaunch, and failed Add retaining its draft
-and allowing retry. The existing durable swipe-add/checkout/recovery route remains
+and allowing retry. Root errors are presented from the outer navigation stack so
+pushed item cards can show them; checkout sheets retain their own exclusive alert
+presenter. Large-text row revelation uses small final crown adjustments while
+retaining whole-row visibility and actual tap assertions. The existing durable
+swipe-add/checkout/recovery route remains
 separate. The DEBUG-only add-failure fixture fails before mutation and is never
 selected during normal or release launch. Generation-qualified persistence IDs
 and command tokens remain unchanged.
