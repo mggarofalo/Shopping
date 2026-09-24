@@ -85,3 +85,16 @@ The duplicate-name route still has UI proof of selecting the existing editor and
 ## Maintaining this ledger
 
 Update the relevant row when adding a new UI owner, changing a fixture boundary or consolidating a scenario. Keep exact method names so a reviewer can locate the proof. Use [the testing skill](../.agents/skills/shopping-testing/SKILL.md) and [read-only reviewer](../.codex/agents/shopping-test-reviewer.toml) for the corresponding implementation and review checks. Test execution evidence belongs in the timing report and PR, not in an unmeasured promise of runtime savings.
+
+## Personal-cart architecture contract (SHOPPING-118)
+
+`Prototypes/PersonalCartContract/Tests/PersonalCartContractTests/CartContractTests.swift`
+owns the isolated architecture fixture: causal same-owner edits, concurrent quantity and
+remove outcomes, unseen edits versus checkout in both delivery orders, new occurrence
+isolation, A/B/C checkpoint reopen/replay, owner isolation, multiple purchase receipts and
+scoped restore, stale/id-reuse rejection, and presence repair reaching a fixed point.
+Run it with `swift test --package-path Prototypes/PersonalCartContract` on the host.
+This does not replace any app Fast or UI proof and is not included in app coverage.
+SHOPPING-103 must port these contracts to real Core Data/account/migration boundaries;
+SHOPPING-30 still owns live permissions and cross-device delivery. See
+[ADR 0002](architecture/0002-personal-carts.md).
