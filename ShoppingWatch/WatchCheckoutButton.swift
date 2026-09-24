@@ -5,7 +5,7 @@ struct WatchCheckoutButton: View {
 
     var body: some View {
         Button { Task { await session.prepareCheckout() } } label: {
-            Text("Check out").font(.caption)
+            Text("Check out").font(.caption2).frame(maxWidth: .infinity)
         }
         .disabled(!session.snapshot.canCheckout || session.snapshot.selectedStore == nil || session.snapshot.cartCount == 0 || session.isBusy)
         .accessibilityIdentifier("watch.checkout.open")

@@ -128,6 +128,22 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 hasResolvedIdentity: entry.purchaseRulesResolved), activeStoreIDs: activeStores)
         }
         let ownIDs = Set(own.map(\.needID))
+        // Store choices summarize all remaining occurrences, independent of the selected store.
+        let pending = projection.needs.filter { $0.purchaseRulesResolved && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) }
+        let stores = projection.stores.map { store in
+            var value = store
+            var counted: Set<UUID> = []
+            for entry in pending where counted.insert(entry.needID).inserted {
+                let rule = PurchaseRuleValue(explicitStoreIDs: entry.storeIDs, anyStore: entry.anyStore,
+                    hasResolvedIdentity: entry.purchaseRulesResolved)
+                switch filter.availability(of: rule, selectedStoreID: store.id, activeStoreIDs: activeStores) {
+                case .mustBuyHere: value.mustBuyCount += 1
+                case .flexibleHere: value.canBuyCount += 1
+                default: break
+                }
+            }
+            return value
+        }
         let grocery = projection.needs.filter { writable && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) && eligible($0) }
         // A retained cart stays removable even when its old store or household disappears.
         let visibleCart = selectedStoreID == nil ? own : own.filter { eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
@@ -177,7 +193,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
-            stores: projection.stores, selectedStoreID: selectedStoreID,
+            stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try item($0, inCart: true) },
             recentCheckouts: operations,

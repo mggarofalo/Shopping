@@ -3,10 +3,11 @@ import SwiftUI
 struct WatchItemSections: View {
     let session: WatchShoppingSession
     let sections: [WatchItemSection]
+    @ScaledMetric(relativeTo: .caption2) private var headerFontSize = 11
 
     var body: some View {
         ForEach(sections) { section in
-            Section(section.title) {
+            Section {
                 ForEach(section.items) { item in
                     NavigationLink {
                         WatchItemCard(session: session, itemID: item.id)
@@ -17,8 +18,7 @@ struct WatchItemSections: View {
                     .accessibilityValue(item.accessibilityValue)
                     .accessibilityHint("Opens item details")
                     .accessibilityIdentifier("watch.item.\(item.id)")
-                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
-                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if item.isInOwnCart && item.canRemove {
                             Button("Remove", systemImage: "cart.badge.minus") {
@@ -46,6 +46,12 @@ struct WatchItemSections: View {
                         }
                     }
                 }
+            } header: {
+                Text(section.title)
+                    .font(.system(size: headerFontSize, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
             }
         }
     }

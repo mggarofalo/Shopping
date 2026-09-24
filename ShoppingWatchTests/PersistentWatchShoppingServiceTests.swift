@@ -214,4 +214,78 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).count, 1)
     }
 
+    func testStoreCountsUseAllPendingOccurrencesAndCanonicalPurchaseRules() async throws {
+        let f = try fixture(), service = adapter(f)
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let list = try XCTUnwrap(household.groceryList)
+            let first = try XCTUnwrap(household.stores?.first { $0.id == f.storeID })
+            let second = try XCTUnwrap(household.stores?.first { $0.id == f.otherStoreID })
+            let archivedStore = Store(context: context)
+            archivedStore.id = UUID(); archivedStore.name = "Archived"; archivedStore.household = household
+            archivedStore.isArchived = true
+            func add(_ name: String, stores: Set<Store> = [], anyStore: Bool = false,
+                     archived: Bool = false, resolved: Bool = true) {
+                let item = Item(context: context)
+                item.id = resolved ? UUID() : PersistenceModel.unsetID
+                item.name = name; item.household = household; item.anyStore = anyStore; item.stores = stores
+                let need = Need(context: context)
+                need.id = UUID(); need.title = name; need.kind = NeedKind.remembered.rawValue
+                need.urgency = NeedUrgency.urgent.rawValue; need.item = item; need.list = list
+                need.archived = archived
+            }
+            // Existing Milk is Any store. Two independent occurrences with the same title
+            // must remain two, while multiple store memberships never double-count one.
+            add("Same title", stores: [first])
+            add("Same title", stores: [first])
+            add("Multiple stores", stores: [first, second])
+            add("Only second", stores: [second])
+            add("Implicit Any store")
+            add("Explicit Any store", stores: [first], anyStore: true)
+            add("One active restriction", stores: [first, archivedStore])
+            add("Archived-only restriction", stores: [archivedStore])
+            add("Archived demand", stores: [first], archived: true)
+            add("Unresolved explicit restriction", stores: [first], resolved: false)
+            try f.persistence.prepareForSave(context)
+            try context.save()
+        }
+        let initial = try await service.load(storeID: nil)
+        let first = try XCTUnwrap(initial.stores.first { $0.id == f.storeID })
+        let second = try XCTUnwrap(initial.stores.first { $0.id == f.otherStoreID })
+        XCTAssertEqual(initial.stores.count, 2)
+        XCTAssertEqual(first.mustBuyCount, 3)
+        XCTAssertEqual(first.canBuyCount, 4)
+        XCTAssertEqual(second.mustBuyCount, 1)
+        XCTAssertEqual(second.canBuyCount, 4)
+        let atFirst = try await service.load(storeID: f.storeID)
+        let atSecond = try await service.load(storeID: f.otherStoreID)
+        XCTAssertEqual(atFirst.stores, initial.stores)
+        XCTAssertEqual(atSecond.stores, initial.stores)
+        XCTAssertNotEqual(atFirst.grocerySections, atSecond.grocerySections)
+    }
+
+    func testStoreCountsExcludeOwnCartAndPurchasedDemandButNotAnotherShoppersCart() async throws {
+        let f = try fixture(), service = adapter(f)
+        let bob = Provider(session: try ShopperSession.authenticated(containerIdentifier: "iCloud.shopping.watch-unit",
+            environment: "Development", accountRecordName: "bob"))
+        let other = PersonalCartService(persistence: f.persistence, sessionProvider: bob)
+        try other.cart(needID: f.needID, householdID: f.householdID, listID: f.listID)
+        let pending = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(pending.stores.map(\.canBuyCount), [1, 1])
+        try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID)
+        let carted = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(carted.stores.map(\.canBuyCount), [0, 0])
+        let row = try XCTUnwrap(carted.cartSections.first?.items.first)
+        _ = try await service.execute(.remove(token: row.commandToken))
+        let uncarted = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(uncarted.stores.map(\.canBuyCount), [1, 1])
+        let theirs = try other.entries(householdID: f.householdID, listID: f.listID)
+        _ = try other.checkout(other.prepareCheckout(tokens: theirs.map(\.token)))
+        let purchased = try await service.load(storeID: f.otherStoreID)
+        XCTAssertEqual(purchased.stores.map(\.mustBuyCount), [0, 0])
+        XCTAssertEqual(purchased.stores.map(\.canBuyCount), [0, 0])
+        XCTAssertTrue(purchased.grocerySections.isEmpty)
+    }
+
 }

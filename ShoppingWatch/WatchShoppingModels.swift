@@ -4,6 +4,8 @@ import Foundation
 struct WatchStore: Identifiable, Equatable {
     let id: UUID
     let name: String
+    var mustBuyCount = 0
+    var canBuyCount = 0
 }
 
 struct WatchItemSection: Identifiable, Equatable {

@@ -246,8 +246,8 @@ struct GroceriesView: View {
                         shoppingRow(need)
                     }
                 }
-                .listStyle(.plain)
-                .listSectionSpacing(.custom(0))
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(.custom(8))
                 .contentMargins(
                     .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
                 )

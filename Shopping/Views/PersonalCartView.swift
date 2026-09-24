@@ -41,26 +41,25 @@ struct PersonalCartView: View {
         List {
             if let message = cart.error { Text(message).foregroundStyle(.secondary) }
             if visibleEntries.isEmpty { Text("Your cart is empty in this view").foregroundStyle(.secondary) }
-            ForEach(sections) { section in
-                Section(section.title) {
-                    ForEach(section.items) { entry in
-                        Button { selected = entry } label: {
-                            HStack {
-                                Text(entry.title).foregroundStyle(.primary)
-                                Spacer()
-                                if let quantity = entry.quantity { Text("\(quantity)").foregroundStyle(.secondary) }
-                            }
-                        }
-                        .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
-                        .swipeActions {
-                            Button("Remove from cart", systemImage: "cart.badge.minus") { remove(entry) }
-                                .tint(.orange)
-                        }
-                        .accessibilityAction(named: "Remove from cart") { remove(entry) }
+            CompactGrocerySections(sections: sections, itemID: \.id) { _, entry in
+                Button { selected = entry } label: {
+                    HStack {
+                        Text(entry.title).foregroundStyle(Color.primary)
+                        Spacer()
+                        if let quantity = entry.quantity { Text("\(quantity)").foregroundStyle(Color.secondary) }
                     }
+                    .frame(minHeight: 44)
                 }
+                .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
+                .swipeActions {
+                    Button("Remove from cart", systemImage: "cart.badge.minus") { remove(entry) }
+                        .tint(.orange)
+                }
+                .accessibilityAction(named: "Remove from cart") { remove(entry) }
             }
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(8))
         .navigationTitle("My cart")
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }

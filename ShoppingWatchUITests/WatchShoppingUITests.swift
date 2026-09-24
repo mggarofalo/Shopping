@@ -16,10 +16,16 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(switcher.waitForExistence(timeout: 5))
         XCTAssertTrue(switcher.isHittable)
         XCTAssertLessThanOrEqual(switcher.frame.maxX, app.frame.maxX - 40)
+        assertBottomAction(app.buttons["watch.cart.open"], in: app)
+        assertBottomAction(app.buttons["watch.checkout.open"], in: app)
         screenshot("Watch compact grocery root", app: app)
         switcher.tap()
         let costco = app.buttons["watch.store.10000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(costco.waitForExistence(timeout: 3))
+        XCTAssertEqual(costco.value as? String, "0 only buy here, 2 can buy here")
+        let traderJoes = app.buttons["watch.store.10000000-0000-0000-0000-000000000001"]
+        XCTAssertEqual(traderJoes.value as? String, "Selected. 1 only buy here, 2 can buy here")
+        screenshot("Watch store purchase counts", app: app)
         costco.tap()
         XCTAssertTrue(switcher.waitForExistence(timeout: 3))
         XCTAssertTrue(switcher.label.contains("Costco"))
@@ -93,6 +99,48 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
     }
 
+    func testCompactItemControlsAndPinnedAdd() {
+        let app = launchFixture()
+        let granola = app.buttons["watch.item.granola"]
+        reveal(granola, in: app)
+        XCTAssertLessThanOrEqual(granola.frame.maxY, app.buttons["watch.cart.open"].frame.minY - 2)
+        granola.tap()
+        XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        let add = app.buttons["watch.item.add"]
+        assertBottomAction(add, in: app)
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        XCTAssertGreaterThanOrEqual(increase.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(increase.frame.width, 44)
+        XCTAssertLessThanOrEqual(increase.frame.width, 60)
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "1")
+        let clear = app.buttons["Clear quantity"]
+        reveal(clear, in: app)
+        XCTAssertLessThanOrEqual(clear.frame.maxY, add.frame.minY - 2)
+        screenshot("Watch compact item and floating add", app: app)
+        add.tap()
+        let remove = app.buttons["watch.item.remove"]
+        reveal(remove, in: app)
+        XCTAssertTrue(remove.isEnabled)
+        XCTAssertFalse(add.exists)
+    }
+
+    func testEmptyListKeepsActionsAtScreenBottom() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = "empty"
+        app.launch()
+        let cart = app.buttons["watch.cart.open"]
+        XCTAssertTrue(cart.waitForExistence(timeout: 5))
+        assertBottomAction(cart, in: app)
+        assertBottomAction(app.buttons["watch.checkout.open"], in: app)
+        screenshot("Watch empty grocery bottom actions", app: app)
+        cart.tap()
+        XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 3))
+        assertBottomAction(app.buttons["watch.checkout.open"], in: app)
+        XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+    }
+
     func testLongNameRemainsAccessibleAtLargeText() {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = "longNames"
@@ -105,6 +153,13 @@ final class WatchShoppingUITests: XCTestCase {
         screenshot("Watch long name large text", app: app)
         item.tap()
         XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        screenshot("Watch long item detail large text", app: app)
+        app.navigationBars.buttons.firstMatch.tap()
+        storeSwitcher(in: app).tap()
+        let costco = app.buttons["watch.store.10000000-0000-0000-0000-000000000002"]
+        reveal(costco, in: app)
+        XCTAssertEqual(costco.value as? String, "0 only buy here, 2 can buy here")
+        screenshot("Watch store counts large text", app: app)
     }
 
     func testFailedCheckoutShowsErrorAndKeepsPreviewForRetry() {
@@ -275,12 +330,15 @@ final class WatchShoppingUITests: XCTestCase {
             let navigation = confirmation.exists ? confirmation : app.navigationBars.firstMatch
             let checkout = app.buttons["watch.checkout.open"]
             let cart = app.buttons["watch.cart.open"]
+            let add = app.buttons["watch.item.add"]
             // A disabled checkout still occupies space beside the enabled View cart button.
             // A presented confirmation has no footer; underlying root controls may remain in AX.
             let footerVisible = !confirmation.exists && checkout.exists
                 && (checkout.isHittable || (cart.exists && cart.isHittable))
-            return (navigation.exists ? navigation.frame.maxY : 30,
-                    footerVisible ? checkout.frame.minY - 2 : app.frame.maxY)
+            let footerTop = footerVisible
+                ? min(checkout.frame.minY, cart.exists && cart.isHittable ? cart.frame.minY : checkout.frame.minY)
+                : add.exists && add.isHittable ? add.frame.minY : app.frame.maxY + 2
+            return (navigation.exists ? navigation.frame.maxY : 30, footerTop - 2)
         }
         func isClear() -> Bool {
             guard element.exists && (element.isHittable || allowDisabled) else { return false }
@@ -309,6 +367,13 @@ final class WatchShoppingUITests: XCTestCase {
         }
         screenshot("Unreachable element", app: app)
         XCTAssertTrue(isClear())
+    }
+
+    private func assertBottomAction(_ action: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(action.exists, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(action.frame.maxY, app.frame.maxY - 24, file: file, line: line)
+        XCTAssertLessThanOrEqual(action.frame.maxY, app.frame.maxY, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(action.frame.height, 44, file: file, line: line)
     }
 
     private func screenshot(_ name: String, app: XCUIApplication) {

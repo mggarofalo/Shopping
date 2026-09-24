@@ -11,6 +11,7 @@ struct CompactGrocerySections<SectionID: Hashable, ItemID: Hashable, Item, Row: 
             Section {
                 ForEach(section.items, id: itemID) { item in
                     row(section.id, item)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(
                             item[keyPath: itemID] == section.items.last?[keyPath: itemID]
                                 ? .hidden : .visible,
@@ -20,10 +21,10 @@ struct CompactGrocerySections<SectionID: Hashable, ItemID: Hashable, Item, Row: 
                 }
             } header: {
                 Text(section.title)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.grocerySecondary)
                     .textCase(nil)
-                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .bottomLeading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
             }
         }

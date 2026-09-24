@@ -146,3 +146,20 @@ ownership. No fixture contains a copy of a shopper’s real records.
 error retention, observed success wording, partial-error classification, stale
 event ordering, and account/container reset. Successful engine events are
 never treated as proof that another device received the records.
+
+## Compact category tables and Watch store counts (SHOPPING-134)
+
+`ShoppingAppearanceUITests/testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText`
+owns the grocery-to-personal-cart interaction with native category tables, row
+hit targets and screenshot evidence at standard/light and largest-accessibility/dark
+settings. It waits for the specific cart toast to disappear before checking the
+checkout control. The fixture supplies groceries only; the UI performs the cart
+action. Existing personal checkout/recovery and legacy scoped-checkout tests
+retain their lifecycle and scope assertions.
+
+`PersistentWatchShoppingServiceTests` owns per-store count semantics, including
+Any store, sole/multiple restrictions, archived-only and unresolved rules,
+independent same-title occurrences, selected-store independence, own versus other
+cart membership, removal and fulfilled demand. Native Watch UI tests own count
+labels in the chooser and actual footer/last-row reachability; visual clearance
+is not a substitute for a successful row interaction.

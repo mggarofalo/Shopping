@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// The native watch bordered style stays ~52 points tall even at .small.
+/// Native text toolbar items instead constrain their hit region to 35 points.
 /// Keep a 44-point native Button hit region with a quieter capsule inside it.
 struct WatchCompactButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
@@ -8,9 +9,9 @@ struct WatchCompactButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.caption)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 6)
             .padding(.vertical, 6)
-            .frame(minHeight: 44)
+            .frame(minWidth: 44, minHeight: 44)
             .background {
                 Capsule()
                     .fill(Color.secondary.opacity(configuration.isPressed ? 0.45 : 0.25))

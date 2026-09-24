@@ -94,6 +94,55 @@ final class ShoppingAppearanceUITests: XCTestCase {
         }
     }
 
+    func testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText() {
+        for (size, appearance) in [
+            ("UICTContentSizeCategoryL", "light"),
+            ("UICTContentSizeCategoryAccessibilityXXXL", "dark")
+        ] {
+            let app = XCUIApplication()
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("CompactTables-\(UUID().uuidString).sqlite").path
+            app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+            app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", size, "-shopping.appearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+            let grocery = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@", "shopping.grocery.row.", "Edit Bananas"
+            )).firstMatch
+            for _ in 0..<6 where !grocery.isHittable { app.swipeUp() }
+            XCTAssertTrue(grocery.existsOrAppears(timeout: 3))
+            XCTAssertTrue(grocery.isHittable)
+            XCTAssertTrue(app.staticTexts["Produce"].exists)
+            let groceryCell = app.collectionViews.cells.containing(.button, identifier: grocery.identifier).firstMatch
+            XCTAssertGreaterThanOrEqual(groceryCell.frame.height, 44)
+            attach("Compact groceries \(appearance) \(size)", app)
+            grocery.swipeLeft()
+            let addToCart = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@", "shopping.checklist.cart."
+            )).firstMatch
+            XCTAssertTrue(addToCart.existsOrAppears(timeout: 3))
+            addToCart.tap()
+            let viewCart = app.buttons["In cart (1)"]
+            for _ in 0..<6 where !viewCart.isHittable { app.swipeDown() }
+            XCTAssertTrue(viewCart.existsOrAppears(timeout: 3))
+            XCTAssertTrue(viewCart.isHittable)
+            viewCart.tap()
+            XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+            let cartRow = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.personalCart.item.", "Bananas"
+            )).firstMatch
+            XCTAssertTrue(cartRow.existsOrAppears(timeout: 3))
+            XCTAssertTrue(cartRow.isHittable)
+            XCTAssertGreaterThanOrEqual(cartRow.frame.height, 44)
+            XCTAssertTrue(app.staticTexts["Produce"].exists)
+            XCTAssertTrue(app.staticTexts["Bananas moved to In cart."].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Check out"].isHittable)
+            attach("Compact personal cart \(appearance) \(size)", app)
+            app.terminate()
+        }
+    }
+
     func testAppearanceChoicePersistsAcrossRelaunch() {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] =

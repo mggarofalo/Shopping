@@ -121,6 +121,14 @@ final class WatchPreviewService: WatchShoppingService {
                 return rows.isEmpty ? nil : WatchItemSection(id: category, title: category, items: rows)
             }
         }
+        value.stores = value.stores.map { store in
+            var result = store
+            let pending = items.filter { !$0.isInOwnCart && $0.purchasedNotice == nil
+                && (store.id == Self.firstStoreID || $0.id != "strawberries") }
+            result.mustBuyCount = pending.filter { $0.rule == .onlyHere }.count
+            result.canBuyCount = pending.filter { $0.rule == .canBuyHere }.count
+            return result
+        }
         value.grocerySections = sections(cart: false)
         value.cartSections = sections(cart: true)
         value.canCheckout = eligible.contains { $0.isInOwnCart && $0.purchasedNotice == nil }
@@ -132,7 +140,7 @@ final class WatchPreviewService: WatchShoppingService {
 
     static var sample: WatchShoppingSnapshot {
         WatchShoppingSnapshot(authorityID: "preview-shopper", availability: .ready,
-            stores: [WatchStore(id: firstStoreID, name: "Trader Joe’s"), WatchStore(id: secondStoreID, name: "Costco")],
+            stores: [WatchStore(id: firstStoreID, name: "Trader Joe’s", mustBuyCount: 1, canBuyCount: 2), WatchStore(id: secondStoreID, name: "Costco", canBuyCount: 2)],
             selectedStoreID: firstStoreID,
             grocerySections: [
                 WatchItemSection(id: "Produce", title: "Produce", items: [

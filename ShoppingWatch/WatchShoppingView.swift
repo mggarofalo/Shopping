@@ -3,7 +3,6 @@ import SwiftUI
 struct WatchShoppingView: View {
     @Bindable var session: WatchShoppingSession
     @Environment(\.scenePhase) private var scenePhase
-    @ScaledMetric(relativeTo: .caption) private var bottomClearance = 60
 
     var body: some View {
         NavigationStack {
@@ -63,7 +62,6 @@ struct WatchShoppingView: View {
             WatchItemSections(session: session, sections: session.snapshot.grocerySections)
         }
         .listStyle(.plain)
-        .contentMargins(.bottom, bottomClearance, for: .scrollContent)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { session.sheet = .stores } label: {
@@ -83,20 +81,27 @@ struct WatchShoppingView: View {
         .environment(\.defaultMinListRowHeight, 44)
         .safeAreaInset(edge: .bottom, spacing: 4) {
             HStack(spacing: 6) {
-                NavigationLink { WatchCartView(session: session) } label: {
-                    Text("View cart").font(.caption)
-                        .frame(maxWidth: .infinity)
-                }
-                .accessibilityLabel("View cart, \(session.snapshot.cartCountText)")
-                .accessibilityIdentifier("watch.cart.open")
+                cartLink
                 WatchCheckoutButton(session: session)
             }
             .buttonStyle(WatchCompactButtonStyle())
-            .padding(.horizontal, 4)
-            .padding(.bottom, 2)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
             .background(.background)
         }
+        // Extend the inset to the screen edge; watchOS otherwise places it above
+        // the curved-screen content safe area. The inset still reserves row space.
+        .ignoresSafeArea(.container, edges: .bottom)
     }
+
+    private var cartLink: some View {
+        NavigationLink { WatchCartView(session: session) } label: {
+            Text("View cart").font(.caption2).frame(maxWidth: .infinity)
+        }
+        .accessibilityLabel("View cart, \(session.snapshot.cartCountText)")
+        .accessibilityIdentifier("watch.cart.open")
+    }
+
 }
 
 private struct WatchShoppingErrorPresenter: ViewModifier {

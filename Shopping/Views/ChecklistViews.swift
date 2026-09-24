@@ -86,8 +86,8 @@ struct CartedGroceriesView: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .listSectionSpacing(.custom(0))
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(8))
         .navigationTitle("In cart")
         .searchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {
