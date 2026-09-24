@@ -25,6 +25,9 @@ final class PersistenceController {
     }
     static let commandAuthor = "app.commands"
     let container: NSPersistentContainer
+    var personalCartsEnabled = false
+    var personalCartInitialBinding: String?
+    var personalCartSessionProvider: (any ShopperSessionProviding)?
     let writer: NSManagedObjectContext
     let configuration: PersistenceConfiguration
     let permissionPolicy: PersistencePermissionPolicy
@@ -106,9 +109,11 @@ final class PersistenceController {
     }
 
     func prepareForSave(_ context: NSManagedObjectContext) throws {
+        if personalCartsEnabled { try HouseholdDemandJournal.captureChanges(in: context) }
         if !context.insertedObjects.isEmpty {
             try context.obtainPermanentIDs(for: Array(context.insertedObjects))
         }
+        try PersonalCartPersistencePolicy.validate(in: context, controller: self)
         try permissionPolicy.validateChanges(in: context, controller: self)
         try shareAssociationJournal?.stagePrivateInserts(context.insertedObjects, controller: self)
     }

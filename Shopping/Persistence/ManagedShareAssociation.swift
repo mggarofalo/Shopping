@@ -23,6 +23,8 @@ enum ShareAssociationScope {
         case let list as GroceryList: return list.household
         case let need as Need: return need.list?.household
         case let operation as ClearOperation: return operation.household
+        case let record as HouseholdCartRecord: return record.household
+        case is PersonalCartRecord, is LegacyCartReview: return nil
         default: return nil
         }
     }

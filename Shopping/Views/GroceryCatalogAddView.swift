@@ -10,6 +10,7 @@ struct GroceryCatalogAddView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.needService) private var service
+    @Environment(\.personalCart) private var personalCart
     @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
@@ -75,7 +76,10 @@ struct GroceryCatalogAddView: View {
 
     private var activeNeedsByItemID: [UUID: Need] {
         let active = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter { !$0.archived && $0.kind == NeedKind.remembered.rawValue && $0.item != nil }
+            .filter { need in
+                (personalCart.map { $0.outstandingNeedIDs.contains(need.id) } ?? !need.archived)
+                    && need.kind == NeedKind.remembered.rawValue && need.item != nil
+            }
             .sorted { $0.id.uuidString < $1.id.uuidString }
         return Dictionary(grouping: active, by: { $0.item?.id ?? PersistenceModel.unsetID })
             .compactMapValues { $0.count == 1 ? $0[0] : nil }
@@ -270,7 +274,7 @@ struct GroceryCatalogAddView: View {
     private func summary(for item: Item, activeNeed: Need?) -> String {
         let needState: String
         if let activeNeed {
-            needState = activeNeed.carted ? "In cart" : "On grocery list"
+            needState = (personalCart?.contains(activeNeed.id) ?? activeNeed.carted) ? "In cart" : "On grocery list"
         } else {
             needState = "Saved in Catalog"
         }

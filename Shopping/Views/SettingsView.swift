@@ -4,6 +4,8 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.personalCart) private var personalCart
+    @Environment(\.activatePersonalCart) private var activatePersonalCart
 
     var body: some View {
         NavigationStack {
@@ -25,6 +27,15 @@ struct SettingsView: View {
                     LabeledContent("Sharing Status") {
                         Text("Not Connected")
                             .accessibilityIdentifier("shopping.settings.sharingStatus")
+                    }
+                    if let personalCart {
+                        NavigationLink("My purchases") { PersonalPurchaseHistoryView(cart: personalCart) }
+                        NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: personalCart.service) }
+                        NavigationLink("Review old cart entries") { LegacyCartReviewView(cart: personalCart) }
+                    } else if let activatePersonalCart {
+                        NavigationLink("Set up personal carts") {
+                            PersonalCartSetupView(activate: activatePersonalCart)
+                        }
                     }
                 }
                 Section("About") {

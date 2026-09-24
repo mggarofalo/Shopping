@@ -50,13 +50,13 @@ An obsolete SHOPPING-27 blocked-by-SHOPPING-10 relation was identified during th
 
 ## Product contract
 
-The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores quantity, carted state, and `Normal`/`Urgent` urgency.
+The MVP uses one active household grocery-demand list. Store screens filter that shared set; they do not create store-owned trips. A catalog item remembers its explicit store purchase rules or `Any store`; a current need stores requested quantity and `Normal`/`Urgent` urgency. After personal-cart activation, cart membership and cart quantity belong to the authenticated shopper’s unshared private graph, synchronized between that shopper’s devices. Other household members see advisory presence only. Legacy local cart flags remain unattributed migration data until explicit review.
 
 For selected store `S`, availability is `Any store OR the purchase rule includes S`. No explicit store restriction means Any store, including older saved records. Grocery List and In cart always group by category in the active order configured in Settings, followed by archived categories and then Uncategorized. In a selected-store view, each eligible row uses a compact accessible symbol to distinguish `Only buy here`—where `S` is the only explicit active store and the item is not `Any store`—from `Can buy here`; those purchase rules are not section headings. Rows never show `Needs store`. Archived-only restrictions stay retained and unavailable at other stores. Include/exclude filters work on explicit store membership, exclusions win, and cannot widen availability. Store choices express household buying rules, not retailer stock.
 
 Ordinary re-add reuses the catalog item's purchase rules, focusing the existing active need rather than duplicating it. One-time needs are separate occurrences: they sync and recover safely, but do not create catalog items, templates, future hints, autocomplete candidates, or learned defaults. Explicit remembering is required to promote one.
 
-Clear-carted operations must be confirmed and recoverable. They target exact captured occurrence IDs and revisions, skip rows changed since capture, and do not delete catalog knowledge or overwrite a later uncart/re-add.
+Personal checkout must be confirmed and recoverable. It captures exact owner-qualified membership generations, occurrence IDs and causal evidence, skips changed entries, and never deletes catalog knowledge or overwrites a later uncart/re-add. Purchase receipts conditionally fulfill the captured demand; replacement requests survive undo. A second shopper keeps their cart entry and chooses Remove or Buy anyway after seeing an Already purchased notice. See [ADR 0002](docs/architecture/0002-personal-carts.md). Legacy clear history is retained separately and cannot be silently attributed or replayed as personal recovery.
 
 ## Architecture and evidence
 
