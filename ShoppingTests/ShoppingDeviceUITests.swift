@@ -141,7 +141,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         search.tap()
         search.typeText("Granola\n")
         XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.item."))
         XCTAssertEqual(rows.count, 1)
         let row = rows.firstMatch

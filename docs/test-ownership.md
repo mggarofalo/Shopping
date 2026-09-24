@@ -179,3 +179,12 @@ swipe-add/checkout/recovery route remains
 separate. The DEBUG-only add-failure fixture fails before mutation and is never
 selected during normal or release launch. Generation-qualified persistence IDs
 and command tokens remain unchanged.
+
+## Catalog contrast audit synchronization (SHOPPING-136)
+
+`ShoppingDeviceUITests/testCatalogRowSupportingTextContrast` waits boundedly for
+Search submission to dismiss the keyboard before asserting one visible, hittable
+catalog row and auditing its contrast. Hosted run 36067861081 recorded a keyboard
+existence check during dismissal; the video ended with it gone. The wait retains
+the failure for a keyboard that remains open, all row bounds, and the unchanged
+contrast audit. It does not retry the test or add production behavior.
