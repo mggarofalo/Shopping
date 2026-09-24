@@ -20,10 +20,52 @@ final class WatchShoppingSessionTests: XCTestCase {
         let before = session.snapshot
         service.shouldFail = true
         let command = WatchShoppingCommand.remove(token: "account-bound:membership-generation:revision")
-        await session.perform(command)
+        let succeeded = await session.perform(command)
+        XCTAssertFalse(succeeded)
         XCTAssertEqual(service.commands, [command])
         XCTAssertEqual(session.snapshot, before)
         XCTAssertNotNil(session.errorMessage)
+        XCTAssertFalse(session.isBusy)
+    }
+
+    func testCommandReportsSuccessOnlyForReadySameAuthoritySnapshot() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let command = WatchShoppingCommand.add(token: "pending-occurrence", quantity: 2)
+        let succeeded = await session.perform(command)
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(service.commands, [command])
+        service.value.authorityID = "different-account"
+        let changedAuthority = await session.perform(command)
+        XCTAssertFalse(changedAuthority)
+        service.value.availability = .setupRequired("Household unavailable")
+        let unavailable = await session.perform(command)
+        XCTAssertFalse(unavailable)
+    }
+
+    func testBusyCommandAndInvalidatedResultDoNotReportSuccess() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let previous = session.snapshot
+        let started = expectation(description: "Add suspended")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let first = WatchShoppingCommand.add(token: "old-authority", quantity: 2)
+        let pending = Task { await session.perform(first) }
+        await fulfillment(of: [started], timeout: 2)
+        let busyResult = await session.perform(.add(token: "second", quantity: 3))
+        XCTAssertFalse(busyResult)
+        XCTAssertEqual(service.commands, [first])
+        service.value.authorityID = "new-account"
+        service.onChange?(.authorityInvalidated)
+        await Task.yield()
+        service.commandContinuation?.resume(returning: previous)
+        let staleResult = await pending.value
+        XCTAssertFalse(staleResult)
+        XCTAssertEqual(session.snapshot.authorityID, "new-account")
+        XCTAssertNil(session.errorMessage)
         XCTAssertFalse(session.isBusy)
     }
 
@@ -141,6 +183,9 @@ private final class SpyService: WatchShoppingService {
     var commands: [WatchShoppingCommand] = []
     var checkoutTokens: [String] = []
     var restoreTokens: [String] = []
+    var suspendCommand = false
+    var commandStarted: (() -> Void)?
+    var commandContinuation: CheckedContinuation<WatchShoppingSnapshot, Never>?
     var suspendCheckout = false
     var checkoutStarted: (() -> Void)?
     var checkoutContinuation: CheckedContinuation<WatchActionResult, Never>?
@@ -151,6 +196,12 @@ private final class SpyService: WatchShoppingService {
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot { value }
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
         commands.append(command)
+        if suspendCommand {
+            return await withCheckedContinuation { continuation in
+                commandContinuation = continuation
+                commandStarted?()
+            }
+        }
         if shouldFail { throw failure }
         return value
     }

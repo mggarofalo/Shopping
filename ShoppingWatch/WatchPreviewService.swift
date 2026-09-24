@@ -11,6 +11,7 @@ final class WatchPreviewService: WatchShoppingService {
     private var cleared: [String: [WatchShoppingItem]] = [:]
     private let scenario: String
     private var failsNextCheckout = false
+    private var failsNextAdd = false
     static let firstStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     static let secondStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
 
@@ -20,6 +21,7 @@ final class WatchPreviewService: WatchShoppingService {
         items = Self.sample.grocerySections.flatMap(\.items) + Self.sample.cartSections.flatMap(\.items)
         if scenario == "empty" { items = [] }
         failsNextCheckout = scenario == "saveFailure"
+        failsNextAdd = scenario == "addFailure"
         if scenario == "fullCart" || scenario == "saveFailure" {
             for index in items.indices {
                 items[index].isInOwnCart = true
@@ -46,6 +48,12 @@ final class WatchPreviewService: WatchShoppingService {
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
         switch command {
         case .add(let token, let quantity):
+            if failsNextAdd {
+                failsNextAdd = false
+                throw NSError(domain: "WatchPreview", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "Preview add failed. Your cart is unchanged. Try again."
+                ])
+            }
             if let i = items.firstIndex(where: { $0.commandToken == token && $0.canAdd }) {
                 items[i].isInOwnCart = true
                 items[i].quantity = quantity

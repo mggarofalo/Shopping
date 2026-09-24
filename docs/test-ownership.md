@@ -163,3 +163,15 @@ independent same-title occurrences, selected-store independence, own versus othe
 cart membership, removal and fulfilled demand. Native Watch UI tests own count
 labels in the chooser and actual footer/last-row reachability; visual clearance
 is not a substitute for a successful row interaction.
+
+## Watch item-card Add transition (SHOPPING-135)
+
+`WatchShoppingSessionTests` owns command completion results: success is returned
+only after an applied snapshot from the same authority; save failure, busy calls,
+changed authority and suspended stale results cannot trigger success navigation.
+`WatchShoppingUITests` owns card dismissal after Add using the real isolated SQLite
+adapter, preserved quantity across relaunch, and failed Add retaining its draft
+and allowing retry. The existing durable swipe-add/checkout/recovery route remains
+separate. The DEBUG-only add-failure fixture fails before mutation and is never
+selected during normal or release launch. Generation-qualified persistence IDs
+and command tokens remain unchanged.

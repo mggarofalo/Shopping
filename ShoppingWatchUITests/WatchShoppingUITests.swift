@@ -106,6 +106,7 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertLessThanOrEqual(granola.frame.maxY, app.buttons["watch.cart.open"].frame.minY - 2)
         granola.tap()
         XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        screenshot("Watch compact item summary", app: app)
         let add = app.buttons["watch.item.add"]
         assertBottomAction(add, in: app)
         let increase = app.buttons["Increase your quantity"]
@@ -120,10 +121,75 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertLessThanOrEqual(clear.frame.maxY, add.frame.minY - 2)
         screenshot("Watch compact item and floating add", app: app)
         add.tap()
-        let remove = app.buttons["watch.item.remove"]
-        reveal(remove, in: app)
-        XCTAssertTrue(remove.isEnabled)
-        XCTAssertFalse(add.exists)
+        assertReturnedToGroceries(app)
+        XCTAssertFalse(granola.exists)
+        app.buttons["watch.cart.open"].tap()
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 1"))
+    }
+
+    func testFailedCardAddKeepsDraftAndAllowsRetry() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = "addFailure"
+        app.launch()
+        let granola = app.buttons["watch.item.granola"]
+        reveal(granola, in: app)
+        granola.tap()
+        XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        increase.tap()
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "2")
+        let add = app.buttons["watch.item.add"]
+        add.tap()
+        XCTAssertTrue(app.buttons["OK"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.staticTexts.matching(NSPredicate(
+            format: "label == %@", "Preview add failed. Your cart is unchanged. Try again."
+        )).count, 0)
+        screenshot("Watch failed add retains card", app: app)
+        app.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        reveal(increase, in: app)
+        XCTAssertEqual(increase.value as? String, "2")
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+        assertReturnedToGroceries(app)
+        XCTAssertFalse(granola.exists)
+        app.buttons["watch.cart.open"].tap()
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 2"))
+    }
+
+    func testDurableCardAddDismissesAndQuantitySurvivesRelaunch() {
+        let app = launchDurableFixture("ready")
+        selectMarketIfNeeded(app)
+        let milk = app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).element
+        reveal(milk, in: app)
+        let groceryIdentifier = milk.identifier
+        milk.tap()
+        XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        increase.tap()
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "2")
+        app.buttons["watch.item.add"].tap()
+        assertReturnedToGroceries(app)
+        XCTAssertFalse(milk.exists)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        let cartIdentifier = milk.identifier
+        XCTAssertNotEqual(cartIdentifier, groceryIdentifier)
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertEqual(milk.identifier, cartIdentifier)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        screenshot("Watch durable card add after relaunch", app: app)
     }
 
     func testEmptyListKeepsActionsAtScreenBottom() {
@@ -291,6 +357,13 @@ final class WatchShoppingUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func assertReturnedToGroceries(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+            object: app.navigationBars["Item"])
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed, file: file, line: line)
+        XCTAssertTrue(app.buttons["watch.cart.open"].isHittable, file: file, line: line)
     }
 
     private func selectMarketIfNeeded(_ app: XCUIApplication) {
