@@ -29,6 +29,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 12: Settings Integrity and Store-Scope Polish | `7f63b8f0-37f3-437c-b348-2020fdc37aa5` | Durable Settings data, store ordering, and category-first store-scoped grocery presentation. |
 | Phase 13: Restore Category Intelligence | `50e324b6-35d2-4e47-826a-5288ceeca70c` | Restore on-device category suggestions and category-fill surfaces across the current UI. |
 | Phase 14: Inline Grocery Add | `89fc13a2-c014-44e1-a128-b080d3396b82` | Make list-originated catalog search, category browsing, and remembered-item creation fast and coherent. |
+| Phase 16: watchOS Companion | `e0a5bbd4-4f94-48b3-8e46-b0779f9597dc` | SHOPPING-102/120: purchase-rule padlocks and native watch UI; SHOPPING-121: production integration; SHOPPING-122: real Series 11 phone-left-home acceptance. |
 | Phase 18: Full Suite Runtime | `5b9a890a-3d77-4497-b8ed-58bb981cf15b` | SHOPPING-108/119: measured exhaustive-test runtime improvements, local/CI timing, proof ownership, quick acceptance CI, and repository testing guidance; based independently on `main`. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
