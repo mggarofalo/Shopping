@@ -1,0 +1,853 @@
+{
+  "issue": "SHOPPING-119",
+  "base_commit": "e341831206907272a6314934619432e843100998",
+  "method": "Serial focused measurements using separate built products on the same local Xcode 27.0 / iOS 26.5 destination. Per-scenario comparisons retain mapped behavioral proof; ordering merges two methods. No retries. Full validation follows only on the final committed candidate.",
+  "limitations": [
+    "Single paired samples, not a distribution or a suite-wide percentage estimate.",
+    "Baseline command includes a logged 600-second CoreSimulator diagnostic timeout after all test bodies passed; its command-time difference is not an optimization claim.",
+    "Ordering baseline methods were measured in two commands; compare summed case time rather than combined command overhead.",
+    "Xcode 27 has no configured coverage baseline. Raw local coverage is retained; unchanged required coverage enforcement runs on pinned hosted Xcode 16.4."
+  ],
+  "runs": [
+    {
+      "name": "baseline",
+      "report_path": "/tmp/shopping-119-evidence/baseline-timing.json",
+      "metadata": {
+        "commit_sha": "e341831206907272a6314934619432e843100998",
+        "dirty": false,
+        "captured_at": "2026-09-24T12:42:37.320633+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "counts": {
+        "totalTestCount": 8,
+        "passedTests": 8,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_path": "/private/tmp/shopping-119-evidence/baseline.xcresult",
+      "result_bundle_wall_seconds": 1081.7599999904633,
+      "summed_test_seconds": 470.2024711370468,
+      "phases": [
+        {
+          "phase": "build",
+          "started_at": "2026-09-24T12:42:37.438912+00:00",
+          "finished_at": "2026-09-24T12:43:00.253678+00:00",
+          "wall_seconds": 22.814755,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/baseline-build.log",
+          "command": [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-baseline-derived",
+            "-quiet"
+          ]
+        },
+        {
+          "phase": "test",
+          "started_at": "2026-09-24T12:44:38.994596+00:00",
+          "finished_at": "2026-09-24T13:02:42.871169+00:00",
+          "wall_seconds": 1083.87965,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/baseline-test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-baseline-derived",
+            "-resultBundlePath",
+            "/tmp/shopping-119-evidence/baseline.xcresult",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:ShoppingTests/OneTimePromotionUITests",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules",
+            "-only-testing:ShoppingTests/ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "name": "testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Passed",
+          "duration_seconds": 31.841781973838806,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()",
+          "name": "testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 67.13503193855286,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()",
+          "name": "testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 35.039409041404724,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "name": "testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 86.82521605491638,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testCartAndCheckoutUseCategoryOrderInsteadOfAddedOrder()",
+          "name": "testCartAndCheckoutUseCategoryOrderInsteadOfAddedOrder()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 16.708917021751404,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testCollisionAndActiveConflictRequireExplicitDistinctChoice()",
+          "name": "testCollisionAndActiveConflictRequireExplicitDistinctChoice()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 87.05737698078156,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()",
+          "name": "testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 85.60060811042786,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testPromotionCancelAndExplicitCreatePreserveOccurrenceAfterRelaunch()",
+          "name": "testPromotionCancelAndExplicitCreatePreserveOccurrenceAfterRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 59.99413001537323,
+          "duration_precision": "exact"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "baseline-additional",
+      "report_path": "/tmp/shopping-119-evidence/baseline-additional-timing.json",
+      "metadata": {
+        "commit_sha": "e341831206907272a6314934619432e843100998",
+        "dirty": false,
+        "captured_at": "2026-09-24T12:42:37.320633+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "counts": {
+        "totalTestCount": 4,
+        "passedTests": 4,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_path": "/private/tmp/shopping-119-evidence/baseline-additional.xcresult",
+      "result_bundle_wall_seconds": 155.47699999809265,
+      "summed_test_seconds": 142.24071288108826,
+      "phases": [
+        {
+          "phase": "test",
+          "started_at": "2026-09-24T13:03:32.830378+00:00",
+          "finished_at": "2026-09-24T13:06:09.997855+00:00",
+          "wall_seconds": 157.167916,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/baseline-additional-test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-baseline-derived",
+            "-resultBundlePath",
+            "/tmp/shopping-119-evidence/baseline-additional.xcresult",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:ShoppingTests/ChecklistUITests/testAllAndStoreGroupsUseCategoryOrder",
+            "-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft",
+            "-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries",
+            "-only-testing:ShoppingTests/CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "name": "testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "bundle": "ShoppingTests",
+          "suite": "CatalogRefreshUITests",
+          "result": "Passed",
+          "duration_seconds": 16.264389991760254,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ChecklistUITests/testAllAndStoreGroupsUseCategoryOrder()",
+          "name": "testAllAndStoreGroupsUseCategoryOrder()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Passed",
+          "duration_seconds": 8.037944912910461,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "name": "testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "bundle": "ShoppingTests",
+          "suite": "ShoppingLaunchTests",
+          "result": "Passed",
+          "duration_seconds": 81.6880339384079,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "name": "testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "bundle": "ShoppingTests",
+          "suite": "ShoppingLaunchTests",
+          "result": "Passed",
+          "duration_seconds": 36.250344038009644,
+          "duration_precision": "exact"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "name": "loop1",
+      "report_path": "/tmp/shopping-119-evidence/candidate-timing.json",
+      "metadata": {
+        "commit_sha": "e341831206907272a6314934619432e843100998",
+        "dirty": true,
+        "captured_at": "2026-09-24T12:58:03.017207+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "counts": {
+        "totalTestCount": 8,
+        "passedTests": 8,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_path": "/private/tmp/shopping-119-evidence/candidate.xcresult",
+      "result_bundle_wall_seconds": 356.06700015068054,
+      "summed_test_seconds": 342.9004112482071,
+      "phases": [
+        {
+          "phase": "build",
+          "started_at": "2026-09-24T13:06:29.424325+00:00",
+          "finished_at": "2026-09-24T13:06:50.663143+00:00",
+          "wall_seconds": 21.238808,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/candidate-build.log",
+          "command": [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingAcceptance",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-candidate-derived",
+            "-quiet"
+          ]
+        },
+        {
+          "phase": "test",
+          "started_at": "2026-09-24T13:08:25.829659+00:00",
+          "finished_at": "2026-09-24T13:14:23.588308+00:00",
+          "wall_seconds": 357.756399,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/candidate-test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-candidate-derived",
+            "-resultBundlePath",
+            "/tmp/shopping-119-evidence/candidate.xcresult",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:ShoppingTests/OneTimePromotionUITests",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts",
+            "-only-testing:ShoppingTests/GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules",
+            "-only-testing:ShoppingTests/ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems",
+            "-only-testing:ShoppingTests/ChecklistUITests/testGroceryCartAndCheckoutUseCategoryOrder"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "name": "testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Passed",
+          "duration_seconds": 30.332789063453674,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ChecklistUITests/testGroceryCartAndCheckoutUseCategoryOrder()",
+          "name": "testGroceryCartAndCheckoutUseCategoryOrder()",
+          "bundle": "ShoppingTests",
+          "suite": "ChecklistUITests",
+          "result": "Passed",
+          "duration_seconds": 22.088024020195007,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()",
+          "name": "testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 55.87193703651428,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()",
+          "name": "testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 26.46329891681671,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "name": "testStoreDefaultDoesNotOverwriteAnExistingItemsRules()",
+          "bundle": "ShoppingTests",
+          "suite": "GroceryEditingUITests",
+          "result": "Passed",
+          "duration_seconds": 72.15485799312592,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testCollisionAndActiveConflictRequireExplicitDistinctChoice()",
+          "name": "testCollisionAndActiveConflictRequireExplicitDistinctChoice()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 42.253584027290344,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()",
+          "name": "testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 33.68787109851837,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "OneTimePromotionUITests/testPromotionCancelAndExplicitCreatePreserveOccurrenceAfterRelaunch()",
+          "name": "testPromotionCancelAndExplicitCreatePreserveOccurrenceAfterRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "OneTimePromotionUITests",
+          "result": "Passed",
+          "duration_seconds": 60.048049092292786,
+          "duration_precision": "exact"
+        }
+      ],
+      "warnings": [],
+      "product_input_manifest": "/tmp/shopping-119-evidence/candidate-product-inputs.json",
+      "product_input_manifest_sha256": "f49872268e1d22ed926a7b9b5d73bafa6b2a10afa53cb449058b13c6cebcefa1"
+    },
+    {
+      "name": "loop2",
+      "report_path": "/tmp/shopping-119-evidence/loop2-timing.json",
+      "metadata": {
+        "commit_sha": "e341831206907272a6314934619432e843100998",
+        "dirty": true,
+        "captured_at": "2026-09-24T13:15:04.388602+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "counts": {
+        "totalTestCount": 3,
+        "passedTests": 3,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_path": "/private/tmp/shopping-119-evidence/loop2.xcresult",
+      "result_bundle_wall_seconds": 135.47299981117249,
+      "summed_test_seconds": 122.086590051651,
+      "phases": [
+        {
+          "phase": "build",
+          "started_at": "2026-09-24T13:15:04.671161+00:00",
+          "finished_at": "2026-09-24T13:15:25.676293+00:00",
+          "wall_seconds": 21.005092,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/loop2-build.log",
+          "command": [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingAcceptance",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-loop2-derived",
+            "-quiet"
+          ]
+        },
+        {
+          "phase": "test",
+          "started_at": "2026-09-24T13:15:58.484985+00:00",
+          "finished_at": "2026-09-24T13:18:15.562632+00:00",
+          "wall_seconds": 137.077851,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-119-evidence/loop2-test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-119-loop2-derived",
+            "-resultBundlePath",
+            "/tmp/shopping-119-evidence/loop2.xcresult",
+            "-parallel-testing-enabled",
+            "NO",
+            "-only-testing:ShoppingTests/ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft",
+            "-only-testing:ShoppingTests/ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries",
+            "-only-testing:ShoppingTests/CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "name": "testNewCatalogItemAppearsWithoutNavigatingAway()",
+          "bundle": "ShoppingTests",
+          "suite": "CatalogRefreshUITests",
+          "result": "Passed",
+          "duration_seconds": 17.57090401649475,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "name": "testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+          "bundle": "ShoppingTests",
+          "suite": "ShoppingLaunchTests",
+          "result": "Passed",
+          "duration_seconds": 76.53274703025818,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "name": "testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()",
+          "bundle": "ShoppingTests",
+          "suite": "ShoppingLaunchTests",
+          "result": "Passed",
+          "duration_seconds": 27.98293900489807,
+          "duration_precision": "exact"
+        }
+      ],
+      "warnings": [],
+      "product_input_manifest": "/tmp/shopping-119-evidence/loop2-product-inputs.json",
+      "product_input_manifest_sha256": "0e63ee7e89c5dbd65c9f14eb989a2283a1a606935748b9b6df28eedc8db9d29e"
+    }
+  ],
+  "comparisons": [
+    {
+      "change": "promotion conflict prerequisite",
+      "baseline_run": "baseline",
+      "baseline_identifiers": [
+        "OneTimePromotionUITests/testCollisionAndActiveConflictRequireExplicitDistinctChoice()"
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "OneTimePromotionUITests/testCollisionAndActiveConflictRequireExplicitDistinctChoice()"
+      ],
+      "baseline_summed_seconds": 87.05737698078156,
+      "candidate_summed_seconds": 42.253584027290344,
+      "reduction_fraction": 0.5146467135505578
+    },
+    {
+      "change": "promotion link prerequisite",
+      "baseline_run": "baseline",
+      "baseline_identifiers": [
+        "OneTimePromotionUITests/testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()"
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "OneTimePromotionUITests/testLinkExistingUsesSavedRulesWithoutOverwritingCatalog()"
+      ],
+      "baseline_summed_seconds": 85.60060811042786,
+      "candidate_summed_seconds": 33.68787109851837,
+      "reduction_fraction": 0.6064528997847795
+    },
+    {
+      "change": "inactive suggestion prerequisite",
+      "baseline_run": "baseline",
+      "baseline_identifiers": [
+        "GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()"
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "GroceryEditingUITests/testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails()"
+      ],
+      "baseline_summed_seconds": 35.039409041404724,
+      "candidate_summed_seconds": 26.46329891681671,
+      "reduction_fraction": 0.24475612914743947
+    },
+    {
+      "change": "active-match query reuse",
+      "baseline_run": "baseline",
+      "baseline_identifiers": [
+        "GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()"
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "GroceryEditingUITests/testActiveMatchFocusPreservesUrgencyAndExplicitNeedAgainUncarts()"
+      ],
+      "baseline_summed_seconds": 67.13503193855286,
+      "candidate_summed_seconds": 55.87193703651428,
+      "reduction_fraction": 0.16776777454053235
+    },
+    {
+      "change": "store-default query reuse",
+      "baseline_run": "baseline",
+      "baseline_identifiers": [
+        "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()"
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "GroceryEditingUITests/testStoreDefaultDoesNotOverwriteAnExistingItemsRules()"
+      ],
+      "baseline_summed_seconds": 86.82521605491638,
+      "candidate_summed_seconds": 72.15485799312592,
+      "reduction_fraction": 0.16896425633437595
+    },
+    {
+      "change": "archived catalog prerequisite",
+      "baseline_run": "baseline-additional",
+      "baseline_identifiers": [
+        "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()"
+      ],
+      "candidate_run": "loop2",
+      "candidate_identifiers": [
+        "ShoppingLaunchTests/testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft()"
+      ],
+      "baseline_summed_seconds": 36.250344038009644,
+      "candidate_summed_seconds": 27.98293900489807,
+      "reduction_fraction": 0.2280641812514368
+    },
+    {
+      "change": "consolidated existing-item route including transferred assertion",
+      "baseline_run": "baseline-additional",
+      "baseline_identifiers": [
+        "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+        "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()"
+      ],
+      "candidate_run": "loop2",
+      "candidate_identifiers": [
+        "ShoppingLaunchTests/testCatalogEditorCancelAndSavedAnyStoreItemDoNotCreateGroceries()",
+        "CatalogRefreshUITests/testNewCatalogItemAppearsWithoutNavigatingAway()"
+      ],
+      "baseline_summed_seconds": 97.95242393016815,
+      "candidate_summed_seconds": 94.10365104675293,
+      "reduction_fraction": 0.039292267909154285
+    },
+    {
+      "change": "ordering consolidation",
+      "baseline_sources": [
+        {
+          "run": "baseline-additional",
+          "identifier": "ChecklistUITests/testAllAndStoreGroupsUseCategoryOrder()"
+        },
+        {
+          "run": "baseline",
+          "identifier": "OneTimePromotionUITests/testCartAndCheckoutUseCategoryOrderInsteadOfAddedOrder()"
+        }
+      ],
+      "candidate_run": "loop1",
+      "candidate_identifiers": [
+        "ChecklistUITests/testGroceryCartAndCheckoutUseCategoryOrder()"
+      ],
+      "baseline_summed_seconds": 24.746861934661865,
+      "candidate_summed_seconds": 22.088024020195007,
+      "reduction_fraction": 0.10744141707691585
+    }
+  ],
+  "final_validation": "Exact committed local/hosted results are published on PR44 and retained under .git/shopping-test-timings/<SHA>.",
+  "local_acceptance_validation": {
+    "result": "Passed",
+    "counts": {
+      "totalTestCount": 6,
+      "passedTests": 6,
+      "failedTests": 0,
+      "skippedTests": 0
+    },
+    "result_bundle_path": "/private/tmp/shopping-119-evidence/acceptance.xcresult",
+    "result_bundle_wall_seconds": 189.01699995994568,
+    "summed_test_seconds": 176.24218094348907,
+    "phases": [
+      {
+        "phase": "test",
+        "started_at": "2026-09-24T13:19:28.640406+00:00",
+        "finished_at": "2026-09-24T13:22:39.169483+00:00",
+        "wall_seconds": 190.529452,
+        "exit_code": 0,
+        "log_path": "/private/tmp/shopping-119-evidence/acceptance-test.log",
+        "command": [
+          "xcodebuild",
+          "test-without-building",
+          "-project",
+          "Shopping.xcodeproj",
+          "-scheme",
+          "Shopping",
+          "-testPlan",
+          "ShoppingAcceptance",
+          "-only-testing:ShoppingTests",
+          "-parallel-testing-enabled",
+          "NO",
+          "-destination",
+          "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+          "-derivedDataPath",
+          "/tmp/shopping-119-loop2-derived",
+          "-resultBundlePath",
+          "/tmp/shopping-119-evidence/acceptance.xcresult"
+        ]
+      }
+    ],
+    "tests": [
+      {
+        "identifier": "CatalogRefreshUITests/testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates()",
+        "name": "testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates()",
+        "bundle": "ShoppingTests",
+        "suite": "CatalogRefreshUITests",
+        "result": "Passed",
+        "duration_seconds": 17.01894199848175,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+        "name": "testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems()",
+        "bundle": "ShoppingTests",
+        "suite": "ChecklistUITests",
+        "result": "Passed",
+        "duration_seconds": 30.852651000022888,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "ChecklistUITests/testChecklistControlsRemainUsableAtAccessibilityTextSize()",
+        "name": "testChecklistControlsRemainUsableAtAccessibilityTextSize()",
+        "bundle": "ShoppingTests",
+        "suite": "ChecklistUITests",
+        "result": "Passed",
+        "duration_seconds": 18.938419938087463,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+        "name": "testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement()",
+        "bundle": "ShoppingTests",
+        "suite": "ClearInterruptionUITests",
+        "result": "Passed",
+        "duration_seconds": 41.266332030296326,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "GroceryEditingUITests/testRememberedDraftCancelAndAtomicSaveSurviveRelaunch()",
+        "name": "testRememberedDraftCancelAndAtomicSaveSurviveRelaunch()",
+        "bundle": "ShoppingTests",
+        "suite": "GroceryEditingUITests",
+        "result": "Passed",
+        "duration_seconds": 53.29993402957916,
+        "duration_precision": "exact"
+      },
+      {
+        "identifier": "ShoppingLaunchTests/testOneTimeAddSavesWithoutStoreSetupAndDoesNotPolluteCatalog()",
+        "name": "testOneTimeAddSavesWithoutStoreSetupAndDoesNotPolluteCatalog()",
+        "bundle": "ShoppingTests",
+        "suite": "ShoppingLaunchTests",
+        "result": "Passed",
+        "duration_seconds": 14.865901947021484,
+        "duration_precision": "exact"
+      }
+    ],
+    "warnings": []
+  },
+  "local_fast_validation": {
+    "result": "Passed",
+    "counts": {
+      "totalTestCount": 218,
+      "passedTests": 218,
+      "failedTests": 0,
+      "skippedTests": 0
+    },
+    "result_bundle_path": "/private/tmp/shopping-119-evidence/loop2-fast.xcresult",
+    "result_bundle_wall_seconds": 9.064000129699707,
+    "summed_test_seconds": 10.73769986629486,
+    "phases": [
+      {
+        "phase": "test",
+        "started_at": "2026-09-24T13:18:31.815626+00:00",
+        "finished_at": "2026-09-24T13:18:42.030769+00:00",
+        "wall_seconds": 10.21506,
+        "exit_code": 0,
+        "log_path": "/private/tmp/shopping-119-evidence/loop2-fast-test.log",
+        "command": [
+          "xcodebuild",
+          "test-without-building",
+          "-project",
+          "Shopping.xcodeproj",
+          "-scheme",
+          "Shopping",
+          "-testPlan",
+          "ShoppingFast",
+          "-destination",
+          "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+          "-derivedDataPath",
+          "/tmp/shopping-119-loop2-derived",
+          "-resultBundlePath",
+          "/tmp/shopping-119-evidence/loop2-fast.xcresult",
+          "-quiet"
+        ]
+      }
+    ],
+    "warnings": [],
+    "all_tests_in_bundle": "ShoppingPersistenceTests"
+  },
+  "static_validation": {
+    "python_contract_tests": 18,
+    "full_attestation_gate": "passed",
+    "testflight_workflow_gate": "passed",
+    "independent_full_diff_reviews": 2,
+    "confirmed_review_defects": 0
+  },
+  "durable_local_evidence": ".git/shopping-test-timings/experiments/shopping-119/"
+}

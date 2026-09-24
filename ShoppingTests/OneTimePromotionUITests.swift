@@ -41,14 +41,8 @@ final class OneTimePromotionUITests: XCTestCase {
     }
 
     func testLinkExistingUsesSavedRulesWithoutOverwritingCatalog() {
-        let app = launchApp(fixture: "populated")
-        row("Granola", in: app).tap()
-        let remove = app.buttons["shopping.grocery.remove"]
-        reveal(remove, in: app)
-        remove.tap()
-        XCTAssertFalse(app.alerts.buttons["shopping.grocery.confirmRemove"].exists)
-        XCTAssertTrue(app.buttons["shopping.grocery.undoRemove"].existsOrAppears(timeout: 3))
-        createOneTime("Breakfast cereal", in: app)
+        let app = launchApp(fixture: "promotionLinkExisting")
+        XCTAssertTrue(row("Breakfast cereal", in: app).existsOrAppears(timeout: 3))
         let originalID = row("Breakfast cereal", in: app).identifier
         row("Breakfast cereal", in: app).tap()
         startPromotion(in: app)
@@ -80,8 +74,7 @@ final class OneTimePromotionUITests: XCTestCase {
     }
 
     func testCollisionAndActiveConflictRequireExplicitDistinctChoice() {
-        let app = launchApp(fixture: "populated")
-        createOneTime("Granola", in: app)
+        let app = launchApp(fixture: "promotionConflict")
         let oneTime = app.buttons.matching(
             NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND value CONTAINS[c] %@",
@@ -124,46 +117,6 @@ final class OneTimePromotionUITests: XCTestCase {
                     "shopping.grocery.row.", "Granola"
                 )
             ).count, 2)
-    }
-
-    func testCartAndCheckoutUseCategoryOrderInsteadOfAddedOrder() {
-        let app = launchApp(fixture: "populated")
-        let bananasRow = row("Bananas", in: app)
-        reveal(bananasRow, in: app)
-        bananasRow.swipeLeft()
-        app.buttons["In cart"].tap()
-        let granolaRow = row("Granola", in: app)
-        for _ in 0..<8 where !granolaRow.exists || !granolaRow.isHittable { app.swipeDown() }
-        XCTAssertTrue(granolaRow.isHittable)
-        granolaRow.swipeLeft()
-        app.buttons["In cart"].tap()
-        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (3)")).firstMatch
-        for _ in 0..<8 where !carted.exists || !carted.isHittable { app.swipeDown() }
-        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
-        carted.tap()
-        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
-        let granola = row("Granola", in: app)
-        let bananas = row("Bananas", in: app)
-        let strawberries = row("Strawberries", in: app)
-        XCTAssertTrue(granola.existsOrAppears(timeout: 3))
-        XCTAssertTrue(bananas.exists)
-        XCTAssertTrue(strawberries.exists)
-        XCTAssertLessThan(bananas.frame.minY, strawberries.frame.minY)
-        XCTAssertLessThan(strawberries.frame.minY, granola.frame.minY)
-
-        let checkout = app.buttons["shopping.checkout.start"]
-        reveal(checkout, in: app)
-        checkout.tap()
-        XCTAssertTrue(app.navigationBars["Checkout"].existsOrAppears(timeout: 2))
-        let checkoutRows = app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier BEGINSWITH %@", "shopping.checkout.row."
-        )).allElementsBoundByIndex
-        let labels = checkoutRows.map(\.label)
-        let bananasIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Bananas") })
-        let strawberriesIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Strawberries") })
-        let granolaIndex = try! XCTUnwrap(labels.firstIndex { $0.contains("Granola") })
-        XCTAssertLessThan(bananasIndex, strawberriesIndex)
-        XCTAssertLessThan(strawberriesIndex, granolaIndex)
     }
 
     private func launchApp(fixture: String? = nil) -> XCUIApplication {

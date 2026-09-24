@@ -1,6 +1,6 @@
 # Test strategy
 
-The repository has one owner for each kind of evidence. `ShoppingFast` owns deterministic app logic and persistence behavior. `ShoppingFull` owns simulator workflows and accessibility. `ShoppingPerformance` owns measurements. `ShoppingDevice` and the manual protocols own system behavior that a simulator cannot prove.
+The repository has one owner for each kind of evidence. `ShoppingFast` owns deterministic app logic and persistence behavior. `ShoppingFull` owns simulator workflows and accessibility; `ShoppingAcceptance` selects six of those workflows alongside all Fast tests for routine feedback. `ShoppingPerformance` owns measurements. `ShoppingDevice` and the manual protocols own system behavior that a simulator cannot prove.
 
 ## Test layers
 
@@ -8,7 +8,7 @@ The repository has one owner for each kind of evidence. `ShoppingFast` owns dete
 | --- | --- | --- | --- |
 | Unit | Swift Testing | `ShoppingCritical` and `ShoppingFast` | Deterministic value and filtering rules without a store or UI. |
 | Integration and persistence | Swift Testing or XCTest | `ShoppingFast` | Core Data commands, SQLite relaunch, recovery, replica ordering, and failure rollback. |
-| User interface | XCTest UI automation | `ShoppingFull` | User workflows, accessibility, layout, appearance, and fixture relaunch on Simulator. |
+| User interface | XCTest UI automation | `ShoppingFull`, with six workflows selected in `ShoppingAcceptance` | User workflows, accessibility, layout, appearance, and fixture relaunch on Simulator. |
 | Performance | XCTest measurement and manual Instruments traces | `ShoppingPerformance` | Stable service and loaded-interface measurements. |
 | Device and system | XCTest UI automation plus a recorded manual protocol | `ShoppingDevice` and `docs/device-validation.md` | Signed-device launch, VoiceOver, Reduce Motion, offline behavior, and live CloudKit limits. |
 
@@ -16,9 +16,9 @@ Swift Testing tags add a second, semantic view across source suites. The `.criti
 
 ## Source inventory
 
-The September 23 SHOPPING-108 inventory, based independently on `main`, has 215 fast tests and 67 non-performance UI tests: 282 in `ShoppingFull`. Its pre-commit fast validation passed all 215 tests. Phase 17's separate 284-test inventory is not part of this branch; its open PR remains independent.
+The September 23 SHOPPING-108 inventory, based independently on `main`, has 215 fast tests and 67 non-performance UI tests: 282 in `ShoppingFull`. Its pre-commit fast validation passed all 215 tests. Phase 17's separate 284-test inventory is not part of this branch; its open PR remains independent. SHOPPING-119 adds three fixture tests (218 Fast tests) and consolidates the rendered ordering scenarios; the [ownership ledger](test-ownership.md) accounts for the changed UI inventory and the [redesign report](test-redesign.md) records the measured comparisons.
 
-The historical September 8 file-level inventory below covers the 221 tests then maintained: 166 fast tests and 55 non-performance UI tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the deterministic run. UI files range from about 10 seconds to several minutes and run only in the exhaustive plan. Use current xcresult counts and per-test records for runtime comparisons rather than treating this historical table as a current manifest.
+The historical September 8 file-level inventory below covers the 221 tests then maintained: 166 fast tests and 55 non-performance UI tests. The 5 performance tests stay outside the ordinary total. “Fast” means a file contributes to the deterministic run. UI files range from about 10 seconds to several minutes. Six selected methods also run in routine acceptance; the complete files run in the exhaustive plan. Use current xcresult counts and per-test records for runtime comparisons rather than treating this historical table as a current manifest.
 
 | Source | Tests | Layer | Runtime dependency | Cost | Coverage owner and notes |
 | --- | ---: | --- | --- | --- | --- |
@@ -63,7 +63,13 @@ The inventory found these boundaries:
 - UI files contain workflow assertions rather than domain assertions. Moving them to Swift Testing would remove required XCTest UI APIs and add no value.
 - Performance tests were misplaced in ordinary regression coverage before SHOPPING-63. They now run only through `ShoppingPerformance`.
 - No test uses `#if targetEnvironment(simulator)` to decide its category or locate a fixture.
-- No verified duplicate or implementation-mirroring assertion should be removed. Similar clear, identity, and scope checks cover different persistence boundaries.
+- Consolidation requires an explicit retained owner for each behavior in the [test ownership ledger](test-ownership.md). Prefer deterministic coverage for rule matrices and isolated fixtures for incidental setup. Preserve representative UI interactions and distinct clear, identity, and recovery boundaries even when related domain rules already have fast tests.
+
+## Quick acceptance boundary
+
+Following [Apple’s guidance](https://developer.apple.com/videos/play/wwdc2022/110361/), `ShoppingAcceptance.xctestplan` combines the exact `ShoppingFast` target/options with six explicit UI methods on one platform. The canonical manifest covers catalog add/reuse, scoped checkout, abrupt-exit clear recovery, one-time isolation, remembered editing/relaunch, and large-text checklist controls. The [ownership ledger](test-ownership.md) records the proof retained by these scenarios and the exhaustive suite.
+
+Routine CI builds this plan once, then runs `ShoppingFast` and the selected UI target into separate result bundles. The unchanged Fast-only coverage gate cannot be boosted by the UI portion. Built-selection and result-selection checks reject accidental broadening, missing methods, skips, and duplicate executions. All remaining maintained UI tests stay in the manual `ShoppingFull` plan with its exact-SHA local attestation requirement. See [CI commands and triggers](continuous-integration.md) for the execution sequence and provisional feedback budgets.
 
 ## Fixtures and relaunch
 

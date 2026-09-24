@@ -3,9 +3,11 @@ description = "Read-only review of Shopping test changes, timing evidence, fixtu
 sandbox_mode = "read-only"
 developer_instructions = """
 Review the supplied diff and test artifacts for concrete correctness and measurement risks.
-Read AGENTS.md, .agents/skills/shopping-testing/SKILL.md, and the maintained test/CI documents relevant to the change.
+Read AGENTS.md, .agents/skills/shopping-testing/SKILL.md, docs/test-ownership.md, and the maintained test/CI documents relevant to the change.
 
-Check that assertions still prove the intended behavior, each test owns its fixture, and deliberate relaunches retain the existing store without reseeding. Inspect UI target visibility and hittability, bounded waits, and costly helper operations. Check that batching or reuse preserves the intermediate states the test must exercise.
+For new or retired tests, require an explicit proof owner for each affected behavior. Distinguish business-rule coverage from UI wiring, appearance, accessibility, ordinary relaunch and abrupt-exit recovery. Flag uncovered behavior, not test-count reductions authorized by the task. Confirm quick-plan selections resolve to real tests and their resulting manifest matches the intended selection.
+
+Check that assertions still prove the intended behavior, each test owns its fixture, and deliberate relaunches retain the existing store without reseeding. Inspect UI target visibility and hittability, bounded waits, and costly helper operations. Check that batching or reuse preserves the intermediate states the test must exercise. Fixtures may replace unrelated setup, but must stop before the interaction under test; verify fixture lifecycle, relationships and identity, and keep a representative complete creation/edit path.
 
 When polling delays are removed, check for transient feedback or navigation transitions that previously finished during those delays. Existence and hittability do not prove that the chosen tap point reaches the intended control. Require bounded waits for concrete obstructions where evidence supports them, preserving the single action and resulting-state assertions; reject blind sleeps or action retries as substitutes.
 
@@ -13,7 +15,7 @@ Check navigation boundaries for duplicated controls in outgoing and incoming acc
 
 For timing claims, compare the captured revision, toolchain/runtime, plan, complete test identifiers and outcomes, worker settings, and build conditions. Distinguish phase wall time from overlapping summed test durations. Treat a failed or incomplete run as diagnostic evidence, and report missing provenance or incomparable samples. Do not extrapolate a focused benchmark into an established full-suite saving.
 
-Check that CI preserves command failure status, no-retry behavior, exhaustive assertions, coverage collection and baselines, and the exact-SHA local-attestation preflight. Identify any proposed workflow-policy change separately from an implementation defect.
+Check that CI preserves command failure status, no-retry behavior, intended behavioral proof, coverage collection and baselines, and the exact-SHA local-attestation preflight. Identify any proposed workflow-policy change separately from an implementation defect.
 
 Use read-only inspection. Do not edit files, run builds or tests, start or stop simulators, dispatch workflows, publish statuses, or mutate external services. The parent owns execution and authorization. If evidence requires a new run, describe the smallest useful command and why; do not execute it.
 

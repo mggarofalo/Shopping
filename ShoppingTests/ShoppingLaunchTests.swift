@@ -333,14 +333,6 @@ final class ShoppingLaunchTests: XCTestCase {
         save.tap()
         let reusableCoffee = searchCatalog(for: "Reusable coffee", in: app)
 
-        app.buttons["shopping.catalog.add"].tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
-        app.textFields["shopping.catalog.name"].typeText("Reusable coffee")
-        app.buttons["Edit Reusable coffee"].tap()
-        XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
-        app.buttons["Cancel"].tap()
-
         reveal(reusableCoffee, in: app)
         reusableCoffee.tap()
         XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
@@ -480,15 +472,8 @@ final class ShoppingLaunchTests: XCTestCase {
     }
 
     func testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft() {
-        let app = launchApp(fixture: "populated")
+        let app = launchApp(fixture: "archivedCatalogItem")
         openCatalog(in: app)
-        XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
-        app.staticTexts["Granola"].tap()
-        XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
-        reveal(app.buttons["shopping.catalog.archive"], in: app)
-        app.buttons["shopping.catalog.archive"].tap()
-        tapArchiveStateConfirmation(in: "Archive this catalog item?", app: app)
-
         app.buttons["shopping.catalog.filters"].tap()
         enableArchivedItems(in: app)
         app.buttons["Done"].tap()

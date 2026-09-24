@@ -254,7 +254,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
     }
 
-    func testAllAndStoreGroupsUseCategoryOrder() throws {
+    func testGroceryCartAndCheckoutUseCategoryOrder() throws {
         let app = launchApp(fixture: "populated")
         var names = groceryRowLabels(app: app)
         XCTAssertLessThan(
@@ -272,6 +272,35 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertLessThan(
             try XCTUnwrap(names.firstIndex { $0.contains("Granola") }),
             try XCTUnwrap(names.firstIndex { $0.contains("Dinner rolls") })
+        )
+
+        // Keep the same within-category and cross-category proof across all three screens.
+        cart("Bananas", app: app)
+        cart("Granola", app: app)
+        let carted = cartedLink(count: 3, app: app)
+        reveal(carted, app: app, upwards: false)
+        carted.tap()
+        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
+        let bananas = row("Bananas", app: app)
+        let strawberries = row("Strawberries", app: app)
+        let granola = row("Granola", app: app)
+        XCTAssertTrue(bananas.exists)
+        XCTAssertTrue(strawberries.exists)
+        XCTAssertTrue(granola.exists)
+        XCTAssertLessThan(bananas.frame.minY, strawberries.frame.minY)
+        XCTAssertLessThan(strawberries.frame.minY, granola.frame.minY)
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
+        openCheckout(app: app)
+        let checkoutNames = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.checkout.row."
+        )).allElementsBoundByIndex.map(\.label)
+        XCTAssertLessThan(
+            try XCTUnwrap(checkoutNames.firstIndex { $0.contains("Bananas") }),
+            try XCTUnwrap(checkoutNames.firstIndex { $0.contains("Strawberries") })
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(checkoutNames.firstIndex { $0.contains("Strawberries") }),
+            try XCTUnwrap(checkoutNames.firstIndex { $0.contains("Granola") })
         )
     }
 

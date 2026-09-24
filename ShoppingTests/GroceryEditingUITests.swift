@@ -41,17 +41,7 @@ final class GroceryEditingUITests: XCTestCase {
     }
 
     func testInactiveCatalogSuggestionRequiresSelectionAndKeepsSavedDetails() {
-        let app = launchApp()
-        app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 2))
-        app.buttons["shopping.catalog.add"].tap()
-        XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
-        app.textFields["shopping.catalog.name"].typeText("Café au lait")
-        app.textFields["shopping.catalog.notes"].tap()
-        app.typeText("Oat milk preferred")
-        app.buttons["shopping.catalog.save"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
-        app.tabBars.buttons["Groceries"].tap()
+        let app = launchApp(fixture: "inactiveCatalogSuggestion")
 
         openAdd(in: app)
         enterName("cafe", in: app)
@@ -179,10 +169,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.grocery.activeMatch."
         )).count, 0, "One-time groceries must not supply Catalog suggestions")
-        app.buttons["shopping.grocery.cancel"].tap()
-
-        openAdd(in: app)
-        enterName("Strawberries", in: app)
+        replaceName(with: "Strawberries", in: app)
         app.buttons["Edit current Strawberries"].tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
@@ -239,9 +226,7 @@ final class GroceryEditingUITests: XCTestCase {
         openAdd(in: app)
         enterName("Bananas", in: app)
         XCTAssertFalse(app.buttons["Edit current Bananas"].exists)
-        app.buttons["shopping.grocery.cancel"].tap()
-        openAdd(in: app)
-        enterName("Grnola", in: app)
+        replaceName(with: "Grnola", in: app)
         XCTAssertTrue(app.buttons["Edit current Granola"].existsOrAppears(timeout: 2))
         app.buttons["shopping.grocery.cancel"].tap()
         app.buttons["Remove Urgent filter"].tap()
@@ -249,10 +234,7 @@ final class GroceryEditingUITests: XCTestCase {
         openAdd(in: app)
         enterName("Chipotles", in: app)
         XCTAssertFalse(app.buttons["Edit current Chipotles in adobo"].exists)
-        app.buttons["shopping.grocery.cancel"].tap()
-
-        openAdd(in: app)
-        enterName("Bananas", in: app)
+        replaceName(with: "Bananas", in: app)
         let match = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.grocery.activeMatch.", "Bananas"
@@ -370,6 +352,19 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(field.existsOrAppears(timeout: 2))
         field.tap()
         field.typeText(name)
+    }
+
+    private func replaceName(with name: String, in app: XCUIApplication) {
+        let field = app.textFields["shopping.grocery.name"]
+        field.tap()
+        field.typeKey("a", modifierFlags: .command)
+        field.typeKey(.delete, modifierFlags: [])
+        if let remaining = field.value as? String,
+           !remaining.isEmpty, remaining != field.placeholderValue {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: remaining.count))
+        }
+        field.typeText(name)
+        XCTAssertEqual(field.value as? String, name)
     }
 
     private func groceryRow(named name: String, app: XCUIApplication) -> XCUIElement {

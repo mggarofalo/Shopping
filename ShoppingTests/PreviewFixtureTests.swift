@@ -70,6 +70,120 @@ final class PreviewFixtureTests: XCTestCase {
         }
     }
 
+    func testArchivedCatalogFixturePreservesActiveNeedAndRulesWithoutChangingAnotherStore() throws {
+        let archived = try ShoppingPreviewFixtures.make(.archivedCatalogItem)
+        let populated = try ShoppingPreviewFixtures.make(.populated)
+        XCTAssertNotEqual(archived.ids.householdID, populated.ids.householdID)
+        XCTAssertTrue(Set(archived.ids.itemIDs.values).isDisjoint(with: populated.ids.itemIDs.values))
+        XCTAssertTrue(Set(archived.ids.needIDs.values).isDisjoint(with: populated.ids.needIDs.values))
+        for (fixture, isArchived) in [(archived, true), (populated, false)] {
+            let granolaID = try XCTUnwrap(fixture.ids.itemIDs["granola"])
+            let needID = try XCTUnwrap(fixture.ids.needIDs["granola"])
+            XCTAssertTrue(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).contains(needID))
+            XCTAssertEqual(
+                try fixture.service.storeEligibility(itemID: granolaID),
+                .activeStores([try XCTUnwrap(fixture.ids.storeIDs["costco"])])
+            )
+            let context = fixture.persistence.simulationContext()
+            try context.performAndWait {
+                let current = try need(needID, in: context)
+                let item = try XCTUnwrap(current.item)
+                XCTAssertEqual(item.id, granolaID)
+                XCTAssertEqual(item.isArchived, isArchived)
+                XCTAssertEqual(item.category?.id, fixture.ids.categoryIDs["pantry"])
+                XCTAssertEqual(item.name, "Granola")
+                XCTAssertEqual(item.notes, "")
+                XCTAssertFalse(current.archived)
+                XCTAssertFalse(current.carted)
+                XCTAssertEqual(current.notes, "Low sugar")
+                XCTAssertEqual(current.urgency, NeedUrgency.urgent.rawValue)
+                XCTAssertNil(current.quantity)
+            }
+        }
+    }
+
+    func testPromotionFixturesPreserveDistinctOccurrenceAndCatalogStateAfterReopen() throws {
+        var occurrenceIDs = Set<UUID>()
+        for fixtureCase in [ShoppingPreviewCase.promotionLinkExisting, .promotionConflict] {
+            let url = temporaryURL("promotion.sqlite")
+            let ids: ShoppingPreviewIDs
+            do {
+                let fixture = try ShoppingPreviewFixtures.make(fixtureCase, storeURL: url)
+                ids = fixture.ids
+            }
+            let reopened = try PersistenceController(storeURL: url)
+            let service = NeedService(persistence: reopened)
+            let oneTimeID = try XCTUnwrap(ids.needIDs["oneTime"])
+            XCTAssertTrue(occurrenceIDs.insert(oneTimeID).inserted)
+            let granolaID = try XCTUnwrap(ids.itemIDs["granola"])
+            XCTAssertNotEqual(oneTimeID, granolaID)
+            XCTAssertEqual(try service.allCatalogItemIDs(householdID: ids.householdID), [granolaID])
+            XCTAssertEqual(
+                try service.storeEligibility(itemID: granolaID),
+                .activeStores([try XCTUnwrap(ids.storeIDs["costco"])])
+            )
+            let context = reopened.simulationContext()
+            try context.performAndWait {
+                let oneTime = try need(oneTimeID, in: context)
+                XCTAssertEqual(oneTime.kind, NeedKind.oneTime.rawValue)
+                XCTAssertNil(oneTime.item)
+                XCTAssertEqual(oneTime.quantity, 2)
+                XCTAssertEqual(oneTime.urgency, NeedUrgency.urgent.rawValue)
+                XCTAssertEqual(oneTime.notes, "Buy this week")
+                XCTAssertTrue(oneTime.oneTimeAnyStore)
+                XCTAssertNil(oneTime.oneTimeCategory)
+                XCTAssertTrue(oneTime.oneTimeStores?.isEmpty ?? true)
+                XCTAssertFalse(oneTime.carted)
+                XCTAssertFalse(oneTime.archived)
+                XCTAssertEqual(oneTime.list?.id, ids.listID)
+                let item = try XCTUnwrap(context.fetch(Item.fetchRequest()).first)
+                XCTAssertEqual(item.name, "Granola")
+                XCTAssertEqual(item.notes, "")
+                XCTAssertEqual(item.category?.id, ids.categoryIDs["pantry"])
+                if fixtureCase == .promotionConflict {
+                    let remembered = try need(try XCTUnwrap(ids.needIDs["granola"]), in: context)
+                    XCTAssertNotEqual(remembered.id, oneTimeID)
+                    XCTAssertEqual(remembered.kind, NeedKind.remembered.rawValue)
+                    XCTAssertEqual(remembered.item?.id, granolaID)
+                    XCTAssertNil(remembered.quantity)
+                    XCTAssertEqual(remembered.notes, "Low sugar")
+                    XCTAssertEqual(remembered.urgency, NeedUrgency.urgent.rawValue)
+                    XCTAssertFalse(remembered.carted)
+                    XCTAssertFalse(remembered.archived)
+                    XCTAssertEqual(oneTime.title, remembered.title)
+                } else {
+                    XCTAssertEqual(oneTime.title, "Breakfast cereal")
+                    XCTAssertNil(ids.needIDs["granola"])
+                }
+            }
+            XCTAssertEqual(
+                try service.allActiveNeedIDs(householdID: ids.householdID).count,
+                fixtureCase == .promotionConflict ? 2 : 1
+            )
+            XCTAssertEqual(try service.catalogSuggestionNames(householdID: ids.householdID), ["Granola"])
+        }
+    }
+
+    func testInactiveSuggestionFixtureHasSavedDetailsWithoutCreatingACurrentNeed() throws {
+        let fixture = try ShoppingPreviewFixtures.make(.inactiveCatalogSuggestion)
+        XCTAssertTrue(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).isEmpty)
+        XCTAssertEqual(
+            try fixture.service.catalogSuggestionNames(householdID: fixture.ids.householdID),
+            ["Café au lait"]
+        )
+        let context = fixture.persistence.simulationContext()
+        try context.performAndWait {
+            let items = try context.fetch(Item.fetchRequest())
+            XCTAssertEqual(items.count, 1)
+            let item = try XCTUnwrap(items.first)
+            XCTAssertEqual(item.id, fixture.ids.itemIDs["cafe"])
+            XCTAssertEqual(item.notes, "Oat milk preferred")
+            XCTAssertTrue(item.anyStore)
+            XCTAssertNil(item.category)
+            XCTAssertTrue(item.stores?.isEmpty ?? true)
+        }
+    }
+
     func testDiskBackedFixtureRetainsRecoveryAndOneTimeDoesNotPolluteCatalogAfterReopen() throws {
         let url = temporaryURL("fixture.sqlite")
         var ids: ShoppingPreviewIDs!

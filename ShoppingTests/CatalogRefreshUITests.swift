@@ -36,6 +36,7 @@ final class CatalogRefreshUITests: XCTestCase {
         app.textFields["shopping.catalog.name"].typeText("Fresh basil")
         app.buttons["Edit Fresh basil"].tap()
         XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
         app.buttons["shopping.catalog.save"].tap()
         XCTAssertTrue(row.existsOrAppears(timeout: 2))
         XCTAssertEqual(row.value as? String, "")
