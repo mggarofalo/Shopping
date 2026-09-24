@@ -24,6 +24,7 @@ final class Household: IdentifiedManagedObject {
     @NSManaged var categories: Set<Category>?
     @NSManaged var people: Set<Person>?
     @NSManaged var clearOperations: Set<ClearOperation>?
+    @NSManaged var cartRecords: Set<HouseholdCartRecord>?
 }
 
 @objc(Person)

@@ -85,3 +85,24 @@ The duplicate-name route still has UI proof of selecting the existing editor and
 ## Maintaining this ledger
 
 Update the relevant row when adding a new UI owner, changing a fixture boundary or consolidating a scenario. Keep exact method names so a reviewer can locate the proof. Use [the testing skill](../.agents/skills/shopping-testing/SKILL.md) and [read-only reviewer](../.codex/agents/shopping-test-reviewer.toml) for the corresponding implementation and review checks. Test execution evidence belongs in the timing report and PR, not in an unmeasured promise of runtime savings.
+
+## Personal-cart architecture contract (SHOPPING-118)
+
+`Prototypes/PersonalCartContract/Tests/PersonalCartContractTests/CartContractTests.swift`
+owns the isolated architecture fixture: causal same-owner edits, concurrent quantity and
+remove outcomes, unseen edits versus checkout in both delivery orders, new occurrence
+isolation, A/B/C checkpoint reopen/replay, owner isolation, multiple purchase receipts and
+scoped restore, stale/id-reuse rejection, and presence repair reaching a fixed point.
+Run it with `swift test --package-path Prototypes/PersonalCartContract` on the host.
+This does not replace any app Fast or UI proof and is not included in app coverage.
+SHOPPING-103 must port these contracts to real Core Data/account/migration boundaries;
+SHOPPING-30 still owns live permissions and cross-device delivery. See
+[ADR 0002](architecture/0002-personal-carts.md).
+
+## Personal-cart production integration (SHOPPING-103)
+
+`PersonalCartServiceTests` owns account-qualified commands, independent cart quantities, exact captured checkout, competing receipts, conditional demand, SQLite recovery and migration decisions. `ShopperSessionProviderTests` owns real-provider state transitions with injected account lookup, durable account binding, offline eligibility and stale response rejection. `PersonalCartActivationTests` owns the local-to-account copy ledger, source preservation and interrupted-copy replay; it does not prove CloudKit delivery.
+
+`PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch` owns the actual personal-service UI route from grocery swipe to captured checkout, reopening SQLite and undo. `testLegacyCartRequiresExplicitClaim` proves old cart flags are not automatically assigned. `testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway` starts with two shoppers’ competing claims and a completed other-shopper purchase, then verifies retained own entry, notice, and explicit acknowledgement before the tested purchase. Its fixture supplies prerequisites only. `testPurchasedRememberedItemCanBeRequestedAgain` owns the catalog re-add route after fulfillment while retaining another occurrence in the personal cart. `testRetainedCartCanBeRemovedAfterHouseholdDisappears` verifies relaunch without recreating a household and the saved-cart cleanup route. These scenarios supplement the retained legacy workflow owners while existing installations await explicit activation; they do not substitute for account/replica or physical sharing tests.
+
+Personal UI fixtures require both an isolated UI-test store path and explicit DEBUG launch options. Normal launch uses the real account provider; previews and UI fixtures never establish authenticated or live-cloud evidence. SHOPPING-30 and SHOPPING-122 remain the physical account/watch proof gates.

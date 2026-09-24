@@ -38,6 +38,8 @@ final class PersistenceBootstrap: ObservableObject {
         let service: NeedService
         let householdID: UUID?
         let listID: UUID?
+        var personalCart: PersonalCartPresentation? = nil
+        var personalCartService: PersonalCartService? = nil
     }
 
     enum State {
@@ -56,6 +58,20 @@ final class PersistenceBootstrap: ObservableObject {
     private var historyConsumer: PersistentHistoryConsumer?
     private var associationWorker: ManagedShareAssociationWorker?
     private var generation = 0
+    private var personalMode = false
+    private var accountProvider: ShopperSessionProvider?
+    private var accountObserver: NSObjectProtocol?
+    private var personalConfiguration: PersistenceConfiguration?
+    private var activeAccountBinding: String?
+    private var accountLoadInProgress = false
+    private var personalService: PersonalCartService?
+#if DEBUG
+    private var personalFixture = false
+    private var personalNoticeFixture = false
+    private var personalRevokedFixture = false
+#endif
+    private static let personalModeKey = "shopping.personalCart.enabled"
+    private static let pendingImportKey = "shopping.personalCart.pendingImport"
 
     init(
         configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() },
@@ -108,17 +124,29 @@ final class PersistenceBootstrap: ObservableObject {
                 if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
-                    return PersistenceBootstrap(
+                    let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment
                     )
+#if DEBUG
+                    bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
+                    bootstrap.personalNoticeFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] == "1"
+                    bootstrap.personalRevokedFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_REVOKED"] == "1"
+#endif
+                    return bootstrap
                 }
-                return PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+                let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) })
+#if DEBUG
+                bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
+#endif
+                return bootstrap
             } catch {
                 return PersistenceBootstrap(configuration: { throw error })
             }
         }
-        return PersistenceBootstrap()
+        let bootstrap = PersistenceBootstrap()
+        bootstrap.personalMode = UserDefaults.standard.bool(forKey: personalModeKey)
+        return bootstrap
     }
 
     static func uiTestStoreURL(
@@ -216,24 +244,124 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     deinit {
+        if let accountObserver { NotificationCenter.default.removeObserver(accountObserver) }
         if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
     }
 
     func start() {
         guard case .loading = state else { return }
-        load()
+        if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
     }
 
     func retry() {
         generation += 1
         state = .loading
-        load()
+        if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
     }
 
     func applicationDidEnterForeground() {
+        if let accountProvider { Task { await accountProvider.refresh() } }
+        if let personalService { try? personalService.resumePending() }
+        if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
         retryShareAssociations()
+    }
+
+    func activatePersonalCarts(importLegacy: Bool) {
+        guard !accountLoadInProgress else { return }
+        accountLoadInProgress = true
+        let sourceURL: URL?
+        if importLegacy, case .ready(let ready) = state, !ready.persistence.configuration.isManaged {
+            sourceURL = ready.persistence.configuration.stores.first?.url
+            UserDefaults.standard.set(sourceURL?.path, forKey: Self.pendingImportKey)
+        } else {
+            sourceURL = UserDefaults.standard.string(forKey: Self.pendingImportKey).map { URL(fileURLWithPath: $0) }
+        }
+        personalMode = true
+        UserDefaults.standard.set(true, forKey: Self.personalModeKey)
+        do {
+            try detachCurrentStores()
+            state = .loading
+            let base = try FileManager.default.url(for: .applicationSupportDirectory,
+                in: .userDomainMask, appropriateFor: nil, create: true)
+                .appendingPathComponent("ShoppingAccounts", isDirectory: true)
+            guard let identifier = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
+                  let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String else {
+                throw ShopperSessionError.invalidConfiguration
+            }
+            if accountProvider == nil {
+                let provider = try ShopperSessionProvider(containerIdentifier: identifier, environment: environment,
+                    cacheDirectory: base.appendingPathComponent("Bindings", isDirectory: true))
+                accountProvider = provider
+                accountObserver = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange,
+                    object: provider, queue: nil) { [weak self] _ in
+                    Task { @MainActor in self?.accountStateChanged() }
+                }
+            }
+            guard let provider = accountProvider else { throw ShopperSessionError.setupRequired }
+            Task {
+                await provider.refresh()
+                do {
+                    let session = try provider.currentSession()
+                    personalConfiguration = try PersonalCartActivation.activate(sourceURL: sourceURL,
+                        session: session, baseDirectory: base, importLegacy: sourceURL != nil)
+                    guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
+                    UserDefaults.standard.removeObject(forKey: Self.pendingImportKey)
+                    activeAccountBinding = session.accountBinding
+                    personalMode = true
+                    UserDefaults.standard.set(true, forKey: Self.personalModeKey)
+                    load()
+                } catch { state = .failed(error) }
+                accountLoadInProgress = false
+            }
+        } catch {
+            accountLoadInProgress = false
+            state = .failed(error)
+        }
+    }
+
+    private func accountStateChanged() {
+        guard let accountProvider, !accountLoadInProgress else { return }
+        do {
+            let session = try accountProvider.currentSession()
+            if session.accountBinding != activeAccountBinding {
+                try detachCurrentStores()
+                activatePersonalCarts(importLegacy: false)
+            }
+        } catch {
+            do { try detachCurrentStores() } catch { state = .failed(error); return }
+            state = .failed(error)
+        }
+    }
+
+    private func detachCurrentStores() throws {
+        generation += 1
+        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver); self.remoteObserver = nil }
+        if let associationObserver { NotificationCenter.default.removeObserver(associationObserver); self.associationObserver = nil }
+        historyConsumer = nil
+        associationWorker = nil
+        personalService = nil
+        if case .ready(let ready) = state {
+            ready.persistence.writer.performAndWait { ready.persistence.writer.reset() }
+            ready.persistence.container.viewContext.reset()
+            let coordinator = ready.persistence.container.persistentStoreCoordinator
+            for store in coordinator.persistentStores { try coordinator.remove(store) }
+        }
+        activeAccountBinding = nil
+    }
+
+    private func makePersonalPresentation(selection: (householdID: UUID, listID: UUID)?) -> PersonalCartPresentation? {
+        guard let personalService, let selection else { return nil }
+        return PersonalCartPresentation(service: personalService, householdID: selection.householdID, listID: selection.listID)
+    }
+
+    private var allowsLocalHouseholdCreation: Bool {
+#if DEBUG
+        return !personalMode && !personalFixture
+#else
+        return !personalMode
+#endif
     }
 
     private func load() {
@@ -242,6 +370,7 @@ final class PersistenceBootstrap: ObservableObject {
             let persistence: PersistenceController
             let service: NeedService
             var selection: (householdID: UUID, listID: UUID)?
+            let isFreshPreview = preloadedPreviewEnvironment != nil
             if let preview = preloadedPreviewEnvironment {
                 resolvedConfiguration = preview.persistence.configuration
                 persistence = preview.persistence
@@ -249,14 +378,54 @@ final class PersistenceBootstrap: ObservableObject {
                 selection = (preview.ids.householdID, preview.ids.listID)
                 preloadedPreviewEnvironment = nil
             } else {
-                resolvedConfiguration = try self.configuration()
+                resolvedConfiguration = try personalConfiguration ?? self.configuration()
                 persistence = try PersistenceController(configuration: resolvedConfiguration)
                 service = NeedService(persistence: persistence)
                 selection = try service.firstHouseholdSelection()
-                if selection == nil, !resolvedConfiguration.isManaged, try service.isPersistentStoreEmpty() {
+                if selection == nil, allowsLocalHouseholdCreation, !resolvedConfiguration.isManaged, try service.isPersistentStoreEmpty() {
                     let created = try service.createHousehold()
                     selection = (created.householdID, created.listID)
                 }
+            }
+#if DEBUG
+            if personalFixture {
+                personalService = PersonalCartService(persistence: persistence,
+                    sessionProvider: try PersonalCartFixtureSessionProvider())
+                try personalService?.captureLegacyReview()
+                if personalNoticeFixture, isFreshPreview, let selection, let owner = personalService {
+                    let request = Need.fetchRequest()
+                    request.predicate = NSPredicate(format: "item.name == %@", "Granola")
+                    if let need = try persistence.container.viewContext.fetch(request).first {
+                        try owner.cart(needID: need.id, householdID: selection.householdID, listID: selection.listID)
+                        let other = PersonalCartService(persistence: persistence,
+                            sessionProvider: try PersonalCartFixtureSessionProvider(shopper: "other-preview-shopper"))
+                        try other.cart(needID: need.id, householdID: selection.householdID, listID: selection.listID)
+                        let token = try other.prepareCheckout(tokens: other.entries(householdID: selection.householdID,
+                            listID: selection.listID).map(\.token))
+                        _ = try other.checkout(token)
+                        personalService = PersonalCartService(persistence: persistence,
+                            sessionProvider: try PersonalCartFixtureSessionProvider())
+                    }
+                }
+                if personalRevokedFixture, isFreshPreview, let selected = selection, let owner = personalService {
+                    let context = persistence.container.viewContext
+                    let request = Need.fetchRequest()
+                    request.predicate = NSPredicate(format: "item.name == %@", "Granola")
+                    if let need = try context.fetch(request).first, let household = need.list?.household {
+                        try owner.cart(needID: need.id, householdID: selected.householdID, listID: selected.listID)
+                        context.delete(household)
+                        try context.save()
+                        selection = nil
+                    }
+                }
+            }
+#endif
+            if personalMode, let accountProvider {
+                let cartService = PersonalCartService(persistence: persistence, sessionProvider: accountProvider)
+                try cartService.captureLegacyReview()
+                personalService = cartService
+                do { try cartService.resumePending() }
+                catch { shareAssociationError = error }
             }
             if Self.consumesPersistentHistory(for: resolvedConfiguration) {
                 let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
@@ -281,7 +450,9 @@ final class PersistenceBootstrap: ObservableObject {
                 persistence: persistence,
                 service: service,
                 householdID: selection?.householdID,
-                listID: selection?.listID
+                listID: selection?.listID,
+                personalCart: makePersonalPresentation(selection: selection),
+                personalCartService: personalService
             ))
             consumeHistory()
             retryShareAssociations()
@@ -330,9 +501,14 @@ final class PersistenceBootstrap: ObservableObject {
                         persistence: ready.persistence,
                         service: ready.service,
                         householdID: selection.householdID,
-                        listID: selection.listID
+                        listID: selection.listID,
+                        personalCart: makePersonalPresentation(selection: selection),
+                personalCartService: personalService
                     ))
                 }
+                do { try personalService?.resumePending() }
+                catch { shareAssociationError = error }
+                if case .ready(let ready) = state { ready.personalCart?.refresh() }
             } catch {
                 guard generation == requestedGeneration else { return }
                 state = .failed(error)

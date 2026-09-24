@@ -21,6 +21,8 @@ struct GroceryNeedRow: View {
     @ObservedObject var need: Need
     let activeStores: [Store]
     let selectedStoreID: UUID?
+    var personalCarted: Bool? = nil
+    var presenceNames: [String] = []
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
@@ -45,11 +47,11 @@ struct GroceryNeedRow: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if let onCartedChange {
                 Button {
-                    onCartedChange(need, !need.carted)
+                    onCartedChange(need, !(personalCarted ?? need.carted))
                 } label: {
                     Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
-                .tint(need.carted ? .orange : .blue)
+                .tint((personalCarted ?? need.carted) ? .orange : .blue)
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }
             if onRemoved != nil {
@@ -62,7 +64,7 @@ struct GroceryNeedRow: View {
             }
         }
         .accessibilityAction(named: Text(cartActionAccessibilityTitle)) {
-            onCartedChange?(need, !need.carted)
+            onCartedChange?(need, !(personalCarted ?? need.carted))
         }
         .accessibilityActions {
             if onRemoved != nil {
@@ -102,12 +104,12 @@ struct GroceryNeedRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Edit \(title)")
-            .accessibilityValue(accessibilityDetails)
+            .accessibilityValue(accessibilityDetails + (presenceNames.isEmpty ? "" : ", In cart: " + presenceNames.joined(separator: ", ")))
             .accessibilityIdentifier("shopping.grocery.row.\(need.id.uuidString)")
         } else {
             details
                 .accessibilityLabel(title)
-                .accessibilityValue(accessibilityDetails)
+                .accessibilityValue(accessibilityDetails + (presenceNames.isEmpty ? "" : ", In cart: " + presenceNames.joined(separator: ", ")))
         }
     }
 
@@ -141,11 +143,11 @@ struct GroceryNeedRow: View {
     }
 
     private var cartActionTitle: String {
-        need.carted ? "Remove from cart" : "In cart"
+        (personalCarted ?? need.carted) ? "Remove from cart" : "In cart"
     }
 
     private var cartActionSymbol: String {
-        need.carted ? "cart.badge.minus" : "cart.fill"
+        (personalCarted ?? need.carted) ? "cart.badge.minus" : "cart.fill"
     }
 
     private var cartActionAccessibilityTitle: String {
@@ -189,6 +191,11 @@ struct GroceryNeedRow: View {
                     .accessibilityIdentifier("shopping.grocery.personLabel.\(need.id.uuidString)")
             }
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
+            if !presenceNames.isEmpty {
+                Text("In cart: " + presenceNames.joined(separator: ", "))
+                    .font(.caption).foregroundStyle(Color.grocerySecondary)
+                    .accessibilityHidden(true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 44)
@@ -216,7 +223,7 @@ struct GroceryNeedRow: View {
         var values: [String] = []
         if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
-        if need.carted { values.append("In cart") }
+        if (personalCarted ?? need.carted) { values.append("In cart") }
         if let storeIndicator { values.append(storeIndicator.title) }
         if let personLabel { values.append("For \(personLabel)") }
         if !need.notes.isEmpty { values.append(need.notes) }
