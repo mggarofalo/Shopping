@@ -45,6 +45,84 @@ final class PersonalCartServiceTests: XCTestCase {
         return try XCTUnwrap(cart.entries(householdID: fixture.householdID, listID: fixture.listID).first)
     }
 
+    func testSuspendedShareAssociationCannotAcknowledgeAfterAccountOrStoreDetaches() throws {
+        let f = try makeFixture()
+        let provider = MutableSession(try session().session)
+        _ = PersonalCartService(persistence: f.persistence, sessionProvider: provider)
+        let store = try XCTUnwrap(f.persistence.primaryStore)
+        XCTAssertNoThrow(try ManagedShareAssociationWorker.validateAuthority(persistence: f.persistence, store: store))
+        provider.value = try session("bob").session
+        XCTAssertThrowsError(try ManagedShareAssociationWorker.validateAuthority(persistence: f.persistence, store: store))
+        provider.value = try session().session
+        try f.persistence.container.persistentStoreCoordinator.remove(store)
+        XCTAssertThrowsError(try ManagedShareAssociationWorker.validateAuthority(persistence: f.persistence, store: store))
+    }
+
+    func testMalformedSharedPurchaseCannotBlockPrivateQuantityOrRemovalAfterRelaunch() throws {
+        let f = try makeFixture()
+        let entry = try add(f)
+        let context = f.persistence.simulationContext()
+        try context.performAndWait {
+            let record = HouseholdCartRecord(context: context)
+            record.id = UUID()
+            record.kind = "purchase"
+            record.household = try context.fetch(Household.fetchRequest()).first
+            record.payload = nil
+            try context.save()
+        }
+        XCTAssertThrowsError(try f.cart.prepareCheckout(tokens: [entry.token]))
+        try f.cart.setQuantity(9, token: entry.token)
+        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
+        let retained = try XCTUnwrap(cart.entries(householdID: f.householdID, listID: f.listID).first)
+        XCTAssertEqual(retained.quantity, 9)
+        try cart.uncart(retained.token)
+        XCTAssertTrue(try cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
+    }
+
+    func testRememberedReaddAfterPrivateIntentBeforePublicationUsesNewOccurrence() throws {
+        enum Injected: Error { case stopped }
+        let f = try makeFixture()
+        let entry = try add(f)
+        let capture = try f.cart.prepareCheckout(tokens: [entry.token])
+        let operationID = UUID()
+        f.cart.failurePoint = { if $0 == "afterIntent" { throw Injected.stopped } }
+        XCTAssertThrowsError(try f.cart.checkout(capture, operationID: operationID))
+        f.cart.failurePoint = nil
+        let replacement = try f.service.addRememberedNeed(itemID: f.itemID, listID: f.listID,
+            householdID: f.householdID, quantity: 3)
+        XCTAssertNotEqual(replacement, f.needID)
+        _ = try f.cart.restore(checkoutID: operationID)
+        let outstanding = try f.cart.outstandingNeedIDs(householdID: f.householdID, listID: f.listID)
+        XCTAssertTrue(outstanding.contains(replacement))
+        XCTAssertFalse(outstanding.contains(f.needID))
+    }
+
+    final class PrivateWritePolicy: PersistencePermissionPolicy {
+        var denied = false
+        func validateChanges(in context: NSManagedObjectContext, controller: PersistenceController) throws {
+            if denied && context.insertedObjects.contains(where: { $0 is PersonalCartRecord }) {
+                throw PersistencePermissionError.updateDenied
+            }
+        }
+    }
+
+    func testAtomicInitialQuantityRollsBackWholeAdditionAndSurvivesRelaunch() throws {
+        let policy = PrivateWritePolicy()
+        let f = try makeFixture(permissionPolicy: policy)
+        policy.denied = true
+        XCTAssertThrowsError(try f.cart.cart(needID: f.needID, householdID: f.householdID,
+            listID: f.listID, initialQuantity: 8))
+        XCTAssertTrue(try f.cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
+        policy.denied = false
+        try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID, initialQuantity: 8)
+        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
+        XCTAssertEqual(try cart.entries(householdID: f.householdID, listID: f.listID).first?.quantity, 8)
+        let context = reopened.simulationContext()
+        try context.performAndWait { XCTAssertNil(try context.fetch(Need.fetchRequest()).first?.quantity) }
+    }
+
     func testOwnQuantityAndCleanupNeverMutateSharedDemandOrOtherOwner() throws {
         let f = try makeFixture()
         let alice = try add(f)

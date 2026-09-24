@@ -17,13 +17,17 @@ protocol WatchShoppingService: AnyObject {
     func restore(token: String) async throws -> WatchActionResult
 }
 
-// Deliberately honest until the production adapter/bootstrap is installed by SHOPPING-121.
+// Explicit unavailable/setup presentation, also used for startup failures and previews.
 @MainActor
 final class UnavailableWatchShoppingService: WatchShoppingService {
     var onChange: (@MainActor (WatchServiceChange) -> Void)?
+    private let message: String?
+
+    init(message: String? = nil) { self.message = message }
 
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
-        WatchShoppingSnapshot(availability: .setupRequired(
+        if let message { return WatchShoppingSnapshot(availability: .unavailable(message)) }
+        return WatchShoppingSnapshot(availability: .setupRequired(
             "Your household isn’t available on this watch yet. Set up Shopping on your iPhone."
         ))
     }

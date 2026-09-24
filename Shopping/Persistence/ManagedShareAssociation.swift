@@ -126,12 +126,15 @@ actor ManagedShareAssociationWorker {
     private func drainOnce() async throws {
         guard let cloud = persistence.container as? NSPersistentCloudKitContainer,
               let privateStore = persistence.store(for: .ownerPrivate) else { return }
+        try Self.validateAuthority(persistence: persistence, store: privateStore)
         let privateStoreIdentifier = privateStore.identifier
         var firstError: Error?
         for entry in try journal.pending() {
+            try Self.validateAuthority(persistence: persistence, store: privateStore)
             guard let householdID = persistence.container.persistentStoreCoordinator
                 .managedObjectID(forURIRepresentation: entry.householdURI),
                   householdID.persistentStore == privateStore else {
+                try Self.validateAuthority(persistence: persistence, store: privateStore)
                 try journal.acknowledge(householdURI: entry.householdURI, objectURIs: entry.objectURIs)
                 continue
             }
@@ -144,7 +147,9 @@ actor ManagedShareAssociationWorker {
                     return false
                 }
             }
+            try Self.validateAuthority(persistence: persistence, store: privateStore)
             guard householdExists else {
+                try Self.validateAuthority(persistence: persistence, store: privateStore)
                 try journal.acknowledge(householdURI: entry.householdURI, objectURIs: entry.objectURIs)
                 continue
             }
@@ -173,7 +178,9 @@ actor ManagedShareAssociationWorker {
                     }
                     return (idsByURI: idsByURI, staleURIs: staleURIs)
                 }
+                try Self.validateAuthority(persistence: persistence, store: privateStore)
                 if !candidates.staleURIs.isEmpty {
+                    try Self.validateAuthority(persistence: persistence, store: privateStore)
                     try journal.acknowledge(
                         householdURI: entry.householdURI,
                         objectURIs: candidates.staleURIs
@@ -195,6 +202,7 @@ actor ManagedShareAssociationWorker {
                     alreadyAssociated.insert(uri)
                 }
                 if !alreadyAssociated.isEmpty {
+                    try Self.validateAuthority(persistence: persistence, store: privateStore)
                     try journal.acknowledge(
                         householdURI: entry.householdURI,
                         objectURIs: alreadyAssociated
@@ -205,6 +213,8 @@ actor ManagedShareAssociationWorker {
                 let associatedURIs = try await withCheckedThrowingContinuation {
                     (continuation: CheckedContinuation<Set<URL>, Error>) in
                     context.perform {
+                        do { try Self.validateAuthority(persistence: self.persistence, store: privateStore) }
+                        catch { continuation.resume(throwing: error); return }
                         var validURIs: Set<URL> = []
                         let objects = unassociated.compactMap { uri, id -> NSManagedObject? in
                             guard let object = try? context.existingObject(with: id),
@@ -223,6 +233,7 @@ actor ManagedShareAssociationWorker {
                     }
                 }
                 if !associatedURIs.isEmpty {
+                    try Self.validateAuthority(persistence: persistence, store: privateStore)
                     try journal.acknowledge(
                         householdURI: entry.householdURI,
                         objectURIs: associatedURIs
@@ -233,6 +244,19 @@ actor ManagedShareAssociationWorker {
             }
         }
         if let firstError { throw firstError }
+    }
+
+    // A suspended worker must not mistake an account-detached store for deleted objects.
+    // Invalidation preserves its durable journal for the original account's next launch.
+    static func validateAuthority(persistence: PersistenceController, store: NSPersistentStore) throws {
+        guard persistence.container.persistentStoreCoordinator.persistentStores.contains(where: { $0 === store }) else {
+            throw PersonalCartError.accountChanged
+        }
+        if let provider = persistence.personalCartSessionProvider {
+            guard try provider.currentSession().accountBinding == persistence.personalCartInitialBinding else {
+                throw PersonalCartError.accountChanged
+            }
+        }
     }
 
 }

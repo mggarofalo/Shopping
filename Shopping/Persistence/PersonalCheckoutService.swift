@@ -20,8 +20,16 @@ extension PersonalCartService {
                     purchaseRuleEvidence: need.map(PersonalCartSnapshotBuilder.ruleEvidence) ?? "retained",
                     needRevision: need?.revision ?? -1)
             }
-            return PersonalCheckoutToken(id: UUID(), accountBinding: first.accountBinding,
+            var token = PersonalCheckoutToken(id: UUID(), accountBinding: first.accountBinding,
                 householdID: first.householdID, listID: first.listID, storeID: storeID, captures: captures)
+            if let storeID {
+                let request = Store.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@ AND household.id == %@ AND isArchived == NO", storeID as CVarArg, first.householdID as CVarArg)
+                let stores = try repository.context.fetch(request)
+                guard stores.count == 1 else { throw PersonalCartError.scopeChanged }
+                token.storeName = stores[0].name
+            }
+            return token
         }
     }
 

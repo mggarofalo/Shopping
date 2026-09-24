@@ -43,6 +43,7 @@ extension EnvironmentValues {
 
 @main
 struct ShoppingApp: App {
+    @UIApplicationDelegateAdaptor(ShoppingApplicationDelegate.self) private var applicationDelegate
     @StateObject private var bootstrap: PersistenceBootstrap
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue

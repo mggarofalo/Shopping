@@ -3,12 +3,11 @@ import XCTest
 final class WatchShoppingUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    func testNormalLaunchShowsSetupWithoutDemoGroceries() {
-        let app = XCUIApplication()
-        app.launch()
+    func testUnimportedReplicaShowsSetupWithoutDemoGroceries() {
+        let app = launchDurableFixture("setup")
         XCTAssertTrue(app.staticTexts["Set up Shopping"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["watch.store.switch"].exists)
-        screenshot("Watch normal launch setup", app: app)
+        screenshot("Watch isolated unimported replica setup", app: app)
     }
 
     func testStoreTitleSwitchAndNativeSwipeCart() {
@@ -130,6 +129,133 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["3 items cleared"].waitForExistence(timeout: 5))
     }
 
+    func testDurableQuantityCheckoutRelaunchAndRestore() {
+        let app = launchDurableFixture("ready")
+        selectMarketIfNeeded(app)
+        let milk = app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).element
+        reveal(milk, in: app)
+        milk.swipeLeft()
+        app.buttons["Add"].tap()
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        milk.tap()
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        increase.tap()
+        XCTAssertTrue(app.staticTexts["1"].waitForExistence(timeout: 3))
+        increase.tap()
+        XCTAssertTrue(app.staticTexts["2"].waitForExistence(timeout: 3))
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        app.buttons["watch.checkout.open"].tap()
+        let confirm = app.buttons["watch.checkout.confirm"]
+        reveal(confirm, in: app)
+        confirm.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        openHistory(app)
+        let restore = app.buttons["Restore items"]
+        reveal(restore, in: app)
+        restore.tap()
+        app.buttons["Restore items"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        screenshot("Durable cart restored after relaunch", app: app)
+    }
+
+    func testDurableMissingAndRevokedHouseholdRetainPrivateCleanupAndHistory() {
+        for scenario in ["missing", "revoked"] {
+            let app = launchDurableFixture(scenario)
+            if app.buttons["watch.cart.open"].waitForExistence(timeout: 3) {
+                app.buttons["watch.cart.open"].tap()
+            } else {
+                let retained = app.buttons["Your cart"]
+                reveal(retained, in: app)
+                retained.tap()
+            }
+            let milk = app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).element
+            reveal(milk, in: app)
+            XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+            milk.swipeLeft()
+            app.buttons["Remove"].tap()
+            XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 5))
+            app.terminate()
+            app.launch()
+            if app.buttons["watch.cart.open"].waitForExistence(timeout: 3) {
+                app.buttons["watch.cart.open"].tap()
+                XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 5))
+                app.navigationBars.buttons.firstMatch.tap()
+            } else {
+                XCTAssertFalse(app.buttons["Your cart"].exists)
+            }
+            openHistory(app)
+            let restore = app.buttons["Restore items"]
+            reveal(restore, in: app, allowDisabled: true)
+            XCTAssertFalse(restore.isEnabled)
+            screenshot("Retained history with " + scenario + " household", app: app)
+            app.terminate()
+        }
+    }
+
+    func testDurableEmptyHouseholdDiffersFromMissingSetup() {
+        let setup = launchDurableFixture("setup")
+        XCTAssertTrue(setup.staticTexts["Set up Shopping"].waitForExistence(timeout: 5))
+        XCTAssertFalse(setup.buttons["watch.cart.open"].exists)
+        setup.terminate()
+        let empty = launchDurableFixture("empty")
+        selectMarketIfNeeded(empty)
+        XCTAssertTrue(empty.buttons["watch.cart.open"].exists)
+        XCTAssertFalse(empty.staticTexts["Set up Shopping"].exists)
+        XCTAssertFalse(empty.buttons["watch.checkout.open"].isEnabled)
+    }
+
+    private func launchDurableFixture(_ scenario: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_WATCH_DURABLE_FIXTURE"] = scenario
+        app.launchEnvironment["SHOPPING_WATCH_TEST_ID"] = UUID().uuidString
+        addTeardownBlock {
+            app.terminate()
+            app.launchEnvironment["SHOPPING_WATCH_DURABLE_FIXTURE"] = "cleanup"
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Set up Shopping"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+        app.launch()
+        return app
+    }
+
+    private func selectMarketIfNeeded(_ app: XCUIApplication) {
+        if !app.buttons["watch.cart.open"].waitForExistence(timeout: 3) {
+            let market = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Market")).element
+            XCTAssertTrue(market.waitForExistence(timeout: 3))
+            market.tap()
+        }
+        XCTAssertTrue(app.buttons["watch.cart.open"].waitForExistence(timeout: 5))
+    }
+
+    private func openHistory(_ app: XCUIApplication) {
+        let switcher = storeSwitcher(in: app)
+        if switcher.waitForExistence(timeout: 3) { switcher.tap() }
+        let history = app.buttons["Recently cleared"]
+        reveal(history, in: app)
+        history.tap()
+        XCTAssertTrue(app.navigationBars["Recently cleared"].waitForExistence(timeout: 3))
+    }
+
     private func storeSwitcher(in app: XCUIApplication) -> XCUIElement {
         // Native watch toolbars repeat the identifier on nested wrappers. Scope to
         // the toolbar-owned button rather than choosing an arbitrary descendant.
@@ -143,18 +269,21 @@ final class WatchShoppingUITests: XCTestCase {
         return app
     }
 
-    private func reveal(_ element: XCUIElement, in app: XCUIApplication, allowOversizedRow: Bool = false) {
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, allowOversizedRow: Bool = false, allowDisabled: Bool = false) {
         func viewport() -> (top: CGFloat, bottom: CGFloat) {
-            let navigation = app.navigationBars.firstMatch
+            let confirmation = app.navigationBars["Check out"]
+            let navigation = confirmation.exists ? confirmation : app.navigationBars.firstMatch
             let checkout = app.buttons["watch.checkout.open"]
             let cart = app.buttons["watch.cart.open"]
             // A disabled checkout still occupies space beside the enabled View cart button.
-            let footerVisible = checkout.exists && (checkout.isHittable || (cart.exists && cart.isHittable))
+            // A presented confirmation has no footer; underlying root controls may remain in AX.
+            let footerVisible = !confirmation.exists && checkout.exists
+                && (checkout.isHittable || (cart.exists && cart.isHittable))
             return (navigation.exists ? navigation.frame.maxY : 30,
                     footerVisible ? checkout.frame.minY - 2 : app.frame.maxY)
         }
         func isClear() -> Bool {
-            guard element.exists && element.isHittable else { return false }
+            guard element.exists && (element.isHittable || allowDisabled) else { return false }
             let bounds = viewport()
             if allowOversizedRow && element.frame.height > bounds.bottom - bounds.top {
                 let visibleHeight = min(element.frame.maxY, bounds.bottom) - max(element.frame.minY, bounds.top)
@@ -169,7 +298,13 @@ final class WatchShoppingUITests: XCTestCase {
             let isAbove = element.exists && (oversized
                 ? element.frame.midY < (bounds.top + bounds.bottom) / 2
                 : element.frame.minY < bounds.top)
-            XCUIDevice.shared.rotateDigitalCrown(delta: isAbove ? -0.15 : 0.15)
+            let distance: CGFloat
+            if !element.exists { distance = .infinity }
+            else if oversized { distance = abs(element.frame.midY - (bounds.top + bounds.bottom) / 2) }
+            else { distance = isAbove ? bounds.top - element.frame.minY : element.frame.maxY - bounds.bottom }
+            // Use a full scroll step for distant rows, then fine Crown movement near the viewport.
+            let rotation = distance > 60 ? 0.6 : 0.15
+            XCUIDevice.shared.rotateDigitalCrown(delta: isAbove ? -rotation : rotation)
         }
         screenshot("Unreachable element", app: app)
         XCTAssertTrue(isClear())

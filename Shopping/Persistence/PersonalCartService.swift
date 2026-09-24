@@ -18,7 +18,8 @@ final class PersonalCartService: @unchecked Sendable {
 
     func entries(householdID: UUID, listID: UUID) throws -> [PersonalCartEntrySnapshot] {
         try transact(save: false) { repository in
-            try self.entries(householdID: householdID, listID: listID, repository: repository)
+            do { return try self.entries(householdID: householdID, listID: listID, repository: repository) }
+            catch { return try self.entries(householdID: householdID, listID: listID, repository: repository, includeShared: false) }
         }
     }
 
@@ -27,18 +28,8 @@ final class PersonalCartService: @unchecked Sendable {
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(format: "list.id == %@ AND list.household.id == %@ AND archived == NO",
                                             listID as CVarArg, householdID as CVarArg)
-            var fulfilled = try HouseholdDemandProjection.fulfilledNeedIDs(householdID: householdID, in: repository.context)
-            let intents = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
-            let restores = try repository.values(PersonalRestoreIntent.self, kind: "restore")
-            for (id, intent) in intents where intent.token.householdID == householdID && intent.token.listID == listID {
-                for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
-                    let needID = capture.entry.needID
-                    guard !restores.values.contains(where: { $0.checkoutID == id && $0.restoredNeedIDs.contains(needID) }),
-                          try HouseholdDemandProjection.evidence(needID: needID, householdID: householdID, in: repository.context) == capture.demandEvidence,
-                          try HouseholdDemandProjection.rulesMatch(capture, in: repository.context) else { continue }
-                    fulfilled.insert(needID)
-                }
-            }
+            let fulfilled = try PersonalDemandProjection.fulfilledNeedIDs(householdID: householdID,
+                persistence: self.persistence, in: repository.context, session: repository.session)
             return Set(try repository.context.fetch(request).map(\.id)).subtracting(fulfilled)
         }
     }
@@ -80,6 +71,7 @@ final class PersonalCartService: @unchecked Sendable {
                     .reduce(into: Set<UUID>()) { $0.formUnion($1.restoredNeedIDs) }
                 return PersonalCheckoutHistoryEntry(id: id, createdAt: intent.createdAt,
                     entries: intent.token.captures.filter { intent.accepted.contains($0.entry.needID) }.map(\.entry),
+                    storeName: intent.token.storeName,
                     restored: !intent.accepted.isEmpty && intent.accepted.isSubset(of: restoredIDs),
                     restoredNeedIDs: restoredIDs,
                     pendingPublication: !completed.values.contains(id)
@@ -88,7 +80,7 @@ final class PersonalCartService: @unchecked Sendable {
         }
     }
 
-    func entries(householdID: UUID, listID: UUID, repository: PersonalCartRepository) throws -> [PersonalCartEntrySnapshot] {
+    func entries(householdID: UUID, listID: UUID, repository: PersonalCartRepository, includeShared: Bool = true) throws -> [PersonalCartEntrySnapshot] {
         let results = try repository.values(PersonalCartCommandResult.self, kind: "cart")
         var edits: [UUID: PersonalCartEdit] = [:]
         for (id, result) in results {
@@ -100,7 +92,7 @@ final class PersonalCartService: @unchecked Sendable {
         }
         let checkouts = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
         let restores = try repository.values(PersonalRestoreIntent.self, kind: "restore")
-        var purchases = try HouseholdDemandProjection.purchases(householdID: householdID, in: repository.context)
+        var purchases = includeShared ? try HouseholdDemandProjection.purchases(householdID: householdID, in: repository.context) : []
         for (id, intent) in checkouts where intent.token.householdID == householdID {
             for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
                 guard !restores.values.contains(where: { $0.checkoutID == id && $0.restoredNeedIDs.contains(capture.entry.needID) }) else { continue }
@@ -111,13 +103,13 @@ final class PersonalCartService: @unchecked Sendable {
                 }
             }
         }
-        let demandEvents = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID, in: repository.context)
+        let demandEvents: [UUID: HouseholdDemandEvent] = includeShared ? try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID, in: repository.context) : [:]
         let evidence = Dictionary(grouping: demandEvents.values, by: \.needID).mapValues { Set($0.map(\.id)) }
         let superseded = demandEvents.values.reduce(into: Set<UUID>()) { $0.formUnion($1.replaces) }
         let reducer = PersonalCartReducer(edits: edits, checkouts: checkouts, restores: restores,
-                                          purchases: purchases, demandEvidence: evidence, superseded: superseded)
+                                          purchases: purchases, demandEvidence: evidence, superseded: superseded, validateSharedRecovery: includeShared)
         return try reducer.entries(accountBinding: repository.session.accountBinding, householdID: householdID, listID: listID).map { saved in
-            guard let need = try repository.need(saved.needID, householdID: householdID, listID: listID) else {
+            guard includeShared, let need = try repository.need(saved.needID, householdID: householdID, listID: listID) else {
                 return self.withMetadata(saved, from: nil)
             }
             let fresh = try PersonalCartSnapshotBuilder.make(need: need, session: repository.session,
@@ -149,6 +141,7 @@ final class PersonalCartService: @unchecked Sendable {
             }
         }
         var result: Result<T, Error>!
+        var saved = false
         persistence.writer.performAndWait {
             let context = persistence.writer
             context.reset()
@@ -161,12 +154,16 @@ final class PersonalCartService: @unchecked Sendable {
                 if save && context.hasChanges {
                     try persistence.prepareForSave(context)
                     try context.save()
+                    saved = true
                 }
                 result = .success(value)
             } catch {
                 context.rollback()
                 result = .failure(error)
             }
+        }
+        if saved && persistence.shareAssociationJournal != nil {
+            NotificationCenter.default.post(name: PersistenceController.pendingShareAssociation, object: persistence)
         }
         return try result.get()
     }

@@ -59,16 +59,6 @@ struct ClearCartedPreviewRow: Equatable {
     let oneTime: Bool
 }
 
-enum NeedUrgency: String, Codable, CaseIterable {
-    case normal
-    case urgent
-}
-
-enum NeedKind: String, Codable {
-    case remembered
-    case oneTime
-}
-
 struct RememberedDuplicateGroup: Equatable {
     let itemID: UUID
     let candidates: [RememberedDuplicateCandidate]
@@ -3453,7 +3443,7 @@ final class NeedService: @unchecked Sendable {
         let householdIDs = Set(needs.compactMap { $0.list?.household?.id })
         var fulfilled: Set<UUID> = []
         for id in householdIDs {
-            fulfilled.formUnion(try HouseholdDemandProjection.fulfilledNeedIDs(householdID: id, in: context))
+            fulfilled.formUnion(try PersonalDemandProjection.fulfilledNeedIDs(householdID: id, persistence: persistence, in: context))
         }
         return needs.filter { !fulfilled.contains($0.id) }
     }

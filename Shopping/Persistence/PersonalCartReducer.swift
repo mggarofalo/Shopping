@@ -7,6 +7,7 @@ struct PersonalCartReducer {
     let purchases: [HouseholdPurchaseEvent]
     let demandEvidence: [UUID: Set<UUID>]
     let superseded: Set<UUID>
+    var validateSharedRecovery = true
 
     func entries(accountBinding: String, householdID: UUID, listID: UUID) throws -> [PersonalCartEntrySnapshot] {
         let scoped = edits.values.filter {
@@ -37,8 +38,8 @@ struct PersonalCartReducer {
                 let restored = restores.values.contains {
                     $0.checkoutID == operationID && $0.restoredNeedIDs.contains(needID)
                 }
-                return !(restored && !superseded.contains(needID)
-                         && capture.demandEvidence == demandEvidence[needID, default: []])
+                return !(restored && (!validateSharedRecovery || (!superseded.contains(needID)
+                         && capture.demandEvidence == demandEvidence[needID, default: []])))
             }
             guard !hidden else { return nil }
             let saved = winner.snapshot

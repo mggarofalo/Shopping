@@ -23,15 +23,23 @@ final class PersonalCartPresentation {
     func refresh() {
         do {
             let nextEntries = try service.entries(householdID: householdID, listID: listID)
-            let nextOutstanding = try service.outstandingNeedIDs(householdID: householdID, listID: listID)
-            let nextPresence = try service.presence(householdID: householdID, listID: listID)
             let nextHistory = try service.history(householdID: householdID, listID: listID)
             entries = nextEntries
+            history = nextHistory
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        do {
+            let nextOutstanding = try service.outstandingNeedIDs(householdID: householdID, listID: listID)
+            let nextPresence = try service.presence(householdID: householdID, listID: listID)
             outstandingNeedIDs = nextOutstanding
             presence = nextPresence
-            history = nextHistory
             error = nil
         } catch {
+            // Incomplete household imports cannot hide private removal or purchase history.
+            outstandingNeedIDs = []
+            presence = []
             self.error = error.localizedDescription
         }
     }

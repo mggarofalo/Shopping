@@ -2,7 +2,7 @@ import CoreData
 
 /// Adds retained causal evidence in the same transaction as each actual need mutation.
 enum HouseholdDemandJournal {
-    static func captureChanges(in context: NSManagedObjectContext) throws {
+    static func captureChanges(in context: NSManagedObjectContext, persistence: PersistenceController) throws {
         let keys: Set<String> = ["revision", "quantity", "notes", "urgency", "archived", "title", "kind", "item", "list",
                                  "oneTimeAnyStore", "oneTimeStores", "oneTimeCategory", "person"]
         let needs = context.insertedObjects.union(context.updatedObjects).compactMap { $0 as? Need }
@@ -20,7 +20,7 @@ enum HouseholdDemandJournal {
                 let request = Need.fetchRequest()
                 request.predicate = NSPredicate(format: "item == %@ AND list == %@ AND id != %@", item, list, need.id as CVarArg)
                 let previous = try context.fetch(request)
-                let fulfilled = try HouseholdDemandProjection.fulfilledNeedIDs(householdID: household.id, in: context)
+                let fulfilled = try PersonalDemandProjection.fulfilledNeedIDs(householdID: household.id, persistence: persistence, in: context)
                 replaces = Set(previous.filter { $0.archived || fulfilled.contains($0.id) }.map(\.id))
             }
             let id = UUID()

@@ -48,6 +48,7 @@ struct PersonalCheckoutToken: Codable, Equatable, Sendable {
     let listID: UUID
     let storeID: UUID?
     let captures: [PersonalCheckoutCapture]
+    var storeName: String? = nil
     var entries: [PersonalCartEntryToken] { captures.map(\.entry.token) }
 }
 
@@ -64,6 +65,7 @@ struct PersonalCheckoutHistoryEntry: Identifiable, Equatable, Sendable {
     let id: UUID
     let createdAt: Date
     let entries: [PersonalCartEntrySnapshot]
+    let storeName: String?
     let restored: Bool
     let restoredNeedIDs: Set<UUID>
     let pendingPublication: Bool

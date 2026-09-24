@@ -6,8 +6,11 @@ struct WatchStoreChooser: View {
 
     var body: some View {
         List {
+            if let status = session.snapshot.statusMessage {
+                Text(status).font(.footnote).foregroundStyle(.secondary)
+            }
             if session.snapshot.stores.isEmpty {
-                Text("Add a store on your iPhone to start shopping.").font(.footnote)
+                Text("No stores available").font(.footnote)
             }
             ForEach(session.snapshot.stores) { store in
                 Button {

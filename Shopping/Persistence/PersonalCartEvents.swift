@@ -67,6 +67,7 @@ struct PersonalCartCommandResult: Codable, Equatable {
 
 enum PersonalCartCommand: Codable, Equatable {
     case cart(needID: UUID, householdID: UUID, listID: UUID)
+    case cartWithQuantity(needID: UUID, householdID: UUID, listID: UUID, quantity: Int64?, expectedStoreID: UUID?)
     case uncart(PersonalCartEntryToken)
     case quantity(PersonalCartEntryToken, Int64?)
     case checkout(PersonalCheckoutToken, Set<UUID>)
