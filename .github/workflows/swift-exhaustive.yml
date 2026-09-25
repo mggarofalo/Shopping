@@ -71,6 +71,9 @@ jobs:
             com.apple.CoreSimulator.SimRuntime.iOS-18-5)"
           xcrun simctl boot "$shopping_simulator_id"
           xcrun simctl bootstatus "$shopping_simulator_id" -b
+          # A fresh simulator's QuickPath tutorial can interrupt the first typed test value.
+          xcrun simctl spawn "$shopping_simulator_id" defaults write \
+            com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true
           echo "udid=$shopping_simulator_id" >> "$GITHUB_OUTPUT"
           SH
 

@@ -75,6 +75,7 @@ struct WatchShoppingSnapshot: Equatable {
     var canCheckout = false
     // Observed status, not inferred from phone reachability. Offline does not disable commands.
     var statusMessage: String?
+    var syncStatus = WatchSyncStatus()
 
     var selectedStore: WatchStore? { stores.first { $0.id == selectedStoreID } }
     var cartCount: Int { cartSections.reduce(0) { $0 + $1.items.count } }

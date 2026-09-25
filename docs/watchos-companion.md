@@ -74,3 +74,9 @@ Local validation on September 24, 2026: the Series 11 46mm simulator passed all 
 - [SwiftUI safe area inset](https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-6gwby)
 
 The installed SDK confirms these native APIs at the watchOS 10 minimum. The target opts into `WKRunsIndependentlyOfCompanionApp`. Its managed bootstrap supplies the independent data path; physical phone-powered-off validation still belongs to SHOPPING-122.
+
+### Compact sync status
+
+Shopping, cart, and store selection expose a small sync control; tapping opens current details. Routine CloudKit activity does not insert message rows or automatically present a sheet. The icon distinguishes waiting, working, recently completed activity, and attention; recent activity does not establish delivery to another device. Account, sharing, import-history and recovery messages remain in details, while blocking setup and action alerts keep their existing flows.
+
+On the grocery screen the store switcher and sync control occupy a stable native `safeAreaInset` header. Separate leading/trailing watchOS toolbar items move the system clock to the center and overlap a wide store-name control; `principal` placement is unavailable on watchOS. The header avoids that collision without custom offsets or gesture handling. Cart and store selection retain native trailing toolbar controls. The small symbol has a full 44-point header target, and details use a scrollable native list with Back and Done.

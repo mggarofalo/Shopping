@@ -192,13 +192,16 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 summary: operation.restored ? "Purchase restored" : "\(operation.entries.count) purchased\(operation.pendingPublication ? " · Sync pending" : "")",
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
+        let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : recoveryMessage
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
             stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try item($0, inCart: true) },
             recentCheckouts: operations,
             canCheckout: writable && selectedStoreID != nil && visibleCart.contains { eligible($0) && $0.demandAvailable && $0.purchaseNotices.isEmpty },
-            statusMessage: !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : recoveryMessage ?? bootstrap?.accountStatusMessage)
+            statusMessage: attention ?? bootstrap?.accountStatusMessage,
+            syncStatus: bootstrap?.syncStatus(additionalMessage: attention)
+                ?? WatchSyncStatus(attentionMessages: [attention].compactMap { $0 }))
         lastSnapshot = snapshot
         if let selectionURL {
             try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)

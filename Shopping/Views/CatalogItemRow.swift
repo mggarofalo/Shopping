@@ -1,25 +1,12 @@
 import SwiftUI
 
 struct CatalogItemRow: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var item: Item
     let validStores: [Store]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if dynamicTypeSize.isAccessibilitySize {
-                titleAndMetadataStack
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) {
-                        title
-                        Spacer(minLength: 8)
-                        supportingMetadata
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    titleAndMetadataStack
-                }
-            }
+            titleAndMetadataStack
             if !item.notes.isEmpty {
                 Text(item.notes)
                     .font(.caption)
@@ -27,6 +14,7 @@ struct CatalogItemRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
     }

@@ -207,6 +207,12 @@ struct CatalogAddScopeConstraint: Equatable {
     let newNeedUrgency: NeedUrgency
 }
 
+enum CatalogListMembership: Equatable {
+    case absent
+    case present(needID: UUID, revision: Int64)
+    case ambiguous
+}
+
 struct CatalogAddEntry: Codable, Equatable {
     let itemID: UUID
     let itemRevision: Int64
@@ -509,6 +515,24 @@ final class NeedService: @unchecked Sendable {
                 archivedCount: archived, restoredCount: restored, deletedCount: deleted,
                 retainedCount: retained, changedCount: changed, missingCount: missing
             )
+        }
+    }
+
+    /// A conflicted item must not prevent the rest of Catalog from displaying its actions.
+    func catalogListMembership(
+        itemIDs: Set<UUID>, householdID: UUID, listID: UUID
+    ) throws -> [UUID: CatalogListMembership] {
+        try readOnWriter { context in
+            _ = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
+            let groups = try self.activeRememberedNeeds(itemIDs: itemIDs, listID: listID, in: context)
+            return Dictionary(uniqueKeysWithValues: itemIDs.map { itemID in
+                let needs = groups[itemID] ?? []
+                let membership: CatalogListMembership
+                if needs.count > 1 { membership = .ambiguous }
+                else if let need = needs.first { membership = .present(needID: need.id, revision: need.revision) }
+                else { membership = .absent }
+                return (itemID, membership)
+            })
         }
     }
 

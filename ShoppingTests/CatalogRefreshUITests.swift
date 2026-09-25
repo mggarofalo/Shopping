@@ -52,7 +52,16 @@ final class CatalogRefreshUITests: XCTestCase {
 
         app.buttons["shopping.catalog.add"].tap()
         XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
-        app.textFields["shopping.catalog.name"].typeText("Oat milk")
+        let name = app.textFields["shopping.catalog.name"]
+        XCTAssertTrue(name.isHittable)
+        name.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        name.typeText("Oat milk")
+        let typedName = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Oat milk"), object: name
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [typedName], timeout: 3), .completed)
+        XCTAssertEqual(name.value as? String, "Oat milk")
         let saveAndAdd = app.buttons["shopping.catalog.saveAndAddToList"]
         XCTAssertTrue(saveAndAdd.isEnabled)
         saveAndAdd.tap()

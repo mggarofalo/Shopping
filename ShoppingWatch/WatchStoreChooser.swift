@@ -6,9 +6,6 @@ struct WatchStoreChooser: View {
 
     var body: some View {
         List {
-            if let status = session.snapshot.statusMessage {
-                Text(status).font(.footnote).foregroundStyle(.secondary)
-            }
             if session.snapshot.stores.isEmpty {
                 Text("No stores available").font(.footnote)
             }
@@ -50,6 +47,7 @@ struct WatchStoreChooser: View {
         }
         .listStyle(.plain)
         .navigationTitle("Stores")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { WatchSyncStatusButton(session: session) } }
     }
 }
 

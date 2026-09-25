@@ -43,9 +43,9 @@ struct GroceryNeedRow: View {
                         maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
                         alignment: .trailing
                     )
+                    .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 12 : 0)
             }
         }
-        .frame(minHeight: 44)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if let onCartedChange {
                 Button {
@@ -199,8 +199,8 @@ struct GroceryNeedRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 44)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

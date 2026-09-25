@@ -162,33 +162,55 @@ final class CategoryManagementUITests: XCTestCase {
         XCTAssertTrue(feedback.label.contains("Needed again 1"))
     }
 
-    func testCatalogAddFocusesExistingAndRequiresExplicitNeedAgainForCartedItem() {
+    func testCatalogSwipeRemovesExistingNeedAndAddsAgainWithoutLeavingCatalog() {
         let app = launchPopulated()
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bananas")).firstMatch
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
+        let rowID = row.identifier
+        let itemID = rowID.replacingOccurrences(of: "shopping.catalog.item.", with: "")
+        row.swipeLeft()
+        let remove = app.buttons["shopping.catalog.removeFromList.\(itemID)"]
+        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.buttons["shopping.catalog.addToList.\(itemID)"].exists)
+        remove.tap()
+        XCTAssertTrue(app.tabBars.buttons["Catalog"].isSelected)
+        XCTAssertFalse(app.navigationBars["Edit item"].exists)
+        XCTAssertTrue(app.buttons[rowID].exists)
+        let undo = app.buttons["shopping.catalog.undoRemove"]
+        XCTAssertTrue(undo.existsOrAppears(timeout: 3))
+        undo.tap()
+        app.buttons[rowID].swipeLeft()
+        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
+        remove.tap()
 
-        let existingRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bananas")).firstMatch
-        XCTAssertTrue(existingRow.existsOrAppears(timeout: 3))
-        existingRow.swipeLeft()
-        app.buttons["Add to list"].tap()
-        XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
-        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
-        app.buttons["shopping.grocery.cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
-
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Catalog"].existsOrAppears(timeout: 5))
         app.tabBars.buttons["Catalog"].tap()
-        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.buttons[rowID].existsOrAppears(timeout: 3))
+        app.buttons[rowID].swipeLeft()
+        let addToList = app.buttons["shopping.catalog.addToList.\(itemID)"]
+        XCTAssertTrue(addToList.existsOrAppears(timeout: 3))
+        XCTAssertFalse(remove.exists)
+        addToList.tap()
+        XCTAssertTrue(app.tabBars.buttons["Catalog"].isSelected)
+        XCTAssertFalse(app.navigationBars["Edit item"].exists)
+        app.buttons[rowID].swipeLeft()
+        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
+
+        // Carted legacy demand is still on the list: remove it rather than opening Need again.
         let carted = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Strawberries")).firstMatch
         XCTAssertTrue(carted.existsOrAppears(timeout: 3))
         carted.swipeLeft()
-        app.buttons["Add to list"].tap()
-        let confirmation = app.sheets["Need Strawberries again?"]
-        XCTAssertTrue(confirmation.existsOrAppears(timeout: 2))
-        confirmation.buttons["Need again"].tap()
-        XCTAssertTrue(app.buttons["View"].existsOrAppears(timeout: 3))
-        app.buttons["View"].tap()
-        XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
-        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
+        let cartedItemID = carted.identifier.replacingOccurrences(of: "shopping.catalog.item.", with: "")
+        let removeCarted = app.buttons["shopping.catalog.removeFromList.\(cartedItemID)"]
+        XCTAssertTrue(removeCarted.existsOrAppears(timeout: 3))
+        removeCarted.tap()
+        XCTAssertFalse(app.sheets["Need Strawberries again?"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Catalog"].isSelected)
     }
 
     func testSelectionControlsStayVisibleAtAccessibilityTextSize() {

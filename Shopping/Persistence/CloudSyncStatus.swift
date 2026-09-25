@@ -72,6 +72,7 @@ struct CloudSyncStatus: Equatable {
         }
     }
 
+    var isWorking: Bool { !active.isEmpty }
     var hasFailure: Bool { completed.values.contains { $0.failure != nil } }
     var lastUpload: Date? { lastSuccess(.upload) }
     var lastDownload: Date? { lastSuccess(.download) }

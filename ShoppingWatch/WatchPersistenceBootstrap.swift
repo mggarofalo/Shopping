@@ -65,6 +65,14 @@ final class WatchPersistenceBootstrap {
             cachedAccount: cached, otherMessage: syncMessage)
     }
 
+    func syncStatus(additionalMessage: String? = nil) -> WatchSyncStatus {
+        var messages = [additionalMessage, syncMessage, associationStatus.message].compactMap { $0 }
+        if case .cached = provider.state {
+            messages.append("Using saved data. Changes sync when a connection returns.")
+        }
+        return WatchSyncStatus(cloud: cloudSync.status, attentionMessages: messages)
+    }
+
     var householdWaitingMessage: String {
         if cloudSync.status.hasFailure { return cloudSync.status.message }
         return "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."

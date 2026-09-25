@@ -3,6 +3,82 @@ import XCTest
 final class WatchShoppingUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testSyncIconShowsDetailsWithoutRoutineBannerAndDismisses() {
+        let app = launchFixture("syncWorking")
+        let icon = syncButton(in: app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 5))
+        XCTAssertTrue(icon.isHittable)
+        XCTAssertTrue(icon.label.contains("iCloud working"))
+        XCTAssertFalse(app.staticTexts["iCloud is working. Changes are saved on this device."].exists)
+        screenshot("Watch compact working sync icon", app: app)
+        icon.tap()
+        let details = app.staticTexts["watch.sync.details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 3))
+        XCTAssertTrue(details.label.contains("iCloud is working"))
+        screenshot("Watch sync details", app: app)
+        let done = app.buttons["watch.sync.done"]
+        reveal(done, in: app)
+        done.tap()
+        XCTAssertTrue(icon.waitForExistence(timeout: 3))
+        app.buttons["watch.cart.open"].tap()
+        let cartBar = app.navigationBars["In cart"]
+        XCTAssertTrue(cartBar.waitForExistence(timeout: 3))
+        let cartIcon = cartBar.children(matching: .button).matching(identifier: "watch.sync.open").element
+        XCTAssertTrue(cartIcon.waitForExistence(timeout: 3))
+        screenshot("Watch cart sync icon", app: app)
+        XCTAssertTrue(cartIcon.isHittable)
+    }
+
+    func testSyncAttentionIconPreservesErrorDetails() {
+        let app = launchFixture("syncError")
+        let icon = syncButton(in: app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 5))
+        XCTAssertTrue(icon.label.contains("Sync needs attention"))
+        screenshot("Watch compact sync attention", app: app)
+        icon.tap()
+        let details = app.staticTexts["watch.sync.details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 3))
+        XCTAssertTrue(details.label.contains("iCloud storage is full"))
+        screenshot("Watch actionable sync details", app: app)
+    }
+
+    func testSyncCompletionKeepsToolbarPositionAndNoStatusRows() {
+        let app = launchFixture("syncChanges")
+        let icon = syncButton(in: app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 5))
+        let frame = icon.frame
+        let bananas = app.buttons["watch.item.bananas"]
+        reveal(bananas, in: app)
+        bananas.swipeLeft()
+        app.buttons["Add"].tap()
+        let completed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "Recent activity completed"), object: icon)
+        XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 5), .completed)
+        XCTAssertEqual(icon.frame.minX, frame.minX, accuracy: 1)
+        XCTAssertEqual(icon.frame.width, frame.width, accuracy: 1)
+        XCTAssertFalse(app.staticTexts["Recent iCloud activity completed. This does not confirm another device has received your changes."].exists)
+        screenshot("Watch completed sync stable toolbar", app: app)
+    }
+
+    func testSyncDetailsRemainUsableAtAccessibilityTextSize() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = "syncError"
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let icon = syncButton(in: app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 5))
+        XCTAssertTrue(icon.isHittable)
+        screenshot("Watch sync icon large text", app: app)
+        icon.tap()
+        XCTAssertTrue(app.staticTexts["watch.sync.details"].waitForExistence(timeout: 3))
+        let done = app.buttons["watch.sync.done"]
+        reveal(done, in: app)
+        XCTAssertTrue(done.isHittable)
+        screenshot("Watch sync details large text", app: app)
+        done.tap()
+        XCTAssertTrue(icon.waitForExistence(timeout: 3))
+    }
+
     func testUnimportedReplicaShowsSetupWithoutDemoGroceries() {
         let app = launchDurableFixture("setup")
         XCTAssertTrue(app.staticTexts["Set up Shopping"].waitForExistence(timeout: 5))
@@ -385,14 +461,18 @@ final class WatchShoppingUITests: XCTestCase {
     }
 
     private func storeSwitcher(in app: XCUIApplication) -> XCUIElement {
-        // Native watch toolbars repeat the identifier on nested wrappers. Scope to
-        // the toolbar-owned button rather than choosing an arbitrary descendant.
-        app.navigationBars.children(matching: .button).matching(identifier: "watch.store.switch").element
+        app.buttons["watch.store.switch"]
     }
 
-    private func launchFixture() -> XCUIApplication {
+    private func syncButton(in app: XCUIApplication) -> XCUIElement {
+        // Toolbar wrappers repeat identifiers; the fixed grocery header does not.
+        let toolbar = app.navigationBars.children(matching: .button).matching(identifier: "watch.sync.open")
+        return toolbar.count == 1 ? toolbar.element : app.buttons["watch.sync.open"]
+    }
+
+    private func launchFixture(_ scenario: String = "populated") -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = "populated"
+        app.launchEnvironment["SHOPPING_WATCH_FIXTURE"] = scenario
         app.launch()
         return app
     }
@@ -411,7 +491,9 @@ final class WatchShoppingUITests: XCTestCase {
             let footerTop = footerVisible
                 ? min(checkout.frame.minY, cart.exists && cart.isHittable ? cart.frame.minY : checkout.frame.minY)
                 : add.exists && add.isHittable ? add.frame.minY : app.frame.maxY + 2
-            return (navigation.exists ? navigation.frame.maxY : 30, footerTop - 2)
+            let switcher = app.buttons["watch.store.switch"]
+            let headerBottom = switcher.exists && switcher.isHittable ? switcher.frame.maxY : 0
+            return (max(navigation.exists ? navigation.frame.maxY : 30, headerBottom), footerTop - 2)
         }
         func isClear() -> Bool {
             guard element.exists && (element.isHittable || allowDisabled) else { return false }

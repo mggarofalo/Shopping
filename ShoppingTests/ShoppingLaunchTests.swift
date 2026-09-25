@@ -406,7 +406,7 @@ final class ShoppingLaunchTests: XCTestCase {
         reveal(visibleChipotlesRow, in: app)
         visibleChipotlesRow.swipeLeft()
         XCTAssertTrue(app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH %@", "shopping.catalog.addToList."
+            format: "identifier BEGINSWITH %@", "shopping.catalog.removeFromList."
         )).firstMatch.existsOrAppears(timeout: 2))
         XCTAssertFalse(app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "shopping.catalog.addToCart."
