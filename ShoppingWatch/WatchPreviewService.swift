@@ -18,6 +18,15 @@ final class WatchPreviewService: WatchShoppingService {
     init(scenario: String = "populated") {
         self.scenario = scenario
         value = Self.sample
+        if scenario.hasPrefix("sync") {
+            var cloud = CloudSyncStatus()
+            let finished = scenario != "syncWorking" && scenario != "syncChanges"
+            cloud.record(.init(store: "fixture", operation: .upload, started: Date(timeIntervalSince1970: 1),
+                ended: finished ? Date(timeIntervalSince1970: 2) : nil,
+                failure: scenario == "syncError" ? .quota : nil))
+            value.syncStatus = WatchSyncStatus(cloud: cloud)
+            value.statusMessage = cloud.message
+        }
         items = Self.sample.grocerySections.flatMap(\.items) + Self.sample.cartSections.flatMap(\.items)
         if scenario == "empty" { items = [] }
         failsNextCheckout = scenario == "saveFailure"
@@ -46,6 +55,13 @@ final class WatchPreviewService: WatchShoppingService {
     }
 
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
+        if scenario == "syncChanges" {
+            var cloud = CloudSyncStatus()
+            cloud.record(.init(store: "fixture", operation: .upload, started: Date(timeIntervalSince1970: 1),
+                ended: Date(timeIntervalSince1970: 2), failure: nil))
+            value.syncStatus = WatchSyncStatus(cloud: cloud)
+            value.statusMessage = cloud.message
+        }
         switch command {
         case .add(let token, let quantity):
             if failsNextAdd {

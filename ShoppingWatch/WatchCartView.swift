@@ -12,6 +12,7 @@ struct WatchCartView: View {
         }
         .listStyle(.plain)
         .navigationTitle("In cart")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { WatchSyncStatusButton(session: session) } }
         .toolbar(.visible, for: .navigationBar)
         .listSectionSpacing(0)
         .environment(\.defaultMinListRowHeight, 44)

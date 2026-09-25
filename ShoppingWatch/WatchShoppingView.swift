@@ -54,29 +54,30 @@ struct WatchShoppingView: View {
 
     private func groceries(store: WatchStore) -> some View {
         List {
-            if let status = session.snapshot.statusMessage {
-                Text(status).font(.caption2).foregroundStyle(.secondary)
-            }
             if session.snapshot.grocerySections.isEmpty {
                 Text("Nothing to get here").foregroundStyle(.secondary)
             }
             WatchItemSections(session: session, sections: session.snapshot.grocerySections)
         }
         .listStyle(.plain)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 4) {
                 Button { session.sheet = .stores } label: {
                     HStack(spacing: 4) {
                         Text(store.name).font(.headline).lineLimit(1)
                         Image(systemName: "arrow.triangle.2.circlepath").font(.caption)
                             .accessibilityHidden(true)
                     }
-                    .frame(maxWidth: 120, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel("Change store, \(store.name)")
                 .accessibilityIdentifier("watch.store.switch")
+                WatchSyncStatusButton(session: session)
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .background(.background)
         }
         .listSectionSpacing(0)
         .environment(\.defaultMinListRowHeight, 44)
