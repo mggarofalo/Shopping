@@ -129,13 +129,11 @@ final class ShoppingAppearanceUITests: XCTestCase {
             let richCell = app.collectionViews.cells.containing(.button, identifier: richRow.identifier).firstMatch
             XCTAssertGreaterThan(richCell.frame.height, bareRowHeight,
                                  "Notes and assignment must expand the row rather than clip to the bare row height")
-            let assignment = app.staticTexts["Michael"]
-            XCTAssertTrue(assignment.exists)
-            XCTAssertGreaterThanOrEqual(assignment.frame.minY, richCell.frame.minY)
-            XCTAssertLessThanOrEqual(assignment.frame.maxY, richCell.frame.maxY)
             let titleText = richRow.staticTexts["Granola"]
             let notesText = richRow.staticTexts["Low sugar"]
             XCTAssertTrue(titleText.exists)
+            XCTAssertGreaterThanOrEqual(titleText.frame.minY, richCell.frame.minY)
+            XCTAssertLessThanOrEqual(titleText.frame.maxY, richCell.frame.maxY)
             XCTAssertTrue(notesText.exists)
             let topPadding = titleText.frame.minY - richCell.frame.minY
             let bottomPadding = richCell.frame.maxY - notesText.frame.maxY
@@ -144,8 +142,6 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertEqual(topPadding, bottomPadding, accuracy: 3,
                            "Multiline content needs consistent top and bottom padding")
             if size == "UICTContentSizeCategoryL" {
-                XCTAssertGreaterThan(richCell.frame.height - bareRowHeight, 20,
-                                     "Extra text must grow the row, not consume its vertical padding")
                 XCTAssertLessThan(richCell.frame.height, bareRowHeight * 3,
                                   "Short notes and one assignment must not reserve empty vertical space")
             }
@@ -177,6 +173,45 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Bananas moved to In cart."].waitForNonExistence(timeout: 5))
             XCTAssertTrue(app.buttons["Check out"].isHittable)
             attach("Compact personal cart \(appearance) \(size)", app)
+            app.terminate()
+        }
+    }
+
+    func testCatalogColumnsPreserveLongTextAndCompleteStoreAccessibility() {
+        let name = "Organic family-size breakfast cereal with a deliberately long complete title"
+        for (size, appearance) in [("UICTContentSizeCategoryL", "light"),
+                                   ("UICTContentSizeCategoryAccessibilityXXXL", "dark")] {
+            let app = XCUIApplication()
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("CatalogColumns-\(UUID().uuidString).sqlite").path
+            app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "catalogColumns"
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", size, "-shopping.appearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Catalog"].existsOrAppears(timeout: 5))
+            app.tabBars.buttons["Catalog"].tap()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.existsOrAppears(timeout: 3))
+            search.tap()
+            search.typeText("Organic family-size\n")
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+            let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "shopping.catalog.item.", name)).firstMatch
+            XCTAssertTrue(row.existsOrAppears(timeout: 3))
+            XCTAssertTrue(row.isHittable)
+            XCTAssertTrue(row.label.contains("Costco, Neighborhood independent grocery market, Publix"))
+            XCTAssertTrue(row.label.contains("Third supporting line"))
+            let title = row.staticTexts[name]
+            let notes = row.staticTexts["First supporting line\nSecond supporting line with more detail\nThird supporting line"]
+            XCTAssertTrue(title.exists)
+            XCTAssertTrue(notes.exists)
+            XCTAssertLessThan(title.frame.maxY, notes.frame.minY + 1)
+            XCTAssertGreaterThan(notes.frame.height, title.frame.height * 2)
+            XCTAssertLessThanOrEqual(title.frame.width, row.frame.width * 0.7)
+            XCTAssertLessThanOrEqual(notes.frame.width, row.frame.width * 0.7)
+            attach("Catalog2to1 \(appearance) \(size)", app)
+            row.tap()
+            XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 3))
+            XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, name)
             app.terminate()
         }
     }

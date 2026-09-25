@@ -12,14 +12,14 @@ final class ShoppingDeviceUITests: XCTestCase {
         let note = app.staticTexts["Number candles: 4 and 0"]
         XCTAssertTrue(candles.waitForExistence(timeout: 3))
         XCTAssertTrue(note.exists)
-        XCTAssertTrue(app.staticTexts["Michael"].exists)
+        XCTAssertTrue((app.buttons["Edit Granola"].value as? String ?? "").contains("For Michael"))
         XCTAssertLessThanOrEqual(note.frame.maxY, app.tabBars.firstMatch.frame.minY)
         screenshot("SHOPPING-107 All six groceries", app: app)
 
         selectCostco(in: app)
         XCTAssertTrue(app.buttons["Edit Granola"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["Edit Birthday candles"].exists)
-        XCTAssertTrue(app.staticTexts["Michael"].exists)
+        XCTAssertTrue((app.buttons["Edit Granola"].value as? String ?? "").contains("For Michael"))
         XCTAssertTrue(app.staticTexts["Low sugar"].exists)
         screenshot("SHOPPING-107 Costco sparse categories", app: app)
 

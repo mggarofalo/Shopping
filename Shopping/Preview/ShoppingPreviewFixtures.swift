@@ -4,6 +4,7 @@ import SwiftUI
 enum ShoppingPreviewCase: String, CaseIterable {
     case empty
     case populated
+    case catalogColumns
     case longName
     case largeText
     case archivedStore
@@ -76,6 +77,16 @@ enum ShoppingPreviewFixtures {
             )
         } else {
             try populate(service: service, fixture: fixture, ids: &ids)
+        }
+        if fixture == .catalogColumns {
+            let longStore = try service.createStore(name: "Neighborhood independent grocery market", householdID: ids.householdID)
+            ids.storeIDs["long"] = longStore
+            ids.itemIDs["columns"] = try service.createItem(
+                name: "Organic family-size breakfast cereal with a deliberately long complete title",
+                notes: "First supporting line\nSecond supporting line with more detail\nThird supporting line",
+                categoryID: ids.categoryIDs["produce"],
+                storeIDs: [ids.storeIDs["costco"]!, ids.storeIDs["publix"]!, longStore],
+                householdID: ids.householdID, anyStore: false)
         }
         if fixture == .pendingRelationship {
             try insertPendingRelationship(in: persistence, householdID: ids.householdID, listID: ids.listID)

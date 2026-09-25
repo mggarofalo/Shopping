@@ -233,3 +233,11 @@ the audited List/Form surfaces and deliberate non-row exceptions.
 ## Fresh keyboard readiness (SHOPPING-142)
 
 Hosted run36157514880 recorded the first catalog save/add test sending text while the keyboard initialized, followed by Apple's QuickPath introduction and a partial name. The fresh hosted simulators now set the observed `DidShowContinuousPathIntroduction` keyboard preference before tests, preventing unrelated first-use onboarding. `CatalogRefreshUITests/testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates` explicitly focuses the name field, waits boundedly for its keyboard and exact entered value, and retains the enabled, save/add, editor navigation and no-duplicates assertions. There is still one typing action, no retries, no relaxed timeout policy, and no product behavior or test-selection change.
+
+## Watch scrolling header (SHOPPING-143)
+
+`WatchShoppingUITests/testStoreAndSyncScrollAwayAndReturnOnlyAtTop` owns native header disappearance, absence after a small reverse scroll, retained bottom actions, and usable sync/store navigation after returning to the top. The bounded return-to-header helper replaces the previous fixed-header assumption; history navigation preserves the direct chooser route for missing/revoked households. Existing empty, large-text, store/swipe and sync-completion cases retain their behavior with the scrolling row. No model or synchronization contract changes.
+
+## Catalog column layout and inline assignment (SHOPPING-144)
+
+`ShoppingAppearanceUITests/testCatalogColumnsPreserveLongTextAndCompleteStoreAccessibility` owns the 2:1 catalog presentation at standard/light and accessibility/dark sizes, multiline supporting content, full purchase-rule accessibility and full title in the editor. Its isolated `catalogColumns` fixture adds a long title, three stores including a long store name, and three supporting lines. Existing compact-table appearance coverage retains assigned/unassigned groceries, symmetric padding, independent quantities and cart actions; the extra-height assertion follows supporting notes rather than requiring assignment to occupy a separate line. Existing catalog membership tests retain native swipe ownership, and catalog grouping/contrast tests retain archived rules and accessible metadata.

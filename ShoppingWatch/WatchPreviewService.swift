@@ -28,6 +28,13 @@ final class WatchPreviewService: WatchShoppingService {
             value.statusMessage = cloud.message
         }
         items = Self.sample.grocerySections.flatMap(\.items) + Self.sample.cartSections.flatMap(\.items)
+        if scenario == "longList" {
+            items += (1...20).map { index in
+                WatchShoppingItem(id: "extra-\(index)", commandToken: "extra-\(index)",
+                    name: "Grocery \(index)", quantity: nil, rule: .canBuyHere,
+                    isInOwnCart: false, canAdd: true)
+            }
+        }
         if scenario == "empty" { items = [] }
         failsNextCheckout = scenario == "saveFailure"
         failsNextAdd = scenario == "addFailure"
