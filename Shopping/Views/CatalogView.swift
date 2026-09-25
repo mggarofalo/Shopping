@@ -23,6 +23,9 @@ struct CatalogView: View {
     @State private var searchText = ""
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
+    @State private var removalTargets: [UUID: CatalogNeedRemovalTarget] = [:]
+    @State private var membershipConflicts: Set<UUID> = []
+    @State private var membershipAvailable = false
     @State private var showingFilters = false
     @State private var renderedGroups: [ItemCollectionSection<CatalogCollectionSectionID, Item>] = []
     @State private var editor: CatalogEditSession?
@@ -363,12 +366,25 @@ struct CatalogView: View {
         .accessibilityIdentifier("shopping.catalog.item.\(item.id.uuidString)")
         .shoppingListRowInsets()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if !item.isArchived {
-                Button { prepareIndividualAdd(item, source: source) } label: {
-                    Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
+            if !item.isArchived && membershipAvailable {
+                if membershipConflicts.contains(item.id) {
+                    Button("Review duplicates", systemImage: "exclamationmark.triangle") {
+                        errorMessage = "This item has multiple grocery entries. Review them in Groceries before removing it here."
+                    }
+                    .tint(.orange)
+                } else if let target = removalTargets[item.id] {
+                    Button { removeFromList(target) } label: {
+                        Label("Remove from list", systemImage: "minus.circle").labelStyle(.iconOnly)
+                    }
+                    .tint(.orange)
+                    .accessibilityIdentifier("shopping.catalog.removeFromList.\(item.id.uuidString)")
+                } else {
+                    Button { prepareIndividualAdd(item, source: source) } label: {
+                        Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
+                    }
+                    .tint(.green)
+                    .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
                 }
-                .tint(.green)
-                .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
             }
             Button { prepareArchive(item) } label: {
                 Label(item.isArchived ? "Restore" : "Archive", systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
@@ -385,9 +401,20 @@ struct CatalogView: View {
         .contextMenu {
             Button("Select", systemImage: "checkmark.circle") { beginSelection(with: item.id) }
                 .accessibilityIdentifier("shopping.catalog.contextSelect.\(item.id.uuidString)")
-            if !item.isArchived {
-                Button("Add to List", systemImage: "note.text.badge.plus") {
-                    prepareIndividualAdd(item, source: source)
+            if !item.isArchived && membershipAvailable {
+                if membershipConflicts.contains(item.id) {
+                    Button("Review duplicates", systemImage: "exclamationmark.triangle") {
+                        errorMessage = "This item has multiple grocery entries. Review them in Groceries before removing it here."
+                    }
+                    .tint(.orange)
+                } else if let target = removalTargets[item.id] {
+                    Button("Remove from list", systemImage: "minus.circle") {
+                        removeFromList(target)
+                    }
+                } else {
+                    Button("Add to list", systemImage: "note.text.badge.plus") {
+                        prepareIndividualAdd(item, source: source)
+                    }
                 }
             }
             Button(item.isArchived ? "Restore" : "Archive",
@@ -401,10 +428,13 @@ struct CatalogView: View {
         .accessibilityAction(named: Text(item.isArchived ? "Restore" : "Archive")) {
             prepareArchive(item)
         }
-        .catalogAddAccessibilityAction(
-            enabled: !editMode.isEditing && !item.isArchived,
-            name: item.name
-        ) { prepareIndividualAdd(item, source: source) }
+        .catalogListAccessibilityAction(
+            enabled: !editMode.isEditing && !item.isArchived && membershipAvailable && !membershipConflicts.contains(item.id),
+            title: removalTargets[item.id] == nil ? "Add \(item.name) to list" : "Remove \(item.name) from list"
+        ) {
+            if let target = removalTargets[item.id] { removeFromList(target) }
+            else { prepareIndividualAdd(item, source: source) }
+        }
         .accessibilityAction(named: Text("Delete \(item.name)")) {
             prepareRemoval(item)
         }
@@ -444,6 +474,7 @@ struct CatalogView: View {
         guard presentation?.isActive != false else { return }
         guard let service, let householdID = selection.householdID else {
             projectedIDs = []
+            removalTargets = [:]
             renderedGroups = []
             return
         }
@@ -453,9 +484,37 @@ struct CatalogView: View {
             ))
             projectedIDs = refreshedIDs
             rebuildRenderedGroups(projectedIDs: refreshedIDs)
+            refreshMembership(itemIDs: refreshedIDs)
         } catch {
             projectedIDs = []
+            removalTargets = [:]
             renderedGroups = []
+            errorMessage = CatalogErrorCopy.message(error)
+        }
+    }
+
+    private func refreshMembership(itemIDs: Set<UUID>) {
+        removalTargets = [:]
+        membershipConflicts = []
+        membershipAvailable = false
+        guard let service, let list = canonicalList, let householdID = list.household?.id else { return }
+        do {
+            let memberships = try service.catalogListMembership(
+                itemIDs: itemIDs, householdID: householdID, listID: list.id
+            )
+            for (itemID, membership) in memberships {
+                switch membership {
+                case .absent: break
+                case .ambiguous: membershipConflicts.insert(itemID)
+                case .present(let needID, let revision):
+                    removalTargets[itemID] = CatalogNeedRemovalTarget(
+                        needID: needID, revision: revision, householdID: householdID, listID: list.id
+                    )
+                }
+            }
+            membershipAvailable = true
+        } catch {
+            // Keep catalog editing available even if grocery membership cannot be read safely.
             errorMessage = CatalogErrorCopy.message(error)
         }
     }
@@ -612,18 +671,63 @@ struct CatalogView: View {
         } catch { errorMessage = CatalogErrorCopy.message(error) }
     }
 
+    private func removeFromList(_ target: CatalogNeedRemovalTarget) {
+        guard let service, selection.householdID == target.householdID,
+              selection.listID == target.listID, canonicalList != nil else {
+            errorMessage = "The household changed. Select the item again."
+            return
+        }
+        do {
+            let operationID = try service.removeNeed(
+                needID: target.needID, householdID: target.householdID,
+                listID: target.listID, expectedRevision: target.revision
+            )
+            refresh()
+            hapticFeedback.play(.warning)
+            toastCenter?.show("Removed from grocery list", duration: .undo, action: ShoppingToastAction(
+                title: "Undo", accessibilityIdentifier: "shopping.catalog.undoRemove"
+            ) {
+                guard selection.householdID == target.householdID, selection.listID == target.listID else {
+                    errorMessage = "Return to the household where you removed the item to undo it."
+                    return false
+                }
+                do {
+                    let restored = try service.undoClear(operationID: operationID,
+                        expectedHouseholdID: target.householdID, expectedListID: target.listID)
+                    refresh()
+                    guard restored > 0 else {
+                        errorMessage = "The grocery changed after removal and could not be restored. Review the current list."
+                        return false
+                    }
+                    return true
+                } catch {
+                    errorMessage = CatalogErrorCopy.message(error)
+                    return false
+                }
+            })
+        } catch {
+            errorMessage = CatalogErrorCopy.message(error)
+            refresh()
+        }
+    }
+
     private func prepareIndividualAdd(_ item: Item, source: CatalogRowSource) {
         presentationSource = source
-        _ = prepareIndividualAdd(itemID: item.id, itemName: item.name)
+        _ = prepareIndividualAdd(itemID: item.id, itemName: item.name, focusExisting: false)
         if addConfirmation == nil { presentationSource = nil }
     }
 
-    private func prepareIndividualAdd(itemID: UUID, itemName: String) -> String? {
+    private func prepareIndividualAdd(itemID: UUID, itemName: String, focusExisting: Bool = true) -> String? {
         guard let preview = captureCatalogAdd(ids: [itemID]) else {
             return errorMessage ?? "The catalog item or household is no longer available."
         }
         guard let entry = preview.token.entries.first else {
             showCatalogNotice("This catalog item is no longer available.", duration: .attention)
+            return nil
+        }
+        if !focusExisting, entry.needID != nil {
+            refresh()
+            showCatalogNotice("Already on the grocery list", duration: .attention)
             return nil
         }
         switch entry.disposition {
@@ -756,13 +860,13 @@ struct CatalogView: View {
 
 private extension View {
     @ViewBuilder
-    func catalogAddAccessibilityAction(
+    func catalogListAccessibilityAction(
         enabled: Bool,
-        name: String,
+        title: String,
         action: @escaping () -> Void
     ) -> some View {
         if enabled {
-            accessibilityAction(named: Text("Add \(name) to list"), action)
+            accessibilityAction(named: Text(title), action)
         } else {
             self
         }

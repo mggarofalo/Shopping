@@ -80,3 +80,11 @@ struct CatalogRefreshKey: Equatable {
     let revision: Int64
     let archived: Bool
 }
+
+/// Captures one displayed grocery occurrence so a stale swipe cannot remove a replacement.
+struct CatalogNeedRemovalTarget {
+    let needID: UUID
+    let revision: Int64
+    let householdID: UUID
+    let listID: UUID
+}

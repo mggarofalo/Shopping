@@ -45,6 +45,67 @@ final class PersonalCartServiceTests: XCTestCase {
         return try XCTUnwrap(cart.entries(householdID: fixture.householdID, listID: fixture.listID).first)
     }
 
+    func testCatalogMembershipIsolatesDuplicateNeedsAndKeepsUnrelatedItemsAvailable() throws {
+        let f = try makeFixture()
+        let otherID = try f.service.createItem(name: "Beans", householdID: f.householdID)
+        let context = f.persistence.simulationContext()
+        try context.performAndWait {
+            let original = try XCTUnwrap(context.fetch(Need.fetchRequest()).first)
+            let duplicate = Need(context: context)
+            duplicate.id = UUID()
+            duplicate.kind = NeedKind.remembered.rawValue
+            duplicate.title = original.title
+            duplicate.notes = "Replica edit"
+            duplicate.revision = 1
+            duplicate.list = original.list
+            duplicate.item = original.item
+            try context.save()
+        }
+        let memberships = try f.service.catalogListMembership(itemIDs: [f.itemID, otherID],
+            householdID: f.householdID, listID: f.listID)
+        XCTAssertEqual(memberships[f.itemID], .ambiguous)
+        XCTAssertEqual(memberships[otherID], .absent)
+        let otherNeedID = try f.service.addRememberedNeed(itemID: otherID, listID: f.listID)
+        guard case .present(let id, _) = try f.service.catalogListMembership(itemIDs: [f.itemID, otherID],
+            householdID: f.householdID, listID: f.listID)[otherID] else {
+            return XCTFail("Healthy item must retain a usable membership action")
+        }
+        XCTAssertEqual(id, otherNeedID)
+    }
+
+    func testCatalogRemovalRetainsPersonalCartAndOffersAddAfterRelaunch() throws {
+        let f = try makeFixture()
+        let cartEntry = try add(f)
+        let preview = try f.service.captureCatalogAdd(itemIDs: [f.itemID],
+            householdID: f.householdID, listID: f.listID, selectedStoreID: nil)
+        let target = try XCTUnwrap(preview.token.entries.first)
+        XCTAssertEqual(target.needID, f.needID)
+        XCTAssertEqual(try f.service.catalogListMembership(itemIDs: [f.itemID],
+            householdID: f.householdID, listID: f.listID)[f.itemID],
+            .present(needID: f.needID, revision: try XCTUnwrap(target.needRevision)))
+        let operationID = try f.service.removeNeed(needID: f.needID,
+            householdID: f.householdID, listID: f.listID,
+            expectedRevision: try XCTUnwrap(target.needRevision))
+        XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).first?.token,
+                       cartEntry.token)
+        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let service = NeedService(persistence: reopened)
+        let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
+        let after = try service.captureCatalogAdd(itemIDs: [f.itemID],
+            householdID: f.householdID, listID: f.listID, selectedStoreID: nil)
+        XCTAssertEqual(after.token.entries.first?.disposition, .add)
+        XCTAssertNil(after.token.entries.first?.needID)
+        XCTAssertEqual(try service.catalogListMembership(itemIDs: [f.itemID],
+            householdID: f.householdID, listID: f.listID)[f.itemID], .absent)
+        XCTAssertEqual(try cart.entries(householdID: f.householdID, listID: f.listID).first?.token,
+                       cartEntry.token)
+        XCTAssertEqual(try service.undoClear(operationID: operationID,
+            expectedHouseholdID: f.householdID, expectedListID: f.listID), 1)
+        XCTAssertEqual(try service.captureCatalogAdd(itemIDs: [f.itemID],
+            householdID: f.householdID, listID: f.listID, selectedStoreID: nil).token.entries.first?.needID,
+                       f.needID)
+    }
+
     func testSuspendedShareAssociationCannotAcknowledgeAfterAccountOrStoreDetaches() throws {
         let f = try makeFixture()
         let provider = MutableSession(try session().session)

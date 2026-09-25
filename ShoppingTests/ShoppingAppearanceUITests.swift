@@ -133,7 +133,19 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(assignment.exists)
             XCTAssertGreaterThanOrEqual(assignment.frame.minY, richCell.frame.minY)
             XCTAssertLessThanOrEqual(assignment.frame.maxY, richCell.frame.maxY)
+            let titleText = richRow.staticTexts["Granola"]
+            let notesText = richRow.staticTexts["Low sugar"]
+            XCTAssertTrue(titleText.exists)
+            XCTAssertTrue(notesText.exists)
+            let topPadding = titleText.frame.minY - richCell.frame.minY
+            let bottomPadding = richCell.frame.maxY - notesText.frame.maxY
+            XCTAssertGreaterThanOrEqual(topPadding, 10)
+            XCTAssertGreaterThanOrEqual(bottomPadding, 10)
+            XCTAssertEqual(topPadding, bottomPadding, accuracy: 3,
+                           "Multiline content needs consistent top and bottom padding")
             if size == "UICTContentSizeCategoryL" {
+                XCTAssertGreaterThan(richCell.frame.height - bareRowHeight, 20,
+                                     "Extra text must grow the row, not consume its vertical padding")
                 XCTAssertLessThan(richCell.frame.height, bareRowHeight * 3,
                                   "Short notes and one assignment must not reserve empty vertical space")
             }

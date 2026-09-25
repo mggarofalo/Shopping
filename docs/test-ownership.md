@@ -217,3 +217,11 @@ the audited List/Form surfaces and deliberate non-row exceptions.
 `ShareAssociationRetryTests` owns the durable association-journal boundary: records for a household without a share remain queued for later sharing without counting as actionable pending work; existing-share work and errors remain visible; overlapping retries serialize and return the final pass result. The injected pass replaces only CloudKit interaction, so these tests do not establish live household delivery. `PersonalCartServiceTests` retains detached-store/account authority validation.
 
 `WatchAssociationStatusTests` owns warning transitions, notification deduplication, preservation and priority of invitation/history/account/CloudKit messages, and rejection of old-runtime or older overlapping completions. `CloudSyncStatusTests` continues to own engine-event classification and per-store import/export failure retention. Real cross-account sharing remains SHOPPING-30.
+
+## Catalog membership actions and text padding (SHOPPING-140)
+
+`CategoryManagementUITests/testCatalogSwipeRemovesExistingNeedAndAddsAgainWithoutLeavingCatalog` replaces the old catalog swipe focus-existing/Need-again scenario because that interaction is explicitly superseded. It owns Remove vs Add controls, remaining in Catalog, Undo, same-store relaunch, re-add and legacy-carted removal. Catalog editor save/add and batch-add rules retain their existing owners.
+
+`PersonalCartServiceTests/testCatalogRemovalRetainsPersonalCartAndOffersAddAfterRelaunch` owns catalog membership, revision-qualified removal, retained private cart membership, SQLite reopen and undo through the same commands used by Catalog. `testCatalogMembershipIsolatesDuplicateNeedsAndKeepsUnrelatedItemsAvailable` proves one ambiguous imported occurrence group does not prevent healthy rows from reporting Add or Remove. Existing grocery removal tests retain stale revision, scope and failure rollback coverage.
+
+`ShoppingAppearanceUITests/testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText` now checks equal padding around actual multiline text bounds as well as expanded row height, visible assignment and independent controls. The existing Catalog appearance and contrast tests supply leading-aligned store-summary screenshots in both appearances and text sizes. Screenshot review is required alongside geometry assertions.
