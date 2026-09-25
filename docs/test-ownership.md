@@ -188,3 +188,14 @@ catalog row and auditing its contrast. Hosted run 36067861081 recorded a keyboar
 existence check during dismissal; the video ended with it gone. The wait retains
 the failure for a keyboard that remains open, all row bounds, and the unchanged
 contrast audit. It does not retry the test or add production behavior.
+
+## Checkout feedback synchronization (SHOPPING-137)
+
+`PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch` and
+`ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems`
+wait boundedly for the specific last-carted item's feedback to disappear before
+tapping checkout once. Hosted run 36075824376 recorded the Granola feedback
+covering the checkout action during the personal-cart test. Hittability alone
+does not prove an overlay has gone. Both tests retain their checkout assertions;
+the personal-cart test still terminates, relaunches without reseeding, and undoes
+the purchase. No action retries or production timing changes are introduced.

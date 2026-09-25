@@ -15,7 +15,10 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["My cart"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).firstMatch.exists)
-        app.buttons["Check out"].tap()
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
+        let checkout = app.buttons["Check out"]
+        XCTAssertTrue(checkout.isHittable)
+        checkout.tap()
         XCTAssertTrue(app.navigationBars["Check out"].waitForExistence(timeout: 3))
         app.buttons["Confirm"].tap()
         XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].waitForExistence(timeout: 3))
