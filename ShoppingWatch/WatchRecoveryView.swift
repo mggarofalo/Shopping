@@ -15,6 +15,7 @@ struct WatchRecoveryView: View {
                 }
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Recently cleared")
         .confirmationDialog("Restore your cleared items?", isPresented: Binding(
             get: { confirming != nil }, set: { if !$0 { confirming = nil } }

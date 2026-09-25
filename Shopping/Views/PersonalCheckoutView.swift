@@ -39,6 +39,7 @@ struct PersonalCheckoutView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 if let error { Text(error).foregroundStyle(.red) }
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Check out")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

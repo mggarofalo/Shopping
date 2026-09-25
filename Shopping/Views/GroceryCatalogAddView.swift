@@ -201,7 +201,7 @@ struct GroceryCatalogAddView: View {
                     .accessibilityIdentifier("shopping.grocery.addOneTime")
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
             .navigationTitle("Add to Groceries")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(

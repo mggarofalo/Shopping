@@ -1,21 +1,53 @@
 import SwiftUI
 
 struct CatalogItemRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var item: Item
     let validStores: [Store]
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(item.name)
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-            Spacer(minLength: 8)
+        VStack(alignment: .leading, spacing: 2) {
+            if dynamicTypeSize.isAccessibilitySize {
+                titleAndMetadataStack
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        title
+                        Spacer(minLength: 8)
+                        supportingMetadata
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    titleAndMetadataStack
+                }
+            }
+            if !item.notes.isEmpty {
+                Text(item.notes)
+                    .font(.caption)
+                    .foregroundStyle(Color.grocerySecondary)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var title: some View {
+        Text(item.name).foregroundStyle(.primary)
+    }
+
+    private var titleAndMetadataStack: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            title
+            supportingMetadata
+        }
+    }
+
+    private var supportingMetadata: some View {
+        HStack(spacing: 6) {
             if !metadata.isEmpty {
                 Text(metadata)
                     .font(.caption)
                     .foregroundStyle(Color.grocerySecondary)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.trailing)
             }
             if item.isArchived {
                 Image(systemName: "archivebox.fill")
@@ -24,12 +56,10 @@ struct CatalogItemRow: View {
                     .accessibilityLabel("Archived")
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
     }
 
     private var accessibilityLabel: String {
-        [item.name, metadata].filter { !$0.isEmpty }.joined(separator: ", ")
+        [item.name, metadata, item.notes].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     private var metadata: String {

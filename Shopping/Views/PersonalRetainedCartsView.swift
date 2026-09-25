@@ -22,6 +22,7 @@ struct PersonalRetainedCartsView: View {
             }
             if let error { Text(error).foregroundStyle(.secondary) }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("Saved carts")
         .onAppear {
             do { scopes = try service.retainedScopes() }

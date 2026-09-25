@@ -116,6 +116,32 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Produce"].exists)
             let groceryCell = app.collectionViews.cells.containing(.button, identifier: grocery.identifier).firstMatch
             XCTAssertGreaterThanOrEqual(groceryCell.frame.height, 44)
+            let bareRowHeight = groceryCell.frame.height
+            let needID = grocery.identifier.replacingOccurrences(of: "shopping.grocery.row.", with: "")
+            XCTAssertTrue(app.buttons["shopping.checklist.quantity.decrease.\(needID)"].isHittable)
+            XCTAssertTrue(app.buttons["shopping.checklist.quantity.increase.\(needID)"].isHittable)
+            let richRow = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@", "shopping.grocery.row.", "Edit Granola"
+            )).firstMatch
+            for _ in 0..<6 where !richRow.isHittable { app.swipeUp() }
+            XCTAssertTrue(richRow.existsOrAppears(timeout: 3))
+            XCTAssertTrue(richRow.isHittable)
+            let richCell = app.collectionViews.cells.containing(.button, identifier: richRow.identifier).firstMatch
+            XCTAssertGreaterThan(richCell.frame.height, bareRowHeight,
+                                 "Notes and assignment must expand the row rather than clip to the bare row height")
+            let assignment = app.staticTexts["Michael"]
+            XCTAssertTrue(assignment.exists)
+            XCTAssertGreaterThanOrEqual(assignment.frame.minY, richCell.frame.minY)
+            XCTAssertLessThanOrEqual(assignment.frame.maxY, richCell.frame.maxY)
+            if size == "UICTContentSizeCategoryL" {
+                XCTAssertLessThan(richCell.frame.height, bareRowHeight * 3,
+                                  "Short notes and one assignment must not reserve empty vertical space")
+            }
+            XCTAssertTrue((richRow.value as? String ?? "").contains("For Michael"))
+            XCTAssertTrue((richRow.value as? String ?? "").contains("Low sugar"))
+            attach("Content-sized groceries \(appearance) \(size)", app)
+            for _ in 0..<6 where !grocery.isHittable { app.swipeDown() }
+            XCTAssertTrue(grocery.isHittable)
             attach("Compact groceries \(appearance) \(size)", app)
             grocery.swipeLeft()
             let addToCart = app.buttons.matching(NSPredicate(

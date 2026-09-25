@@ -29,6 +29,7 @@ struct PersonalPurchaseHistoryView: View {
             }
             if let message = resultMessage { Text(message) }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("My purchases")
         .onAppear { cart.refresh() }
         .alert("Couldn’t undo purchase", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {

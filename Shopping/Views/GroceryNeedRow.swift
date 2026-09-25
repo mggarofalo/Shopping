@@ -36,12 +36,14 @@ struct GroceryNeedRow: View {
             : AnyLayout(HStackLayout(alignment: .groceryTitle, spacing: 12))
         layout {
             detailsControl
-            controls.fixedSize(horizontal: true, vertical: false)
-                .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
-                .frame(
-                maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
-                alignment: .trailing
-            )
+            if storeIndicator != nil || need.quantity != nil {
+                controls.fixedSize(horizontal: true, vertical: false)
+                    .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
+                    .frame(
+                        maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                        alignment: .trailing
+                    )
+            }
         }
         .frame(minHeight: 44)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -181,14 +183,13 @@ struct GroceryNeedRow: View {
                 }
             }
             .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
-            if need.kind == NeedKind.oneTime.rawValue {
-                Label("One-time", systemImage: "1.circle")
-                    .font(.caption).foregroundStyle(Color.grocerySecondary)
-            }
-            if let personLabel {
-                Label(personLabel, systemImage: "person")
-                    .font(.caption).foregroundStyle(Color.grocerySecondary)
-                    .accessibilityIdentifier("shopping.grocery.personLabel.\(need.id.uuidString)")
+            if need.kind == NeedKind.oneTime.rawValue || personLabel != nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { metadataLabels }
+                        .fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 2) { metadataLabels }
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
             if !presenceNames.isEmpty {
@@ -197,10 +198,26 @@ struct GroceryNeedRow: View {
                     .accessibilityHidden(true)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var metadataLabels: some View {
+        if need.kind == NeedKind.oneTime.rawValue {
+            Label("One-time", systemImage: "1.circle")
+                .labelStyle(.titleAndIcon)
+                .font(.caption).foregroundStyle(Color.grocerySecondary)
+        }
+        if let personLabel {
+            Label(personLabel, systemImage: "person")
+                .labelStyle(.titleAndIcon)
+                .font(.caption).foregroundStyle(Color.grocerySecondary)
+                .accessibilityIdentifier("shopping.grocery.personLabel.\(need.id.uuidString)")
+        }
     }
 
     private var title: String { need.item?.name ?? need.title }

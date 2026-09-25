@@ -14,10 +14,17 @@ struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: 
 
     var body: some View {
         ForEach(sections) { section in
-            Section(section.title) {
+            Section {
                 ForEach(section.items, id: itemID) { item in
                     row(section.id, item)
                 }
+            } header: {
+                Text(section.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.grocerySecondary)
+                    .textCase(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
             }
         }
     }

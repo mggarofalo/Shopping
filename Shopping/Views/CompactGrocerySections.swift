@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The grocery and cart collections share a compact section rhythm. Catalog keeps its own list style.
+/// Grocery and cart collections share compact row insets and section typography.
 struct CompactGrocerySections<SectionID: Hashable, ItemID: Hashable, Item, Row: View>: View {
     let sections: [ItemCollectionSection<SectionID, Item>]
     let itemID: KeyPath<Item, ItemID>

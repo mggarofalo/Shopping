@@ -41,5 +41,5 @@ struct CheckoutPreviewRow: View {
             needID: UUID(), revision: 0, title: "Coffee", quantity: 2, oneTime: true
         ))
     }
-    .listStyle(.plain)
+    .listStyle(.insetGrouped)
 }
