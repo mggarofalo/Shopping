@@ -16,6 +16,7 @@ final class WatchPersistenceBootstrap {
     var onAuthorityInvalidated: (() -> Void)?
     var onDataChanged: (() -> Void)?
     private let cloudSync = CloudSyncEventMonitor()
+    private let associationStatus = WatchAssociationStatus()
     private let provider: ShopperSessionProvider
     private let baseDirectory: URL
     private var current: Runtime?
@@ -40,6 +41,7 @@ final class WatchPersistenceBootstrap {
         provider = try ShopperSessionProvider(containerIdentifier: container, environment: environment,
             cacheDirectory: base.appendingPathComponent("Account", isDirectory: true))
         cloudSync.onChange = { [weak self] _ in self?.onDataChanged?() }
+        associationStatus.onChange = { [weak self] in self?.onDataChanged?() }
         observer = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange, object: provider, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.accountChanged() }
         }
@@ -57,9 +59,10 @@ final class WatchPersistenceBootstrap {
     }
 
     var accountStatusMessage: String? {
-        if cloudSync.status.hasFailure { return cloudSync.status.message }
-        if case .cached = provider.state { return "Using saved data. Changes sync when a connection returns." }
-        return syncMessage ?? cloudSync.status.message
+        let cached: Bool
+        if case .cached = provider.state { cached = true } else { cached = false }
+        return associationStatus.projectedMessage(cloudStatus: cloudSync.status,
+            cachedAccount: cached, otherMessage: syncMessage)
     }
 
     var householdWaitingMessage: String {
@@ -91,6 +94,7 @@ final class WatchPersistenceBootstrap {
                 checkpoints: FileHistoryCheckpointStore(directory: directory.appendingPathComponent("History", isDirectory: true))),
             selectionURL: directory.appendingPathComponent("watch-selection.json"),
             associations: persistence.shareAssociationJournal.map { ManagedShareAssociationWorker(persistence: persistence, journal: $0) })
+        associationStatus.reset()
         current = runtime
         binding = session.accountBinding
         observeImports(runtime)
@@ -106,6 +110,7 @@ final class WatchPersistenceBootstrap {
         guard binding != nil, next != binding else { return }
         authorityGeneration += 1
         cloudSync.reset()
+        associationStatus.reset()
         syncMessage = nil
         onAuthorityInvalidated?()
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
@@ -156,13 +161,8 @@ final class WatchPersistenceBootstrap {
 
     private func drainAssociations(_ runtime: Runtime) async {
         guard current?.persistence === runtime.persistence else { return }
-        do {
-            let remaining = try await runtime.associations?.retryPending() ?? 0
-            guard current?.persistence === runtime.persistence else { return }
-            if remaining > 0 { syncMessage = "Some household changes are waiting to be shared." }
-        } catch {
-            guard current?.persistence === runtime.persistence else { return }
-            syncMessage = "Your changes are saved. Household sharing will retry later."
+        await associationStatus.refresh {
+            try await runtime.associations?.retryPending() ?? 0
         }
     }
 
