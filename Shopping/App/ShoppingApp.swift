@@ -45,7 +45,6 @@ extension EnvironmentValues {
 struct ShoppingApp: App {
     @UIApplicationDelegateAdaptor(ShoppingApplicationDelegate.self) private var applicationDelegate
     @StateObject private var bootstrap: PersistenceBootstrap
-    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
@@ -54,46 +53,8 @@ struct ShoppingApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                switch bootstrap.state {
-                case .loading:
-                    ProgressView("Opening groceries…")
-                        .accessibilityIdentifier("shopping.persistence.loading")
-                case .ready(let ready):
-                    Group {
-                        if (ready.persistence.configuration.isManaged || ready.personalCartService != nil) && ready.householdID == nil {
-                            NavigationStack {
-                            ContentUnavailableView {
-                                Label("Waiting for your household", systemImage: "icloud")
-                            } description: {
-                                Text("Your existing iCloud groceries will appear after import. An empty cache does not create another household.")
-                            } actions: {
-                                Button("Check again") { bootstrap.applicationDidEnterForeground() }
-                                if let service = ready.personalCartService {
-                                    NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
-                                }
-                            }
-                            }
-                        } else { ContentView() }
-                    }
-                        .environment(\.managedObjectContext, ready.persistence.container.viewContext)
-                        .environment(\.needService, ready.service)
-                        .environment(\.personalCart, ready.personalCart)
-                        .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
-                        .environment(\.persistenceSelection, PersistenceSelection(
-                            householdID: ready.householdID,
-                            listID: ready.listID
-                        ))
-                case .failed(let error):
-                    PersistenceRecoveryView(error: error, retry: bootstrap.retry)
-                }
-            }
-            .environmentObject(bootstrap)
-            .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
-            .task { bootstrap.start() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { bootstrap.applicationDidEnterForeground() }
-            }
+            PersistenceRootView(bootstrap: bootstrap)
+                .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
         }
     }
 }

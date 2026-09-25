@@ -19,17 +19,28 @@ struct WatchStoreChooser: View {
                         if session.snapshot.selectedStoreID == store.id { dismiss() }
                     }
                 } label: {
-                    HStack {
+                    HStack(spacing: 6) {
                         Text(store.name)
-                        Spacer(minLength: 0)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if store.id == session.snapshot.selectedStoreID {
-                            Image(systemName: "checkmark").accessibilityHidden(true)
+                            Image(systemName: "checkmark").font(.caption2).accessibilityHidden(true)
                         }
+                        HStack(spacing: 6) {
+                            Label("\(store.mustBuyCount)", systemImage: "lock.fill")
+                            Label("\(store.canBuyCount)", systemImage: "lock.open")
+                        }
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .fixedSize()
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     }
                     .frame(minHeight: 44)
                 }
                 .disabled(session.isBusy)
-                .accessibilityValue(store.id == session.snapshot.selectedStoreID ? "Selected" : "")
+                .accessibilityLabel(store.name)
+                .accessibilityValue("\(store.id == session.snapshot.selectedStoreID ? "Selected. " : "")\(store.mustBuyCount) only buy here, \(store.canBuyCount) can buy here")
                 .accessibilityIdentifier("watch.store.\(store.id)")
             }
             if session.snapshot.cartCount > 0 {

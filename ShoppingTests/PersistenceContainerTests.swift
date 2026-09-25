@@ -1,5 +1,7 @@
 import CoreData
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Shopping
 
 final class PersistenceContainerTests: XCTestCase {
@@ -554,4 +556,146 @@ private final class MemoryCheckpointStore: HistoryCheckpointStore {
             successfulSaveCount += 1
         }
     }
+}
+
+
+extension PersistenceContainerTests {
+    @MainActor
+    func testActivationRetiresMountedGroceriesBeforeInvalidatingFetchedObjects() async throws {
+        enum Expected: Error { case stopBeforeCloudAccount }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("original.sqlite")
+        let fixture = try ShoppingPreviewFixtures.make(.populated, storeURL: sourceURL)
+        let suite = "Shopping.BootstrapTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accountRequested = expectation(description: "Account opens after outgoing presentation retirement")
+        var providerCalled = false
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: sourceURL) },
+            preloadedPreviewEnvironment: fixture, defaults: defaults, makeAccountProvider: { _ in
+                providerCalled = true
+                accountRequested.fulfill()
+                throw Expected.stopBeforeCloudAccount
+            })
+        bootstrap.start()
+        guard case .ready(let ready) = bootstrap.state else { return XCTFail("Missing isolated grocery fixture") }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: PersistenceRootView(bootstrap: bootstrap))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousWindow?.makeKeyAndVisible() }
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            bootstrap.isPresentationMounted(ready.presentation.id)
+        }, object: nil)], timeout: 5)
+        let context = ready.persistence.container.viewContext
+        let stores = try context.fetch(Store.fetchRequest())
+        XCTAssertFalse(stores.isEmpty)
+        context.processPendingChanges()
+
+        // This is the real setup command, with real mounted GroceriesView FRCs and notifications.
+        bootstrap.activatePersonalCarts(importLegacy: true)
+        XCTAssertFalse(ready.presentation.isActive)
+        XCTAssertFalse(providerCalled)
+        XCTAssertEqual(ready.persistence.container.persistentStoreCoordinator.persistentStores.count, 1)
+        XCTAssertFalse(stores[0].name.isEmpty)
+        // Already queued presentation callbacks must be harmless even before SwiftUI unmounts it.
+        NotificationCenter.default.post(name: .NSManagedObjectContextObjectsDidChange, object: context)
+        await fulfillment(of: [accountRequested], timeout: 5)
+        XCTAssertFalse(bootstrap.isPresentationMounted(ready.presentation.id))
+        XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        guard case .failed = bootstrap.state else { return XCTFail("Expected isolated provider failure") }
+        XCTAssertEqual(defaults.string(forKey: "shopping.personalCart.pendingImport"), sourceURL.path)
+        let reopened = try PersistenceController(storeURL: sourceURL)
+        defer {
+            let coordinator = reopened.container.persistentStoreCoordinator
+            for store in coordinator.persistentStores { try? coordinator.remove(store) }
+        }
+        XCTAssertEqual(try NeedService(persistence: reopened).firstHouseholdSelection()?.householdID, fixture.ids.householdID)
+    }
+
+    @MainActor
+    func testAccountFailureUsesSamePresentationRetirementBoundary() async throws {
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: nil, inMemory: true) })
+        bootstrap.start()
+        guard case .ready(let ready) = bootstrap.state else { return XCTFail("Expected local state") }
+        // A mounted presentation is an explicit gate; loading alone cannot detach its context.
+        bootstrap.presentationDidAppear(ready.presentation.id)
+        bootstrap.retireAndFail(ShopperSessionError.accountChanged)
+        bootstrap.runLoadingTransition()
+        XCTAssertFalse(ready.presentation.isActive)
+        XCTAssertFalse(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        bootstrap.presentationDidDisappear(UUID())
+        bootstrap.runLoadingTransition()
+        XCTAssertFalse(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        bootstrap.presentationDidDisappear(ready.presentation.id)
+        bootstrap.runLoadingTransition()
+        XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        guard case .failed(let error) = bootstrap.state else { return XCTFail("Expected account failure") }
+        XCTAssertEqual(error as? ShopperSessionError, .accountChanged)
+    }
+
+    @MainActor
+    func testActivationRejectedDuringRetirementDoesNotBlockLaterRetry() throws {
+        let suite = "Shopping.BootstrapTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var providerAttempts = 0
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: nil, inMemory: true) },
+            defaults: defaults, makeAccountProvider: { _ in
+                providerAttempts += 1
+                throw ShopperSessionError.temporarilyUnavailable
+            })
+        bootstrap.start()
+        guard case .ready(let ready) = bootstrap.state else { return XCTFail("Expected local state") }
+        bootstrap.presentationDidAppear(ready.presentation.id)
+        bootstrap.retireAndFail(ShopperSessionError.accountChanged)
+        bootstrap.activatePersonalCarts(importLegacy: false)
+        XCTAssertFalse(defaults.bool(forKey: "shopping.personalCart.enabled"))
+        bootstrap.presentationDidDisappear(ready.presentation.id)
+        bootstrap.runLoadingTransition()
+        guard case .failed = bootstrap.state else { return XCTFail("Expected original retirement to complete") }
+        bootstrap.activatePersonalCarts(importLegacy: false)
+        bootstrap.runLoadingTransition()
+        XCTAssertEqual(providerAttempts, 1)
+        bootstrap.retry()
+        bootstrap.runLoadingTransition()
+        XCTAssertEqual(providerAttempts, 2, "Rejected activation must not leave account loading latched")
+    }
+
+    @MainActor
+    func testRetiredMountedCartIgnoresContextInvalidationNotifications() async throws {
+        let fixture = try ShoppingPreviewFixtures.make(.populated)
+        let context = fixture.persistence.container.viewContext
+        let presentation = PersistenceBootstrap.Presentation()
+        let appeared = expectation(description: "Actual cart view mounted")
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView:
+            NavigationStack {
+                CartedGroceriesView(navigation: GroceryNavigationState())
+                    .onAppear { appeared.fulfill() }
+            }
+            .environment(\.managedObjectContext, context)
+            .environment(\.needService, fixture.service)
+            .environment(\.persistencePresentation, presentation)
+            .environment(\.persistenceSelection, PersistenceSelection(
+                householdID: fixture.ids.householdID, listID: fixture.ids.listID)))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousWindow?.makeKeyAndVisible() }
+        await fulfillment(of: [appeared], timeout: 5)
+        XCTAssertFalse(try context.fetch(Store.fetchRequest()).isEmpty)
+        presentation.retire()
+        // Deliberately keep the old view mounted through reset, as a retained navigation
+        // destination can outlive its parent. Its queued receiver must not touch old FRCs.
+        context.reset()
+        let coordinator = fixture.persistence.container.persistentStoreCoordinator
+        for store in coordinator.persistentStores { try coordinator.remove(store) }
+        NotificationCenter.default.post(name: .NSManagedObjectContextObjectsDidChange, object: context)
+        XCTAssertTrue(coordinator.persistentStores.isEmpty)
+    }
+
 }

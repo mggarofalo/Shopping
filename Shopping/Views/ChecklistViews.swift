@@ -5,6 +5,7 @@ import Darwin
 #endif
 
 struct CartedGroceriesView: View {
+    @Environment(\.persistencePresentation) private var presentation
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
@@ -41,6 +42,11 @@ struct CartedGroceriesView: View {
     }
 
     var body: some View {
+        if presentation?.isActive != false { activeBody }
+    }
+
+    @ViewBuilder
+    private var activeBody: some View {
         let visibleCarted = visibleCartedNeeds
         let activeStores = validActiveStores
         List {
@@ -80,8 +86,8 @@ struct CartedGroceriesView: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .listSectionSpacing(.custom(0))
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(8))
         .navigationTitle("In cart")
         .searchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {
@@ -123,6 +129,7 @@ struct CartedGroceriesView: View {
             for: .NSManagedObjectContextObjectsDidChange,
             object: viewContext
         )) { _ in
+            guard presentation?.isActive != false else { return }
             configureAndRefresh()
         }
         .alert(
@@ -256,6 +263,7 @@ struct CartedGroceriesView: View {
     }
 
     private func configureAndRefresh() {
+        guard presentation?.isActive != false else { return }
         navigation.configure(
             householdID: selection.householdID,
             activeStoreIDs: Set(validActiveStores.map(\.id)),
@@ -265,6 +273,7 @@ struct CartedGroceriesView: View {
     }
 
     private func refreshProjection() {
+        guard presentation?.isActive != false else { return }
         guard let service, let householdID = selection.householdID, canonicalList != nil else {
             visibleNeedObjectIDs = []
             return

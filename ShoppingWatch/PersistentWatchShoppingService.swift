@@ -81,7 +81,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let session: ShopperSession
         do { (cart, session) = try await resolve() }
         catch {
-            return WatchShoppingSnapshot(availability: .setupRequired(error.localizedDescription))
+            let message = (error as? ShopperSessionError)?.errorDescription
+                ?? (error as? PersonalCartError)?.errorDescription
+                ?? "Saved shopping data could not be opened. Relaunch Shopping to retry; your data is retained."
+            return WatchShoppingSnapshot(availability: .setupRequired(message))
         }
         bootstrap?.retryPendingAssociations()
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
@@ -93,8 +96,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let savedHousehold = saved?.accountBinding == session.accountBinding ? saved?.householdID : nil
         guard let projection = try WatchPersistentProjection.read(cart: cart,
             preferredHouseholdID: preferredHouseholdID ?? savedHousehold, writable: householdWritable) else {
-            return WatchShoppingSnapshot(availability: .setupRequired("Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."),
-                statusMessage: bootstrap?.accountStatusMessage)
+            return WatchShoppingSnapshot(availability: .setupRequired(bootstrap?.householdWaitingMessage
+                ?? "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."))
         }
         activeHouseholdID = projection.scope.householdID
         if selectedStoreID == nil, let selectionURL,
@@ -125,6 +128,22 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 hasResolvedIdentity: entry.purchaseRulesResolved), activeStoreIDs: activeStores)
         }
         let ownIDs = Set(own.map(\.needID))
+        // Store choices summarize all remaining occurrences, independent of the selected store.
+        let pending = projection.needs.filter { $0.purchaseRulesResolved && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) }
+        let stores = projection.stores.map { store in
+            var value = store
+            var counted: Set<UUID> = []
+            for entry in pending where counted.insert(entry.needID).inserted {
+                let rule = PurchaseRuleValue(explicitStoreIDs: entry.storeIDs, anyStore: entry.anyStore,
+                    hasResolvedIdentity: entry.purchaseRulesResolved)
+                switch filter.availability(of: rule, selectedStoreID: store.id, activeStoreIDs: activeStores) {
+                case .mustBuyHere: value.mustBuyCount += 1
+                case .flexibleHere: value.canBuyCount += 1
+                default: break
+                }
+            }
+            return value
+        }
         let grocery = projection.needs.filter { writable && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) && eligible($0) }
         // A retained cart stays removable even when its old store or household disappears.
         let visibleCart = selectedStoreID == nil ? own : own.filter { eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
@@ -174,7 +193,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
-            stores: projection.stores, selectedStoreID: selectedStoreID,
+            stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try item($0, inCart: true) },
             recentCheckouts: operations,

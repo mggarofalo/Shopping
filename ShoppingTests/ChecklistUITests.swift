@@ -139,6 +139,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(row("Chipotles in adobo", app: app).exists)
         XCTAssertFalse(row("Strawberries", app: app).exists)
 
+        XCTAssertTrue(app.staticTexts["Chipotles in adobo moved to In cart."].waitForNonExistence(timeout: 5))
         openCheckout(app: app)
         XCTAssertTrue(app.buttons["shopping.checkout.confirm"].label.contains("2"))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Birthday candles")).firstMatch.exists)

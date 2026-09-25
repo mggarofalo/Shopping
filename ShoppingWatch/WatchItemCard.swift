@@ -6,16 +6,23 @@ struct WatchItemCard: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draftQuantity: Int?
     @State private var hasLoadedDraft = false
+    @ScaledMetric(relativeTo: .caption2) private var headerFontSize = 11
 
     var body: some View {
         List {
             if let item = session.snapshot.item(id: itemID) {
-                Text(item.name).font(.headline)
-                if let rule = item.rule { Label(rule.title, systemImage: rule.symbol).font(.footnote) }
-                if item.isUrgent { Label("Urgent", systemImage: "exclamationmark").foregroundStyle(.orange) }
-                if item.isOneTime { Text("One-time item").font(.footnote) }
-                if !item.notes.isEmpty { Text(item.notes).font(.footnote) }
-                if let reason = item.unavailableReason { Text(reason).font(.footnote).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name).font(.headline)
+                    if let rule = item.rule {
+                        Label(rule.title, systemImage: rule.symbol)
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if item.isUrgent { Label("Urgent", systemImage: "exclamationmark").font(.caption2).foregroundStyle(.orange) }
+                    if item.isOneTime { Text("One-time item").font(.caption2).foregroundStyle(.secondary) }
+                    if !item.notes.isEmpty { Text(item.notes).font(.footnote) }
+                    if let reason = item.unavailableReason { Text(reason).font(.footnote).foregroundStyle(.secondary) }
+                }
+                .listRowBackground(Color.clear)
                 if let notice = item.purchasedNotice {
                     Section {
                         Text(notice).font(.footnote)
@@ -28,8 +35,12 @@ struct WatchItemCard: View {
                         }
                     }
                 }
-                Section(item.isInOwnCart ? "Your cart quantity" : "Quantity to buy") {
+                Section {
                     quantityControls(item: item)
+                } header: {
+                    Text(item.isInOwnCart ? "Your cart quantity" : "Quantity to buy")
+                        .font(.system(size: headerFontSize, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 if !item.otherCarts.isEmpty {
                     Section("Other shoppers") {
@@ -50,20 +61,37 @@ struct WatchItemCard: View {
                     }
                     .disabled(session.isBusy)
                     .accessibilityIdentifier("watch.item.remove")
-                } else if !item.isInOwnCart && item.canAdd {
-                    Button("Add to your cart") {
-                        Task {
-                            await session.perform(.add(token: item.commandToken, quantity: draftQuantity))
-                        }
-                    }
-                    .disabled(session.isBusy)
-                    .accessibilityIdentifier("watch.item.add")
                 }
             } else {
                 Text("This item has changed. Return to the list to see the latest groceries.")
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Item")
+        .safeAreaInset(edge: .bottom, spacing: 4) {
+            if let item = addableItem {
+                HStack {
+                    Button {
+                        Task {
+                            if await session.perform(.add(token: item.commandToken, quantity: draftQuantity)) {
+                                dismiss()
+                            }
+                        }
+                    } label: {
+                        Text("Add to cart").font(.caption2)
+                    }
+                    .buttonStyle(WatchCompactButtonStyle())
+                    .fixedSize(horizontal: true, vertical: false)
+                    .disabled(session.isBusy)
+                    .accessibilityLabel("Add to your cart")
+                    .accessibilityIdentifier("watch.item.add")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 8)
+                .background(.background)
+            }
+        }
+        .ignoresSafeArea(.container, edges: addableItem == nil ? [] : .bottom)
         .task {
             if !hasLoadedDraft {
                 draftQuantity = session.snapshot.item(id: itemID)?.quantity
@@ -72,29 +100,43 @@ struct WatchItemCard: View {
         }
     }
 
+    private var addableItem: WatchShoppingItem? {
+        guard let item = session.snapshot.item(id: itemID), !item.isInOwnCart, item.canAdd else { return nil }
+        return item
+    }
+
     private func quantityControls(item: WatchShoppingItem) -> some View {
         let quantity = item.isInOwnCart ? item.quantity : draftQuantity
         let editable = !session.isBusy && (item.isInOwnCart ? item.canChangeQuantity : item.canAdd)
-        return VStack(spacing: 4) {
-            Text(quantity.map(String.init) ?? "Not specified").monospacedDigit()
-            HStack {
+        return VStack(spacing: 0) {
+            HStack(spacing: 2) {
                 Button { setQuantity(max(1, (quantity ?? 1) - 1), item: item) } label: {
-                    Image(systemName: "minus").frame(maxWidth: .infinity, minHeight: 44)
+                    Image(systemName: "minus").frame(width: 24)
                 }
                 .disabled(!editable || quantity == nil || quantity == 1)
                 .accessibilityLabel("Decrease your quantity")
+                .accessibilityValue(quantity.map(String.init) ?? "Not specified")
+                Text(quantity.map(String.init) ?? "—")
+                    .font(.body).monospacedDigit()
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel(quantity.map(String.init) ?? "Quantity not specified")
                 Button { setQuantity(min(99, (quantity ?? 0) + 1), item: item) } label: {
-                    Image(systemName: "plus").frame(maxWidth: .infinity, minHeight: 44)
+                    Image(systemName: "plus").frame(width: 24)
                 }
                 .disabled(!editable || quantity == 99)
                 .accessibilityLabel("Increase your quantity")
+                .accessibilityValue(quantity.map(String.init) ?? "Not specified")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(WatchCompactButtonStyle())
             if quantity != nil {
                 Button("Clear quantity") { setQuantity(nil, item: item) }
-                    .font(.footnote).disabled(!editable)
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .disabled(!editable)
             }
         }
+        .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
     }
 
     private func setQuantity(_ quantity: Int?, item: WatchShoppingItem) {

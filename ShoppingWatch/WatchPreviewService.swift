@@ -11,6 +11,7 @@ final class WatchPreviewService: WatchShoppingService {
     private var cleared: [String: [WatchShoppingItem]] = [:]
     private let scenario: String
     private var failsNextCheckout = false
+    private var failsNextAdd = false
     static let firstStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     static let secondStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
 
@@ -20,6 +21,7 @@ final class WatchPreviewService: WatchShoppingService {
         items = Self.sample.grocerySections.flatMap(\.items) + Self.sample.cartSections.flatMap(\.items)
         if scenario == "empty" { items = [] }
         failsNextCheckout = scenario == "saveFailure"
+        failsNextAdd = scenario == "addFailure"
         if scenario == "fullCart" || scenario == "saveFailure" {
             for index in items.indices {
                 items[index].isInOwnCart = true
@@ -46,6 +48,12 @@ final class WatchPreviewService: WatchShoppingService {
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
         switch command {
         case .add(let token, let quantity):
+            if failsNextAdd {
+                failsNextAdd = false
+                throw NSError(domain: "WatchPreview", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "Preview add failed. Your cart is unchanged. Try again."
+                ])
+            }
             if let i = items.firstIndex(where: { $0.commandToken == token && $0.canAdd }) {
                 items[i].isInOwnCart = true
                 items[i].quantity = quantity
@@ -121,6 +129,14 @@ final class WatchPreviewService: WatchShoppingService {
                 return rows.isEmpty ? nil : WatchItemSection(id: category, title: category, items: rows)
             }
         }
+        value.stores = value.stores.map { store in
+            var result = store
+            let pending = items.filter { !$0.isInOwnCart && $0.purchasedNotice == nil
+                && (store.id == Self.firstStoreID || $0.id != "strawberries") }
+            result.mustBuyCount = pending.filter { $0.rule == .onlyHere }.count
+            result.canBuyCount = pending.filter { $0.rule == .canBuyHere }.count
+            return result
+        }
         value.grocerySections = sections(cart: false)
         value.cartSections = sections(cart: true)
         value.canCheckout = eligible.contains { $0.isInOwnCart && $0.purchasedNotice == nil }
@@ -132,7 +148,7 @@ final class WatchPreviewService: WatchShoppingService {
 
     static var sample: WatchShoppingSnapshot {
         WatchShoppingSnapshot(authorityID: "preview-shopper", availability: .ready,
-            stores: [WatchStore(id: firstStoreID, name: "Trader Joe’s"), WatchStore(id: secondStoreID, name: "Costco")],
+            stores: [WatchStore(id: firstStoreID, name: "Trader Joe’s", mustBuyCount: 1, canBuyCount: 2), WatchStore(id: secondStoreID, name: "Costco", canBuyCount: 2)],
             selectedStoreID: firstStoreID,
             grocerySections: [
                 WatchItemSection(id: "Produce", title: "Produce", items: [

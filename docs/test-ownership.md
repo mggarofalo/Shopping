@@ -116,3 +116,86 @@ The durable Watch UI scenarios use `WatchPersistentTestFixture` with the product
 `PersistentWatchShoppingServiceTests` owns real-adapter SQLite reopening, stale command rejection, retained private cleanup, store restrictions, captured checkout and account invalidation. `PersonalCartPresentationTests` proves malformed shared receipts cannot hide private cart removal/history. `CloudConfigurationTests` runs in both hosted app targets and verifies their packaged container/environment settings, iPhone background mode and Watch independence/sharing configuration. `PersonalCartServiceTests` also verifies detached/account-changed share workers cannot acknowledge pending associations. These are local authority and packaging checks, not live server delivery proof.
 
 Watch tests run in the `ShoppingWatch` scheme separately from iPhone Fast coverage. Existing iPhone acceptance selection and coverage thresholds remain unchanged. Real owner/participant bootstrap, cross-device CloudKit delivery, physical accessibility and phone-powered-off Series 11 behavior remain SHOPPING-30/122 evidence.
+
+## Household setup and legacy review regression (SHOPPING-133)
+
+`PersistenceContainerTests/testActivationRetiresMountedGroceriesBeforeInvalidatingFetchedObjects`
+owns the real `PersistenceRootView`/`GroceriesView` hosting boundary: activation
+retires presentation authority before a queued Core Data callback and waits for
+the loading view’s lifecycle before detaching the old store.
+`testAccountFailureUsesSamePresentationRetirementBoundary` owns the same
+authority ordering during an account failure.
+`testActivationRejectedDuringRetirementDoesNotBlockLaterRetry` covers overlapping
+activation and retirement without permanently blocking retry.
+`testRetiredMountedCartIgnoresContextInvalidationNotifications` retains the actual
+cart screen through context invalidation and verifies its retired callback guard.
+
+`PersonalCartUITests/testHouseholdSetupCopyRetiresVisibleGroceriesBeforeAccountFailureAndRelaunch`
+owns Settings → Set up household → Copy existing groceries, the visible failure
+state, and recovery after relaunch. The fixture supplies legacy data and an
+isolated unavailable account; the UI performs setup itself. It cannot prove
+real CloudKit delivery.
+`testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute`
+owns the discard control, pending-card disappearance, same-store relaunch, and
+separate earlier-history navigation. `PersonalCartServiceTests` owns migration
+selection, equivalent duplicate identities, durable claim/discard receipts,
+late merges, and preserved scoped historical recovery without personal-cart
+ownership. No fixture contains a copy of a shopper’s real records.
+
+`CloudSyncStatusTests` runs in both app targets and owns per-store/per-operation
+error retention, observed success wording, partial-error classification, stale
+event ordering, and account/container reset. Successful engine events are
+never treated as proof that another device received the records.
+
+## Compact category tables and Watch store counts (SHOPPING-134)
+
+`ShoppingAppearanceUITests/testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText`
+owns the grocery-to-personal-cart interaction with native category tables, row
+hit targets and screenshot evidence at standard/light and largest-accessibility/dark
+settings. It waits for the specific cart toast to disappear before checking the
+checkout control. The fixture supplies groceries only; the UI performs the cart
+action. Existing personal checkout/recovery and legacy scoped-checkout tests
+retain their lifecycle and scope assertions.
+
+`PersistentWatchShoppingServiceTests` owns per-store count semantics, including
+Any store, sole/multiple restrictions, archived-only and unresolved rules,
+independent same-title occurrences, selected-store independence, own versus other
+cart membership, removal and fulfilled demand. Native Watch UI tests own count
+labels in the chooser and actual footer/last-row reachability; visual clearance
+is not a substitute for a successful row interaction.
+
+## Watch item-card Add transition (SHOPPING-135)
+
+`WatchShoppingSessionTests` owns command completion results: success is returned
+only after an applied snapshot from the same authority; save failure, busy calls,
+changed authority and suspended stale results cannot trigger success navigation.
+`WatchShoppingUITests` owns card dismissal after Add using the real isolated SQLite
+adapter, preserved quantity across relaunch, and failed Add retaining its draft
+and allowing retry. Root errors are presented from the outer navigation stack so
+pushed item cards can show them; checkout sheets retain their own exclusive alert
+presenter. Large-text row revelation uses small final crown adjustments while
+retaining whole-row visibility and actual tap assertions. The existing durable
+swipe-add/checkout/recovery route remains
+separate. The DEBUG-only add-failure fixture fails before mutation and is never
+selected during normal or release launch. Generation-qualified persistence IDs
+and command tokens remain unchanged.
+
+## Catalog contrast audit synchronization (SHOPPING-136)
+
+`ShoppingDeviceUITests/testCatalogRowSupportingTextContrast` waits boundedly for
+Search submission to dismiss the keyboard before asserting one visible, hittable
+catalog row and auditing its contrast. Hosted run 36067861081 recorded a keyboard
+existence check during dismissal; the video ended with it gone. The wait retains
+the failure for a keyboard that remains open, all row bounds, and the unchanged
+contrast audit. It does not retry the test or add production behavior.
+
+## Checkout feedback synchronization (SHOPPING-137)
+
+`PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch` and
+`ChecklistUITests/testCartInheritsGroceryScopeAndCheckoutCapturesVisibleItems`
+wait boundedly for the specific last-carted item's feedback to disappear before
+tapping checkout once. Hosted run 36075824376 recorded the Granola feedback
+covering the checkout action during the personal-cart test. Hittability alone
+does not prove an overlay has gone. Both tests retain their checkout assertions;
+the personal-cart test still terminates, relaunches without reseeding, and undoes
+the purchase. No action retries or production timing changes are introduced.

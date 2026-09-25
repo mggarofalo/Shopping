@@ -43,8 +43,11 @@ final class WatchShoppingSession {
         await run { .snapshot(try await self.service.load(storeID: storeID ?? self.snapshot.selectedStoreID)) }
     }
 
-    func perform(_ command: WatchShoppingCommand) async {
-        await run { .snapshot(try await self.service.execute(command)) }
+    @discardableResult
+    func perform(_ command: WatchShoppingCommand) async -> Bool {
+        let authorityID = snapshot.authorityID
+        let applied = await run { .snapshot(try await self.service.execute(command)) }
+        return applied && snapshot.availability == .ready && snapshot.authorityID == authorityID
     }
 
     func prepareCheckout() async {
@@ -75,14 +78,19 @@ final class WatchShoppingSession {
         case result(WatchActionResult)
     }
 
-    private func run(_ operation: () async throws -> Update) async {
-        guard !isBusy else { return }
+    @discardableResult
+    private func run(_ operation: () async throws -> Update) async -> Bool {
+        guard !isBusy else { return false }
         isBusy = true
         errorMessage = nil
         let generation = authorityGeneration
+        var applied = false
         do {
             let update = try await operation()
-            if generation == authorityGeneration { apply(update) }
+            if generation == authorityGeneration {
+                apply(update)
+                applied = true
+            }
         } catch {
             // Do not resurrect old-account errors or UI after authority invalidation.
             if generation == authorityGeneration { errorMessage = error.localizedDescription }
@@ -92,6 +100,7 @@ final class WatchShoppingSession {
             reloadRequested = false
             await reload()
         }
+        return applied && generation == authorityGeneration
     }
 
     private func apply(_ update: Update) {

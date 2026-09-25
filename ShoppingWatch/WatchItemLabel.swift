@@ -16,8 +16,8 @@ struct WatchItemLabel: View {
             if let quantity = item.quantity { Text("\(quantity)").monospacedDigit() }
             if let rule = item.rule { Image(systemName: rule.symbol).font(.caption).accessibilityHidden(true) }
         }
-        .font(.body)
-        .frame(minHeight: 32)
+        .font(.callout)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.name)
         .accessibilityValue(item.accessibilityValue)
