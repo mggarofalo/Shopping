@@ -49,6 +49,7 @@ struct WatchShoppingView: View {
             Button("Try again") { Task { await session.reload() } }
                 .disabled(session.isBusy)
         }
+        .listStyle(.plain)
     }
 
     private func groceries(store: WatchStore) -> some View {

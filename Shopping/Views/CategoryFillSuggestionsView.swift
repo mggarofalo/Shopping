@@ -35,6 +35,7 @@ struct CategoryFillSuggestionsView: View {
                     List(candidates) { candidate in
                         candidateRow(candidate)
                     }
+                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle(categoryName)

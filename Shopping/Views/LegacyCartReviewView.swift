@@ -28,6 +28,7 @@ struct LegacyCartReviewView: View {
                 NavigationLink("Earlier cleared groceries") { RecentlyClearedView() }
             }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("Old cart entries")
         .onAppear(perform: refresh)
         .alert("Couldn’t update entry", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {

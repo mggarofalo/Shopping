@@ -48,6 +48,7 @@ struct WatchStoreChooser: View {
             }
             NavigationLink("Recently cleared") { WatchRecoveryView(session: session) }
         }
+        .listStyle(.plain)
         .navigationTitle("Stores")
     }
 }

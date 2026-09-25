@@ -15,6 +15,7 @@ struct WatchResultView: View {
             }
             Button("Done") { dismiss() }
         }
+        .listStyle(.plain)
         .navigationTitle("Result")
     }
 }

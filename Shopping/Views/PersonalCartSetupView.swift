@@ -17,6 +17,7 @@ struct PersonalCartSetupView: View {
                 Text("Copy only from the first device. On your other devices, use the existing iCloud groceries. The original local data is retained.")
             }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("Personal carts")
         .confirmationDialog("Copy these groceries to your iCloud account?", isPresented: $confirmingImport, titleVisibility: .visible) {
             Button("Copy groceries") { activate(true) }

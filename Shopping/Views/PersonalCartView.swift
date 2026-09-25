@@ -43,11 +43,19 @@ struct PersonalCartView: View {
             if visibleEntries.isEmpty { Text("Your cart is empty in this view").foregroundStyle(.secondary) }
             CompactGrocerySections(sections: sections, itemID: \.id) { _, entry in
                 Button { selected = entry } label: {
-                    HStack {
-                        Text(entry.title).foregroundStyle(Color.primary)
-                        Spacer()
-                        if let quantity = entry.quantity { Text("\(quantity)").foregroundStyle(Color.secondary) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(entry.title).foregroundStyle(Color.primary)
+                            Spacer()
+                            if let quantity = entry.quantity {
+                                Text("\(quantity)").foregroundStyle(Color.secondary).fixedSize()
+                            }
+                        }
+                        if !entry.notes.isEmpty {
+                            Text(entry.notes).font(.caption).foregroundStyle(Color.grocerySecondary)
+                        }
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 44)
                 }
                 .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")

@@ -26,6 +26,7 @@ struct WatchCheckoutView: View {
             Button("Cancel", role: .cancel) { dismiss() }
                 .disabled(session.isBusy)
         }
+        .listStyle(.plain)
         .navigationTitle("Check out")
         .interactiveDismissDisabled(session.isBusy)
     }

@@ -128,7 +128,7 @@ struct CatalogView: View {
                 List(selection: $selectedIDs) {
                     catalogListRows
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
                 .contentMargins(.top, 0, for: .scrollContent)
                 .accessibilityIdentifier("shopping.catalog.list")
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -311,7 +311,7 @@ struct CatalogView: View {
                 }
                 .id(source)
                 .listRowBackground(
-                    highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : Color.clear
+                    highlightedItemID == item.id ? Color.accentColor.opacity(0.2) : nil
                 )
                 .accessibilityValue(highlightedItemID == item.id ? "Recently added" : "")
             }

@@ -199,3 +199,21 @@ covering the checkout action during the personal-cart test. Hittability alone
 does not prove an overlay has gone. Both tests retain their checkout assertions;
 the personal-cart test still terminates, relaunches without reseeding, and undoes
 the purchase. No action retries or production timing changes are introduced.
+
+## Consistent list surfaces and content-sized rows (SHOPPING-138)
+
+`ShoppingAppearanceUITests/testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText`
+compares a bare grocery row with a notes-and-assignment row in the existing
+populated fixture, verifies expanded height and retained metadata, and keeps
+quantity targets and the actual cart interaction reachable at standard and
+accessibility sizes. The other appearance methods retain catalog, editor,
+filter and Settings screenshots in light/dark modes; native management selection
+and catalog contrast retain their existing UI owners. No fixture or persistence
+contract changes are required. See [list presentation](list-presentation.md) for
+the audited List/Form surfaces and deliberate non-row exceptions.
+
+## Household association status (SHOPPING-139)
+
+`ShareAssociationRetryTests` owns the durable association-journal boundary: records for a household without a share remain queued for later sharing without counting as actionable pending work; existing-share work and errors remain visible; overlapping retries serialize and return the final pass result. The injected pass replaces only CloudKit interaction, so these tests do not establish live household delivery. `PersonalCartServiceTests` retains detached-store/account authority validation.
+
+`WatchAssociationStatusTests` owns warning transitions, notification deduplication, preservation and priority of invitation/history/account/CloudKit messages, and rejection of old-runtime or older overlapping completions. `CloudSyncStatusTests` continues to own engine-event classification and per-store import/export failure retention. Real cross-account sharing remains SHOPPING-30.

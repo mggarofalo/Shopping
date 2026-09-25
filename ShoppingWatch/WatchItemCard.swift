@@ -22,7 +22,6 @@ struct WatchItemCard: View {
                     if !item.notes.isEmpty { Text(item.notes).font(.footnote) }
                     if let reason = item.unavailableReason { Text(reason).font(.footnote).foregroundStyle(.secondary) }
                 }
-                .listRowBackground(Color.clear)
                 if let notice = item.purchasedNotice {
                     Section {
                         Text(notice).font(.footnote)

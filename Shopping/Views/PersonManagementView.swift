@@ -37,7 +37,7 @@ struct PersonManagementView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .navigationTitle("People")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {

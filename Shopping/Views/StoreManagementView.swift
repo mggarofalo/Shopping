@@ -93,7 +93,7 @@ struct StoreManagementView: View {
                 standardList
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .environment(\.editMode, $editMode)
         .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Stores")
         .toolbar {

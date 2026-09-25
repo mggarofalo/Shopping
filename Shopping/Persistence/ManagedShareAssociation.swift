@@ -87,16 +87,25 @@ enum ManagedShareAssociationError: Error {
 }
 
 actor ManagedShareAssociationWorker {
-    private let persistence: PersistenceController
     private let journal: ShareAssociationJournal
+    private let performPass: () async throws -> Set<URL>
     private var processing = false
     private var passRequested = false
     private var waiters: [CheckedContinuation<Int, Error>] = []
 
     init(persistence: PersistenceController, journal: ShareAssociationJournal) {
-        self.persistence = persistence
         self.journal = journal
+        performPass = { try await Self.drainOnce(persistence: persistence, journal: journal) }
     }
+
+    // The pass reports households without an existing share. Their journal remains durable,
+    // but it is not a queue of unfinished work for an existing household share.
+    init(journal: ShareAssociationJournal, performPass: @escaping () async throws -> Set<URL>) {
+        self.journal = journal
+        self.performPass = performPass
+    }
+
+    var queuedRetryCount: Int { waiters.count }
 
     @discardableResult
     func retryPending() async throws -> Int {
@@ -106,11 +115,13 @@ actor ManagedShareAssociationWorker {
         }
         processing = true
         do {
+            var unsharedHouseholds: Set<URL> = []
             while passRequested {
                 passRequested = false
-                try await drainOnce()
+                unsharedHouseholds = try await performPass()
             }
-            let count = try journal.pending().reduce(0) { $0 + $1.objectURIs.count }
+            let count = try journal.pending().filter { !unsharedHouseholds.contains($0.householdURI) }
+                .reduce(0) { $0 + $1.objectURIs.count }
             processing = false
             let pending = waiters; waiters.removeAll()
             pending.forEach { $0.resume(returning: count) }
@@ -123,12 +134,15 @@ actor ManagedShareAssociationWorker {
         }
     }
 
-    private func drainOnce() async throws {
+    private static func drainOnce(persistence: PersistenceController, journal: ShareAssociationJournal) async throws -> Set<URL> {
         guard let cloud = persistence.container as? NSPersistentCloudKitContainer,
-              let privateStore = persistence.store(for: .ownerPrivate) else { return }
+              let privateStore = persistence.store(for: .ownerPrivate) else {
+            return Set(try journal.pending().map(\.householdURI))
+        }
         try Self.validateAuthority(persistence: persistence, store: privateStore)
         let privateStoreIdentifier = privateStore.identifier
         var firstError: Error?
+        var unsharedHouseholds: Set<URL> = []
         for entry in try journal.pending() {
             try Self.validateAuthority(persistence: persistence, store: privateStore)
             guard let householdID = persistence.container.persistentStoreCoordinator
@@ -156,12 +170,15 @@ actor ManagedShareAssociationWorker {
 
             do {
                 let householdShares = try cloud.fetchShares(matching: [householdID])
-                guard let householdShare = householdShares[householdID] else { continue }
+                guard let householdShare = householdShares[householdID] else {
+                    unsharedHouseholds.insert(entry.householdURI)
+                    continue
+                }
                 let candidates = try await context.perform {
                     var idsByURI: [URL: NSManagedObjectID] = [:]
                     var staleURIs: Set<URL> = []
                     for uri in entry.objectURIs {
-                        guard let id = self.persistence.container.persistentStoreCoordinator
+                        guard let id = persistence.container.persistentStoreCoordinator
                             .managedObjectID(forURIRepresentation: uri),
                               id.persistentStore?.identifier == privateStoreIdentifier else {
                             staleURIs.insert(uri)
@@ -213,7 +230,7 @@ actor ManagedShareAssociationWorker {
                 let associatedURIs = try await withCheckedThrowingContinuation {
                     (continuation: CheckedContinuation<Set<URL>, Error>) in
                     context.perform {
-                        do { try Self.validateAuthority(persistence: self.persistence, store: privateStore) }
+                        do { try Self.validateAuthority(persistence: persistence, store: privateStore) }
                         catch { continuation.resume(throwing: error); return }
                         var validURIs: Set<URL> = []
                         let objects = unassociated.compactMap { uri, id -> NSManagedObject? in
@@ -244,6 +261,7 @@ actor ManagedShareAssociationWorker {
             }
         }
         if let firstError { throw firstError }
+        return unsharedHouseholds
     }
 
     // A suspended worker must not mistake an account-detached store for deleted objects.
