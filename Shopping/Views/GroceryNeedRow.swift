@@ -174,7 +174,8 @@ struct GroceryNeedRow: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(title).font(.body)
+                titleWithAssignment
+                    .accessibilityLabel(title)
                 if need.urgency == NeedUrgency.urgent.rawValue {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.body)
@@ -183,7 +184,7 @@ struct GroceryNeedRow: View {
                 }
             }
             .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
-            if need.kind == NeedKind.oneTime.rawValue || personLabel != nil {
+            if need.kind == NeedKind.oneTime.rawValue {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
                         .fixedSize(horizontal: true, vertical: false)
@@ -212,12 +213,14 @@ struct GroceryNeedRow: View {
                 .labelStyle(.titleAndIcon)
                 .font(.caption).foregroundStyle(Color.grocerySecondary)
         }
+
+    }
+
+    private var titleWithAssignment: Text {
         if let personLabel {
-            Label(personLabel, systemImage: "person")
-                .labelStyle(.titleAndIcon)
-                .font(.caption).foregroundStyle(Color.grocerySecondary)
-                .accessibilityIdentifier("shopping.grocery.personLabel.\(need.id.uuidString)")
+            return Text("\(Text(title).font(.body)) \(Text("(\(personLabel))").font(.caption).foregroundColor(Color.grocerySecondary))")
         }
+        return Text(title).font(.body)
     }
 
     private var title: String { need.item?.name ?? need.title }
