@@ -3,6 +3,48 @@ import XCTest
 final class WatchShoppingUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testStoreAndSyncScrollAwayAndReturnOnlyAtTop() {
+        let app = launchFixture("longList")
+        let switcher = app.buttons["watch.store.switch"]
+        let cloud = app.buttons["watch.sync.open"]
+        XCTAssertTrue(switcher.waitForExistence(timeout: 5))
+        XCTAssertTrue(switcher.isHittable)
+        XCTAssertTrue(cloud.isHittable)
+        let originalBottom = switcher.frame.maxY
+        screenshot("Watch scrolling header at top", app: app)
+        XCUIDevice.shared.rotateDigitalCrown(delta: 2.0)
+        XCTAssertFalse(switcher.exists && switcher.isHittable)
+        XCTAssertFalse(cloud.exists && cloud.isHittable)
+        assertBottomAction(app.buttons["watch.cart.open"], in: app)
+        assertBottomAction(app.buttons["watch.checkout.open"], in: app)
+        screenshot("Watch expanded grocery viewport", app: app)
+        XCUIDevice.shared.rotateDigitalCrown(delta: -0.15)
+        XCTAssertFalse(switcher.exists && switcher.isHittable, "A small reverse scroll must not summon the header")
+        if switcher.exists {
+            let bar = app.navigationBars.firstMatch
+            XCTAssertLessThanOrEqual(switcher.frame.maxY, bar.exists ? bar.frame.maxY : 30)
+        }
+        assertBottomAction(app.buttons["watch.cart.open"], in: app)
+        assertBottomAction(app.buttons["watch.checkout.open"], in: app)
+        screenshot("Watch header stays offscreen on small reverse scroll", app: app)
+        returnToStoreHeader(in: app)
+        XCTAssertTrue(switcher.isHittable)
+        XCTAssertTrue(cloud.isHittable)
+        XCTAssertEqual(switcher.frame.maxY, originalBottom, accuracy: 2)
+        cloud.tap()
+        XCTAssertTrue(app.staticTexts["watch.sync.details"].waitForExistence(timeout: 3))
+        let done = app.buttons["watch.sync.done"]
+        reveal(done, in: app)
+        done.tap()
+        returnToStoreHeader(in: app)
+        switcher.tap()
+        let costco = app.buttons["watch.store.10000000-0000-0000-0000-000000000002"]
+        XCTAssertTrue(costco.waitForExistence(timeout: 3))
+        costco.tap()
+        XCTAssertTrue(switcher.waitForExistence(timeout: 3))
+        XCTAssertTrue(switcher.label.contains("Costco"))
+    }
+
     func testSyncIconShowsDetailsWithoutRoutineBannerAndDismisses() {
         let app = launchFixture("syncWorking")
         let icon = syncButton(in: app)
@@ -51,6 +93,7 @@ final class WatchShoppingUITests: XCTestCase {
         reveal(bananas, in: app)
         bananas.swipeLeft()
         app.buttons["Add"].tap()
+        returnToStoreHeader(in: app)
         let completed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label CONTAINS %@", "Recent activity completed"), object: icon)
         XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 5), .completed)
@@ -274,6 +317,9 @@ final class WatchShoppingUITests: XCTestCase {
         app.launch()
         let cart = app.buttons["watch.cart.open"]
         XCTAssertTrue(cart.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["watch.store.switch"].isHittable)
+        XCTAssertTrue(app.buttons["watch.sync.open"].isHittable)
+        XCTAssertTrue(app.staticTexts["Nothing to get here"].exists)
         assertBottomAction(cart, in: app)
         assertBottomAction(app.buttons["watch.checkout.open"], in: app)
         screenshot("Watch empty grocery bottom actions", app: app)
@@ -452,8 +498,10 @@ final class WatchShoppingUITests: XCTestCase {
     }
 
     private func openHistory(_ app: XCUIApplication) {
-        let switcher = storeSwitcher(in: app)
-        if switcher.waitForExistence(timeout: 3) { switcher.tap() }
+        // Missing/revoked households already show the chooser without a grocery header.
+        if app.buttons["watch.cart.open"].exists {
+            storeSwitcher(in: app).tap()
+        }
         let history = app.buttons["Recently cleared"]
         reveal(history, in: app)
         history.tap()
@@ -461,11 +509,21 @@ final class WatchShoppingUITests: XCTestCase {
     }
 
     private func storeSwitcher(in app: XCUIApplication) -> XCUIElement {
-        app.buttons["watch.store.switch"]
+        returnToStoreHeader(in: app)
+        return app.buttons["watch.store.switch"]
+    }
+
+    private func returnToStoreHeader(in app: XCUIApplication) {
+        let switcher = app.buttons["watch.store.switch"]
+        for _ in 0..<20 {
+            if switcher.exists && switcher.isHittable && switcher.frame.minY >= 30 { return }
+            XCUIDevice.shared.rotateDigitalCrown(delta: -0.8)
+        }
+        XCTFail("Store header did not return at the top")
     }
 
     private func syncButton(in app: XCUIApplication) -> XCUIElement {
-        // Toolbar wrappers repeat identifiers; the fixed grocery header does not.
+        // Toolbar wrappers repeat identifiers; the scrolling grocery row does not.
         let toolbar = app.navigationBars.children(matching: .button).matching(identifier: "watch.sync.open")
         return toolbar.count == 1 ? toolbar.element : app.buttons["watch.sync.open"]
     }
@@ -491,9 +549,7 @@ final class WatchShoppingUITests: XCTestCase {
             let footerTop = footerVisible
                 ? min(checkout.frame.minY, cart.exists && cart.isHittable ? cart.frame.minY : checkout.frame.minY)
                 : add.exists && add.isHittable ? add.frame.minY : app.frame.maxY + 2
-            let switcher = app.buttons["watch.store.switch"]
-            let headerBottom = switcher.exists && switcher.isHittable ? switcher.frame.maxY : 0
-            return (max(navigation.exists ? navigation.frame.maxY : 30, headerBottom), footerTop - 2)
+            return (navigation.exists ? navigation.frame.maxY : 30, footerTop - 2)
         }
         func isClear() -> Bool {
             guard element.exists && (element.isHittable || allowDisabled) else { return false }

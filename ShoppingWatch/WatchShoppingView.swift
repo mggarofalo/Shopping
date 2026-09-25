@@ -54,13 +54,6 @@ struct WatchShoppingView: View {
 
     private func groceries(store: WatchStore) -> some View {
         List {
-            if session.snapshot.grocerySections.isEmpty {
-                Text("Nothing to get here").foregroundStyle(.secondary)
-            }
-            WatchItemSections(session: session, sections: session.snapshot.grocerySections)
-        }
-        .listStyle(.plain)
-        .safeAreaInset(edge: .top, spacing: 0) {
             HStack(spacing: 4) {
                 Button { session.sheet = .stores } label: {
                     HStack(spacing: 4) {
@@ -76,9 +69,14 @@ struct WatchShoppingView: View {
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 8)
-            .background(.background)
+            .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+            .listRowBackground(Color.clear)
+            if session.snapshot.grocerySections.isEmpty {
+                Text("Nothing to get here").foregroundStyle(.secondary)
+            }
+            WatchItemSections(session: session, sections: session.snapshot.grocerySections)
         }
+        .listStyle(.plain)
         .listSectionSpacing(0)
         .environment(\.defaultMinListRowHeight, 44)
         .safeAreaInset(edge: .bottom, spacing: 4) {
