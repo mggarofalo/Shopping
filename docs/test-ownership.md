@@ -229,3 +229,7 @@ the audited List/Form surfaces and deliberate non-row exceptions.
 ## Watch sync presentation (SHOPPING-141)
 
 `WatchSyncStatusTests` owns typed waiting/working/recent-activity/attention projection, including setup-only activity, unrelated-store success, and preserved account/sharing/history/recovery details. `WatchShoppingUITests` owns the compact control, absence of routine status rows, stable control placement across completion, on-demand details and dismissal, and accessibility-sized interaction. The store-switch/swipe scenario retains the surrounding shopping workflow. These tests do not prove delivery to another device.
+
+## Fresh keyboard readiness (SHOPPING-142)
+
+Hosted run36157514880 recorded the first catalog save/add test sending text while the keyboard initialized, followed by Apple's QuickPath introduction and a partial name. The fresh hosted simulators now set the observed `DidShowContinuousPathIntroduction` keyboard preference before tests, preventing unrelated first-use onboarding. `CatalogRefreshUITests/testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates` explicitly focuses the name field, waits boundedly for its keyboard and exact entered value, and retains the enabled, save/add, editor navigation and no-duplicates assertions. There is still one typing action, no retries, no relaxed timeout policy, and no product behavior or test-selection change.
