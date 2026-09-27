@@ -13,6 +13,21 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(session.snapshot.canCheckout)
     }
 
+    func testSyncActivityUpdatesIconWithoutReloadingGroceries() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let groceries = session.snapshot.grocerySections
+        XCTAssertEqual(service.loadCount, 1)
+        var cloud = CloudSyncStatus()
+        cloud.record(.init(store: "private", operation: .upload, started: Date(),
+            ended: nil, failure: nil))
+        service.onChange?(.syncChanged(WatchSyncStatus(cloud: cloud)))
+        XCTAssertEqual(session.snapshot.syncStatus.state, .working)
+        XCTAssertEqual(session.snapshot.grocerySections, groceries)
+        XCTAssertEqual(service.loadCount, 1)
+    }
+
     func testFailedSaveRetainsSnapshotAndOpaqueCommand() async {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
@@ -179,6 +194,7 @@ final class WatchShoppingSessionTests: XCTestCase {
 private final class SpyService: WatchShoppingService {
     var onChange: (@MainActor (WatchServiceChange) -> Void)?
     var value = WatchPreviewService.sample
+    var loadCount = 0
     var shouldFail = false
     var commands: [WatchShoppingCommand] = []
     var checkoutTokens: [String] = []
@@ -193,7 +209,10 @@ private final class SpyService: WatchShoppingService {
     var captureRows = WatchPreviewService.previewCheckout.rows
 
     init() { value.canCheckout = true }
-    func load(storeID: UUID?) async throws -> WatchShoppingSnapshot { value }
+    func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
+        loadCount += 1
+        return value
+    }
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
         commands.append(command)
         if suspendCommand {

@@ -52,6 +52,28 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
     }
 
+    func testBlockedPersistenceWriterDoesNotBlockMainActorDuringLoad() async throws {
+        let f = try fixture()
+        let writerEntered = expectation(description: "writer is occupied")
+        let releaseWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait {
+                writerEntered.fulfill()
+                releaseWriter.wait()
+            }
+        }
+        await fulfillment(of: [writerEntered], timeout: 2)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { releaseWriter.signal() }
+
+        let service = adapter(f)
+        let started = ContinuousClock.now
+        let loading = Task { try await service.load(storeID: f.storeID) }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1),
+            "A blocked Core Data writer must not prevent the Watch UI actor from running")
+        _ = try await loading.value
+    }
+
     func testOfflineDraftQuantityAndCheckoutIntentRecoverAfterSQLiteRelaunch() async throws {
         enum Injected: Error { case stop }
         let f = try fixture(), service = adapter(f)

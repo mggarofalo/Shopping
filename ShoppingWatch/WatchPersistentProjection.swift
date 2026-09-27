@@ -1,7 +1,7 @@
 import CoreData
 import Foundation
 
-struct WatchPersistentProjection {
+struct WatchPersistentProjection: Sendable {
     let scope: PersonalCartScopeSnapshot
     let stores: [WatchStore]
     let needs: [PersonalCartEntrySnapshot]
