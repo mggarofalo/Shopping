@@ -52,6 +52,52 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
     }
 
+    func testImportedLocalGroceryAppearsOnNextWatchRefresh() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(initial.grocerySections.flatMap(\.items).map(\.name), ["Milk"])
+
+        // A second context simulates Core Data import into the Watch's local store.
+        let context = f.persistence.simulationContext()
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let list = try XCTUnwrap(household.groceryList)
+            let category = try XCTUnwrap(context.fetch(Category.fetchRequest()).first)
+            let item = Item(context: context); item.id = UUID(); item.name = "Bread"; item.notes = ""
+            item.anyStore = true; item.household = household; item.category = category
+            let need = Need(context: context); need.id = UUID(); need.title = "Bread"; need.notes = ""
+            need.quantity = 1; need.kind = NeedKind.remembered.rawValue
+            need.urgency = NeedUrgency.normal.rawValue; need.item = item; need.list = list
+            try context.save()
+        }
+
+        let refreshed = try await service.load(storeID: nil)
+        XCTAssertEqual(Set(refreshed.grocerySections.flatMap(\.items).map(\.name)), ["Milk", "Bread"])
+        XCTAssertEqual(refreshed.authorityID, initial.authorityID)
+    }
+
+    func testBlockedPersistenceWriterDoesNotBlockMainActorDuringLoad() async throws {
+        let f = try fixture()
+        let writerEntered = expectation(description: "writer is occupied")
+        let releaseWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait {
+                writerEntered.fulfill()
+                releaseWriter.wait()
+            }
+        }
+        await fulfillment(of: [writerEntered], timeout: 2)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { releaseWriter.signal() }
+
+        let service = adapter(f)
+        let started = ContinuousClock.now
+        let loading = Task { try await service.load(storeID: f.storeID) }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1),
+            "A blocked Core Data writer must not prevent the Watch UI actor from running")
+        _ = try await loading.value
+    }
+
     func testOfflineDraftQuantityAndCheckoutIntentRecoverAfterSQLiteRelaunch() async throws {
         enum Injected: Error { case stop }
         let f = try fixture(), service = adapter(f)

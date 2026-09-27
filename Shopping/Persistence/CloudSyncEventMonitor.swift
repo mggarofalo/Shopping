@@ -9,6 +9,7 @@ final class CloudSyncEventMonitor {
     private weak var container: NSPersistentCloudKitContainer?
     private var observer: NSObjectProtocol?
     private var generation = 0
+    private var publication: Task<Void, Never>?
 
     init() {
         observer = NotificationCenter.default.addObserver(
@@ -30,6 +31,8 @@ final class CloudSyncEventMonitor {
 
     func reset() {
         generation += 1
+        publication?.cancel()
+        publication = nil
         container = nil
         status = CloudSyncStatus()
         onChange?(status)
@@ -54,7 +57,8 @@ final class CloudSyncEventMonitor {
                 let events = result?.result as? [NSPersistentCloudKitContainer.Event] ?? []
                 Task { @MainActor in
                     guard let self, generation == self.generation, self.container === cloud else { return }
-                    for event in events { self.record(event, from: cloud) }
+                    for event in events { self.record(event, from: cloud, publish: false) }
+                    self.schedulePublication()
                 }
             } catch {
                 // Live events still work. A failed diagnostic read cannot establish sync failure
@@ -63,7 +67,8 @@ final class CloudSyncEventMonitor {
         }
     }
 
-    private func record(_ event: NSPersistentCloudKitContainer.Event, from source: NSPersistentCloudKitContainer) {
+    private func record(_ event: NSPersistentCloudKitContainer.Event,
+                        from source: NSPersistentCloudKitContainer, publish: Bool = true) {
         let operation: CloudSyncStatus.Operation
         switch event.type {
         case .setup: operation = .setup
@@ -71,15 +76,37 @@ final class CloudSyncEventMonitor {
         case .export: operation = .upload
         @unknown default: return
         }
-        receive(.init(store: event.storeIdentifier, operation: operation,
+        record(.init(store: event.storeIdentifier, operation: operation,
             started: event.startDate, ended: event.endDate,
-            failure: event.endDate == nil || event.succeeded ? nil : event.error.map { CloudSyncStatus.Failure.classify($0) } ?? .unknown), from: source)
+            failure: event.endDate == nil || event.succeeded ? nil : event.error.map { CloudSyncStatus.Failure.classify($0) } ?? .unknown),
+            from: source, publish: publish)
     }
 
     // Both live notifications and recorded startup history pass through the same authority check.
     func receive(_ event: CloudSyncStatus.Event, from source: NSPersistentCloudKitContainer) {
+        record(event, from: source, publish: true)
+    }
+
+    private func record(_ event: CloudSyncStatus.Event, from source: NSPersistentCloudKitContainer,
+                        publish: Bool) {
         guard source === container else { return }
         status.record(event)
-        onChange?(status)
+        if publish { schedulePublication() }
+    }
+
+    private func schedulePublication() {
+        publication?.cancel()
+        if status.hasFailure {
+            onChange?(status)
+            publication = nil
+            return
+        }
+        let generation = generation
+        publication = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled, let self, self.generation == generation else { return }
+            self.onChange?(self.status)
+            self.publication = nil
+        }
     }
 }

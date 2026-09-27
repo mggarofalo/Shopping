@@ -37,7 +37,7 @@ struct CategoryPills: View {
                         Label("Add category", systemImage: "plus")
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .frame(minHeight: 44)
+                            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

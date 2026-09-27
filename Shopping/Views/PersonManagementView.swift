@@ -40,13 +40,15 @@ struct PersonManagementView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("People")
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                EditButton()
-                    .disabled(!selectionAvailable || activePeople.isEmpty)
-                    .accessibilityIdentifier("shopping.people.reorder")
-                Button(action: beginCreate) { Label("Add person", systemImage: "plus").labelStyle(.iconOnly) }
-                    .disabled(!selectionAvailable)
-                    .accessibilityIdentifier("shopping.people.add")
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 8) {
+                    EditButton()
+                        .disabled(!selectionAvailable || activePeople.isEmpty)
+                        .accessibilityIdentifier("shopping.people.reorder")
+                    Button(action: beginCreate) { Label("Add person", systemImage: "plus").labelStyle(.iconOnly) }
+                        .disabled(!selectionAvailable)
+                        .accessibilityIdentifier("shopping.people.add")
+                }
             }
         }
         .sheet(item: $editor) { session in
@@ -81,7 +83,7 @@ struct PersonManagementView: View {
                 Spacer()
                 if person.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

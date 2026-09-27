@@ -194,8 +194,10 @@ enum CatalogSuggestionPurchaseSummary {
     static func text(
         anyStore: Bool,
         savedStoreLabels: [String],
-        hasSavedStores: Bool = true
+        hasSavedStores: Bool = true,
+        hasResolvedIdentity: Bool = true
     ) -> String {
+        guard hasResolvedIdentity else { return "Unresolved purchase rules" }
         let labels = savedStoreLabels.sorted()
         if anyStore || !hasSavedStores {
             return labels.isEmpty

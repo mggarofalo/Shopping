@@ -1,7 +1,7 @@
 import Foundation
 
 // Presentation values only. The service owns eligibility, ordering, identity and authorization.
-struct WatchStore: Identifiable, Equatable {
+struct WatchStore: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     var mustBuyCount = 0

@@ -2,7 +2,11 @@ import CoreData
 import SwiftUI
 
 enum ShoppingListMetrics {
-    static let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 8)
+    /// A 44-point control inside small, symmetric list insets is the standard row.
+    /// Text can grow beyond this minimum at larger Dynamic Type sizes.
+    static let minimumRowHeight: CGFloat = 44
+    static let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
+    static let contentVerticalPadding: CGFloat = 4
 }
 
 extension View {

@@ -1,9 +1,30 @@
 import CloudKit
 import CoreData
 import Foundation
+import os
+
+enum WatchPerformanceTrace {
+    static let log = OSLog(subsystem: "com.mggarofalo.shopping.watchkitapp", category: .pointsOfInterest)
+}
 
 @MainActor
 final class WatchPersistenceBootstrap {
+    /// Created off the UI actor, then transferred once to the main-actor runtime.
+    /// No context or container is touched concurrently during that transfer.
+    private struct PreparedStore: @unchecked Sendable {
+        let persistence: PersistenceController
+        let directory: URL
+
+        func close() throws {
+            let coordinator = persistence.container.persistentStoreCoordinator
+            for store in coordinator.persistentStores { try coordinator.remove(store) }
+        }
+    }
+    private struct Preparation {
+        let accountBinding: String
+        let task: Task<PreparedStore, Error>
+    }
+
     struct Runtime {
         let persistence: PersistenceController
         let provider: any ShopperSessionProviding
@@ -15,11 +36,13 @@ final class WatchPersistenceBootstrap {
 
     var onAuthorityInvalidated: (() -> Void)?
     var onDataChanged: (() -> Void)?
+    var onSyncChanged: ((WatchSyncStatus) -> Void)?
     private let cloudSync = CloudSyncEventMonitor()
     private let associationStatus = WatchAssociationStatus()
     private let provider: ShopperSessionProvider
     private let baseDirectory: URL
     private var current: Runtime?
+    private var preparation: Preparation?
     private var binding: String?
     private var observer: NSObjectProtocol?
     private var remoteObserver: NSObjectProtocol?
@@ -40,7 +63,10 @@ final class WatchPersistenceBootstrap {
         self.baseDirectory = base
         provider = try ShopperSessionProvider(containerIdentifier: container, environment: environment,
             cacheDirectory: base.appendingPathComponent("Account", isDirectory: true))
-        cloudSync.onChange = { [weak self] _ in self?.onDataChanged?() }
+        cloudSync.onChange = { [weak self] _ in
+            guard let self else { return }
+            self.onSyncChanged?(self.syncStatus())
+        }
         associationStatus.onChange = { [weak self] in self?.onDataChanged?() }
         observer = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange, object: provider, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.accountChanged() }
@@ -90,17 +116,45 @@ final class WatchPersistenceBootstrap {
         }
         let session = try provider.currentSession()
         if let current, session.accountBinding == binding { return current }
-        let configuration = try PersonalCartActivation.activate(sourceURL: nil, session: session,
-            baseDirectory: baseDirectory.appendingPathComponent("Accounts", isDirectory: true), importLegacy: false)
-        let persistence = try PersistenceController(configuration: configuration)
+        let generation = authorityGeneration
+        let accountsDirectory = baseDirectory.appendingPathComponent("Accounts", isDirectory: true)
+        let ownsPreparation = preparation?.accountBinding != session.accountBinding
+        let task: Task<PreparedStore, Error>
+        if let preparation, preparation.accountBinding == session.accountBinding {
+            task = preparation.task
+        } else {
+            task = Task.detached(priority: .userInitiated) {
+                let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
+                os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID)
+                defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID) }
+                let configuration = try PersonalCartActivation.activate(sourceURL: nil, session: session,
+                    baseDirectory: accountsDirectory, importLegacy: false)
+                let persistence = try PersistenceController(configuration: configuration)
+                let directory = try session.storeDirectory(in: accountsDirectory)
+                return PreparedStore(persistence: persistence, directory: directory)
+            }
+            preparation = Preparation(accountBinding: session.accountBinding, task: task)
+        }
+        let prepared: PreparedStore
+        do { prepared = try await task.value }
+        catch {
+            if generation == authorityGeneration, preparation?.accountBinding == session.accountBinding { preparation = nil }
+            throw error
+        }
+        guard generation == authorityGeneration, (try? provider.currentSession()) == session else {
+            if generation == authorityGeneration, preparation?.accountBinding == session.accountBinding { preparation = nil }
+            if ownsPreparation { Task.detached(priority: .utility) { try? prepared.close() } }
+            throw PersonalCartError.accountChanged
+        }
+        if let current, binding == session.accountBinding { return current }
+        preparation = nil
+        let persistence = prepared.persistence
         cloudSync.attach(to: persistence.container)
-        guard try provider.currentSession() == session else { throw PersonalCartError.accountChanged }
         let cart = PersonalCartService(persistence: persistence, sessionProvider: provider)
-        let directory = try session.storeDirectory(in: baseDirectory.appendingPathComponent("Accounts", isDirectory: true))
         let runtime = Runtime(persistence: persistence, provider: provider, cart: cart,
             history: PersistentHistoryConsumer(persistence: persistence,
-                checkpoints: FileHistoryCheckpointStore(directory: directory.appendingPathComponent("History", isDirectory: true))),
-            selectionURL: directory.appendingPathComponent("watch-selection.json"),
+                checkpoints: FileHistoryCheckpointStore(directory: prepared.directory.appendingPathComponent("History", isDirectory: true))),
+            selectionURL: prepared.directory.appendingPathComponent("watch-selection.json"),
             associations: persistence.shareAssociationJournal.map { ManagedShareAssociationWorker(persistence: persistence, journal: $0) })
         associationStatus.reset()
         current = runtime
@@ -117,6 +171,7 @@ final class WatchPersistenceBootstrap {
         let next = try? provider.currentSession().accountBinding
         guard binding != nil, next != binding else { return }
         authorityGeneration += 1
+        preparation = nil
         cloudSync.reset()
         associationStatus.reset()
         syncMessage = nil

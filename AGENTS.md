@@ -46,6 +46,8 @@ Before dispatching remote `ShoppingFull`, commit the candidate, run `.github/scr
 
 Repository testing guidance is available as the [shopping-testing skill](.agents/skills/shopping-testing/SKILL.md) for test implementation, failure diagnosis, and runtime work. When independent review is useful and delegation is authorized, the [shopping-test-reviewer agent](.codex/agents/shopping-test-reviewer.toml) checks test changes and timing evidence without running tests or changing external state.
 
+For any screen, Core Data, CloudKit, or Watch change, follow the [UI responsiveness contract](docs/ui-responsiveness.md). It defines the main-actor rules, measurable targets, and device trace procedure.
+
 ## Code conventions
 
 - Use SwiftUI and the architecture selected by SHOPPING-27.

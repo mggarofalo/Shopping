@@ -41,6 +41,7 @@ struct CatalogView: View {
     @State private var highlightedItemID: UUID?
     @State private var highlightTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var navigation: GroceryNavigationState
 
     private var canonicalList: GroceryList? {
@@ -79,7 +80,7 @@ struct CatalogView: View {
     }
 
     private var hasNarrowing: Bool {
-        !searchText.isEmpty || filters.count > 0
+        !searchText.isEmpty || filters.selectedStoreID != nil || filters.count > 0
     }
     private var removalAction: CatalogRemovalAction? { removalTarget?.preview.action }
     private var removalNoticePresented: Binding<Bool> {
@@ -134,10 +135,6 @@ struct CatalogView: View {
                 .listStyle(.insetGrouped)
                 .contentMargins(.top, 0, for: .scrollContent)
                 .accessibilityIdentifier("shopping.catalog.list")
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    filterHeader
-                        .background(.bar)
-                }
                 .onChange(of: pendingRevealID) { _, _ in revealPendingItem(with: proxy) }
                 .onChange(of: renderedItemIDs) { _, _ in revealPendingItem(with: proxy) }
             }
@@ -155,13 +152,15 @@ struct CatalogView: View {
                         .accessibilityIdentifier("shopping.catalog.selectAll")
                     }
                 } else {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        Button("Select") { editMode = .active }
-                            .disabled(household == nil || service == nil || visibleItems.isEmpty)
-                            .accessibilityIdentifier("shopping.catalog.select")
-                        Button("New catalog item", systemImage: "plus", action: create)
-                            .accessibilityIdentifier("shopping.catalog.add")
-                            .disabled(household == nil || service == nil)
+                    ToolbarItem(placement: .primaryAction) {
+                        HStack(spacing: 8) {
+                            Button("Select") { editMode = .active }
+                                .disabled(household == nil || service == nil || visibleItems.isEmpty)
+                                .accessibilityIdentifier("shopping.catalog.select")
+                            Button("New catalog item", systemImage: "plus", action: create)
+                                .accessibilityIdentifier("shopping.catalog.add")
+                                .disabled(household == nil || service == nil)
+                        }
                     }
                 }
             }
@@ -174,20 +173,20 @@ struct CatalogView: View {
                                 .tint(.red)
                                 .disabled(selectedIDs.isEmpty)
                                 .accessibilityIdentifier("shopping.catalog.batchDelete")
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                                 .modifier(CatalogBatchDialogs(preview: $batchPreview, apply: applyBatch))
                         Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedItems.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.catalog.batchArchive")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                         Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
                             .disabled(!selectedItems.contains(where: \.isArchived))
                             .accessibilityIdentifier("shopping.catalog.batchRestore")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                             Button("Add", systemImage: "note.text.badge.plus") { prepareBatchAdd() }
                                 .disabled(!selectedItems.contains(where: { !$0.isArchived }))
                                 .accessibilityIdentifier("shopping.catalog.batchAdd")
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                                 .modifier(CatalogAddDialogs(
                                     confirmation: batchAddConfirmation,
                                     apply: applyCatalogAdd
@@ -281,6 +280,13 @@ struct CatalogView: View {
 
     @ViewBuilder
     private var catalogListRows: some View {
+        Section {
+            filterHeader
+                .buttonStyle(.borderless)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
         if visibleItems.isEmpty {
             Section {
                 ContentUnavailableView {
@@ -302,7 +308,7 @@ struct CatalogView: View {
                 Group {
                     if editMode.isEditing {
                         CatalogItemRow(item: item, validStores: validStores)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                             .contentShape(Rectangle())
                             .shoppingListRowInsets()
                             .tag(item.id)
@@ -327,13 +333,52 @@ struct CatalogView: View {
 
     private var filterHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PillFlowLayout {
-                SelectionPill(
-                    title: "Filters\(filters.count == 0 ? "" : " (\(filters.count))")",
-                    isSelected: filters.count > 0,
-                    systemImage: "line.3.horizontal.decrease.circle",
-                    identifier: "shopping.catalog.filters"
-                ) { showingFilters = true }
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                HStack(spacing: 0) {
+                    Menu {
+                        ForEach(activeStores, id: \.objectID) { store in
+                            Button {
+                                filters.selectedStoreID = store.id
+                            } label: {
+                                if filters.selectedStoreID == store.id {
+                                    Label(store.name, systemImage: "checkmark")
+                                } else {
+                                    Text(store.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(selectedStoreName, systemImage: "storefront")
+                            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                    }
+                    .menuStyle(.button)
+                    .accessibilityIdentifier("shopping.catalog.store.menu")
+                    if filters.selectedStoreID != nil {
+                        Button {
+                            filters.selectedStoreID = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
+                        }
+                        .accessibilityLabel("Clear selected store")
+                        .accessibilityIdentifier("shopping.catalog.store.clear")
+                    }
+                }
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                Button {
+                    showingFilters = true
+                } label: {
+                    Label("Filters\(filters.count == 0 ? "" : " \(filters.count)")",
+                          systemImage: "line.3.horizontal.decrease.circle")
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                }
+                .accessibilityIdentifier("shopping.catalog.filters")
+                .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                       alignment: .trailing)
             }
             if filters.count > 0 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -352,8 +397,13 @@ struct CatalogView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal)
         .padding(.vertical, 4)
+    }
+
+    private var selectedStoreName: String {
+        guard let id = filters.selectedStoreID else { return "Choose store" }
+        return activeStores.first(where: { $0.id == id })?.name ?? "Choose store"
     }
 
     private func catalogRow(_ item: Item, source: CatalogRowSource) -> some View {
@@ -465,6 +515,9 @@ struct CatalogView: View {
     private func sanitizeFilters() {
         guard presentation?.isActive != false else { return }
         let ids = Set(activeStores.map(\.id))
+        if let selectedStoreID = filters.selectedStoreID, !ids.contains(selectedStoreID) {
+            filters.selectedStoreID = nil
+        }
         filters.includedStoreIDs.formIntersection(ids)
         filters.excludedStoreIDs.formIntersection(ids)
         filters.categoryIDs.formIntersection(Set(activeCategories.map(\.id)))

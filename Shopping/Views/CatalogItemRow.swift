@@ -29,7 +29,8 @@ struct CatalogItemRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.vertical, 10)
+        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+        .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([item.name, fullStoreSummary, item.notes, item.isArchived ? "Archived" : ""]
             .filter { !$0.isEmpty }.joined(separator: ", "))

@@ -10,6 +10,7 @@ struct PersonalCartItemView: View {
     @State private var checkout: PersonalCheckoutSheet?
 
     private var current: PersonalCartEntrySnapshot { cart.entries.first { $0.id == entry.id } ?? entry }
+    private var quantityPending: Bool { cart.isQuantityTransitionPending(current.id) }
 
     var body: some View {
         NavigationStack {
@@ -24,8 +25,10 @@ struct PersonalCartItemView: View {
                         get: { current.quantity != nil },
                         set: { setQuantity($0 ? 1 : nil) }
                     ))
+                    .disabled(quantityPending)
                     if let quantity = current.quantity {
                         Stepper("\(quantity)", value: Binding(get: { quantity }, set: { setQuantity($0) }), in: 1...99)
+                            .disabled(quantityPending)
                     }
                 }
                 if !current.purchaseNotices.isEmpty {
@@ -34,15 +37,18 @@ struct PersonalCartItemView: View {
                             Text(notice.purchaserName.map { "Already purchased by \($0)" } ?? "Already purchased")
                         }
                         Button("Buy anyway") { prepare() }
+                            .disabled(quantityPending)
                     }
                 }
                 Button("Remove from my cart", role: .destructive) {
                     do { try cart.uncart(current); dismiss() }
                     catch { self.error = error.localizedDescription }
                 }
+                .disabled(quantityPending)
             }
             .navigationTitle("Cart item")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(quantityPending) } }
+            .interactiveDismissDisabled(quantityPending)
             .sheet(item: $checkout) { sheet in PersonalCheckoutView(cart: cart, token: sheet.token, storeName: sheet.storeName) }
             .alert("Couldn’t update cart", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}

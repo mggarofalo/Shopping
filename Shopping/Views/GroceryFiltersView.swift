@@ -69,11 +69,6 @@ struct GroceryScopeControls: View {
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
                 : AnyLayout(HStackLayout(spacing: 8))
             layout {
-                SelectionPill(
-                    title: "All",
-                    isSelected: navigation.selectedStoreID == nil,
-                    identifier: "shopping.store.all"
-                ) { navigation.selectAll() }
                 storeMenu
                 if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                 filtersButton
@@ -130,7 +125,7 @@ struct GroceryScopeControls: View {
                     Image(systemName: "storefront").accessibilityHidden(true)
                     Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 .contentShape(Rectangle())
             }
             .menuStyle(.button)
@@ -141,7 +136,7 @@ struct GroceryScopeControls: View {
                 Button { navigation.selectAll() } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Clear selected store")
@@ -156,7 +151,7 @@ struct GroceryScopeControls: View {
                 Image(systemName: "line.3.horizontal.decrease.circle").accessibilityHidden(true)
                 Text(filterLabel).fixedSize(horizontal: false, vertical: true)
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
             .contentShape(Rectangle())
         }
         .accessibilityLabel(filterLabel)
@@ -180,7 +175,7 @@ struct GroceryScopeControls: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-                .frame(minHeight: 44)
+                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -111,7 +111,7 @@ The built `.xctestrun` selection is checked before either run. After UI executio
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_acceptance_contract.py'
 ```
 
-Each result publishes a Markdown and JSON summary. Fast and full runs publish line and function coverage from `xccov`; adding UI coverage cannot mask a deterministic coverage regression. Failed runs retain the shared build log, both test logs, and result bundles for 14 days. No test retries are enabled. The 15-minute job timeout stays in place. The planning goals are roughly 3 minutes of selected UI execution and under 10 minutes for the routine job; measurements, rather than those provisional budgets, determine whether another redesign is needed. These are not new timing gates.
+Each result publishes a Markdown and JSON summary. Fast and full runs publish line and function coverage from `xccov`; adding UI coverage cannot mask a deterministic coverage regression. Failed runs retain the shared build log, both test logs, and result bundles for 14 days. No test retries are enabled. The Build & Test job has a 30-minute limit after the September 27 Phase 19 cold run used about 11 minutes for setup, compilation, Fast tests, and coverage, then reached the former 15-minute limit during the selected UI workflows. The planning goals remain roughly 3 minutes of selected UI execution and under 10 minutes for the routine job; measurements, rather than those provisional budgets, determine whether another redesign is needed. These are not new timing gates.
 
 ## Coverage ownership
 

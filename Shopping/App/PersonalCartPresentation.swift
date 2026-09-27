@@ -4,6 +4,18 @@ import SwiftUI
 
 @Observable @MainActor
 final class PersonalCartPresentation {
+    private struct Snapshot: Sendable {
+        let entries: [PersonalCartEntrySnapshot]
+        let history: [PersonalCheckoutHistoryEntry]
+        let outstandingNeedIDs: Set<UUID>
+        let presence: [PersonalCartPresenceSnapshot]
+        let householdError: String?
+    }
+    private enum SnapshotResult: Sendable {
+        case success(Snapshot)
+        case failure(String)
+    }
+
     let service: PersonalCartService
     let householdID: UUID
     let listID: UUID
@@ -12,6 +24,11 @@ final class PersonalCartPresentation {
     private(set) var presence: [PersonalCartPresenceSnapshot] = []
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
     private(set) var error: String?
+    private var pendingCartState: [UUID: Bool] = [:]
+    private var pendingQuantityIDs: Set<UUID> = []
+    private var refreshInProgress = false
+    private var refreshRequested = false
+    private var mutationRevision = 0
 
     init(service: PersonalCartService, householdID: UUID, listID: UUID) {
         self.service = service
@@ -21,30 +38,69 @@ final class PersonalCartPresentation {
     }
 
     func refresh() {
-        do {
-            let nextEntries = try service.entries(householdID: householdID, listID: listID)
-            let nextHistory = try service.history(householdID: householdID, listID: listID)
-            entries = nextEntries
-            history = nextHistory
-        } catch {
-            self.error = error.localizedDescription
-            return
-        }
-        do {
-            let nextOutstanding = try service.outstandingNeedIDs(householdID: householdID, listID: listID)
-            let nextPresence = try service.presence(householdID: householdID, listID: listID)
-            outstandingNeedIDs = nextOutstanding
-            presence = nextPresence
-            error = nil
-        } catch {
-            // Incomplete household imports cannot hide private removal or purchase history.
-            outstandingNeedIDs = []
-            presence = []
-            self.error = error.localizedDescription
+        refreshRequested = true
+        guard !refreshInProgress else { return }
+        refreshInProgress = true
+        Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                refreshRequested = false
+                let requestedRevision = mutationRevision
+                let service = self.service
+                let householdID = self.householdID
+                let listID = self.listID
+                let result = await Task.detached(priority: .userInitiated) {
+                    Self.readSnapshot(service: service, householdID: householdID, listID: listID)
+                }.value
+                guard requestedRevision == mutationRevision else {
+                    refreshRequested = true
+                    continue
+                }
+                switch result {
+                case .success(let snapshot):
+                    entries = snapshot.entries
+                    history = snapshot.history
+                    outstandingNeedIDs = snapshot.outstandingNeedIDs
+                    presence = snapshot.presence
+                    error = snapshot.householdError
+                    pendingCartState.removeAll()
+                    pendingQuantityIDs.removeAll()
+                case .failure(let failure):
+                    error = failure
+                    pendingQuantityIDs.removeAll()
+                }
+            } while refreshRequested
+            refreshInProgress = false
         }
     }
 
-    func contains(_ needID: UUID) -> Bool { entries.contains { $0.needID == needID } }
+    nonisolated private static func readSnapshot(
+        service: PersonalCartService, householdID: UUID, listID: UUID
+    ) -> SnapshotResult {
+        do {
+            let entries = try service.entries(householdID: householdID, listID: listID)
+            let history = try service.history(householdID: householdID, listID: listID)
+            do {
+                return .success(Snapshot(entries: entries, history: history,
+                    outstandingNeedIDs: try service.outstandingNeedIDs(householdID: householdID, listID: listID),
+                    presence: try service.presence(householdID: householdID, listID: listID), householdError: nil))
+            } catch {
+                // Incomplete household imports cannot hide private removal or purchase history.
+                return .success(Snapshot(entries: entries, history: history,
+                    outstandingNeedIDs: [], presence: [], householdError: error.localizedDescription))
+            }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    func contains(_ needID: UUID) -> Bool {
+        pendingCartState[needID] ?? entries.contains { $0.needID == needID }
+    }
+
+    func isCartTransitionPending(_ needID: UUID) -> Bool { pendingCartState[needID] != nil }
+
+    func isQuantityTransitionPending(_ entryID: UUID) -> Bool { pendingQuantityIDs.contains(entryID) }
 
     func visibleEntries(filter: GroceryNeedFilter, activeStoreIDs: Set<UUID>) -> [PersonalCartEntrySnapshot] {
         entries.filter { entry in
@@ -58,16 +114,24 @@ final class PersonalCartPresentation {
 
     func cart(_ needID: UUID) throws {
         try service.cart(needID: needID, householdID: householdID, listID: listID)
+        pendingCartState[needID] = true
+        mutationRevision += 1
         refresh()
     }
 
     func uncart(_ entry: PersonalCartEntrySnapshot) throws {
         try service.uncart(entry.token)
+        entries.removeAll { $0.needID == entry.needID }
+        pendingCartState[entry.needID] = false
+        mutationRevision += 1
         refresh()
     }
 
     func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) throws {
+        guard !pendingQuantityIDs.contains(entry.id) else { return }
         try service.setQuantity(quantity, token: entry.token)
+        pendingQuantityIDs.insert(entry.id)
+        mutationRevision += 1
         refresh()
     }
 }

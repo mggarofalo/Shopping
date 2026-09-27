@@ -10,7 +10,7 @@ struct PersistenceRootView: View {
             case .loading:
                 ProgressView("Opening groceries…")
                     .accessibilityIdentifier("shopping.persistence.loading")
-                    .task(id: bootstrap.loadingTransitionID) { bootstrap.runLoadingTransition() }
+                    .task(id: bootstrap.loadingTransitionID) { await bootstrap.runLoadingTransition() }
             case .ready(let ready):
                 Group {
                     if !ready.presentation.isActive { EmptyView() }
@@ -48,6 +48,7 @@ struct PersistenceRootView: View {
         }
         .environmentObject(bootstrap)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
+        .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { bootstrap.applicationDidEnterForeground() }
         }

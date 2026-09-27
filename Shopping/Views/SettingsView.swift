@@ -2,7 +2,7 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.sharingStatusDescription) private var sharingStatusDescription
+    @Environment(\.sharingStatusPresentation) private var sharingStatus
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.personalCart) private var personalCart
@@ -25,10 +25,22 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
-                    LabeledContent("Sharing Status") {
-                        Text(sharingStatusDescription)
-                            .accessibilityIdentifier("shopping.settings.sharingStatus")
+                    NavigationLink {
+                        List {
+                            Section("Status") {
+                                Label(sharingStatus.title, systemImage: sharingStatus.symbol)
+                                Text(sharingStatus.details)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .navigationTitle("Sync status")
+                    } label: {
+                        LabeledContent("Sync status") {
+                            Image(systemName: sharingStatus.symbol)
+                                .accessibilityLabel(sharingStatus.title)
+                        }
                     }
+                    .accessibilityIdentifier("shopping.settings.sharingStatus")
                     if let personalCart {
                         NavigationLink("My purchases") { PersonalPurchaseHistoryView(cart: personalCart) }
                         NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: personalCart.service) }

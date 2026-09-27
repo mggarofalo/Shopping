@@ -25,13 +25,19 @@ final class WatchShoppingSession {
         self.service = service
         service.onChange = { [weak self] change in
             guard let self else { return }
-            if change == .authorityInvalidated {
+            switch change {
+            case .authorityInvalidated:
                 self.authorityGeneration += 1
                 self.snapshot = WatchShoppingSnapshot()
                 self.sheet = nil
                 self.errorMessage = nil
+                Task { await self.reload() }
+            case .dataChanged:
+                Task { await self.reload() }
+            case .syncChanged(let status):
+                guard self.snapshot.syncStatus != status else { return }
+                self.snapshot.syncStatus = status
             }
-            Task { await self.reload() }
         }
     }
 

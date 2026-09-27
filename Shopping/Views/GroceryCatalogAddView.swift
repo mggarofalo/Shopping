@@ -147,15 +147,14 @@ struct GroceryCatalogAddView: View {
                     }
                 }
                 if canCreateNew {
-                    Section {
-                        Button(action: createCatalogItem) {
-                            Label("Create “\(proposedCatalogName)”", systemImage: "plus.circle.fill")
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .disabled(!personSelectionValid)
-                        .accessibilityHint("Opens a new catalog item and adds it to this grocery list after saving")
-                        .accessibilityIdentifier("shopping.grocery.catalogAddNew")
+                    Button(action: createCatalogItem) {
+                        Label("Create “\(proposedCatalogName)”", systemImage: "plus.circle.fill")
+                            .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                     }
+                    .disabled(!personSelectionValid)
+                    .accessibilityHint("Opens a new catalog item and adds it to this grocery list after saving")
+                    .accessibilityIdentifier("shopping.grocery.catalogAddNew")
+                    .shoppingListRowInsets()
                 }
                 if catalogSections.isEmpty {
                     ContentUnavailableView.search(text: searchText)
@@ -184,12 +183,13 @@ struct GroceryCatalogAddView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .frame(minHeight: 44)
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .disabled(!personSelectionValid)
                         .accessibilityHint(activeNeed == nil
                                            ? "Adds this saved item to Groceries"
                                            : "Opens the existing grocery item")
                         .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
+                        .shoppingListRowInsets()
                     }
                 }
                 Section("One-time") {

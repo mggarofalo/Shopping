@@ -2,6 +2,7 @@ import CoreData
 import SwiftUI
 
 struct CatalogFilterState: Equatable {
+    var selectedStoreID: UUID?
     var includedStoreIDs: Set<UUID> = []
     var excludedStoreIDs: Set<UUID> = []
     var categoryIDs: Set<UUID> = []
@@ -13,6 +14,7 @@ struct CatalogFilterState: Equatable {
 
     func query(text: String) -> CatalogItemFilter {
         CatalogItemFilter(purchase: PurchaseFilter(
+            selectedStoreID: selectedStoreID,
             includedStoreIDs: includedStoreIDs,
             excludedStoreIDs: excludedStoreIDs
         ), text: text, categoryIDs: categoryIDs)

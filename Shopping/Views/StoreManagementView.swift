@@ -106,13 +106,15 @@ struct StoreManagementView: View {
                     .accessibilityIdentifier("shopping.stores.selectAll")
                 }
             } else {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Select") { editMode = .active }
-                        .disabled(!selectionAvailable || householdStores.isEmpty)
-                        .accessibilityIdentifier("shopping.stores.select")
-                    Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
-                        .disabled(!selectionAvailable)
-                        .accessibilityIdentifier("shopping.stores.add")
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 8) {
+                        Button("Select") { editMode = .active }
+                            .disabled(!selectionAvailable || householdStores.isEmpty)
+                            .accessibilityIdentifier("shopping.stores.select")
+                        Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
+                            .disabled(!selectionAvailable)
+                            .accessibilityIdentifier("shopping.stores.add")
+                    }
                 }
             }
         }
@@ -124,7 +126,7 @@ struct StoreManagementView: View {
                         .tint(.red)
                         .disabled(selectedIDs.isEmpty)
                         .accessibilityIdentifier("shopping.stores.batchDelete")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                         .confirmationDialog(
                             batchPreview.map(ManagementBatchCopy.title) ?? "Delete selected stores?",
                             isPresented: Binding(get: { batchPreview != nil }, set: { if !$0 { batchPreview = nil } }),
@@ -140,15 +142,15 @@ struct StoreManagementView: View {
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedStores.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.stores.batchArchive")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                     Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
                         .disabled(!selectedStores.contains(where: \.isArchived))
                         .accessibilityIdentifier("shopping.stores.batchRestore")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                     Button("Edit", systemImage: "pencil", action: editSelectedStore)
                         .disabled(selectedStores.count != 1)
                         .accessibilityIdentifier("shopping.stores.batchEdit")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                 }
                 .labelStyle(.iconOnly)
                 .padding(.horizontal, 8)
@@ -276,7 +278,7 @@ struct StoreManagementView: View {
             storeRowActions(
                 Button { beginRename(store) } label: {
                     storeRowLabel(store)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                     .buttonStyle(.plain),
@@ -287,7 +289,7 @@ struct StoreManagementView: View {
 
     private func storeRowActions<Content: View>(_ content: Content, store: Store) -> some View {
         content
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { store.isArchived ? restore(store) : archive(store) } label: {

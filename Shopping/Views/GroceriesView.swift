@@ -296,7 +296,7 @@ struct GroceriesView: View {
     private var recoveryLinks: some View {
         NavigationLink(value: GroceryDestination.carted) {
             Label("In cart (\(cartedCount))", systemImage: "cart.fill")
-                .frame(minHeight: 44)
+                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
         }
     }
 
@@ -610,6 +610,7 @@ struct GroceriesView: View {
             selectedStoreID: navigation.selectedStoreID,
             personalCarted: personalCart.map { $0.contains(need.id) },
             presenceNames: personalCart?.presence.filter { $0.needID == need.id }.map { $0.name ?? "Another shopper" } ?? [],
+            cartActionAvailable: !(personalCart?.isCartTransitionPending(need.id) ?? false),
             onEdit: focus,
             onCartedChange: setCarted,
             onQuantityChange: setQuantity,
@@ -628,6 +629,7 @@ struct GroceriesView: View {
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
         let name = need.item?.name ?? need.title
+        if personalCart?.isCartTransitionPending(needID) == true { return }
         do {
             if let personalCart {
                 if carted { try personalCart.cart(needID) }

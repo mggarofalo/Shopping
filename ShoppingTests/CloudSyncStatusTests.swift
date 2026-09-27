@@ -46,7 +46,7 @@ final class CloudSyncStatusTests: XCTestCase {
         XCTAssertNil(status.lastDownload)
         XCTAssertTrue(status.message.contains("Waiting for iCloud activity"))
         status.record(event(.download, time: 2))
-        XCTAssertTrue(status.message.contains("does not confirm another device"))
+        XCTAssertEqual(status.message, "Recent iCloud activity completed.")
     }
 
     func testFailureMessagesClassifyUnderlyingErrorsWithoutLeakingDetails() {
@@ -89,5 +89,33 @@ final class CloudSyncStatusTests: XCTestCase {
         monitor.attach(to: foreign)
         monitor.receive(event(.upload, time: 3), from: own)
         XCTAssertNil(monitor.status.lastUpload)
+    }
+
+    @MainActor
+    func testMonitorPublishesRapidActivityOnceButReportsFailureImmediately() async {
+        let cloud = NSPersistentCloudKitContainer(name: "Coalescing", managedObjectModel: NSManagedObjectModel())
+        let monitor = CloudSyncEventMonitor()
+        var published: [CloudSyncStatus] = []
+        monitor.attach(to: cloud)
+        let completion = expectation(description: "coalesced completion")
+        monitor.onChange = { status in
+            published.append(status)
+            if status.lastUpload != nil && !status.hasFailure { completion.fulfill() }
+        }
+
+        monitor.receive(event(.upload, time: 1, active: true), from: cloud)
+        monitor.receive(event(.upload, time: 1), from: cloud)
+        for time in 2...200 {
+            monitor.receive(event(.upload, time: TimeInterval(time)), from: cloud)
+        }
+        XCTAssertTrue(published.isEmpty)
+        await fulfillment(of: [completion], timeout: 5)
+        XCTAssertEqual(published.count, 1)
+        XCTAssertFalse(published[0].isWorking)
+        XCTAssertEqual(published[0].lastUpload, Date(timeIntervalSince1970: 201))
+
+        monitor.receive(event(.upload, time: 201, failure: .network), from: cloud)
+        XCTAssertEqual(published.count, 2)
+        XCTAssertTrue(published[1].hasFailure)
     }
 }

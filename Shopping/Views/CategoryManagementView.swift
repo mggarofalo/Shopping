@@ -93,17 +93,19 @@ struct CategoryManagementView: View {
                     .accessibilityIdentifier("shopping.categories.selectAll")
                 }
             } else {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button { editMode = .active } label: {
-                        Label("Select", systemImage: "checkmark.circle").labelStyle(.iconOnly)
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 8) {
+                        Button { editMode = .active } label: {
+                            Label("Select", systemImage: "checkmark.circle").labelStyle(.iconOnly)
+                        }
+                            .disabled(!selectionAvailable || householdCategories.isEmpty)
+                            .accessibilityIdentifier("shopping.categories.select")
+                        Button { beginCreate() } label: {
+                            Label("Add category", systemImage: "plus").labelStyle(.iconOnly)
+                        }
+                            .disabled(!selectionAvailable)
+                            .accessibilityIdentifier("shopping.categories.add")
                     }
-                        .disabled(!selectionAvailable || householdCategories.isEmpty)
-                        .accessibilityIdentifier("shopping.categories.select")
-                    Button { beginCreate() } label: {
-                        Label("Add category", systemImage: "plus").labelStyle(.iconOnly)
-                    }
-                        .disabled(!selectionAvailable)
-                        .accessibilityIdentifier("shopping.categories.add")
                 }
             }
         }
@@ -115,15 +117,15 @@ struct CategoryManagementView: View {
                     Button("Archive", systemImage: "archivebox") { prepareBatch(.archive) }
                         .disabled(!selectedCategories.contains(where: { !$0.isArchived }))
                         .accessibilityIdentifier("shopping.categories.batchArchive")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                     Button("Restore", systemImage: "arrow.uturn.backward") { prepareBatch(.restore) }
                         .disabled(!selectedCategories.contains(where: \.isArchived))
                         .accessibilityIdentifier("shopping.categories.batchRestore")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                     Button("Edit", systemImage: "pencil", action: editSelectedCategory)
                         .disabled(selectedCategories.count != 1)
                         .accessibilityIdentifier("shopping.categories.batchEdit")
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                     Menu {
                         if let source = selectedCategories.first {
                             mergeDestinationButtons(for: source)
@@ -133,7 +135,7 @@ struct CategoryManagementView: View {
                     }
                     .disabled(selectedCategories.count != 1 || householdCategories.count < 2)
                     .accessibilityIdentifier("shopping.categories.merge")
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
                 }
                 .labelStyle(.iconOnly)
                     .padding(.horizontal, 8)
@@ -215,7 +217,7 @@ struct CategoryManagementView: View {
             categoryRowActions(
                 Button { beginRename(category) } label: {
                     categoryRowLabel(category)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                     .buttonStyle(.plain),
@@ -226,7 +228,7 @@ struct CategoryManagementView: View {
 
     private func categoryRowActions<Content: View>(_ content: Content, category: Category) -> some View {
         content
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { setArchived(category, !category.isArchived) } label: {
@@ -327,21 +329,21 @@ struct CategoryManagementView: View {
                 }
                 .tint(.red)
                 .accessibilityIdentifier("shopping.categories.batchDelete")
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
             } else {
                 Button("Delete", systemImage: "trash", role: .destructive) {
                     deleteUnused(source)
                 }
                 .tint(.red)
                 .accessibilityIdentifier("shopping.categories.batchDelete")
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
             }
         } else {
             Button("Delete", systemImage: "trash", role: .destructive) {}
                 .tint(.red)
                 .disabled(true)
                 .accessibilityIdentifier("shopping.categories.batchDelete")
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight)
         }
     }
 

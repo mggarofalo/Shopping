@@ -1,8 +1,9 @@
 import Foundation
 
-enum WatchServiceChange {
+enum WatchServiceChange: Equatable {
     case dataChanged
     case authorityInvalidated
+    case syncChanged(WatchSyncStatus)
 }
 
 @MainActor

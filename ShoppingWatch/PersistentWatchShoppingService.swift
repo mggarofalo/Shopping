@@ -1,7 +1,18 @@
 import Foundation
+import os
 
 @MainActor
 final class PersistentWatchShoppingService: WatchShoppingService {
+    private struct LoadedValues: Sendable {
+        let projection: WatchPersistentProjection
+        let own: [PersonalCartEntrySnapshot]
+        let outstanding: Set<UUID>
+        let presence: [PersonalCartPresenceSnapshot]
+        let sharedAvailable: Bool
+        let history: [PersonalCheckoutHistoryEntry]
+        let recoveryMessage: String?
+    }
+
     var onChange: (@MainActor (WatchServiceChange) -> Void)?
     private let bootstrap: WatchPersistenceBootstrap?
     private var cart: PersonalCartService?
@@ -16,6 +27,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var startupError: Error?
     private var sharedWritable = false
     private var activeHouseholdID: UUID?
+    private var currentAttention: String?
 
     static func production() -> PersistentWatchShoppingService {
         do { return PersistentWatchShoppingService(bootstrap: try WatchPersistenceBootstrap()) }
@@ -39,6 +51,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         householdWritable = nil
         bootstrap.onAuthorityInvalidated = { [weak self] in self?.invalidateAuthority() }
         bootstrap.onDataChanged = { [weak self] in self?.onChange?(.dataChanged) }
+        bootstrap.onSyncChanged = { [weak self] _ in
+            guard let self, let bootstrap = self.bootstrap else { return }
+            self.onChange?(.syncChanged(bootstrap.syncStatus(additionalMessage: self.currentAttention)))
+        }
     }
 
     private init(error: Error) {
@@ -55,6 +71,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         lastSnapshot = WatchShoppingSnapshot()
         sharedWritable = false
         activeHouseholdID = nil
+        currentAttention = nil
         selectedStoreID = nil
         if bootstrap != nil { cart = nil; provider = nil; selectionURL = nil }
     }
@@ -88,17 +105,42 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         }
         bootstrap?.retryPendingAssociations()
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
-        var recoveryMessage: String?
-        do { try cart.resumePending() }
-        catch { recoveryMessage = "Saved cart available. Some household changes are waiting to sync." }
         let saved = selectionURL.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode(Selection.self, from: $0) }
         let savedHousehold = saved?.accountBinding == session.accountBinding ? saved?.householdID : nil
-        guard let projection = try WatchPersistentProjection.read(cart: cart,
-            preferredHouseholdID: preferredHouseholdID ?? savedHousehold, writable: householdWritable) else {
+        let preferredHouseholdID = preferredHouseholdID ?? savedHousehold
+        let loaded = try await Task.detached(priority: .userInitiated) { [cart] () throws -> LoadedValues? in
+            let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
+            os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch snapshot read", signpostID: signpostID)
+            defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch snapshot read", signpostID: signpostID) }
+            var recoveryMessage: String?
+            do { try cart.resumePending() }
+            catch { recoveryMessage = "Saved cart available. Some household changes are waiting to sync." }
+            guard let projection = try WatchPersistentProjection.read(cart: cart,
+                preferredHouseholdID: preferredHouseholdID, writable: nil) else { return nil }
+            let scope = projection.scope
+            let own = try cart.entries(householdID: scope.householdID, listID: scope.listID)
+            var outstanding: Set<UUID> = []
+            var presence: [PersonalCartPresenceSnapshot] = []
+            var sharedAvailable = true
+            do {
+                outstanding = try cart.outstandingNeedIDs(householdID: scope.householdID, listID: scope.listID)
+                presence = try cart.presence(householdID: scope.householdID, listID: scope.listID)
+            } catch { sharedAvailable = false }
+            let history = try cart.history(householdID: scope.householdID, listID: scope.listID)
+            return LoadedValues(projection: projection, own: own, outstanding: outstanding,
+                presence: presence, sharedAvailable: sharedAvailable, history: history,
+                recoveryMessage: recoveryMessage)
+        }.value
+        guard self.cart === cart, try provider?.currentSession() == session else {
+            throw PersonalCartError.accountChanged
+        }
+        guard let loaded else {
+            currentAttention = nil
             return WatchShoppingSnapshot(availability: .setupRequired(bootstrap?.householdWaitingMessage
                 ?? "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."))
         }
+        let projection = loaded.projection
         activeHouseholdID = projection.scope.householdID
         if selectedStoreID == nil, let selectionURL,
            let data = try? Data(contentsOf: selectionURL), let saved = try? JSONDecoder().decode(Selection.self, from: data),
@@ -107,15 +149,11 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         }
         if let storeID { selectedStoreID = storeID }
         if !projection.stores.contains(where: { $0.id == selectedStoreID }) { selectedStoreID = nil }
-        let own = try cart.entries(householdID: projection.scope.householdID, listID: projection.scope.listID)
-        var outstanding: Set<UUID> = []
-        var presence: [PersonalCartPresenceSnapshot] = []
-        var sharedAvailable = true
-        do {
-            outstanding = try cart.outstandingNeedIDs(householdID: projection.scope.householdID, listID: projection.scope.listID)
-            presence = try cart.presence(householdID: projection.scope.householdID, listID: projection.scope.listID)
-        } catch { sharedAvailable = false }
-        let writable = projection.writable && sharedAvailable
+        let own = loaded.own
+        let outstanding = loaded.outstanding
+        let presence = loaded.presence
+        let writable = projection.writable && loaded.sharedAvailable &&
+            (householdWritable?(projection.scope.householdID) ?? true)
         sharedWritable = writable
         let nextAuthority = "\(session.accountBinding)|\(projection.scope.householdID)|\(writable)|\(epoch)"
         if let authorityID, authorityID != nextAuthority { onChange?(.authorityInvalidated) }
@@ -182,8 +220,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             else if !entry.demandAvailable && entry.purchaseNotices.isEmpty { row.unavailableReason = "This item is no longer on the household list." }
             return row
         }
-        let history = try cart.history(householdID: projection.scope.householdID, listID: projection.scope.listID)
-        let operations = try history.map { operation in
+        let operations = try loaded.history.map { operation in
             let token = WatchRestoreToken(authorityID: nextAuthority, accountBinding: session.accountBinding,
                 householdID: projection.scope.householdID, listID: projection.scope.listID,
                 checkoutID: operation.id, operationID: UUID())
@@ -192,7 +229,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 summary: operation.restored ? "Purchase restored" : "\(operation.entries.count) purchased\(operation.pendingPublication ? " · Sync pending" : "")",
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
-        let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : recoveryMessage
+        let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : loaded.recoveryMessage
+        currentAttention = attention
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
             stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },

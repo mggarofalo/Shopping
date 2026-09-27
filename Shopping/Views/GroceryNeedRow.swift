@@ -23,6 +23,7 @@ struct GroceryNeedRow: View {
     let selectedStoreID: UUID?
     var personalCarted: Bool? = nil
     var presenceNames: [String] = []
+    var cartActionAvailable = true
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
@@ -54,6 +55,7 @@ struct GroceryNeedRow: View {
                     Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
                 .tint((personalCarted ?? need.carted) ? .orange : .blue)
+                .disabled(!cartActionAvailable)
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }
             if onRemoved != nil {
@@ -162,7 +164,7 @@ struct GroceryNeedRow: View {
         Button {
             action(need, quantity + change)
         } label: {
-            Image(systemName: symbol).frame(minWidth: 44, minHeight: 44)
+            Image(systemName: symbol).frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
         }
         .buttonStyle(.borderless)
         .disabled(change < 0 ? quantity <= 1 : quantity >= 99)
@@ -192,6 +194,11 @@ struct GroceryNeedRow: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
+            Text(storeSummary)
+                .font(.caption)
+                .foregroundStyle(Color.grocerySecondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
             if !presenceNames.isEmpty {
                 Text("In cart: " + presenceNames.joined(separator: ", "))
@@ -200,8 +207,8 @@ struct GroceryNeedRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
+        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -225,6 +232,18 @@ struct GroceryNeedRow: View {
 
     private var title: String { need.item?.name ?? need.title }
 
+    private var storeSummary: String {
+        let oneTime = need.kind == NeedKind.oneTime.rawValue
+        let assigned = need.item?.stores ?? (oneTime ? need.oneTimeStores : nil) ?? []
+        let labels = assigned.map { $0.isArchived ? "\($0.name) (archived)" : $0.name }
+        return CatalogSuggestionPurchaseSummary.text(
+            anyStore: need.item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
+            savedStoreLabels: labels,
+            hasSavedStores: !assigned.isEmpty,
+            hasResolvedIdentity: oneTime || need.item != nil
+        )
+    }
+
     private var storeIndicator: GroceryStoreScopeIndicator? {
         GroceryStoreScopeIndicator.value(
             for: need,
@@ -245,6 +264,7 @@ struct GroceryNeedRow: View {
         if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
         if (personalCarted ?? need.carted) { values.append("In cart") }
         if let storeIndicator { values.append(storeIndicator.title) }
+        values.append(storeSummary)
         if let personLabel { values.append("For \(personLabel)") }
         if !need.notes.isEmpty { values.append(need.notes) }
         return values.joined(separator: ", ")
