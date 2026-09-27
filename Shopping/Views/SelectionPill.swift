@@ -30,7 +30,7 @@ struct SelectionPill: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(isSelected ? Color.groceryAccent : Color.secondary.opacity(0.35))
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

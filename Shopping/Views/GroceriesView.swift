@@ -296,7 +296,7 @@ struct GroceriesView: View {
     private var recoveryLinks: some View {
         NavigationLink(value: GroceryDestination.carted) {
             Label("In cart (\(cartedCount))", systemImage: "cart.fill")
-                .frame(minHeight: 44)
+                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
         }
     }
 

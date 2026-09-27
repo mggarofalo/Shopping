@@ -11,6 +11,21 @@ extension Tag {
 
 @Suite("Catalog filter logic", .tags(.unit, .critical))
 struct CatalogFilterUnitTests {
+    @Test("Catalog store picker narrows before advanced filters")
+    func catalogStorePickerUsesPurchaseEligibility() {
+        let selected = UUID()
+        let other = UUID()
+        var state = CatalogFilterState()
+        state.selectedStoreID = selected
+        state.includedStoreIDs = [other]
+        let filter = state.query(text: "")
+        #expect(filter.purchase.selectedStoreID == selected)
+        #expect(filter.purchase.matches(.init(explicitStoreIDs: [selected, other], anyStore: false),
+                                        activeStoreIDs: [selected, other]))
+        #expect(!filter.purchase.matches(.init(explicitStoreIDs: [other], anyStore: false),
+                                         activeStoreIDs: [selected, other]))
+    }
+
     @Test("Purchase rules retain store eligibility and filter narrowing")
     func independentPurchaseRuleMatrix() {
         let a = UUID()

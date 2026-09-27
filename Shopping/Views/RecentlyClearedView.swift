@@ -40,7 +40,7 @@ struct RecentlyClearedView: View {
                                     }
                                     Spacer(minLength: 8)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("shopping.recovery.restore.\(operation.id.uuidString)")

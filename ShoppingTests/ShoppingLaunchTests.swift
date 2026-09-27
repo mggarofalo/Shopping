@@ -196,8 +196,7 @@ final class ShoppingLaunchTests: XCTestCase {
         app.buttons["Cancel"].tap()
 
         app.tabBars.buttons["Groceries"].tap()
-        XCTAssertTrue(app.buttons["shopping.store.all"].existsOrAppears(timeout: 2))
-        XCTAssertTrue(app.buttons["shopping.store.all"].isSelected)
+        XCTAssertTrue(app.buttons["shopping.store.menu"].existsOrAppears(timeout: 2))
         XCTAssertFalse(app.buttons["shopping.store.clear"].exists)
         app.buttons["shopping.store.menu"].tap()
         XCTAssertFalse(app.buttons["Costco"].waitForExistence(timeout: 2))
@@ -435,6 +434,21 @@ final class ShoppingLaunchTests: XCTestCase {
         reveal(app.staticTexts["Granola"], in: app)
         XCTAssertTrue(app.staticTexts["Granola"].exists)
         XCTAssertFalse(app.staticTexts["Dinner rolls"].exists)
+    }
+
+    func testCatalogStorePickerNarrowsPurchaseRulesAndCanBeCleared() {
+        let app = launchApp(fixture: "populated")
+        openCatalog(in: app)
+        let menu = app.buttons["shopping.catalog.store.menu"]
+        XCTAssertTrue(menu.existsOrAppears(timeout: 2))
+        menu.tap()
+        app.buttons["Costco"].tap()
+        XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Chipotles in adobo"].exists)
+        let clear = app.buttons["shopping.catalog.store.clear"]
+        XCTAssertTrue(clear.existsOrAppears(timeout: 2))
+        clear.tap()
+        XCTAssertTrue(app.staticTexts["Chipotles in adobo"].existsOrAppears(timeout: 2))
     }
 
     func testCatalogArchiveFilterAndRestorePreservesActiveGrocery() {

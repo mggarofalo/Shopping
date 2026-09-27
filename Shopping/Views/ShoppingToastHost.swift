@@ -13,7 +13,7 @@ struct ShoppingToastHost: View {
                         Button(action.title) {
                             center.performAction(for: toast)
                         }
-                        .frame(minHeight: 44)
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityIdentifier(action.accessibilityIdentifier)
                     }
                 }

@@ -13,7 +13,7 @@ struct CheckoutPreviewRow: View {
                         .foregroundStyle(Color.grocerySecondary)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
 
             if let quantity = row.quantity {
                 Text("\(quantity)")

@@ -394,13 +394,13 @@ struct GroceryEditorView: View {
                             allowDuplicate = true
                             if isPromotingOneTime { promoteOneTime() } else { save() }
                         }
-                        .frame(minHeight: 44)
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityIdentifier("shopping.grocery.createDistinct")
                     }
                     if let conflictingNeedID,
                        let conflictingNeed = activeRememberedNeed(id: conflictingNeedID) {
                         Button("View existing item") { onFocusNeed(conflictingNeed.id) }
-                            .frame(minHeight: 44)
+                            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                             .accessibilityIdentifier("shopping.grocery.promotion.viewConflict")
                     }
                 }
@@ -507,7 +507,7 @@ struct GroceryEditorView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .frame(minHeight: 44)
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityIdentifier("shopping.grocery.promotion.item.\(item.id.uuidString)")
                     }
                     if let item = selectedCatalogItem {
@@ -522,13 +522,13 @@ struct GroceryEditorView: View {
                     }
                 }
                 Button("Keep as one-time") { exitPromotion() }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                     .accessibilityIdentifier("shopping.grocery.promotion.keepOneTime")
             }
         } else {
             Section {
                 Button("Remember this item") { enterPromotion() }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                     .accessibilityIdentifier("shopping.grocery.promotion.start")
             } footer: {
                 Text("Review Catalog details before saving. Nothing changes until you tap Remember.")
@@ -546,7 +546,7 @@ struct GroceryEditorView: View {
                     selectedCatalogItemID = item.id
                     error = nil
                 }
-                .frame(minHeight: 44)
+                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 .accessibilityIdentifier("shopping.grocery.promotion.collision.\(item.id.uuidString)")
             }
         }
@@ -569,7 +569,7 @@ struct GroceryEditorView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.borderless)
-                        .frame(minHeight: 44)
+                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityLabel(
                             activeRememberedNeedsByItemID[item.id] == nil
                                 ? "Need again \(item.name)"
@@ -597,7 +597,7 @@ struct GroceryEditorView: View {
     private func needAgainButton(_ item: Item) -> some View {
         Button("Need again \(item.name)") { needAgain(item) }
             .buttonStyle(.borderless)
-            .frame(minHeight: 44)
+            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
             .disabled(!scopeValid)
             .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
     }

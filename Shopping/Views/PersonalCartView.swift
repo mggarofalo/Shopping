@@ -56,8 +56,8 @@ struct PersonalCartView: View {
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 12)
-                    .frame(minHeight: 44)
+                    .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
+                    .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 }
                 .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
                 .swipeActions {

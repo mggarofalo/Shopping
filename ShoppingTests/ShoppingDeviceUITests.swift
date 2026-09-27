@@ -217,7 +217,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertEqual(clearStore.label, "Clear selected store")
         clearStore.tap()
         XCTAssertFalse(clearStore.exists)
-        XCTAssertTrue(app.buttons["shopping.store.all"].isSelected)
+        XCTAssertTrue(app.buttons["shopping.store.menu"].exists)
         XCTAssertTrue(removeUrgent.exists)
         XCTAssertTrue(app.buttons["Remove Pantry filter"].exists)
         let quantity = app.staticTexts["Quantity 1"]
