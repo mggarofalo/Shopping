@@ -27,6 +27,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var startupError: Error?
     private var sharedWritable = false
     private var activeHouseholdID: UUID?
+    private var currentAttention: String?
 
     static func production() -> PersistentWatchShoppingService {
         do { return PersistentWatchShoppingService(bootstrap: try WatchPersistenceBootstrap()) }
@@ -50,7 +51,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         householdWritable = nil
         bootstrap.onAuthorityInvalidated = { [weak self] in self?.invalidateAuthority() }
         bootstrap.onDataChanged = { [weak self] in self?.onChange?(.dataChanged) }
-        bootstrap.onSyncChanged = { [weak self] status in self?.onChange?(.syncChanged(status)) }
+        bootstrap.onSyncChanged = { [weak self] _ in
+            guard let self, let bootstrap = self.bootstrap else { return }
+            self.onChange?(.syncChanged(bootstrap.syncStatus(additionalMessage: self.currentAttention)))
+        }
     }
 
     private init(error: Error) {
@@ -67,6 +71,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         lastSnapshot = WatchShoppingSnapshot()
         sharedWritable = false
         activeHouseholdID = nil
+        currentAttention = nil
         selectedStoreID = nil
         if bootstrap != nil { cart = nil; provider = nil; selectionURL = nil }
     }
@@ -131,6 +136,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             throw PersonalCartError.accountChanged
         }
         guard let loaded else {
+            currentAttention = nil
             return WatchShoppingSnapshot(availability: .setupRequired(bootstrap?.householdWaitingMessage
                 ?? "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."))
         }
@@ -224,6 +230,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
         let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : loaded.recoveryMessage
+        currentAttention = attention
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
             stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },

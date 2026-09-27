@@ -71,6 +71,9 @@ final class PersistenceBootstrap: ObservableObject {
         let personalCartService: PersonalCartService?
         let resumeError: String?
     }
+    private struct RetiringStore: @unchecked Sendable {
+        let persistence: PersistenceController
+    }
     private static let performanceFixtureVersion = 2
     private static let retainedUITestStoreLimit = 12
     private static let retainedUITestHistoryTokenLimit = 24
@@ -400,13 +403,13 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     // Called only by the loading view's task, after the retired ready hierarchy disappears.
-    func runLoadingTransition() {
+    func runLoadingTransition() async {
         guard let transition else { start(); return }
         guard loadingTransitionID == transition.id,
               transition.previous.map({ !mountedPresentations.contains($0.presentation.id) }) ?? true else { return }
         self.transition = nil
         do {
-            try detachStores(transition.previous)
+            try await detachStores(transition.previous)
             pendingRetirement = nil
             transition.action()
         } catch {
@@ -506,7 +509,7 @@ final class PersistenceBootstrap: ObservableObject {
         }
     }
 
-    private func detachStores(_ previous: ReadyState?) throws {
+    private func detachStores(_ previous: ReadyState?) async throws {
         generation += 1
         if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver); self.remoteObserver = nil }
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver); self.associationObserver = nil }
@@ -515,11 +518,14 @@ final class PersistenceBootstrap: ObservableObject {
         personalService = nil
         cloudMonitor.reset()
         if let ready = previous {
-            let writer = ready.persistence.writer
-            writer.performAndWait { writer.reset() }
             ready.persistence.container.viewContext.reset()
-            let coordinator = ready.persistence.container.persistentStoreCoordinator
-            for store in coordinator.persistentStores { try coordinator.remove(store) }
+            let retiring = RetiringStore(persistence: ready.persistence)
+            try await Task.detached(priority: .utility) {
+                let writer = retiring.persistence.writer
+                writer.performAndWait { writer.reset() }
+                let coordinator = retiring.persistence.container.persistentStoreCoordinator
+                for store in coordinator.persistentStores { try coordinator.remove(store) }
+            }.value
         }
         activeAccountBinding = nil
     }

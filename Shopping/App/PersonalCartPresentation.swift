@@ -24,8 +24,10 @@ final class PersonalCartPresentation {
     private(set) var presence: [PersonalCartPresenceSnapshot] = []
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
     private(set) var error: String?
+    private var pendingCartState: [UUID: Bool] = [:]
     private var refreshInProgress = false
     private var refreshRequested = false
+    private var mutationRevision = 0
 
     init(service: PersonalCartService, householdID: UUID, listID: UUID) {
         self.service = service
@@ -42,12 +44,17 @@ final class PersonalCartPresentation {
             guard let self else { return }
             repeat {
                 refreshRequested = false
+                let requestedRevision = mutationRevision
                 let service = self.service
                 let householdID = self.householdID
                 let listID = self.listID
                 let result = await Task.detached(priority: .userInitiated) {
                     Self.readSnapshot(service: service, householdID: householdID, listID: listID)
                 }.value
+                guard requestedRevision == mutationRevision else {
+                    refreshRequested = true
+                    continue
+                }
                 switch result {
                 case .success(let snapshot):
                     entries = snapshot.entries
@@ -55,6 +62,7 @@ final class PersonalCartPresentation {
                     outstandingNeedIDs = snapshot.outstandingNeedIDs
                     presence = snapshot.presence
                     error = snapshot.householdError
+                    pendingCartState.removeAll()
                 case .failure(let failure):
                     error = failure
                 }
@@ -83,7 +91,11 @@ final class PersonalCartPresentation {
         }
     }
 
-    func contains(_ needID: UUID) -> Bool { entries.contains { $0.needID == needID } }
+    func contains(_ needID: UUID) -> Bool {
+        pendingCartState[needID] ?? entries.contains { $0.needID == needID }
+    }
+
+    func isCartTransitionPending(_ needID: UUID) -> Bool { pendingCartState[needID] != nil }
 
     func visibleEntries(filter: GroceryNeedFilter, activeStoreIDs: Set<UUID>) -> [PersonalCartEntrySnapshot] {
         entries.filter { entry in
@@ -97,16 +109,22 @@ final class PersonalCartPresentation {
 
     func cart(_ needID: UUID) throws {
         try service.cart(needID: needID, householdID: householdID, listID: listID)
+        pendingCartState[needID] = true
+        mutationRevision += 1
         refresh()
     }
 
     func uncart(_ entry: PersonalCartEntrySnapshot) throws {
         try service.uncart(entry.token)
+        entries.removeAll { $0.needID == entry.needID }
+        pendingCartState[entry.needID] = false
+        mutationRevision += 1
         refresh()
     }
 
     func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) throws {
         try service.setQuantity(quantity, token: entry.token)
+        mutationRevision += 1
         refresh()
     }
 }

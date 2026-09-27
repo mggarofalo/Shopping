@@ -23,6 +23,7 @@ struct GroceryNeedRow: View {
     let selectedStoreID: UUID?
     var personalCarted: Bool? = nil
     var presenceNames: [String] = []
+    var cartActionAvailable = true
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
@@ -54,6 +55,7 @@ struct GroceryNeedRow: View {
                     Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
                 .tint((personalCarted ?? need.carted) ? .orange : .blue)
+                .disabled(!cartActionAvailable)
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }
             if onRemoved != nil {
@@ -237,7 +239,8 @@ struct GroceryNeedRow: View {
         return CatalogSuggestionPurchaseSummary.text(
             anyStore: need.item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
             savedStoreLabels: labels,
-            hasSavedStores: !assigned.isEmpty
+            hasSavedStores: !assigned.isEmpty,
+            hasResolvedIdentity: oneTime || need.item != nil
         )
     }
 

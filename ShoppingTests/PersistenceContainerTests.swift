@@ -625,17 +625,42 @@ extension PersistenceContainerTests {
         // A mounted presentation is an explicit gate; loading alone cannot detach its context.
         bootstrap.presentationDidAppear(ready.presentation.id)
         bootstrap.retireAndFail(ShopperSessionError.accountChanged)
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         XCTAssertFalse(ready.presentation.isActive)
         XCTAssertFalse(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         bootstrap.presentationDidDisappear(UUID())
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         XCTAssertFalse(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         bootstrap.presentationDidDisappear(ready.presentation.id)
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         guard case .failed(let error) = bootstrap.state else { return XCTFail("Expected account failure") }
         XCTAssertEqual(error as? ShopperSessionError, .accountChanged)
+    }
+
+    @MainActor
+    func testAccountTransitionKeepsMainActorResponsiveWhileWriterIsBusy() async throws {
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: nil, inMemory: true) })
+        bootstrap.start()
+        try await waitForReady(bootstrap)
+        guard case .ready(let ready) = bootstrap.state else { return XCTFail("Expected local state") }
+        let occupied = expectation(description: "writer occupied")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            ready.persistence.writer.performAndWait {
+                occupied.fulfill()
+                _ = release.wait(timeout: .now() + 5)
+            }
+        }
+        await fulfillment(of: [occupied], timeout: 2)
+        bootstrap.retireAndFail(ShopperSessionError.accountChanged)
+        let start = ContinuousClock.now
+        let transition = Task { await bootstrap.runLoadingTransition() }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertLessThan(start.duration(to: .now), .milliseconds(500))
+        release.signal()
+        await transition.value
+        guard case .failed = bootstrap.state else { return XCTFail("Transition did not finish") }
     }
 
     @MainActor
@@ -657,13 +682,13 @@ extension PersistenceContainerTests {
         bootstrap.activatePersonalCarts(importLegacy: false)
         XCTAssertFalse(defaults.bool(forKey: "shopping.personalCart.enabled"))
         bootstrap.presentationDidDisappear(ready.presentation.id)
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         guard case .failed = bootstrap.state else { return XCTFail("Expected original retirement to complete") }
         bootstrap.activatePersonalCarts(importLegacy: false)
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         XCTAssertEqual(providerAttempts, 1)
         bootstrap.retry()
-        bootstrap.runLoadingTransition()
+        await bootstrap.runLoadingTransition()
         XCTAssertEqual(providerAttempts, 2, "Rejected activation must not leave account loading latched")
     }
 

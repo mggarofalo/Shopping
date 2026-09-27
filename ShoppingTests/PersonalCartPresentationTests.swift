@@ -78,6 +78,32 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testCartMutationIsVisibleUntilBackgroundSnapshotCatchesUp() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let itemID = try needs.createItem(name: "Milk", householdID: scope.householdID)
+        let needID = try needs.addRememberedNeed(itemID: itemID,
+            listID: scope.listID, householdID: scope.householdID)
+        let provider = FixedSession(session: try ShopperSession.authenticated(
+            containerIdentifier: "iCloud.shopping.presentation-tests", environment: "Development", accountRecordName: "alice"))
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider)
+        let presentation = PersonalCartPresentation(service: service,
+            householdID: scope.householdID, listID: scope.listID)
+
+        try presentation.cart(needID)
+        XCTAssertTrue(presentation.contains(needID))
+        XCTAssertTrue(presentation.isCartTransitionPending(needID))
+        try await waitUntil { !presentation.isCartTransitionPending(needID) }
+        let entry = try XCTUnwrap(presentation.entries.first)
+        try presentation.uncart(entry)
+        XCTAssertFalse(presentation.contains(needID))
+        XCTAssertTrue(presentation.entries.isEmpty)
+        try await waitUntil { !presentation.isCartTransitionPending(needID) }
+        XCTAssertTrue(presentation.entries.isEmpty)
+    }
+
+    @MainActor
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while !condition() {

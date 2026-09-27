@@ -152,6 +152,9 @@ struct CatalogFilterUnitTests {
         #expect(CatalogSuggestionPurchaseSummary.text(
             anyStore: false, savedStoreLabels: [], hasSavedStores: false
         ) == "Any Store")
+        #expect(CatalogSuggestionPurchaseSummary.text(
+            anyStore: false, savedStoreLabels: [], hasSavedStores: false, hasResolvedIdentity: false
+        ) == "Unresolved purchase rules")
     }
 
     @Test("Suggestions rank exact, prefix, substring, then fuzzy matches")

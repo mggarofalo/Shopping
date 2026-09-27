@@ -10,7 +10,7 @@ struct PersistenceRootView: View {
             case .loading:
                 ProgressView("Opening groceries…")
                     .accessibilityIdentifier("shopping.persistence.loading")
-                    .task(id: bootstrap.loadingTransitionID) { bootstrap.runLoadingTransition() }
+                    .task(id: bootstrap.loadingTransitionID) { await bootstrap.runLoadingTransition() }
             case .ready(let ready):
                 Group {
                     if !ready.presentation.isActive { EmptyView() }

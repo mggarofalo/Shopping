@@ -14,6 +14,15 @@ final class WatchPersistenceBootstrap {
     private struct PreparedStore: @unchecked Sendable {
         let persistence: PersistenceController
         let directory: URL
+
+        func close() throws {
+            let coordinator = persistence.container.persistentStoreCoordinator
+            for store in coordinator.persistentStores { try coordinator.remove(store) }
+        }
+    }
+    private struct Preparation {
+        let accountBinding: String
+        let task: Task<PreparedStore, Error>
     }
 
     struct Runtime {
@@ -33,6 +42,7 @@ final class WatchPersistenceBootstrap {
     private let provider: ShopperSessionProvider
     private let baseDirectory: URL
     private var current: Runtime?
+    private var preparation: Preparation?
     private var binding: String?
     private var observer: NSObjectProtocol?
     private var remoteObserver: NSObjectProtocol?
@@ -108,18 +118,36 @@ final class WatchPersistenceBootstrap {
         if let current, session.accountBinding == binding { return current }
         let generation = authorityGeneration
         let accountsDirectory = baseDirectory.appendingPathComponent("Accounts", isDirectory: true)
-        let prepared = try await Task.detached(priority: .userInitiated) {
-            let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
-            os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID)
-            defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID) }
-            let configuration = try PersonalCartActivation.activate(sourceURL: nil, session: session,
-                baseDirectory: accountsDirectory, importLegacy: false)
-            let persistence = try PersistenceController(configuration: configuration)
-            let directory = try session.storeDirectory(in: accountsDirectory)
-            return PreparedStore(persistence: persistence, directory: directory)
-        }.value
-        guard generation == authorityGeneration,
-              try provider.currentSession() == session else { throw PersonalCartError.accountChanged }
+        let ownsPreparation = preparation?.accountBinding != session.accountBinding
+        let task: Task<PreparedStore, Error>
+        if let preparation, preparation.accountBinding == session.accountBinding {
+            task = preparation.task
+        } else {
+            task = Task.detached(priority: .userInitiated) {
+                let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
+                os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID)
+                defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID) }
+                let configuration = try PersonalCartActivation.activate(sourceURL: nil, session: session,
+                    baseDirectory: accountsDirectory, importLegacy: false)
+                let persistence = try PersistenceController(configuration: configuration)
+                let directory = try session.storeDirectory(in: accountsDirectory)
+                return PreparedStore(persistence: persistence, directory: directory)
+            }
+            preparation = Preparation(accountBinding: session.accountBinding, task: task)
+        }
+        let prepared: PreparedStore
+        do { prepared = try await task.value }
+        catch {
+            if generation == authorityGeneration, preparation?.accountBinding == session.accountBinding { preparation = nil }
+            throw error
+        }
+        guard generation == authorityGeneration, (try? provider.currentSession()) == session else {
+            if generation == authorityGeneration, preparation?.accountBinding == session.accountBinding { preparation = nil }
+            if ownsPreparation { Task.detached(priority: .utility) { try? prepared.close() } }
+            throw PersonalCartError.accountChanged
+        }
+        if let current, binding == session.accountBinding { return current }
+        preparation = nil
         let persistence = prepared.persistence
         cloudSync.attach(to: persistence.container)
         let cart = PersonalCartService(persistence: persistence, sessionProvider: provider)
@@ -143,6 +171,7 @@ final class WatchPersistenceBootstrap {
         let next = try? provider.currentSession().accountBinding
         guard binding != nil, next != binding else { return }
         authorityGeneration += 1
+        preparation = nil
         cloudSync.reset()
         associationStatus.reset()
         syncMessage = nil
