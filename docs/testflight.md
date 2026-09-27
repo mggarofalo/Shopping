@@ -80,6 +80,14 @@ Base64 is transport encoding, not encryption. Keep all six values in the protect
 
 ## Manual upload
 
+SHOPPING-132 tracks the hosted upload's two-profile signing repair. The current
+script installs one old iPhone App Store profile and applies it globally. It
+cannot sign the embedded Watch app, and the profile lacks CloudKit and push
+entitlements. A hosted archive failure before Apple validation/upload does not
+consume the requested build number. Inspect the run stage before retrying.
+Do not call the hosted path repaired until an archive with separate,
+capability-correct iPhone and Watch App Store profiles succeeds.
+
 After the workflow reaches the repository's default branch:
 
 1. Open **Actions → Upload to TestFlight → Run workflow**.
@@ -103,6 +111,32 @@ After the workflow reaches the repository's default branch:
    adding the build to the same tester groups as the confirmed build.
 
 The workflow is manual-only, grants the GitHub token read-only repository access, serializes uploads, and never cancels an upload in progress. It creates a random temporary keychain and temporary signing directory on the hosted runner. Its exit trap removes the installed profile, keychain, certificate, private key, archive, and exported IPA whether the job succeeds or fails.
+
+## Local automatic-signing fallback
+
+While SHOPPING-132 is open, use a clean detached worktree at the exact merged
+`main` SHA. Do not archive from a root checkout with unrelated local edits.
+With the intended Apple team signed in to Xcode, archive the Release scheme for
+`generic/platform=iOS` using `-allowProvisioningUpdates`,
+`DEVELOPMENT_TEAM=649367BDD4`, `CODE_SIGN_STYLE=Automatic`, and the chosen
+`CURRENT_PROJECT_VERSION`. Export with method `app-store-connect`, automatic
+signing, the same team, `manageAppVersionAndBuildNumber=false`, and destination
+`export`. Before upload, inspect the exported IPA, not just the archive:
+
+- The iPhone and embedded Watch bundles have the same intended marketing
+  version and build number.
+- Both signed bundles have Production CloudKit and production push entitlements.
+- `BuildCommit.txt` in the iPhone bundle equals the clean `main` SHA.
+
+Use the same export options with destination `upload` to submit through Xcode.
+Wait for the explicit upload-complete response. That response means the package
+is processing, not yet available to testers. Dispatch the repository's
+`verify_only=true` workflow on the same source SHA and build number; approve
+its protected environment, then wait for processing and tester-group
+assignment. If processing is slow or verification fails, retry verify-only
+without another upload. Record the local archive/export/upload evidence and the
+verify-only workflow URL in the release issue. This fallback does not validate
+or repair the hosted archive path.
 
 ## Validation without credentials
 
