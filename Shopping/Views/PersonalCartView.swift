@@ -59,10 +59,12 @@ struct PersonalCartView: View {
                     .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
                     .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 }
+                .disabled(cart.isQuantityTransitionPending(entry.id))
                 .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
                 .swipeActions {
                     Button("Remove from cart", systemImage: "cart.badge.minus") { remove(entry) }
                         .tint(.orange)
+                        .disabled(cart.isQuantityTransitionPending(entry.id))
                 }
                 .accessibilityAction(named: "Remove from cart") { remove(entry) }
             }
@@ -73,7 +75,8 @@ struct PersonalCartView: View {
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)
-                .disabled(visibleEntries.isEmpty || cart.error != nil)
+                .disabled(visibleEntries.isEmpty || cart.error != nil ||
+                    visibleEntries.contains { cart.isQuantityTransitionPending($0.id) })
                 .padding(8)
         }
         .sheet(item: $selected) { entry in
@@ -98,10 +101,12 @@ struct PersonalCartView: View {
     }
 
     private func remove(_ entry: PersonalCartEntrySnapshot) {
+        guard !cart.isQuantityTransitionPending(entry.id) else { return }
         do { try cart.uncart(entry) } catch { self.error = error.localizedDescription }
     }
 
     private func prepare(_ entries: [PersonalCartEntrySnapshot]) {
+        guard !entries.contains(where: { cart.isQuantityTransitionPending($0.id) }) else { return }
         do {
             checkout = PersonalCheckoutSheet(token: try cart.service.prepareCheckout(
                 tokens: entries.map(\.token), storeID: navigation.selectedStoreID),

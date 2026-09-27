@@ -47,7 +47,8 @@ struct PersonalCartItemView: View {
                 .disabled(quantityPending)
             }
             .navigationTitle("Cart item")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(quantityPending) } }
+            .interactiveDismissDisabled(quantityPending)
             .sheet(item: $checkout) { sheet in PersonalCheckoutView(cart: cart, token: sheet.token, storeName: sheet.storeName) }
             .alert("Couldn’t update cart", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}
