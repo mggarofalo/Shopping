@@ -620,6 +620,7 @@ extension PersistenceContainerTests {
     func testAccountFailureUsesSamePresentationRetirementBoundary() async throws {
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: nil, inMemory: true) })
         bootstrap.start()
+        try await waitForReady(bootstrap)
         guard case .ready(let ready) = bootstrap.state else { return XCTFail("Expected local state") }
         // A mounted presentation is an explicit gate; loading alone cannot detach its context.
         bootstrap.presentationDidAppear(ready.presentation.id)
@@ -638,7 +639,7 @@ extension PersistenceContainerTests {
     }
 
     @MainActor
-    func testActivationRejectedDuringRetirementDoesNotBlockLaterRetry() throws {
+    func testActivationRejectedDuringRetirementDoesNotBlockLaterRetry() async throws {
         let suite = "Shopping.BootstrapTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -649,6 +650,7 @@ extension PersistenceContainerTests {
                 throw ShopperSessionError.temporarilyUnavailable
             })
         bootstrap.start()
+        try await waitForReady(bootstrap)
         guard case .ready(let ready) = bootstrap.state else { return XCTFail("Expected local state") }
         bootstrap.presentationDidAppear(ready.presentation.id)
         bootstrap.retireAndFail(ShopperSessionError.accountChanged)
@@ -663,6 +665,15 @@ extension PersistenceContainerTests {
         bootstrap.retry()
         bootstrap.runLoadingTransition()
         XCTAssertEqual(providerAttempts, 2, "Rejected activation must not leave account loading latched")
+    }
+
+    @MainActor
+    private func waitForReady(_ bootstrap: PersistenceBootstrap) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while case .loading = bootstrap.state {
+            guard ContinuousClock.now < deadline else { throw CocoaError(.fileReadUnknown) }
+            try await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     @MainActor

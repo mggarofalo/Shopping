@@ -63,6 +63,14 @@ extension EnvironmentValues {
 
 @MainActor
 final class PersistenceBootstrap: ObservableObject {
+    private struct PreparedStore: @unchecked Sendable {
+        let configuration: PersistenceConfiguration
+        let persistence: PersistenceController
+        let service: NeedService
+        let selection: (householdID: UUID, listID: UUID)?
+        let personalCartService: PersonalCartService?
+        let resumeError: String?
+    }
     private static let performanceFixtureVersion = 2
     private static let retainedUITestStoreLimit = 12
     private static let retainedUITestHistoryTokenLimit = 24
@@ -427,7 +435,7 @@ final class PersistenceBootstrap: ObservableObject {
     func applicationDidEnterForeground() {
         guard case .ready = state, transition == nil else { return }
         if let accountProvider { Task { await accountProvider.refresh() } }
-        if let personalService { try? personalService.resumePending() }
+        resumePendingCart()
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
         retryShareAssociations()
@@ -466,9 +474,12 @@ final class PersistenceBootstrap: ObservableObject {
                 await provider.refresh()
                 do {
                     let session = try provider.currentSession()
-                    personalConfiguration = try PersonalCartActivation.activate(sourceURL: sourceURL,
-                        session: session, baseDirectory: base, importLegacy: sourceURL != nil)
+                    let activated = try await Task.detached(priority: .userInitiated) {
+                        try PersonalCartActivation.activate(sourceURL: sourceURL,
+                            session: session, baseDirectory: base, importLegacy: sourceURL != nil)
+                    }.value
                     guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
+                    personalConfiguration = activated
                     defaults.removeObject(forKey: Self.pendingImportKey)
                     activeAccountBinding = session.accountBinding
                     personalMode = true
@@ -527,6 +538,48 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func load() {
+        guard preloadedPreviewEnvironment == nil else { finishLoad(prepared: nil); return }
+        let requestedGeneration = generation
+        let configuration = self.configuration
+        let personalConfiguration = self.personalConfiguration
+        let allowsLocalHouseholdCreation = self.allowsLocalHouseholdCreation
+        let accountProvider = self.accountProvider
+        let personalMode = self.personalMode
+        Task {
+            do {
+                let prepared = try await Task.detached(priority: .userInitiated) {
+                    let resolved = try personalConfiguration ?? configuration()
+                    let persistence = try PersistenceController(configuration: resolved)
+                    let service = NeedService(persistence: persistence)
+                    var selection = try service.firstHouseholdSelection()
+                    if selection == nil, allowsLocalHouseholdCreation, !resolved.isManaged,
+                       try service.isPersistentStoreEmpty() {
+                        let created = try service.createHousehold()
+                        selection = (created.householdID, created.listID)
+                    }
+                    var cartService: PersonalCartService?
+                    var resumeError: String?
+                    if personalMode, let accountProvider {
+                        let cart = PersonalCartService(persistence: persistence, sessionProvider: accountProvider)
+                        try cart.captureLegacyReview()
+                        cartService = cart
+                        do { try cart.resumePending() }
+                        catch { resumeError = error.localizedDescription }
+                    }
+                    return PreparedStore(configuration: resolved, persistence: persistence,
+                        service: service, selection: selection, personalCartService: cartService,
+                        resumeError: resumeError)
+                }.value
+                guard generation == requestedGeneration else { return }
+                finishLoad(prepared: prepared)
+            } catch {
+                guard generation == requestedGeneration else { return }
+                state = .failed(error)
+            }
+        }
+    }
+
+    private func finishLoad(prepared: PreparedStore?) {
         do {
             let resolvedConfiguration: PersistenceConfiguration
             let persistence: PersistenceController
@@ -539,15 +592,18 @@ final class PersistenceBootstrap: ObservableObject {
                 service = preview.service
                 selection = (preview.ids.householdID, preview.ids.listID)
                 preloadedPreviewEnvironment = nil
-            } else {
-                resolvedConfiguration = try personalConfiguration ?? self.configuration()
-                persistence = try PersistenceController(configuration: resolvedConfiguration)
-                service = NeedService(persistence: persistence)
-                selection = try service.firstHouseholdSelection()
-                if selection == nil, allowsLocalHouseholdCreation, !resolvedConfiguration.isManaged, try service.isPersistentStoreEmpty() {
-                    let created = try service.createHousehold()
-                    selection = (created.householdID, created.listID)
+            } else if let prepared {
+                resolvedConfiguration = prepared.configuration
+                persistence = prepared.persistence
+                service = prepared.service
+                selection = prepared.selection
+                personalService = prepared.personalCartService
+                if let resumeError = prepared.resumeError {
+                    shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: resumeError])
                 }
+            } else {
+                preconditionFailure("A non-preview store must be prepared off the main actor")
             }
 #if DEBUG
             if personalFixture {
@@ -582,7 +638,7 @@ final class PersistenceBootstrap: ObservableObject {
                 }
             }
 #endif
-            if personalMode, let accountProvider {
+            if prepared == nil, personalMode, let accountProvider {
                 let cartService = PersonalCartService(persistence: persistence, sessionProvider: accountProvider)
                 try cartService.captureLegacyReview()
                 personalService = cartService
@@ -669,12 +725,27 @@ final class PersistenceBootstrap: ObservableObject {
                 personalCartService: personalService
                     ))
                 }
-                do { try personalService?.resumePending() }
-                catch { shareAssociationError = error }
+                resumePendingCart()
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
             } catch {
                 guard generation == requestedGeneration else { return }
                 retireAndFail(error)
+            }
+        }
+    }
+
+    private func resumePendingCart() {
+        guard let personalService else { return }
+        let requestedGeneration = generation
+        Task {
+            let failure = await Task.detached(priority: .utility) { () -> String? in
+                do { try personalService.resumePending(); return nil }
+                catch { return error.localizedDescription }
+            }.value
+            guard generation == requestedGeneration, self.personalService === personalService else { return }
+            if let failure {
+                shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: failure])
             }
         }
     }

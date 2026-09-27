@@ -9,7 +9,7 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testColdPresentationKeepsPrivateCleanupAndHistoryWhenSharedReceiptIsIncomplete() throws {
+    func testColdPresentationKeepsPrivateCleanupAndHistoryWhenSharedReceiptIsIncomplete() async throws {
         let persistence = try PersistenceController(inMemory: true)
         let needs = NeedService(persistence: persistence)
         let scope = try needs.createHousehold()
@@ -39,13 +39,50 @@ final class PersonalCartPresentationTests: XCTestCase {
         }
 
         let presentation = PersonalCartPresentation(service: service, householdID: scope.householdID, listID: scope.listID)
+        try await waitUntil { presentation.history.count == 1 }
         XCTAssertEqual(presentation.entries.map(\.needID), [milk])
         XCTAssertEqual(presentation.history.map(\.id), [checkout.id])
         XCTAssertNotNil(presentation.error)
         XCTAssertTrue(presentation.outstandingNeedIDs.isEmpty)
         XCTAssertTrue(presentation.presence.isEmpty)
         try presentation.uncart(XCTUnwrap(presentation.entries.first))
+        try await waitUntil { presentation.entries.isEmpty }
         XCTAssertTrue(presentation.entries.isEmpty)
         XCTAssertEqual(presentation.history.map(\.id), [checkout.id])
+    }
+
+    @MainActor
+    func testBlockedWriterDoesNotBlockMainActorDuringRefresh() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let provider = FixedSession(session: try ShopperSession.authenticated(
+            containerIdentifier: "iCloud.shopping.presentation-tests", environment: "Development", accountRecordName: "alice"))
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider)
+        let entered = expectation(description: "writer occupied")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            persistence.writer.performAndWait {
+                entered.fulfill()
+                _ = release.wait(timeout: .now() + 5)
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        let start = ContinuousClock.now
+        let presentation = PersonalCartPresentation(service: service,
+            householdID: scope.householdID, listID: scope.listID)
+        presentation.refresh()
+        let elapsed = start.duration(to: .now)
+        release.signal()
+        XCTAssertLessThan(elapsed, .milliseconds(250))
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !condition() {
+            guard ContinuousClock.now < deadline else { throw XCTSkip("Presentation refresh timed out") }
+            try await Task.sleep(for: .milliseconds(20))
+        }
     }
 }

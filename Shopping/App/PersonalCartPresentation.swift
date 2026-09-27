@@ -4,6 +4,18 @@ import SwiftUI
 
 @Observable @MainActor
 final class PersonalCartPresentation {
+    private struct Snapshot: Sendable {
+        let entries: [PersonalCartEntrySnapshot]
+        let history: [PersonalCheckoutHistoryEntry]
+        let outstandingNeedIDs: Set<UUID>
+        let presence: [PersonalCartPresenceSnapshot]
+        let householdError: String?
+    }
+    private enum SnapshotResult: Sendable {
+        case success(Snapshot)
+        case failure(String)
+    }
+
     let service: PersonalCartService
     let householdID: UUID
     let listID: UUID
@@ -12,6 +24,8 @@ final class PersonalCartPresentation {
     private(set) var presence: [PersonalCartPresenceSnapshot] = []
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
     private(set) var error: String?
+    private var refreshInProgress = false
+    private var refreshRequested = false
 
     init(service: PersonalCartService, householdID: UUID, listID: UUID) {
         self.service = service
@@ -21,26 +35,51 @@ final class PersonalCartPresentation {
     }
 
     func refresh() {
-        do {
-            let nextEntries = try service.entries(householdID: householdID, listID: listID)
-            let nextHistory = try service.history(householdID: householdID, listID: listID)
-            entries = nextEntries
-            history = nextHistory
-        } catch {
-            self.error = error.localizedDescription
-            return
+        refreshRequested = true
+        guard !refreshInProgress else { return }
+        refreshInProgress = true
+        Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                refreshRequested = false
+                let service = self.service
+                let householdID = self.householdID
+                let listID = self.listID
+                let result = await Task.detached(priority: .userInitiated) {
+                    Self.readSnapshot(service: service, householdID: householdID, listID: listID)
+                }.value
+                switch result {
+                case .success(let snapshot):
+                    entries = snapshot.entries
+                    history = snapshot.history
+                    outstandingNeedIDs = snapshot.outstandingNeedIDs
+                    presence = snapshot.presence
+                    error = snapshot.householdError
+                case .failure(let failure):
+                    error = failure
+                }
+            } while refreshRequested
+            refreshInProgress = false
         }
+    }
+
+    nonisolated private static func readSnapshot(
+        service: PersonalCartService, householdID: UUID, listID: UUID
+    ) -> SnapshotResult {
         do {
-            let nextOutstanding = try service.outstandingNeedIDs(householdID: householdID, listID: listID)
-            let nextPresence = try service.presence(householdID: householdID, listID: listID)
-            outstandingNeedIDs = nextOutstanding
-            presence = nextPresence
-            error = nil
+            let entries = try service.entries(householdID: householdID, listID: listID)
+            let history = try service.history(householdID: householdID, listID: listID)
+            do {
+                return .success(Snapshot(entries: entries, history: history,
+                    outstandingNeedIDs: try service.outstandingNeedIDs(householdID: householdID, listID: listID),
+                    presence: try service.presence(householdID: householdID, listID: listID), householdError: nil))
+            } catch {
+                // Incomplete household imports cannot hide private removal or purchase history.
+                return .success(Snapshot(entries: entries, history: history,
+                    outstandingNeedIDs: [], presence: [], householdError: error.localizedDescription))
+            }
         } catch {
-            // Incomplete household imports cannot hide private removal or purchase history.
-            outstandingNeedIDs = []
-            presence = []
-            self.error = error.localizedDescription
+            return .failure(error.localizedDescription)
         }
     }
 
