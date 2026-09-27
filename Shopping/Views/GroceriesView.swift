@@ -18,6 +18,11 @@ struct GroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @ObservedObject var navigation: GroceryNavigationState
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
+    @State private var projectionTask: Task<Void, Never>?
+    @State private var projectionRevision = 0
+    @State private var pendingCartActionNeedIDs: Set<UUID> = []
+    @State private var pendingNeedQuantityIDs: Set<UUID> = []
+    @State private var pendingNeedAgainIDs: Set<UUID> = []
     @State private var showingFilters = false
     @State private var showingCategoryFill = false
     @State private var addPickerScope: GroceryAddScope?
@@ -478,30 +483,38 @@ struct GroceriesView: View {
         guard let service, let canonicalList, let householdID = canonicalList.household?.id,
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need),
               !need.archived else { return }
-        do {
-            let id: UUID
-            if let personalCart, let entry = personalCart.entries.first(where: { $0.needID == need.id }) {
-                try personalCart.uncart(entry)
-                id = need.id
-            } else if let item = need.item {
-                id = try service.addRememberedNeed(itemID: item.id, listID: canonicalList.id,
-                    householdID: householdID)
-            } else if need.kind == NeedKind.oneTime.rawValue {
-                try service.uncartNeed(needID: need.id, householdID: householdID, listID: canonicalList.id)
-                id = need.id
-            } else { return }
-            pendingSavedNeed = PendingSavedNeed(
-                id: id,
-                scope: GroceryAddScope(householdID: householdID, listID: canonicalList.id,
-                    selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName),
-                expectsUncarted: true,
-                originalCategoryID: nil,
-                savedCategoryID: categoryID(for: need),
-                wasEditing: false
-            )
-            refreshProjection()
-            completeSaveFeedback()
-        } catch { self.error = error }
+        let needID = need.id, itemID = need.item?.id, listID = canonicalList.id
+        guard pendingNeedAgainIDs.insert(needID).inserted else { return }
+        let isOneTime = need.kind == NeedKind.oneTime.rawValue
+        let savedCategoryID = categoryID(for: need)
+        let scope = GroceryAddScope(householdID: householdID, listID: listID,
+            selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName)
+        let personalCart = self.personalCart
+        Task {
+            defer { pendingNeedAgainIDs.remove(needID) }
+            do {
+                let id: UUID
+                if let personalCart, let entry = personalCart.entries.first(where: { $0.needID == needID }) {
+                    try await personalCart.uncart(entry)
+                    id = needID
+                } else if let itemID {
+                    id = try await Task.detached(priority: .userInitiated) {
+                        try service.addRememberedNeed(itemID: itemID, listID: listID, householdID: householdID)
+                    }.value
+                } else if isOneTime {
+                    try await Task.detached(priority: .userInitiated) {
+                        try service.uncartNeed(needID: needID, householdID: householdID, listID: listID)
+                    }.value
+                    id = needID
+                } else { return }
+                guard presentation?.isActive != false,
+                      selection.householdID == householdID, selection.listID == listID else { return }
+                pendingSavedNeed = PendingSavedNeed(id: id, scope: scope, expectsUncarted: true,
+                    originalCategoryID: nil, savedCategoryID: savedCategoryID, wasEditing: false)
+                refreshProjection()
+                completeSaveFeedback()
+            } catch { self.error = error }
+        }
     }
 
     private func uncarted(_ needID: UUID, householdID: UUID, listID: UUID) {
@@ -569,17 +582,31 @@ struct GroceriesView: View {
     private func refreshProjection() {
         guard presentation?.isActive != false else { return }
         personalCart?.refresh()
+        projectionTask?.cancel()
+        projectionRevision += 1
+        let revision = projectionRevision
         guard let householdID = selection.householdID, canonicalList != nil, let service else {
             visibleNeedObjectIDs = []
             return }
-        do {
-            let matchingIDs = Set(try service.filteredActiveNeedIDs(householdID: householdID, filter: currentNeedFilter))
-            visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(
-                Array(needs), canonicalList: canonicalList
-            ).filter { matchingIDs.contains($0.id) }.map(\.objectID))
-        } catch {
-            self.error = error
-            visibleNeedObjectIDs = []
+        let filter = currentNeedFilter
+        projectionTask = Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            do {
+                let matchingIDs = try await Task.detached(priority: .userInitiated) {
+                    Set(try service.filteredActiveNeedIDs(householdID: householdID, filter: filter))
+                }.value
+                guard !Task.isCancelled, projectionRevision == revision,
+                      selection.householdID == householdID,
+                      presentation?.isActive != false else { return }
+                visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(
+                    Array(needs), canonicalList: canonicalList
+                ).filter { matchingIDs.contains($0.id) }.map(\.objectID))
+            } catch {
+                guard !Task.isCancelled, projectionRevision == revision else { return }
+                self.error = error
+                visibleNeedObjectIDs = []
+            }
         }
     }
 
@@ -610,7 +637,9 @@ struct GroceriesView: View {
             selectedStoreID: navigation.selectedStoreID,
             personalCarted: personalCart.map { $0.contains(need.id) },
             presenceNames: personalCart?.presence.filter { $0.needID == need.id }.map { $0.name ?? "Another shopper" } ?? [],
-            cartActionAvailable: !(personalCart?.isCartTransitionPending(need.id) ?? false),
+            cartActionAvailable: !(personalCart?.isCartTransitionPending(need.id) ?? false) &&
+                !pendingCartActionNeedIDs.contains(need.id),
+            quantityActionAvailable: !pendingNeedQuantityIDs.contains(need.id),
             onEdit: focus,
             onCartedChange: setCarted,
             onQuantityChange: setQuantity,
@@ -629,18 +658,30 @@ struct GroceriesView: View {
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
         let name = need.item?.name ?? need.title
-        if personalCart?.isCartTransitionPending(needID) == true { return }
-        do {
-            if let personalCart {
-                if carted { try personalCart.cart(needID) }
-                else if let entry = personalCart.entries.first(where: { $0.needID == needID }) { try personalCart.uncart(entry) }
-            } else {
-                try service.setNeedCarted(needID: needID, householdID: householdID, listID: canonicalList.id, carted: carted)
-            }
-            hapticFeedback.play(.lightImpact)
-            refreshProjection()
-            if carted { showActionFeedback("\(name) moved to In cart.") }
-        } catch { self.error = error }
+        let listID = canonicalList.id
+        let personalCart = self.personalCart
+        if personalCart?.isCartTransitionPending(needID) == true || pendingCartActionNeedIDs.contains(needID) { return }
+        pendingCartActionNeedIDs.insert(needID)
+        Task {
+            defer { pendingCartActionNeedIDs.remove(needID) }
+            do {
+                if let personalCart {
+                    if carted { try await personalCart.cart(needID) }
+                    else if let entry = personalCart.entries.first(where: { $0.needID == needID }) {
+                        try await personalCart.uncart(entry)
+                    }
+                } else {
+                    try await Task.detached(priority: .userInitiated) {
+                        try service.setNeedCarted(needID: needID, householdID: householdID, listID: listID, carted: carted)
+                    }.value
+                }
+                guard presentation?.isActive != false,
+                      selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.lightImpact)
+                refreshProjection()
+                if carted { showActionFeedback("\(name) moved to In cart.") }
+            } catch { self.error = error }
+        }
     }
 
     private func isInMyCart(_ need: Need) -> Bool {
@@ -675,13 +716,16 @@ struct GroceriesView: View {
               quantity.map({ (1...99).contains($0) }) ?? true,
               GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains(need) else { return }
         let needID = need.id
-        do {
-            try service.setNeedQuantity(
-                needID: needID,
-                householdID: householdID,
-                listID: canonicalList.id,
-                quantity: quantity
-            )
-        } catch { self.error = error }
+        guard pendingNeedQuantityIDs.insert(needID).inserted else { return }
+        let listID = canonicalList.id
+        Task {
+            defer { pendingNeedQuantityIDs.remove(needID) }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setNeedQuantity(
+                        needID: needID, householdID: householdID, listID: listID, quantity: quantity)
+                }.value
+            } catch { self.error = error }
+        }
     }
 }

@@ -23,6 +23,8 @@ struct CatalogView: View {
     @State private var searchText = ""
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var refreshRevision = 0
     @State private var removalTargets: [UUID: CatalogNeedRemovalTarget] = [:]
     @State private var membershipConflicts: Set<UUID> = []
     @State private var membershipAvailable = false
@@ -525,48 +527,68 @@ struct CatalogView: View {
 
     private func refresh() {
         guard presentation?.isActive != false else { return }
+        refreshTask?.cancel()
+        refreshRevision += 1
+        let revision = refreshRevision
         guard let service, let householdID = selection.householdID else {
             projectedIDs = []
             removalTargets = [:]
             renderedGroups = []
             return
         }
-        do {
-            let refreshedIDs = Set(try service.filteredCatalogItemIDs(
-                householdID: householdID, filter: filters.query(text: searchText), includeArchived: filters.showArchived
-            ))
-            projectedIDs = refreshedIDs
-            rebuildRenderedGroups(projectedIDs: refreshedIDs)
-            refreshMembership(itemIDs: refreshedIDs)
-        } catch {
-            projectedIDs = []
-            removalTargets = [:]
-            renderedGroups = []
-            errorMessage = CatalogErrorCopy.message(error)
+        let query = filters.query(text: searchText)
+        let showArchived = filters.showArchived
+        let listID = canonicalList?.id
+        refreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            do {
+                let refreshedIDs = try await Task.detached(priority: .userInitiated) {
+                    Set(try service.filteredCatalogItemIDs(
+                        householdID: householdID, filter: query, includeArchived: showArchived))
+                }.value
+                guard !Task.isCancelled, refreshRevision == revision,
+                      selection.householdID == householdID,
+                      presentation?.isActive != false else { return }
+                projectedIDs = refreshedIDs
+                rebuildRenderedGroups(projectedIDs: refreshedIDs)
+                await refreshMembership(itemIDs: refreshedIDs, service: service,
+                    householdID: householdID, listID: listID, revision: revision)
+            } catch {
+                guard !Task.isCancelled, refreshRevision == revision else { return }
+                projectedIDs = []
+                removalTargets = [:]
+                renderedGroups = []
+                errorMessage = CatalogErrorCopy.message(error)
+            }
         }
     }
 
-    private func refreshMembership(itemIDs: Set<UUID>) {
+    private func refreshMembership(itemIDs: Set<UUID>, service: NeedService,
+                                   householdID: UUID, listID: UUID?, revision: Int) async {
         removalTargets = [:]
         membershipConflicts = []
         membershipAvailable = false
-        guard let service, let list = canonicalList, let householdID = list.household?.id else { return }
+        guard let listID else { return }
         do {
-            let memberships = try service.catalogListMembership(
-                itemIDs: itemIDs, householdID: householdID, listID: list.id
-            )
+            let memberships = try await Task.detached(priority: .userInitiated) {
+                try service.catalogListMembership(itemIDs: itemIDs, householdID: householdID, listID: listID)
+            }.value
+            guard !Task.isCancelled, refreshRevision == revision,
+                  selection.householdID == householdID else { return }
             for (itemID, membership) in memberships {
                 switch membership {
                 case .absent: break
                 case .ambiguous: membershipConflicts.insert(itemID)
                 case .present(let needID, let revision):
                     removalTargets[itemID] = CatalogNeedRemovalTarget(
-                        needID: needID, revision: revision, householdID: householdID, listID: list.id
+                        needID: needID, revision: revision, householdID: householdID, listID: listID
                     )
                 }
             }
             membershipAvailable = true
         } catch {
+            guard !Task.isCancelled, refreshRevision == revision else { return }
             // Keep catalog editing available even if grocery membership cannot be read safely.
             errorMessage = CatalogErrorCopy.message(error)
         }

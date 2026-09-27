@@ -3,6 +3,7 @@ import SwiftUI
 struct PersonalRetainedCartsView: View {
     let service: PersonalCartService
     @State private var scopes: [PersonalCartScopeSnapshot] = []
+    @State private var summaries: [PersonalCartScopeSnapshot: String] = [:]
     @State private var error: String?
 
     var body: some View {
@@ -16,7 +17,7 @@ struct PersonalRetainedCartsView: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text("Saved personal cart")
-                        Text(summary(scope)).font(.caption).foregroundStyle(.secondary)
+                        Text(summaries[scope] ?? "Purchase history").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -24,16 +25,23 @@ struct PersonalRetainedCartsView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Saved carts")
-        .onAppear {
-            do { scopes = try service.retainedScopes() }
-            catch { self.error = error.localizedDescription }
+        .task {
+            do {
+                let loaded = try await Task.detached(priority: .userInitiated) { () throws ->
+                    ([PersonalCartScopeSnapshot], [PersonalCartScopeSnapshot: String]) in
+                    let scopes = try service.retainedScopes()
+                    let summaries = Dictionary(uniqueKeysWithValues: try scopes.map { scope in
+                        let entries = try service.entries(householdID: scope.householdID, listID: scope.listID)
+                        let names = entries.prefix(3).map(\.title)
+                        return (scope, names.isEmpty ? "Purchase history" : names.joined(separator: ", "))
+                    })
+                    return (scopes, summaries)
+                }.value
+                guard !Task.isCancelled else { return }
+                scopes = loaded.0
+                summaries = loaded.1
+            } catch { self.error = error.localizedDescription }
         }
-    }
-
-    private func summary(_ scope: PersonalCartScopeSnapshot) -> String {
-        let entries = try? service.entries(householdID: scope.householdID, listID: scope.listID)
-        let names = entries?.prefix(3).map(\.title) ?? []
-        return names.isEmpty ? "Purchase history" : names.joined(separator: ", ")
     }
 }
 

@@ -24,11 +24,13 @@ struct GroceryNeedRow: View {
     var personalCarted: Bool? = nil
     var presenceNames: [String] = []
     var cartActionAvailable = true
+    var quantityActionAvailable = true
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
     var onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
     @State private var removalError: String?
+    @State private var removalPending = false
 
 
     var body: some View {
@@ -64,6 +66,7 @@ struct GroceryNeedRow: View {
                     Label("Remove", systemImage: "trash").labelStyle(.iconOnly)
                 }
                 .tint(.red)
+                .disabled(removalPending)
                 .accessibilityIdentifier("shopping.checklist.remove.\(need.id.uuidString)")
             }
         }
@@ -83,19 +86,23 @@ struct GroceryNeedRow: View {
     }
 
     private func remove() {
-        guard let service, onRemoved != nil, !need.archived,
+        guard !removalPending, let service, onRemoved != nil, !need.archived,
               let householdID = selection.householdID, let listID = selection.listID,
               need.list?.household?.id == householdID, need.list?.id == listID else { return }
         let needID = need.id
         let revision = need.revision
-        do {
-            let operationID = try service.removeNeed(
-                needID: needID, householdID: householdID,
-                listID: listID, expectedRevision: revision
-            )
-            onRemoved?(operationID, householdID, listID)
-            hapticFeedback.play(.warning)
-        } catch { removalError = error.localizedDescription }
+        removalPending = true
+        Task {
+            defer { removalPending = false }
+            do {
+                let operationID = try await Task.detached(priority: .userInitiated) {
+                    try service.removeNeed(needID: needID, householdID: householdID,
+                        listID: listID, expectedRevision: revision)
+                }.value
+                onRemoved?(operationID, householdID, listID)
+                hapticFeedback.play(.warning)
+            } catch { removalError = error.localizedDescription }
+        }
     }
 
     @ViewBuilder
@@ -167,7 +174,7 @@ struct GroceryNeedRow: View {
             Image(systemName: symbol).frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
         }
         .buttonStyle(.borderless)
-        .disabled(change < 0 ? quantity <= 1 : quantity >= 99)
+        .disabled(!quantityActionAvailable || (change < 0 ? quantity <= 1 : quantity >= 99))
         .accessibilityLabel("\(change < 0 ? "Decrease" : "Increase") quantity for \(title)")
         .accessibilityIdentifier(
             "shopping.checklist.quantity.\(change < 0 ? "decrease" : "increase").\(need.id.uuidString)")

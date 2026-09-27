@@ -98,6 +98,49 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         _ = try await loading.value
     }
 
+    func testBlockedPersistenceWriterDoesNotBlockMainActorDuringCartCommand() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        let row = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        let writerEntered = expectation(description: "writer is occupied")
+        let releaseWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait {
+                writerEntered.fulfill()
+                releaseWriter.wait()
+            }
+        }
+        await fulfillment(of: [writerEntered], timeout: 2)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { releaseWriter.signal() }
+
+        let started = ContinuousClock.now
+        let command = Task { try await service.execute(.add(token: row.commandToken, quantity: 1)) }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1),
+            "A blocked cart writer must not freeze the Watch UI actor")
+        _ = try await command.value
+    }
+
+    func testStoreRetirementDoesNotBlockMainActorBehindWriter() async throws {
+        let f = try fixture()
+        let writerEntered = expectation(description: "writer is occupied")
+        let releaseWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait {
+                writerEntered.fulfill()
+                releaseWriter.wait()
+            }
+        }
+        await fulfillment(of: [writerEntered], timeout: 2)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { releaseWriter.signal() }
+
+        let started = ContinuousClock.now
+        let retirement = WatchPersistenceBootstrap.retireStore(f.persistence)
+        XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(250),
+            "Closing an old account store must not wait for the writer on the UI actor")
+        try await retirement.value
+    }
+
     func testOfflineDraftQuantityAndCheckoutIntentRecoverAfterSQLiteRelaunch() async throws {
         enum Injected: Error { case stop }
         let f = try fixture(), service = adapter(f)

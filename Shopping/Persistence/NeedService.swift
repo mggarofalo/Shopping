@@ -113,7 +113,7 @@ enum CatalogRemovalAction: Equatable {
     case keepArchived
 }
 
-struct CatalogItemValues: Equatable {
+struct CatalogItemValues: Equatable, Sendable {
     var name: String
     var notes: String
     var categoryID: UUID?
@@ -207,7 +207,7 @@ struct CatalogAddScopeConstraint: Equatable {
     let newNeedUrgency: NeedUrgency
 }
 
-enum CatalogListMembership: Equatable {
+enum CatalogListMembership: Equatable, Sendable {
     case absent
     case present(needID: UUID, revision: Int64)
     case ambiguous
@@ -248,19 +248,19 @@ struct CatalogAddResult: Equatable {
     let missingCount: Int
 }
 
-enum CatalogSuggestionSelectionResult: Equatable {
+enum CatalogSuggestionSelectionResult: Equatable, Sendable {
     case added(UUID)
     case focusExisting(UUID)
     case renewed(UUID)
 }
 
-struct RememberedNeedValues: Equatable {
+struct RememberedNeedValues: Equatable, Sendable {
     var quantity: Int64? = nil
     var purchaseNotes: String = ""
     var urgency: NeedUrgency = .normal
 }
 
-struct CreatedRememberedGrocery: Equatable {
+struct CreatedRememberedGrocery: Equatable, Sendable {
     let itemID: UUID
     let needID: UUID
 }

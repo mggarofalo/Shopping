@@ -77,6 +77,8 @@ struct GroceryEditorView: View {
     @State private var showingStoreCreation = false
     @State private var didRequestInitialFocus = false
     @State private var isSaving = false
+    @State private var isApplyingSuggestion = false
+    @State private var isRemoving = false
     @FocusState private var focusedField: GroceryEditorField?
     let target: GroceryEditorTarget
     let onSaved: (UUID, UUID?) -> Void
@@ -392,7 +394,7 @@ struct GroceryEditorView: View {
                         if isPromotingOneTime { collisionChoices }
                         Button("Create distinct item") {
                             allowDuplicate = true
-                            if isPromotingOneTime { promoteOneTime() } else { save() }
+                            save()
                         }
                         .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityIdentifier("shopping.grocery.createDistinct")
@@ -654,7 +656,7 @@ struct GroceryEditorView: View {
     }
 
     private func save() {
-        guard canSave, !isSaving else { return }
+        guard canSave, !isSaving, !isApplyingSuggestion, !isRemoving else { return }
         isSaving = true
         Task { await saveItem() }
     }
@@ -669,7 +671,7 @@ struct GroceryEditorView: View {
             let listID = target.scope.listID
         else { return }
         if isPromotingOneTime {
-            promoteOneTime()
+            await promoteOneTime()
             return
         }
         do {
@@ -677,35 +679,42 @@ struct GroceryEditorView: View {
             let catalog = CatalogItemValues(
                 name: name, notes: catalogNotes, categoryID: categoryID,
                 anyStore: anyStore, storeIDs: storeIDs)
+            let needValues = values()
+            let personID = self.personID, allowDuplicate = self.allowDuplicate
+            let savedCategoryID = self.categoryID
             if let needID = target.needID {
                 if remembered {
                     try await service.saveRememberedGrocery(
                         needID: needID, householdID: householdID,
-                        listID: listID, catalog: catalog, need: values(),
+                        listID: listID, catalog: catalog, need: needValues,
                         personID: personID,
                         allowingCatalogNameCollision: allowDuplicate)
                 } else {
                     try await service.saveOneTimeGrocery(
                         needID: needID, householdID: householdID,
                         listID: listID, title: name, categoryID: categoryID, storeIDs: storeIDs,
-                        anyStore: anyStore, need: values(), personID: personID)
+                        anyStore: anyStore, need: needValues, personID: personID)
                 }
                 savedID = needID
             } else if remembered {
-                savedID = try service.createRememberedGrocery(
-                    householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), personID: personID,
-                    allowingCatalogNameCollision: allowDuplicate
-                ).needID
+                savedID = try await Task.detached(priority: .userInitiated) {
+                    try service.createRememberedGrocery(householdID: householdID, listID: listID,
+                        catalog: catalog, need: needValues, personID: personID,
+                        allowingCatalogNameCollision: allowDuplicate).needID
+                }.value
             } else {
-                savedID = try service.addOneTimeNeed(
-                    title: name, notes: purchaseNotes,
-                    categoryID: categoryID, storeIDs: storeIDs, anyStore: anyStore,
-                    quantity: quantity.map(Int64.init), urgency: urgency, personID: personID,
-                    householdID: householdID, listID: listID)
+                let title = name, notes = purchaseNotes, categoryID = self.categoryID
+                let storeIDs = self.storeIDs, anyStore = self.anyStore
+                let quantity = self.quantity.map(Int64.init), urgency = self.urgency
+                savedID = try await Task.detached(priority: .userInitiated) {
+                    try service.addOneTimeNeed(title: title, notes: notes, categoryID: categoryID,
+                        storeIDs: storeIDs, anyStore: anyStore, quantity: quantity, urgency: urgency,
+                        personID: personID, householdID: householdID, listID: listID)
+                }.value
             }
+            guard selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
-            onSaved(savedID, categoryID)
+            onSaved(savedID, savedCategoryID)
             dismiss()
         } catch { self.error = error }
     }
@@ -729,32 +738,38 @@ struct GroceryEditorView: View {
         error = nil
     }
 
-    private func promoteOneTime() {
+    private func promoteOneTime() async {
         defer { allowDuplicate = false }
         guard isPromotingOneTime, canSave, let service, let needID = target.needID,
               let householdID = target.scope.householdID, let listID = target.scope.listID else { return }
         do {
             let savedCategoryID: UUID?
+            let needValues = values(), personID = self.personID, allowDuplicate = self.allowDuplicate
             switch promotionChoice {
             case .create:
+                let selectedCategoryID = categoryID
                 let catalog = CatalogItemValues(
-                    name: name, notes: catalogNotes, categoryID: categoryID,
+                    name: name, notes: catalogNotes, categoryID: selectedCategoryID,
                     anyStore: anyStore, storeIDs: storeIDs
                 )
-                _ = try service.rememberOneTimeGroceryCreatingItem(
-                    needID: needID, householdID: householdID, listID: listID,
-                    catalog: catalog, need: values(), personID: personID,
-                    allowingCatalogNameCollision: allowDuplicate
-                )
-                savedCategoryID = categoryID
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try service.rememberOneTimeGroceryCreatingItem(
+                        needID: needID, householdID: householdID, listID: listID,
+                        catalog: catalog, need: needValues, personID: personID,
+                        allowingCatalogNameCollision: allowDuplicate)
+                }.value
+                savedCategoryID = selectedCategoryID
             case .existing:
                 guard let item = selectedCatalogItem else { return }
-                _ = try service.rememberOneTimeGrocery(
-                    needID: needID, householdID: householdID, listID: listID,
-                    existingItemID: item.id, need: values(), personID: personID
-                )
-                savedCategoryID = item.category?.id
+                let itemID = item.id, itemCategoryID = item.category?.id
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try service.rememberOneTimeGrocery(
+                        needID: needID, householdID: householdID, listID: listID,
+                        existingItemID: itemID, need: needValues, personID: personID)
+                }.value
+                savedCategoryID = itemCategoryID
             }
+            guard selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
             onSaved(needID, savedCategoryID)
             dismiss()
@@ -805,53 +820,65 @@ struct GroceryEditorView: View {
     }
 
     private func applySuggestion(_ item: Item, renewCarted: Bool) {
-        guard scopeValid, suggestedItems.contains(item), let service,
+        guard !isSaving, !isApplyingSuggestion, !isRemoving,
+              scopeValid, suggestedItems.contains(item), let service,
               let householdID = target.scope.householdID, let listID = target.scope.listID else { return }
+        isApplyingSuggestion = true
         let expectedNeed = activeRememberedNeedsByItemID[item.id]
-        do {
-            switch try service.applyCatalogSuggestion(
-                itemID: item.id,
-                itemRevision: item.revision,
-                expectedNeedID: expectedNeed?.id,
-                expectedNeedRevision: expectedNeed?.revision,
-                listID: listID,
-                householdID: householdID,
-                purchaseFilter: PurchaseFilter(
-                    selectedStoreID: target.scope.selectedStoreID,
-                    includedStoreIDs: target.scope.includedStoreIDs,
-                    excludedStoreIDs: target.scope.excludedStoreIDs
-                ),
-                categoryID: target.scope.categoryID,
-                textFilter: target.scope.textFilter,
-                urgentOnly: target.scope.urgentOnly,
-                renewCarted: personalCart == nil && renewCarted,
-                personID: personID
-            ) {
-            case .added(let needID), .renewed(let needID):
-                onSaved(needID, item.category?.id)
-                dismiss()
-            case .focusExisting(let needID):
-                if renewCarted, let personalCart,
-                   let entry = personalCart.entries.first(where: { $0.needID == needID }) {
-                    try personalCart.uncart(entry)
-                    onSaved(needID, item.category?.id)
+        let itemID = item.id, itemRevision = item.revision, itemCategoryID = item.category?.id
+        let expectedNeedID = expectedNeed?.id, expectedNeedRevision = expectedNeed?.revision
+        let purchaseFilter = PurchaseFilter(selectedStoreID: target.scope.selectedStoreID,
+            includedStoreIDs: target.scope.includedStoreIDs, excludedStoreIDs: target.scope.excludedStoreIDs)
+        let categoryID = target.scope.categoryID, textFilter = target.scope.textFilter
+        let urgentOnly = target.scope.urgentOnly, renewLegacyCart = personalCart == nil && renewCarted
+        let personID = self.personID
+        Task {
+            defer { isApplyingSuggestion = false }
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.applyCatalogSuggestion(itemID: itemID, itemRevision: itemRevision,
+                        expectedNeedID: expectedNeedID, expectedNeedRevision: expectedNeedRevision,
+                        listID: listID, householdID: householdID, purchaseFilter: purchaseFilter,
+                        categoryID: categoryID, textFilter: textFilter, urgentOnly: urgentOnly,
+                        renewCarted: renewLegacyCart, personID: personID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                switch result {
+                case .added(let needID), .renewed(let needID):
+                    onSaved(needID, itemCategoryID)
                     dismiss()
-                } else { onFocusNeed(needID) }
-            }
-        } catch { self.error = error }
+                case .focusExisting(let needID):
+                    if renewCarted, let personalCart,
+                       let entry = personalCart.entries.first(where: { $0.needID == needID }) {
+                        try await personalCart.uncart(entry)
+                        guard selection.householdID == householdID, selection.listID == listID else { return }
+                        onSaved(needID, itemCategoryID)
+                        dismiss()
+                    } else { onFocusNeed(needID) }
+                }
+            } catch { self.error = error }
+        }
     }
 
     private func remove() {
-        guard scopeValid, let service, let need = canonicalNeed,
+        guard !isSaving, !isApplyingSuggestion, !isRemoving,
+              scopeValid, let service, let need = canonicalNeed,
               let householdID = target.scope.householdID,
               let listID = target.scope.listID else { return }
-        do {
-            let operationID = try service.removeNeed(
-                needID: need.id, householdID: householdID,
-                listID: listID, expectedRevision: need.revision)
-            onRemoved(operationID, target.scope)
-            dismiss()
-        } catch { self.error = error }
+        isRemoving = true
+        let needID = need.id, revision = need.revision, scope = target.scope
+        Task {
+            defer { isRemoving = false }
+            do {
+                let operationID = try await Task.detached(priority: .userInitiated) {
+                    try service.removeNeed(needID: needID, householdID: householdID,
+                        listID: listID, expectedRevision: revision)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                onRemoved(operationID, scope)
+                dismiss()
+            } catch { self.error = error }
+        }
     }
 
 }
