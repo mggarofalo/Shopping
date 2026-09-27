@@ -61,7 +61,7 @@ class AcceptanceContractTests(unittest.TestCase):
         self.assertEqual(triggers["pull_request"]["branches"], ["main", "milestone/**"])
         build = workflow["jobs"]["build"]
         self.assertEqual(build["name"], "Build & Test")
-        self.assertEqual(build["timeout-minutes"], 15)
+        self.assertEqual(build["timeout-minutes"], 30)
         steps = {step.get("name"): step for step in build["steps"]}
         commands = [step.get("run", "") for step in build["steps"]]
         self.assertEqual(sum("xcodebuild build-for-testing" in command for command in commands), 1)
