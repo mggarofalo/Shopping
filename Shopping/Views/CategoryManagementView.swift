@@ -44,6 +44,7 @@ struct CategoryManagementView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var editor: CategoryEditorSession?
     @State private var editorName = ""
+    @State private var isSaving = false
     @State private var error: Error?
     @State private var selectedIDs: Set<UUID> = []
     @State private var editMode: EditMode = .inactive
@@ -156,6 +157,7 @@ struct CategoryManagementView: View {
                     : "This category is no longer available. Your draft is still here.",
                 available: session.scope.matches(canonicalList: canonicalList)
                     && (session.category.map(householdCategories.contains) ?? true),
+                busy: isSaving,
                 onSave: { save(session) },
                 onCancel: { editor = nil }
             )
@@ -369,22 +371,27 @@ struct CategoryManagementView: View {
     }
 
     private func save(_ session: CategoryEditorSession) {
-        guard session.scope.matches(canonicalList: canonicalList), let service else { return }
-        do {
-            if let category = session.category {
-                try service.renameCategory(
-                    name: editorName, categoryID: category.id,
-                    householdID: session.scope.householdID, listID: session.scope.listID
-                )
-            } else {
-                _ = try service.createCategory(
-                    name: editorName, householdID: session.scope.householdID,
-                    listID: session.scope.listID
-                )
-            }
-            hapticFeedback.play(.success)
-            editor = nil
-        } catch { self.error = error }
+        guard !isSaving, session.scope.matches(canonicalList: canonicalList), let service else { return }
+        isSaving = true
+        let name = editorName, categoryID = session.category?.id
+        let householdID = session.scope.householdID, listID = session.scope.listID
+        Task {
+            defer { isSaving = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    if let categoryID {
+                        try service.renameCategory(name: name, categoryID: categoryID,
+                            householdID: householdID, listID: listID)
+                    } else {
+                        _ = try service.createCategory(name: name,
+                            householdID: householdID, listID: listID)
+                    }
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.success)
+                editor = nil
+            } catch { self.error = error }
+        }
     }
 
     private func categoryHasReferences(_ category: Category) -> Bool {
@@ -412,66 +419,68 @@ struct CategoryManagementView: View {
     private func merge(_ source: Category, into destination: Category?) {
         guard selectionAvailable, let service, let householdID = selection.householdID,
               let listID = selection.listID else { return }
-        do {
-            let preview = try service.captureCategoryMerge(
-                sourceCategoryID: source.id, destinationCategoryID: destination?.id,
-                householdID: householdID, listID: listID
-            )
-            _ = try service.applyCategoryMerge(preview.token)
-            let destinationName = destination?.name
-            let message: String
-            if preview.referenceCount == 0 {
-                message = "\(preview.token.sourceName) deleted"
-            } else if let destinationName {
-                message = "\(preview.token.sourceName) merged into \(destinationName)"
-            } else {
-                message = "\(preview.token.sourceName) deleted; items moved to Uncategorized"
-            }
-            clearSelection()
-            hapticFeedback.play(.warning)
-            toastCenter?.show(
-                message,
-                duration: .undo,
-                action: ShoppingToastAction(
-                    title: "Undo",
-                    accessibilityIdentifier: "shopping.categories.undoDelete"
-                ) { undoMerge(preview.token) }
-            )
-        } catch { self.error = error }
+        let sourceID = source.id, destinationID = destination?.id, destinationName = destination?.name
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.captureCategoryMerge(sourceCategoryID: sourceID,
+                        destinationCategoryID: destinationID, householdID: householdID, listID: listID)
+                }.value
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try service.applyCategoryMerge(preview.token)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                let message: String
+                if preview.referenceCount == 0 {
+                    message = "\(preview.token.sourceName) deleted"
+                } else if let destinationName {
+                    message = "\(preview.token.sourceName) merged into \(destinationName)"
+                } else {
+                    message = "\(preview.token.sourceName) deleted; items moved to Uncategorized"
+                }
+                clearSelection()
+                hapticFeedback.play(.warning)
+                toastCenter?.show(message, duration: .undo, action: ShoppingToastAction(
+                    title: "Undo", accessibilityIdentifier: "shopping.categories.undoDelete"
+                ) { undoMerge(preview.token) })
+            } catch { self.error = error }
+        }
     }
 
     private func deleteUnused(_ source: Category) {
         guard selectionAvailable, let service, let householdID = selection.householdID,
               let listID = selection.listID else { return }
-        do {
-            let preview = try service.captureCategoryMerge(
-                sourceCategoryID: source.id, destinationCategoryID: nil,
-                householdID: householdID, listID: listID
-            )
-            guard preview.referenceCount == 0 else {
+        let sourceID = source.id
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.captureCategoryMerge(sourceCategoryID: sourceID,
+                        destinationCategoryID: nil, householdID: householdID, listID: listID)
+                }.value
+                guard preview.referenceCount == 0 else {
+                    toastCenter?.show(
+                        "\(preview.token.sourceName) now has items. Delete again to choose where to move them.",
+                        duration: .attention
+                    )
+                    return
+                }
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try service.applyCategoryMerge(preview.token)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                clearSelection()
+                hapticFeedback.play(.warning)
+                toastCenter?.show("\(preview.token.sourceName) deleted", duration: .undo,
+                    action: ShoppingToastAction(title: "Undo",
+                        accessibilityIdentifier: "shopping.categories.undoDelete"
+                    ) { undoMerge(preview.token) })
+            } catch NeedServiceError.scopeChanged {
                 toastCenter?.show(
-                    "\(preview.token.sourceName) now has items. Delete again to choose where to move them.",
+                    "Category changed. Delete again to choose what happens to its items.",
                     duration: .attention
                 )
-                return
-            }
-            _ = try service.applyCategoryMerge(preview.token)
-            clearSelection()
-            hapticFeedback.play(.warning)
-            toastCenter?.show(
-                "\(preview.token.sourceName) deleted",
-                duration: .undo,
-                action: ShoppingToastAction(
-                    title: "Undo",
-                    accessibilityIdentifier: "shopping.categories.undoDelete"
-                ) { undoMerge(preview.token) }
-            )
-        } catch NeedServiceError.scopeChanged {
-            toastCenter?.show(
-                "Category changed. Delete again to choose what happens to its items.",
-                duration: .attention
-            )
-        } catch { self.error = error }
+            } catch { self.error = error }
+        }
     }
 
     private func undoMerge(_ token: CategoryMergeToken) -> Bool {
@@ -479,27 +488,21 @@ struct CategoryManagementView: View {
               selection.householdID == token.householdID,
               selection.listID == token.listID,
               canonicalList != nil else { return false }
-        do {
-            let result = try service.undoCategoryMerge(token)
-            if result.changedCount > 0 || result.missingCount > 0 {
-                toastCenter?.show(
-                    "Category restored. Some newer item changes were kept.",
-                    duration: .attention
-                )
-            }
-            hapticFeedback.play(.success)
-            return true
-        } catch NeedServiceError.scopeChanged {
-            toastCenter?.show(
-                "Couldn’t undo. A newer category change was kept.",
-                duration: .attention
-            )
-            hapticFeedback.play(.warning)
-            return true
-        } catch {
-            self.error = error
-            return false
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.undoCategoryMerge(token)
+                }.value
+                if result.changedCount > 0 || result.missingCount > 0 {
+                    toastCenter?.show("Category restored. Some newer item changes were kept.", duration: .attention)
+                }
+                hapticFeedback.play(.success)
+            } catch NeedServiceError.scopeChanged {
+                toastCenter?.show("Couldn’t undo. A newer category change was kept.", duration: .attention)
+                hapticFeedback.play(.warning)
+            } catch { self.error = error }
         }
+        return true
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
@@ -507,42 +510,61 @@ struct CategoryManagementView: View {
               let listID = selection.listID else { return }
         var ids = activeCategories.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
-        do {
-            try service.reorderCategories(ids, householdID: householdID, listID: listID)
-        } catch { self.error = error }
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.reorderCategories(ids, householdID: householdID, listID: listID)
+                }.value
+            } catch { self.error = error }
+        }
     }
 
     private func prepareBatch(_ action: ManagementBatchAction) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
-        do {
-            let preview = try service.captureManagementBatch(
-                entity: .category, action: action, ids: selectedIDs,
-                householdID: householdID, listID: listID
-            )
-            applyBatch(preview.token)
-        } catch { self.error = error }
+        let ids = selectedIDs
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.captureManagementBatch(entity: .category, action: action,
+                        ids: ids, householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                applyBatch(preview.token)
+            } catch { self.error = error }
+        }
     }
 
     private func applyBatch(_ token: ManagementBatchToken) {
         guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
             clearSelection(); return
         }
-        do {
-            let result = try service.applyManagementBatch(token)
-            clearSelection()
-            batchNotice = ManagementBatchCopy.result(result)
-            hapticFeedback.play(.success)
-        } catch { self.error = error }
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.applyManagementBatch(token)
+                }.value
+                guard selection.householdID == token.householdID, selection.listID == token.listID else { return }
+                clearSelection()
+                batchNotice = ManagementBatchCopy.result(result)
+                hapticFeedback.play(.success)
+            } catch { self.error = error }
+        }
     }
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }
 
     private func setArchived(_ category: Category, _ archived: Bool) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
-        do {
-            try service.setCategoryArchived(archived, categoryID: category.id, householdID: householdID, listID: listID)
-            hapticFeedback.play(.success)
-        } catch { self.error = error }
+        let categoryID = category.id
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setCategoryArchived(archived, categoryID: categoryID,
+                        householdID: householdID, listID: listID)
+                }.value
+                hapticFeedback.play(.success)
+            } catch { self.error = error }
+        }
     }
 
 }

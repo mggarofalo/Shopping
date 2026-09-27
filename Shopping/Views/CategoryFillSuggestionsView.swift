@@ -18,6 +18,7 @@ struct CategoryFillSuggestionsView: View {
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var isLoading = true
     @State private var isAdding = false
+    @State private var loadRevision = 0
     @State private var errorMessage: String?
 
     var body: some View {
@@ -106,20 +107,30 @@ struct CategoryFillSuggestionsView: View {
             dismiss()
             return
         }
-        do {
-            let snapshot = try CategoryFillCandidateLoader().load(
-                from: viewContext,
-                selection: persistenceSelection,
-                categoryID: categoryID,
-                purchaseFilter: purchaseFilter
-            )
-            candidates = snapshot.candidates
-            categoryRevision = snapshot.categoryRevision
-            selectedItemIDs.formIntersection(Set(candidates.map(\.itemID)))
-            isLoading = false
-        } catch {
+        guard let coordinator = viewContext.persistentStoreCoordinator else {
             isLoading = false
             errorMessage = "The current category and saved items could not be read."
+            return
+        }
+        loadRevision += 1
+        let revision = loadRevision
+        let selection = persistenceSelection
+        isLoading = true
+        Task {
+            do {
+                let snapshot = try await CategoryFillCandidateLoader().loadInBackground(
+                    coordinator: coordinator, selection: selection, categoryID: categoryID,
+                    purchaseFilter: purchaseFilter)
+                guard revision == loadRevision, persistenceSelection == selection else { return }
+                candidates = snapshot.candidates
+                categoryRevision = snapshot.categoryRevision
+                selectedItemIDs.formIntersection(Set(candidates.map(\.itemID)))
+                isLoading = false
+            } catch {
+                guard revision == loadRevision else { return }
+                isLoading = false
+                errorMessage = "The current category and saved items could not be read."
+            }
         }
     }
 
@@ -135,47 +146,45 @@ struct CategoryFillSuggestionsView: View {
             errorMessage = "The household changed. Open the suggestions again."
             return
         }
+        guard !isAdding else { return }
         isAdding = true
-        var addedCount = 0
-        var skippedCount = 0
-        for candidate in candidates where selectedItemIDs.contains(candidate.itemID) {
-            do {
-                switch try service.applyCatalogSuggestion(
-                    itemID: candidate.itemID,
-                    itemRevision: candidate.itemRevision,
-                    expectedNeedID: nil,
-                    expectedNeedRevision: nil,
-                    listID: listID,
-                    householdID: householdID,
-                    purchaseFilter: purchaseFilter,
-                    categoryID: categoryID,
-                    expectedCategoryRevision: categoryRevision,
-                    textFilter: "",
-                    urgentOnly: false,
-                    renewCarted: false
-                ) {
-                case .added:
-                    addedCount += 1
-                case .renewed, .focusExisting:
-                    skippedCount += 1
+        let selected = candidates.filter { selectedItemIDs.contains($0.itemID) }
+        let purchaseFilter = self.purchaseFilter, categoryID = self.categoryID
+        Task {
+            defer { isAdding = false }
+            let counts = await Task.detached(priority: .userInitiated) { () -> (Int, Int) in
+                var added = 0, skipped = 0
+                for candidate in selected {
+                    do {
+                        switch try service.applyCatalogSuggestion(itemID: candidate.itemID,
+                            itemRevision: candidate.itemRevision, expectedNeedID: nil,
+                            expectedNeedRevision: nil, listID: listID, householdID: householdID,
+                            purchaseFilter: purchaseFilter, categoryID: categoryID,
+                            expectedCategoryRevision: categoryRevision, textFilter: "",
+                            urgentOnly: false, renewCarted: false) {
+                        case .added: added += 1
+                        case .renewed, .focusExisting: skipped += 1
+                        }
+                    } catch { skipped += 1 }
                 }
-            } catch {
-                skippedCount += 1
+                return (added, skipped)
+            }.value
+            guard persistenceSelection.householdID == householdID,
+                  persistenceSelection.listID == listID else { return }
+            let (addedCount, skippedCount) = counts
+            guard addedCount > 0 else {
+                errorMessage = "Those items changed or are already on the list. Nothing was added."
+                loadCandidates()
+                return
             }
-        }
-        isAdding = false
-        guard addedCount > 0 else {
-            errorMessage = "Those items changed or are already on the list. Nothing was added."
-            loadCandidates()
-            return
-        }
-        hapticFeedback.play(.success)
-        onAdded(addedCount)
-        if skippedCount == 0 {
-            dismiss()
-        } else {
-            errorMessage = "Added \(addedCount). Skipped \(skippedCount) because they changed or were already on the list."
-            loadCandidates()
+            hapticFeedback.play(.success)
+            onAdded(addedCount)
+            if skippedCount == 0 {
+                dismiss()
+            } else {
+                errorMessage = "Added \(addedCount). Skipped \(skippedCount) because they changed or were already on the list."
+                loadCandidates()
+            }
         }
     }
 }
@@ -187,4 +196,3 @@ extension CategoryFillCandidate: Identifiable {
 #Preview {
     Text("Category fill suggestions require a configured household preview.")
 }
-

@@ -39,19 +39,19 @@ enum ShoppingPerformanceTrace {
     static let log = OSLog(subsystem: "com.mggarofalo.shopping", category: .pointsOfInterest)
 }
 
-struct ClearCartedToken: Codable, Equatable {
+struct ClearCartedToken: Codable, Equatable, Sendable {
     let id: UUID
     let householdID: UUID
     let listID: UUID
     let revisionsByNeedID: [UUID: Int64]
 }
 
-struct ClearCartedPreview: Equatable {
+struct ClearCartedPreview: Equatable, Sendable {
     let token: ClearCartedToken
     let rows: [ClearCartedPreviewRow]
 }
 
-struct ClearCartedPreviewRow: Equatable {
+struct ClearCartedPreviewRow: Equatable, Sendable {
     let needID: UUID
     let revision: Int64
     let title: String
@@ -107,7 +107,7 @@ enum StoreRemovalAction: Equatable {
     case archive
 }
 
-enum CatalogRemovalAction: Equatable {
+enum CatalogRemovalAction: Equatable, Sendable {
     case delete
     case archive
     case keepArchived
@@ -121,26 +121,26 @@ struct CatalogItemValues: Equatable, Sendable {
     var storeIDs: Set<UUID>
 }
 
-struct CatalogRemovalPreview: Equatable {
+struct CatalogRemovalPreview: Equatable, Sendable {
     let action: CatalogRemovalAction
     let values: CatalogItemValues
     let isArchived: Bool
     let revision: Int64
 }
 
-enum ManagementEntityKind: String, Codable, Equatable {
+enum ManagementEntityKind: String, Codable, Equatable, Sendable {
     case store
     case category
     case catalogItem
 }
 
-enum ManagementBatchAction: String, Codable, Equatable {
+enum ManagementBatchAction: String, Codable, Equatable, Sendable {
     case archive
     case restore
     case delete
 }
 
-struct ManagementBatchEntry: Codable, Equatable, Hashable {
+struct ManagementBatchEntry: Codable, Equatable, Hashable, Sendable {
     let id: UUID
     let revision: Int64
     let references: [ManagementBatchReference]
@@ -152,8 +152,8 @@ struct ManagementBatchEntry: Codable, Equatable, Hashable {
     }
 }
 
-struct ManagementBatchReference: Codable, Equatable, Hashable {
-    enum Kind: String, Codable {
+struct ManagementBatchReference: Codable, Equatable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case catalogItem
         case oneTimeNeed
     }
@@ -163,7 +163,7 @@ struct ManagementBatchReference: Codable, Equatable, Hashable {
     let revision: Int64
 }
 
-struct ManagementBatchToken: Codable, Equatable {
+struct ManagementBatchToken: Codable, Equatable, Sendable {
     let id: UUID
     let householdID: UUID
     let listID: UUID
@@ -172,7 +172,7 @@ struct ManagementBatchToken: Codable, Equatable {
     let entries: [ManagementBatchEntry]
 }
 
-struct ManagementBatchPreview: Equatable {
+struct ManagementBatchPreview: Equatable, Sendable {
     let token: ManagementBatchToken
     let archiveCount: Int
     let restoreCount: Int
@@ -180,7 +180,7 @@ struct ManagementBatchPreview: Equatable {
     let retainedCount: Int
 }
 
-struct ManagementBatchResult: Equatable {
+struct ManagementBatchResult: Equatable, Sendable {
     let archivedCount: Int
     let restoredCount: Int
     let deletedCount: Int
@@ -189,7 +189,7 @@ struct ManagementBatchResult: Equatable {
     let missingCount: Int
 }
 
-enum CatalogAddDisposition: String, Codable, Equatable {
+enum CatalogAddDisposition: String, Codable, Equatable, Sendable {
     case add
     case focusExisting
     case needAgain
@@ -197,9 +197,9 @@ enum CatalogAddDisposition: String, Codable, Equatable {
     case ineligible
 }
 
-enum CatalogAddDestination { case list, cart }
+enum CatalogAddDestination: Sendable { case list, cart }
 
-struct CatalogAddScopeConstraint: Equatable {
+struct CatalogAddScopeConstraint: Equatable, Sendable {
     let purchaseFilter: PurchaseFilter
     let categoryID: UUID?
     let textFilters: [String]
@@ -213,7 +213,7 @@ enum CatalogListMembership: Equatable, Sendable {
     case ambiguous
 }
 
-struct CatalogAddEntry: Codable, Equatable {
+struct CatalogAddEntry: Codable, Equatable, Sendable {
     let itemID: UUID
     let itemRevision: Int64
     let needID: UUID?
@@ -221,7 +221,7 @@ struct CatalogAddEntry: Codable, Equatable {
     let disposition: CatalogAddDisposition
 }
 
-struct CatalogAddToken: Codable, Equatable {
+struct CatalogAddToken: Codable, Equatable, Sendable {
     let id: UUID
     let householdID: UUID
     let listID: UUID
@@ -229,7 +229,7 @@ struct CatalogAddToken: Codable, Equatable {
     let entries: [CatalogAddEntry]
 }
 
-struct CatalogAddPreview: Equatable {
+struct CatalogAddPreview: Equatable, Sendable {
     let token: CatalogAddToken
     let addCount: Int
     let existingCount: Int
@@ -238,7 +238,7 @@ struct CatalogAddPreview: Equatable {
     let ineligibleCount: Int
 }
 
-struct CatalogAddResult: Equatable {
+struct CatalogAddResult: Equatable, Sendable {
     let addedNeedIDs: [UUID]
     let existingNeedIDs: [UUID]
     let renewedNeedIDs: [UUID]

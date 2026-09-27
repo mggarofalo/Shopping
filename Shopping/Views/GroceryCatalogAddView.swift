@@ -22,6 +22,7 @@ struct GroceryCatalogAddView: View {
     @State private var searchText: String
     @State private var catalogEditor: CatalogEditSession?
     @State private var pendingCompletion: GroceryCatalogAddCompletion?
+    @State private var isSelecting = false
     @State private var errorMessage: String?
     @State private var personID: UUID?
     @State private var personSelectionWasChanged = false
@@ -182,6 +183,7 @@ struct GroceryCatalogAddView: View {
                             }
                             .contentShape(Rectangle())
                         }
+                        .disabled(isSelecting)
                         .buttonStyle(.plain)
                         .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .disabled(!personSelectionValid)
@@ -218,7 +220,7 @@ struct GroceryCatalogAddView: View {
                     allowsSaveWithoutAdding: false,
                     onSaved: { _ in }
                 ) { result in
-                    if let message = addSavedCatalogItem(result) {
+                    if let message = await addSavedCatalogItem(result) {
                         return .failed(message)
                     }
                     return .completed
@@ -289,28 +291,33 @@ struct GroceryCatalogAddView: View {
     }
 
     private func select(_ item: Item) {
-        guard let service, let householdID = scope.householdID, let listID = scope.listID else { return }
+        guard !isSelecting, let service, let householdID = scope.householdID,
+              let listID = scope.listID else { return }
+        isSelecting = true
         let expectedNeed = activeNeedsByItemID[item.id]
-        do {
-            let result = try service.applyCatalogSuggestion(
-                itemID: item.id,
-                itemRevision: item.revision,
-                expectedNeedID: expectedNeed?.id,
-                expectedNeedRevision: expectedNeed?.revision,
-                listID: listID,
-                householdID: householdID,
-                purchaseFilter: purchaseFilter,
-                categoryID: scope.categoryID,
-                textFilter: scope.textFilter,
-                urgentOnly: scope.urgentOnly,
-                renewCarted: false,
-                personID: personID,
-                applyPersonToFocusedNeed: personSelectionWasChanged
-            )
-            hapticFeedback.play(.success)
-            complete(with: completion(for: result))
-        } catch {
-            errorMessage = CatalogErrorCopy.message(error)
+        let itemID = item.id, itemRevision = item.revision
+        let expectedNeedID = expectedNeed?.id, expectedNeedRevision = expectedNeed?.revision
+        let purchaseFilter = purchaseFilter, categoryID = scope.categoryID
+        let textFilter = scope.textFilter, urgentOnly = scope.urgentOnly
+        let personID = personID, applyPersonToFocusedNeed = personSelectionWasChanged
+        Task {
+            defer { isSelecting = false }
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.applyCatalogSuggestion(
+                        itemID: itemID, itemRevision: itemRevision,
+                        expectedNeedID: expectedNeedID, expectedNeedRevision: expectedNeedRevision,
+                        listID: listID, householdID: householdID,
+                        purchaseFilter: purchaseFilter, categoryID: categoryID,
+                        textFilter: textFilter, urgentOnly: urgentOnly,
+                        renewCarted: false, personID: personID,
+                        applyPersonToFocusedNeed: applyPersonToFocusedNeed
+                    )
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.success)
+                complete(with: completion(for: result))
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
         }
     }
 
@@ -341,27 +348,27 @@ struct GroceryCatalogAddView: View {
         )
     }
 
-    private func addSavedCatalogItem(_ result: CatalogSaveResult) -> String? {
+    private func addSavedCatalogItem(_ result: CatalogSaveResult) async -> String? {
         guard let service, let householdID = scope.householdID, let listID = scope.listID else {
             return "The household is no longer available."
         }
+        let selectedStoreID = scope.selectedStoreID, scopeConstraint = addScopeConstraint
+        let personID = personID
         do {
-            let preview = try service.captureCatalogAdd(
-                itemIDs: [result.itemID],
-                householdID: householdID,
-                listID: listID,
-                selectedStoreID: scope.selectedStoreID,
-                scopeConstraint: addScopeConstraint
-            )
+            let preview = try await Task.detached(priority: .userInitiated) {
+                try service.captureCatalogAdd(itemIDs: [result.itemID], householdID: householdID,
+                    listID: listID, selectedStoreID: selectedStoreID, scopeConstraint: scopeConstraint)
+            }.value
             guard preview.needAgainCount == 0 else {
                 return "This item is already in the cart. Choose it from the search results to view it."
             }
-            let applied = try service.applyCatalogAdd(
-                preview.token,
-                renewCarted: false,
-                scopeConstraint: addScopeConstraint,
-                personID: personID
-            )
+            let applied = try await Task.detached(priority: .userInitiated) {
+                try service.applyCatalogAdd(preview.token, renewCarted: false,
+                    scopeConstraint: scopeConstraint, personID: personID)
+            }.value
+            guard selection.householdID == householdID, selection.listID == listID else {
+                return "The household changed. Select the item again."
+            }
             if let id = applied.addedNeedIDs.first {
                 pendingCompletion = .added(id)
                 return nil

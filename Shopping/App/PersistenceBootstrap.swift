@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import SwiftUI
 
-struct PersistenceSelection: Equatable {
+struct PersistenceSelection: Equatable, Sendable {
     let householdID: UUID?
     let listID: UUID?
 }

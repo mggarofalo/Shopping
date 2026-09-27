@@ -1,7 +1,7 @@
 import CoreData
 import SwiftUI
 
-struct CatalogSaveResult {
+struct CatalogSaveResult: Sendable {
     let itemID: UUID
     let itemName: String
     let wasCreated: Bool
@@ -32,19 +32,20 @@ struct CatalogEditorView: View {
     @State private var showingStoreCreation = false
     @State private var requestedArchived = true
     @State private var pendingAddConfirmation: CatalogAddConfirmation?
+    @State private var isSaving = false
     @FocusState private var focusedField: Field?
     let session: CatalogEditSession
     let allowsSaveWithoutAdding: Bool
     let onSaved: (CatalogSaveResult) -> Void
-    let onAddToList: (CatalogSaveResult) -> CatalogEditorAddOutcome
-    let onConfirmAdd: (CatalogAddToken) -> Void
+    let onAddToList: (CatalogSaveResult) async -> CatalogEditorAddOutcome
+    let onConfirmAdd: (CatalogAddToken) async -> Bool
 
     init(
         session: CatalogEditSession,
         allowsSaveWithoutAdding: Bool = true,
         onSaved: @escaping (CatalogSaveResult) -> Void,
-        onAddToList: @escaping (CatalogSaveResult) -> CatalogEditorAddOutcome = { _ in .completed },
-        onConfirmAdd: @escaping (CatalogAddToken) -> Void = { _ in }
+        onAddToList: @escaping (CatalogSaveResult) async -> CatalogEditorAddOutcome = { _ in .completed },
+        onConfirmAdd: @escaping (CatalogAddToken) async -> Bool = { _ in true }
     ) {
         self.session = session
         self.allowsSaveWithoutAdding = allowsSaveWithoutAdding
@@ -73,7 +74,7 @@ struct CatalogEditorView: View {
         matches.contains { CatalogProjection.normalizedName($0.name) == CatalogProjection.normalizedName(values.name) }
     }
     private var canSave: Bool {
-        scopeAvailable && !CatalogProjection.normalizedName(values.name).isEmpty &&
+        !isSaving && scopeAvailable && !CatalogProjection.normalizedName(values.name).isEmpty &&
             (itemID == nil || currentItem != nil) && (!hasExactMatch || allowingNameCollision)
     }
 
@@ -166,7 +167,9 @@ struct CatalogEditorView: View {
                 DispatchQueue.main.async { focusedField = .name }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(isSaving)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     HStack {
                         Button("Save and Add to List", systemImage: "note.text.badge.plus") {
@@ -188,8 +191,16 @@ struct CatalogEditorView: View {
                             if let confirmation = pendingAddConfirmation {
                                 Button(confirmation.itemName == nil ? "Add to list" : "Need again") {
                                     pendingAddConfirmation = nil
-                                    onConfirmAdd(confirmation.preview.token)
-                                    dismiss()
+                                    isSaving = true
+                                    Task {
+                                        let added = await onConfirmAdd(confirmation.preview.token)
+                                        isSaving = false
+                                        if added { dismiss() }
+                                        else {
+                                            errorMessage = "Saved to Catalog, but couldn’t add to the list. Review the item and try again."
+                                            hapticFeedback.play(.warning)
+                                        }
+                                    }
                                 }
                             }
                             Button("Cancel", role: .cancel) {
@@ -237,64 +248,70 @@ struct CatalogEditorView: View {
                     values.storeIDs.insert(id)
                 }
             }
+            .interactiveDismissDisabled(isSaving)
         }
     }
 
     private func save(addToList: Bool = false) {
-        guard scopeAvailable, let service, let householdID = session.selection.householdID,
+        guard canSave, let service, let householdID = session.selection.householdID,
               let listID = session.selection.listID else { return }
-        do {
-            let wasCreated = itemID == nil
-            let savedItemID: UUID
-            if let itemID {
-                try service.saveCatalogItem(
-                    itemID: itemID, householdID: householdID, listID: listID,
-                    values: values, allowingNameCollision: allowingNameCollision
-                )
-                savedItemID = itemID
-            } else {
-                savedItemID = try service.createCatalogItem(
-                    values: values, householdID: householdID, listID: listID,
-                    allowingNameCollision: allowingNameCollision
-                )
-            }
-            let result = CatalogSaveResult(
-                itemID: savedItemID,
-                itemName: values.name.trimmingCharacters(in: .whitespacesAndNewlines),
-                wasCreated: wasCreated
-            )
-            onSaved(result)
-            if addToList {
-                switch onAddToList(result) {
-                case .completed:
-                    break
-                case .confirmation(let confirmation):
-                    itemID = savedItemID
-                    pendingAddConfirmation = confirmation
-                    return
-                case .failed(let addError):
-                    itemID = savedItemID
-                    errorMessage = "Saved to Catalog, but couldn’t add to the list. \(addError)"
-                    hapticFeedback.play(.warning)
-                    return
+        isSaving = true
+        let values = self.values, itemID = self.itemID
+        let allowingNameCollision = self.allowingNameCollision
+        Task {
+            defer { isSaving = false }
+            do {
+                let savedItemID = try await Task.detached(priority: .userInitiated) {
+                    if let itemID {
+                        try service.saveCatalogItem(itemID: itemID, householdID: householdID,
+                            listID: listID, values: values, allowingNameCollision: allowingNameCollision)
+                        return itemID
+                    }
+                    return try service.createCatalogItem(values: values, householdID: householdID,
+                        listID: listID, allowingNameCollision: allowingNameCollision)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                let result = CatalogSaveResult(itemID: savedItemID,
+                    itemName: values.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    wasCreated: itemID == nil)
+                onSaved(result)
+                if addToList {
+                    switch await onAddToList(result) {
+                    case .completed: break
+                    case .confirmation(let confirmation):
+                        self.itemID = savedItemID
+                        pendingAddConfirmation = confirmation
+                        return
+                    case .failed(let addError):
+                        self.itemID = savedItemID
+                        errorMessage = "Saved to Catalog, but couldn’t add to the list. \(addError)"
+                        hapticFeedback.play(.warning)
+                        return
+                    }
                 }
-            }
-            hapticFeedback.play(.success)
-            dismiss()
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
+                hapticFeedback.play(.success)
+                dismiss()
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 
     private func archive(_ archived: Bool) {
-        guard scopeAvailable, let service, let householdID = session.selection.householdID,
+        guard !isSaving, scopeAvailable, let service, let householdID = session.selection.householdID,
               let listID = session.selection.listID, let itemID else { return }
-        do {
-            try service.setCatalogItemArchived(
-                itemID: itemID, householdID: householdID, listID: listID,
-                archived: archived
-            )
-            onSaved(CatalogSaveResult(itemID: itemID, itemName: values.name, wasCreated: false))
-            dismiss()
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
+        isSaving = true
+        let name = values.name
+        Task {
+            defer { isSaving = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setCatalogItemArchived(itemID: itemID, householdID: householdID,
+                        listID: listID, archived: archived)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                onSaved(CatalogSaveResult(itemID: itemID, itemName: name, wasCreated: false))
+                dismiss()
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 }
 

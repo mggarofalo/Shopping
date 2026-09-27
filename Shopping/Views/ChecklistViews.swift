@@ -21,6 +21,12 @@ struct CartedGroceriesView: View {
         FetchedResults<Category>
     @ObservedObject var navigation: GroceryNavigationState
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
+    @State private var projectionTask: Task<Void, Never>?
+    @State private var projectionRevision = 0
+    @State private var pendingCartNeedIDs: Set<UUID> = []
+    @State private var pendingQuantityNeedIDs: Set<UUID> = []
+    @State private var isPreparingCheckout = false
+    @State private var isConfirmingCheckout = false
     @State private var showingFilters = false
     @State private var checkoutDraft: CheckoutDraft?
     @State private var clearErrorMessage: String?
@@ -109,6 +115,7 @@ struct CartedGroceriesView: View {
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isPreparingCheckout || isConfirmingCheckout)
                     .buttonBorderShape(.circle)
                     .accessibilityLabel(checkoutLabel(count: visibleCarted.count))
                     .accessibilityIdentifier("shopping.checkout.start")
@@ -147,7 +154,10 @@ struct CartedGroceriesView: View {
     private func row(_ need: Need, activeStores: [Store]) -> some View {
         GroceryNeedRow(
             need: need, activeStores: activeStores,
-            selectedStoreID: navigation.selectedStoreID, onEdit: onEdit,
+            selectedStoreID: navigation.selectedStoreID,
+            cartActionAvailable: !pendingCartNeedIDs.contains(need.id),
+            quantityActionAvailable: !pendingQuantityNeedIDs.contains(need.id),
+            onEdit: onEdit,
             onCartedChange: setCarted, onQuantityChange: setQuantity,
             onRemoved: onRemoved
         )
@@ -169,7 +179,7 @@ struct CartedGroceriesView: View {
                             .shoppingMultilineText()
                             .shoppingListRowInsets()
                         Button("Retry") { confirmCheckout(draft) }
-                            .disabled(!selectionMatches(draft))
+                            .disabled(isConfirmingCheckout || !selectionMatches(draft))
                             .accessibilityIdentifier("shopping.checkout.retry")
                             .shoppingListRowInsets()
                     }
@@ -190,6 +200,7 @@ struct CartedGroceriesView: View {
                     Button { checkoutDraft = nil } label: {
                         Label("Cancel", systemImage: "xmark").labelStyle(.iconOnly)
                     }
+                        .disabled(isConfirmingCheckout)
                         .accessibilityLabel("Cancel")
                         .accessibilityIdentifier("shopping.checkout.cancel")
                 }
@@ -200,11 +211,12 @@ struct CartedGroceriesView: View {
                         Label(checkoutLabel(count: draft.preview.rows.count), systemImage: "checkmark")
                             .labelStyle(.iconOnly)
                     }
-                    .disabled(!selectionMatches(draft))
+                    .disabled(isConfirmingCheckout || !selectionMatches(draft))
                     .accessibilityLabel(checkoutLabel(count: draft.preview.rows.count))
                     .accessibilityIdentifier("shopping.checkout.confirm")
                 }
             }
+            .interactiveDismissDisabled(isConfirmingCheckout)
         }
     }
 
@@ -274,21 +286,32 @@ struct CartedGroceriesView: View {
 
     private func refreshProjection() {
         guard presentation?.isActive != false else { return }
+        projectionTask?.cancel()
+        projectionRevision += 1
+        let revision = projectionRevision
         guard let service, let householdID = selection.householdID, canonicalList != nil else {
             visibleNeedObjectIDs = []
             return
         }
-        do {
-            let matchingIDs = Set(try service.filteredActiveNeedIDs(
-                householdID: householdID,
-                filter: currentNeedFilter
-            ))
-            visibleNeedObjectIDs = Set(allScopedCartedNeeds.filter {
-                matchingIDs.contains($0.id)
-            }.map(\.objectID))
-        } catch {
-            self.error = error
-            visibleNeedObjectIDs = []
+        let filter = currentNeedFilter
+        projectionTask = Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            do {
+                let matchingIDs = try await Task.detached(priority: .userInitiated) {
+                    Set(try service.filteredActiveNeedIDs(householdID: householdID, filter: filter))
+                }.value
+                guard !Task.isCancelled, projectionRevision == revision,
+                      selection.householdID == householdID,
+                      presentation?.isActive != false else { return }
+                visibleNeedObjectIDs = Set(allScopedCartedNeeds.filter {
+                    matchingIDs.contains($0.id)
+                }.map(\.objectID))
+            } catch {
+                guard !Task.isCancelled, projectionRevision == revision else { return }
+                self.error = error
+                visibleNeedObjectIDs = []
+            }
         }
     }
 
@@ -300,56 +323,62 @@ struct CartedGroceriesView: View {
     }
 
     private func setCarted(_ need: Need, _ carted: Bool) {
-        if mutate(need, command: { service, needID, householdID, listID in
-            try service.setNeedCarted(
-                needID: needID, householdID: householdID, listID: listID, carted: carted)
-            if !carted { onUncarted?(needID, householdID, listID) }
-        }) {
-            hapticFeedback.play(.lightImpact)
-            refreshProjection()
+        guard let service, let list = canonicalList, let householdID = list.household?.id,
+              GroceryRowScope.validNeeds(Array(needs), canonicalList: list).contains(need),
+              !pendingCartNeedIDs.contains(need.id) else { return }
+        let needID = need.id, listID = list.id
+        pendingCartNeedIDs.insert(needID)
+        Task {
+            defer { pendingCartNeedIDs.remove(needID) }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setNeedCarted(needID: needID, householdID: householdID,
+                        listID: listID, carted: carted)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if !carted { onUncarted?(needID, householdID, listID) }
+                hapticFeedback.play(.lightImpact)
+                refreshProjection()
+            } catch { self.error = error }
         }
     }
 
     private func setQuantity(_ need: Need, _ quantity: Int64?) {
-        mutate(need) {
-            try $0.setNeedQuantity(needID: $1, householdID: $2, listID: $3, quantity: quantity)
-        }
-    }
-
-    @discardableResult
-    private func mutate(
-        _ need: Need,
-        command: (NeedService, UUID, UUID, UUID) throws -> Void
-    ) -> Bool {
         guard let service, let list = canonicalList, let householdID = list.household?.id,
-            GroceryRowScope.validNeeds(Array(needs), canonicalList: list).contains(need)
-        else { return false }
-        let needID = need.id
-        do {
-            try command(service, needID, householdID, list.id)
-            return true
-        } catch {
-            self.error = error
-            return false
+              GroceryRowScope.validNeeds(Array(needs), canonicalList: list).contains(need),
+              !pendingQuantityNeedIDs.contains(need.id) else { return }
+        let needID = need.id, listID = list.id
+        pendingQuantityNeedIDs.insert(needID)
+        Task {
+            defer { pendingQuantityNeedIDs.remove(needID) }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setNeedQuantity(needID: needID, householdID: householdID,
+                        listID: listID, quantity: quantity)
+                }.value
+            } catch { self.error = error }
         }
     }
 
     private func prepareCheckout() {
-        guard let service, let list = canonicalList, let householdID = list.household?.id else {
-            return
+        guard !isPreparingCheckout, let service, let list = canonicalList,
+              let householdID = list.household?.id else { return }
+        isPreparingCheckout = true
+        clearErrorMessage = nil
+        let listID = list.id, filter = currentNeedFilter
+        let needIDs = Set(visibleCartedNeeds.map(\.id))
+        Task {
+            defer { isPreparingCheckout = false }
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.prepareClearCarted(householdID: householdID, listID: listID,
+                        filter: filter, restrictedToNeedIDs: needIDs)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                checkoutDraft = CheckoutDraft(preview: preview,
+                    householdID: householdID, listID: listID)
+            } catch { self.error = error }
         }
-        do {
-            clearErrorMessage = nil
-            let preview = try service.prepareClearCarted(
-                householdID: householdID,
-                listID: list.id,
-                filter: currentNeedFilter,
-                restrictedToNeedIDs: Set(visibleCartedNeeds.map(\.id))
-            )
-            checkoutDraft = CheckoutDraft(
-                preview: preview,
-                householdID: householdID, listID: list.id)
-        } catch { self.error = error }
     }
 
     private func selectionMatches(_ draft: CheckoutDraft) -> Bool {
@@ -358,53 +387,57 @@ struct CartedGroceriesView: View {
     }
 
     private func confirmCheckout(_ draft: CheckoutDraft) {
-        guard let service, selectionMatches(draft) else { return }
-        do {
-            let cleared = try service.clearCarted(using: draft.preview.token)
+        guard !isConfirmingCheckout, let service, selectionMatches(draft) else { return }
+        isConfirmingCheckout = true
+        let token = draft.preview.token
+        let rowCount = draft.preview.rows.count
+        clearErrorMessage = nil
+        Task {
+            defer { isConfirmingCheckout = false }
+            do {
+                let cleared = try await Task.detached(priority: .userInitiated) {
+                    try service.clearCarted(using: token)
+                }.value
 #if DEBUG
-            // Exercise the committed-save / UI-acknowledgement boundary without graceful teardown.
-            if ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] != nil,
-                ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] == "1" {
-                _exit(0)
-            }
-#endif
-            let result = CheckoutResult(
-                operationID: draft.preview.token.id,
-                householdID: draft.householdID, listID: draft.listID,
-                cleared: cleared, skipped: draft.preview.rows.count - cleared)
-            let message = result.skipped == 0
-                ? "Checked out \(result.cleared) items"
-                : "Checked out \(result.cleared); skipped \(result.skipped) changed items"
-            toastCenter?.show(
-                message,
-                duration: .undo,
-                action: ShoppingToastAction(
-                    title: "Undo",
-                    accessibilityIdentifier: "shopping.checkout.undo"
-                ) {
-                    undo(result)
+                // Exercise the committed-save / UI-acknowledgement boundary without graceful teardown.
+                if ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_STORE_PATH"] != nil,
+                    ProcessInfo.processInfo.environment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] == "1" {
+                    _exit(0)
                 }
-            )
-            clearErrorMessage = nil
-            checkoutDraft = nil
-            if cleared > 0 { hapticFeedback.play(.success) }
-        } catch { clearErrorMessage = error.localizedDescription }
+#endif
+                guard selectionMatches(draft) else { return }
+                let result = CheckoutResult(operationID: token.id,
+                    householdID: draft.householdID, listID: draft.listID,
+                    cleared: cleared, skipped: rowCount - cleared)
+                let message = result.skipped == 0
+                    ? "Checked out \(result.cleared) items"
+                    : "Checked out \(result.cleared); skipped \(result.skipped) changed items"
+                toastCenter?.show(message, duration: .undo,
+                    action: ShoppingToastAction(title: "Undo",
+                        accessibilityIdentifier: "shopping.checkout.undo") { undo(result) })
+                clearErrorMessage = nil
+                checkoutDraft = nil
+                if cleared > 0 { hapticFeedback.play(.success) }
+            } catch { clearErrorMessage = error.localizedDescription }
+        }
     }
 
     private func undo(_ result: CheckoutResult) -> Bool {
         guard let service, selection.householdID == result.householdID,
             selection.listID == result.listID
         else { return false }
-        do {
-            let restored = try service.undoClear(
-                operationID: result.operationID,
-                expectedHouseholdID: result.householdID, expectedListID: result.listID)
-            showRestoreNotice(restored: restored, expected: result.cleared)
-            return true
-        } catch {
-            self.error = error
-            return false
+        let operationID = result.operationID, householdID = result.householdID, listID = result.listID
+        Task {
+            do {
+                let restored = try await Task.detached(priority: .userInitiated) {
+                    try service.undoClear(operationID: operationID,
+                        expectedHouseholdID: householdID, expectedListID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                showRestoreNotice(restored: restored, expected: result.cleared)
+            } catch { self.error = error }
         }
+        return true
     }
 
     private func checkoutLabel(count: Int) -> String {
