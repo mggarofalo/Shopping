@@ -10,6 +10,7 @@ struct StoreCreationView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var name = ""
     @State private var error: Error?
+    @State private var isSaving = false
     @State private var capturedScope: StoreManagementCommandScope?
     @State private var didCaptureScope = false
     @FocusState private var nameIsFocused: Bool
@@ -18,7 +19,7 @@ struct StoreCreationView: View {
     let onSelected: (UUID) -> Void
 
     private var scopeAvailable: Bool {
-        service != nil && StoreManagementScope.permits(capturedScope, canonicalList: canonicalList)
+        !isSaving && service != nil && StoreManagementScope.permits(capturedScope, canonicalList: canonicalList)
     }
 
     private var canonicalList: GroceryList? {
@@ -67,7 +68,7 @@ struct StoreCreationView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { dismiss() }.disabled(isSaving)
                         .accessibilityIdentifier("shopping.tags.storeCancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -76,27 +77,46 @@ struct StoreCreationView: View {
                         .accessibilityIdentifier("shopping.tags.storeSave")
                 }
             }
+            .interactiveDismissDisabled(isSaving)
         }
     }
 
     private func select(_ store: Store) {
         guard scopeAvailable, matches.contains(store), let service, let capturedScope else { return }
-        do {
-            if store.isArchived {
-                try service.setStoreArchived(
-                    false, storeID: store.id, householdID: capturedScope.householdID, listID: capturedScope.listID)
-            }
-            onSelected(store.id)
-            dismiss()
-        } catch { self.error = error }
+        isSaving = true
+        let storeID = store.id, archived = store.isArchived
+        let householdID = capturedScope.householdID, listID = capturedScope.listID
+        Task {
+            defer { isSaving = false }
+            do {
+                if archived {
+                    try await Task.detached(priority: .userInitiated) {
+                        try service.setStoreArchived(false, storeID: storeID,
+                            householdID: householdID, listID: listID)
+                    }.value
+                }
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                onSelected(storeID)
+                dismiss()
+            } catch { self.error = error }
+        }
     }
 
     private func save() {
         guard scopeAvailable, let service, let capturedScope else { return }
-        do {
-            onSelected(try service.createStore(
-                name: name, householdID: capturedScope.householdID, listID: capturedScope.listID))
-            dismiss()
-        } catch { self.error = error }
+        isSaving = true
+        let name = self.name
+        let householdID = capturedScope.householdID, listID = capturedScope.listID
+        Task {
+            defer { isSaving = false }
+            do {
+                let id = try await Task.detached(priority: .userInitiated) {
+                    try service.createStore(name: name, householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                onSelected(id)
+                dismiss()
+            } catch { self.error = error }
+        }
     }
 }

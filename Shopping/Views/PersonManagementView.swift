@@ -10,6 +10,7 @@ struct PersonManagementView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var editor: PersonEditorSession?
     @State private var editorName = ""
+    @State private var isSaving = false
     @State private var removal: PersonRemovalSession?
     @State private var error: Error?
 
@@ -62,6 +63,7 @@ struct PersonManagementView: View {
                     : "This person is no longer available. Your draft is still here.",
                 available: session.scope.matches(canonicalList: canonicalList)
                     && (session.person.map(householdPeople.contains) ?? true),
+                busy: isSaving,
                 onSave: { save(session) }, onCancel: { editor = nil }
             )
         }
@@ -139,59 +141,83 @@ struct PersonManagementView: View {
     }
 
     private func save(_ session: PersonEditorSession) {
-        guard session.scope.matches(canonicalList: canonicalList), let service else { return }
-        do {
-            if let person = session.person {
-                try service.renamePerson(
-                    name: editorName, personID: person.id,
-                    householdID: session.scope.householdID, listID: session.scope.listID
-                )
-            } else {
-                _ = try service.createPerson(
-                    name: editorName, householdID: session.scope.householdID, listID: session.scope.listID
-                )
-            }
-            hapticFeedback.play(.success)
-            editor = nil
-        } catch { self.error = error }
+        guard !isSaving, session.scope.matches(canonicalList: canonicalList), let service else { return }
+        isSaving = true
+        let name = editorName, personID = session.person?.id
+        let householdID = session.scope.householdID, listID = session.scope.listID
+        Task {
+            defer { isSaving = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    if let personID {
+                        try service.renamePerson(name: name, personID: personID,
+                            householdID: householdID, listID: listID)
+                    } else {
+                        _ = try service.createPerson(name: name, householdID: householdID, listID: listID)
+                    }
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.success)
+                editor = nil
+            } catch { self.error = error }
+        }
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
         var ids = activePeople.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
-        do { try service.reorderPeople(ids, householdID: householdID, listID: listID) }
-        catch { self.error = error }
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.reorderPeople(ids, householdID: householdID, listID: listID)
+                }.value
+            } catch { self.error = error }
+        }
     }
 
     private func setArchived(_ person: Person, _ archived: Bool) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
-        do {
-            try service.setPersonArchived(archived, personID: person.id, householdID: householdID, listID: listID)
-            hapticFeedback.play(.success)
-        } catch { self.error = error }
+        let personID = person.id
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setPersonArchived(archived, personID: personID,
+                        householdID: householdID, listID: listID)
+                }.value
+                hapticFeedback.play(.success)
+            } catch { self.error = error }
+        }
     }
 
     private func beginRemoval(_ person: Person) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
-        do {
-            let action = try service.personRemovalAction(
-                personID: person.id, householdID: householdID, listID: listID
-            )
-            removal = PersonRemovalSession(person: person, action: action)
-        } catch { self.error = error }
+        let personID = person.id
+        Task {
+            do {
+                let action = try await Task.detached(priority: .userInitiated) {
+                    try service.personRemovalAction(personID: personID,
+                        householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                removal = PersonRemovalSession(person: person, action: action)
+            } catch { self.error = error }
+        }
     }
 
     private func remove(_ session: PersonRemovalSession) {
         guard let service, let householdID = selection.householdID, let listID = selection.listID else { return }
-        do {
-            _ = try service.removePerson(
-                personID: session.person.id, householdID: householdID,
-                listID: listID, confirmedAction: session.action
-            )
-            hapticFeedback.play(.warning)
-            removal = nil
-        } catch { removal = nil; self.error = error }
+        let personID = session.person.id, action = session.action
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try service.removePerson(personID: personID, householdID: householdID,
+                        listID: listID, confirmedAction: action)
+                }.value
+                hapticFeedback.play(.warning)
+                removal = nil
+            } catch { removal = nil; self.error = error }
+        }
     }
 }
 

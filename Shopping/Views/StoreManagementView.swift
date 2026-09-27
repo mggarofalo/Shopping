@@ -60,6 +60,7 @@ struct StoreManagementView: View {
         FetchedResults<Household>
     @State private var editor: StoreEditorSession?
     @State private var editorName = ""
+    @State private var isSaving = false
     @State private var removingStore: Store?
     @State private var removalScope: StoreManagementCommandScope?
     @State private var removalAction: StoreRemovalAction?
@@ -171,6 +172,7 @@ struct StoreManagementView: View {
                     : "This store is no longer available. Your draft is still here.",
                 available: StoreManagementScope.permits(session.scope, canonicalList: canonicalList)
                     && (session.store.map(householdStores.contains) ?? true),
+                busy: isSaving,
                 onSave: { save(session) },
                 onCancel: { editor = nil }
             )
@@ -360,19 +362,28 @@ struct StoreManagementView: View {
     }
 
     private func save(_ session: StoreEditorSession) {
-        guard StoreManagementScope.permits(session.scope, canonicalList: canonicalList), let service else { return }
-        do {
-            if let store = session.store {
-                try service.renameStore(
-                    name: editorName, storeID: store.id, householdID: session.scope.householdID,
-                    listID: session.scope.listID)
-            } else {
-                _ = try service.createStore(
-                    name: editorName, householdID: session.scope.householdID, listID: session.scope.listID)
-            }
-            hapticFeedback.play(.success)
-            editor = nil
-        } catch { self.error = error }
+        guard !isSaving, StoreManagementScope.permits(session.scope, canonicalList: canonicalList),
+              let service else { return }
+        isSaving = true
+        let name = editorName, storeID = session.store?.id
+        let householdID = session.scope.householdID, listID = session.scope.listID
+        Task {
+            defer { isSaving = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    if let storeID {
+                        try service.renameStore(name: name, storeID: storeID,
+                            householdID: householdID, listID: listID)
+                    } else {
+                        _ = try service.createStore(name: name,
+                            householdID: householdID, listID: listID)
+                    }
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.success)
+                editor = nil
+            } catch { self.error = error }
+        }
     }
 
     private func reorder(from offsets: IndexSet, to destination: Int) {
@@ -380,12 +391,13 @@ struct StoreManagementView: View {
               let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
         var ids = activeStores.map(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
-        do {
-            try service.reorderStores(
-                ids, householdID: scope.householdID, listID: scope.listID
-            )
-        } catch {
-            self.error = error
+        let householdID = scope.householdID, listID = scope.listID
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.reorderStores(ids, householdID: householdID, listID: listID)
+                }.value
+            } catch { self.error = error }
         }
     }
 
@@ -398,49 +410,66 @@ struct StoreManagementView: View {
     private func archive(_ store: Store) {
         guard selectionAvailable, householdStores.contains(store), let service,
               let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
-        do {
-            try service.setStoreArchived(
-                true, storeID: store.id, householdID: scope.householdID, listID: scope.listID
-            )
-            hapticFeedback.play(.success)
-        } catch { self.error = error }
+        setArchived(true, storeID: store.id, scope: scope, service: service)
     }
 
     private func restore(_ store: Store) {
         guard let service, let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
-        do {
-            try service.setStoreArchived(false, storeID: store.id, householdID: scope.householdID, listID: scope.listID)
-            hapticFeedback.play(.success)
-        } catch { self.error = error }
+        setArchived(false, storeID: store.id, scope: scope, service: service)
+    }
+
+    private func setArchived(_ archived: Bool, storeID: UUID, scope: StoreManagementCommandScope,
+                             service: NeedService) {
+        let householdID = scope.householdID, listID = scope.listID
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setStoreArchived(archived, storeID: storeID,
+                        householdID: householdID, listID: listID)
+                }.value
+                hapticFeedback.play(.success)
+            } catch { self.error = error }
+        }
     }
 
     private func beginDeletion(_ store: Store) {
         guard selectionAvailable, householdStores.contains(store), let service,
               let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
-        do {
-            requestedDeletion = true
-            removalAction = try service.storeRemovalAction(
-                storeID: store.id, householdID: scope.householdID, listID: scope.listID
-            )
-            removalScope = scope
-            removingStore = store
-        } catch { self.error = error }
+        let storeID = store.id, householdID = scope.householdID, listID = scope.listID
+        requestedDeletion = true
+        Task {
+            do {
+                let action = try await Task.detached(priority: .userInitiated) {
+                    try service.storeRemovalAction(storeID: storeID,
+                        householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                removalAction = action
+                removalScope = scope
+                removingStore = store
+            } catch { self.error = error }
+        }
     }
 
     private func remove() {
         guard let store = removingStore, let scope = removalScope, let removalAction,
               StoreManagementScope.permits(scope, canonicalList: canonicalList), let service else { return }
-        do {
-            let appliedAction = try service.removeStore(
-                storeID: store.id, householdID: scope.householdID, listID: scope.listID,
-                confirmedAction: removalAction
-            )
-            hapticFeedback.play(.warning)
-            clearRemoval()
-            if removalAction == .delete, appliedAction == .archive {
-                removalNotice = "A saved item or grocery began using \(store.name), so it was archived instead of permanently deleted."
-            }
-        } catch { self.error = error }
+        let storeID = store.id, storeName = store.name
+        let householdID = scope.householdID, listID = scope.listID
+        Task {
+            do {
+                let appliedAction = try await Task.detached(priority: .userInitiated) {
+                    try service.removeStore(storeID: storeID, householdID: householdID,
+                        listID: listID, confirmedAction: removalAction)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                hapticFeedback.play(.warning)
+                clearRemoval()
+                if removalAction == .delete, appliedAction == .archive {
+                    removalNotice = "A saved item or grocery began using \(storeName), so it was archived instead of permanently deleted."
+                }
+            } catch { self.error = error }
+        }
     }
 
     private func clearRemoval() {
@@ -456,30 +485,36 @@ struct StoreManagementView: View {
 
     private func prepareBatch(_ action: ManagementBatchAction) {
         guard let service, let scope = StoreManagementCommandScope(canonicalList: canonicalList) else { return }
-        do {
-            let preview = try service.captureManagementBatch(
-                entity: .store, action: action, ids: selectedIDs,
-                householdID: scope.householdID, listID: scope.listID
-            )
-            if action == .delete {
-                batchPreview = preview
-            } else {
-                applyBatch(preview.token)
-            }
-        } catch { self.error = error }
+        let ids = selectedIDs, householdID = scope.householdID, listID = scope.listID
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.captureManagementBatch(entity: .store, action: action,
+                        ids: ids, householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if action == .delete { batchPreview = preview }
+                else { applyBatch(preview.token) }
+            } catch { self.error = error }
+        }
     }
 
     private func applyBatch(_ token: ManagementBatchToken) {
         guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
             batchPreview = nil; clearSelection(); return
         }
-        do {
-            let result = try service.applyManagementBatch(token)
-            batchPreview = nil
-            clearSelection()
-            batchNotice = ManagementBatchCopy.result(result)
-            hapticFeedback.play(token.action == .delete ? .warning : .success)
-        } catch { batchPreview = nil; self.error = error }
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.applyManagementBatch(token)
+                }.value
+                guard selection.householdID == token.householdID, selection.listID == token.listID else { return }
+                batchPreview = nil
+                clearSelection()
+                batchNotice = ManagementBatchCopy.result(result)
+                hapticFeedback.play(token.action == .delete ? .warning : .success)
+            } catch { batchPreview = nil; self.error = error }
+        }
     }
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }

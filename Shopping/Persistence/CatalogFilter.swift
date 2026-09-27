@@ -1,6 +1,6 @@
 import Foundation
 
-struct PurchaseRuleValue: Equatable {
+struct PurchaseRuleValue: Equatable, Sendable {
     let explicitStoreIDs: Set<UUID>
     let anyStore: Bool
     var hasResolvedIdentity: Bool = true
@@ -8,14 +8,14 @@ struct PurchaseRuleValue: Equatable {
     var allowsAnyStore: Bool { hasResolvedIdentity && (anyStore || explicitStoreIDs.isEmpty) }
 }
 
-enum PurchaseAvailability: Equatable {
+enum PurchaseAvailability: Equatable, Sendable {
     case unavailable
     case mustBuyHere
     case flexibleHere
     case needsStore
 }
 
-struct PurchaseFilter: Equatable {
+struct PurchaseFilter: Equatable, Sendable {
     let selectedStoreID: UUID?
     let includedStoreIDs: Set<UUID>
     let excludedStoreIDs: Set<UUID>
@@ -60,7 +60,7 @@ struct PurchaseFilter: Equatable {
     }
 }
 
-struct CatalogItemFilter: Equatable {
+struct CatalogItemFilter: Equatable, Sendable {
     let purchase: PurchaseFilter
     let text: String
     let categoryIDs: Set<UUID>
@@ -76,7 +76,7 @@ struct CatalogItemFilter: Equatable {
     }
 }
 
-struct GroceryNeedFilter: Equatable {
+struct GroceryNeedFilter: Equatable, Sendable {
     let purchase: PurchaseFilter
     let text: String
     let categoryID: UUID?

@@ -1,6 +1,6 @@
 import Foundation
 
-enum NeedUrgency: String, Codable, CaseIterable {
+enum NeedUrgency: String, Codable, CaseIterable, Sendable {
     case normal
     case urgent
 }

@@ -8,6 +8,7 @@ struct PersonalCheckoutView: View {
     @Environment(\.shoppingToastCenter) private var toastCenter
     @State private var acknowledged: Set<UUID> = []
     @State private var error: String?
+    @State private var isConfirming = false
 
     private var requiredAcknowledgements: Set<UUID> {
         Set(token.captures.flatMap { $0.entry.purchaseNotices.map(\.receiptID) })
@@ -42,25 +43,36 @@ struct PersonalCheckoutView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Check out")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(isConfirming) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Confirm") { confirm() }
-                        .disabled(token.captures.isEmpty || !requiredAcknowledgements.isSubset(of: acknowledged))
+                        .disabled(isConfirming || token.captures.isEmpty || !requiredAcknowledgements.isSubset(of: acknowledged))
                 }
             }
+            .interactiveDismissDisabled(isConfirming)
         }
     }
 
     private func confirm() {
-        do {
-            let result = try cart.service.checkout(token, buyAnywayReceiptIDs: acknowledged, operationID: token.id)
-            cart.refresh()
-            var message = "Checked out \(result.purchasedCount) items."
-            if result.skippedCount > 0 { message += " Kept \(result.skippedCount) changed items." }
-            if result.pendingPublication { message += " Household sync pending." }
-            toastCenter?.show(message, duration: .attention)
-            dismiss()
-        } catch { self.error = error.localizedDescription; cart.refresh() }
+        guard !isConfirming else { return }
+        isConfirming = true
+        let service = cart.service
+        let capture = token
+        let acknowledged = self.acknowledged
+        Task {
+            defer { isConfirming = false }
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.checkout(capture, buyAnywayReceiptIDs: acknowledged, operationID: capture.id)
+                }.value
+                cart.refresh()
+                var message = "Checked out \(result.purchasedCount) items."
+                if result.skippedCount > 0 { message += " Kept \(result.skippedCount) changed items." }
+                if result.pendingPublication { message += " Household sync pending." }
+                toastCenter?.show(message, duration: .attention)
+                dismiss()
+            } catch { self.error = error.localizedDescription; cart.refresh() }
+        }
     }
 }
 

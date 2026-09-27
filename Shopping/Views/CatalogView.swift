@@ -23,6 +23,8 @@ struct CatalogView: View {
     @State private var searchText = ""
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var refreshRevision = 0
     @State private var removalTargets: [UUID: CatalogNeedRemovalTarget] = [:]
     @State private var membershipConflicts: Set<UUID> = []
     @State private var membershipAvailable = false
@@ -207,15 +209,16 @@ struct CatalogView: View {
                     catalogItemSaved(result.itemID, wasCreated: result.wasCreated)
                 }) { result in
                     presentationSource = nil
-                    let message = prepareIndividualAdd(itemID: result.itemID, itemName: result.itemName)
+                    let message = await prepareIndividualAdd(itemID: result.itemID, itemName: result.itemName)
                     if message != nil { errorMessage = nil }
                     if let message { return .failed(message) }
                     guard let confirmation = addConfirmation else { return .completed }
                     addConfirmation = nil
                     return .confirmation(confirmation)
                 } onConfirmAdd: { token in
-                    applyCatalogAdd(token)
-                    editor = nil
+                    let result = await applyCatalogAddResult(token, renewCarted: true)
+                    if result != nil { editor = nil }
+                    return result != nil
                 }
             }
             .alert("Catalog item archived", isPresented: removalNoticePresented) {
@@ -525,48 +528,68 @@ struct CatalogView: View {
 
     private func refresh() {
         guard presentation?.isActive != false else { return }
+        refreshTask?.cancel()
+        refreshRevision += 1
+        let revision = refreshRevision
         guard let service, let householdID = selection.householdID else {
             projectedIDs = []
             removalTargets = [:]
             renderedGroups = []
             return
         }
-        do {
-            let refreshedIDs = Set(try service.filteredCatalogItemIDs(
-                householdID: householdID, filter: filters.query(text: searchText), includeArchived: filters.showArchived
-            ))
-            projectedIDs = refreshedIDs
-            rebuildRenderedGroups(projectedIDs: refreshedIDs)
-            refreshMembership(itemIDs: refreshedIDs)
-        } catch {
-            projectedIDs = []
-            removalTargets = [:]
-            renderedGroups = []
-            errorMessage = CatalogErrorCopy.message(error)
+        let query = filters.query(text: searchText)
+        let showArchived = filters.showArchived
+        let listID = canonicalList?.id
+        refreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            do {
+                let refreshedIDs = try await Task.detached(priority: .userInitiated) {
+                    Set(try service.filteredCatalogItemIDs(
+                        householdID: householdID, filter: query, includeArchived: showArchived))
+                }.value
+                guard !Task.isCancelled, refreshRevision == revision,
+                      selection.householdID == householdID,
+                      presentation?.isActive != false else { return }
+                projectedIDs = refreshedIDs
+                rebuildRenderedGroups(projectedIDs: refreshedIDs)
+                await refreshMembership(itemIDs: refreshedIDs, service: service,
+                    householdID: householdID, listID: listID, revision: revision)
+            } catch {
+                guard !Task.isCancelled, refreshRevision == revision else { return }
+                projectedIDs = []
+                removalTargets = [:]
+                renderedGroups = []
+                errorMessage = CatalogErrorCopy.message(error)
+            }
         }
     }
 
-    private func refreshMembership(itemIDs: Set<UUID>) {
+    private func refreshMembership(itemIDs: Set<UUID>, service: NeedService,
+                                   householdID: UUID, listID: UUID?, revision: Int) async {
         removalTargets = [:]
         membershipConflicts = []
         membershipAvailable = false
-        guard let service, let list = canonicalList, let householdID = list.household?.id else { return }
+        guard let listID else { return }
         do {
-            let memberships = try service.catalogListMembership(
-                itemIDs: itemIDs, householdID: householdID, listID: list.id
-            )
+            let memberships = try await Task.detached(priority: .userInitiated) {
+                try service.catalogListMembership(itemIDs: itemIDs, householdID: householdID, listID: listID)
+            }.value
+            guard !Task.isCancelled, refreshRevision == revision,
+                  selection.householdID == householdID else { return }
             for (itemID, membership) in memberships {
                 switch membership {
                 case .absent: break
                 case .ambiguous: membershipConflicts.insert(itemID)
                 case .present(let needID, let revision):
                     removalTargets[itemID] = CatalogNeedRemovalTarget(
-                        needID: needID, revision: revision, householdID: householdID, listID: list.id
+                        needID: needID, revision: revision, householdID: householdID, listID: listID
                     )
                 }
             }
             membershipAvailable = true
         } catch {
+            guard !Task.isCancelled, refreshRevision == revision else { return }
             // Keep catalog editing available even if grocery membership cannot be read safely.
             errorMessage = CatalogErrorCopy.message(error)
         }
@@ -656,27 +679,33 @@ struct CatalogView: View {
             errorMessage = "Return to the household where you started this change."
             return
         }
-        do {
-            try service.setCatalogItemArchived(
-                itemID: target.itemID, householdID: target.householdID,
-                listID: target.listID, archived: target.archived
-            )
-            refresh()
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.setCatalogItemArchived(itemID: target.itemID,
+                        householdID: target.householdID, listID: target.listID, archived: target.archived)
+                }.value
+                guard selection.householdID == target.householdID, selection.listID == target.listID else { return }
+                refresh()
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 
     private func prepareRemoval(_ item: Item) {
         guard let service, let list = canonicalList, let householdID = list.household?.id,
               scopedItems.contains(item) else { return }
-        do {
-            let preview = try service.catalogItemRemovalPreview(
-                itemID: item.id, householdID: householdID, listID: list.id
-            )
-            removalTarget = CatalogRemovalTarget(
-                itemID: item.id, householdID: householdID, listID: list.id,
-                name: item.name, preview: preview
-            )
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
+        let itemID = item.id, itemName = item.name, listID = list.id
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.catalogItemRemovalPreview(itemID: itemID,
+                        householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                removalTarget = CatalogRemovalTarget(itemID: itemID, householdID: householdID,
+                    listID: listID, name: itemName, preview: preview)
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 
     private func applyRemoval() {
@@ -688,40 +717,38 @@ struct CatalogView: View {
             errorMessage = "Return to the household where you started this change."
             return
         }
-        do {
-            guard target.preview.action != .keepArchived else {
-                removalTarget = nil
-                return
-            }
-            let appliedAction = try service.removeCatalogItem(
-                itemID: target.itemID, householdID: target.householdID,
-                listID: target.listID, preview: target.preview
-            )
-            hapticFeedback.play(.warning)
-            removalTarget = nil
-            refresh()
-            if target.preview.action == .delete, appliedAction == .archive {
-                removalNotice = "A grocery began using this item, so it was archived instead of permanently deleted."
-            }
-        } catch {
-            removalTarget = nil
-            errorMessage = CatalogErrorCopy.message(error)
+        guard target.preview.action != .keepArchived else { removalTarget = nil; return }
+        removalTarget = nil
+        Task {
+            do {
+                let appliedAction = try await Task.detached(priority: .userInitiated) {
+                    try service.removeCatalogItem(itemID: target.itemID,
+                        householdID: target.householdID, listID: target.listID, preview: target.preview)
+                }.value
+                guard selection.householdID == target.householdID, selection.listID == target.listID else { return }
+                hapticFeedback.play(.warning)
+                refresh()
+                if target.preview.action == .delete, appliedAction == .archive {
+                    removalNotice = "A grocery began using this item, so it was archived instead of permanently deleted."
+                }
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
         }
     }
 
     private func prepareBatch(_ action: ManagementBatchAction) {
         guard let service, let list = canonicalList, let householdID = list.household?.id else { return }
-        do {
-            let preview = try service.captureManagementBatch(
-                entity: .catalogItem, action: action, ids: selectedIDs,
-                householdID: householdID, listID: list.id
-            )
-            if action == .delete {
-                batchPreview = preview
-            } else {
-                applyBatch(preview.token)
-            }
-        } catch { errorMessage = CatalogErrorCopy.message(error) }
+        let ids = selectedIDs, listID = list.id
+        Task {
+            do {
+                let preview = try await Task.detached(priority: .userInitiated) {
+                    try service.captureManagementBatch(entity: .catalogItem, action: action,
+                        ids: ids, householdID: householdID, listID: listID)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if action == .delete { batchPreview = preview }
+                else { applyBatch(preview.token) }
+            } catch { errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 
     private func removeFromList(_ target: CatalogNeedRemovalTarget) {
@@ -730,48 +757,54 @@ struct CatalogView: View {
             errorMessage = "The household changed. Select the item again."
             return
         }
-        do {
-            let operationID = try service.removeNeed(
-                needID: target.needID, householdID: target.householdID,
-                listID: target.listID, expectedRevision: target.revision
-            )
-            refresh()
-            hapticFeedback.play(.warning)
-            toastCenter?.show("Removed from grocery list", duration: .undo, action: ShoppingToastAction(
-                title: "Undo", accessibilityIdentifier: "shopping.catalog.undoRemove"
-            ) {
-                guard selection.householdID == target.householdID, selection.listID == target.listID else {
-                    errorMessage = "Return to the household where you removed the item to undo it."
-                    return false
-                }
-                do {
-                    let restored = try service.undoClear(operationID: operationID,
-                        expectedHouseholdID: target.householdID, expectedListID: target.listID)
-                    refresh()
-                    guard restored > 0 else {
-                        errorMessage = "The grocery changed after removal and could not be restored. Review the current list."
+        Task {
+            do {
+                let operationID = try await Task.detached(priority: .userInitiated) {
+                    try service.removeNeed(needID: target.needID, householdID: target.householdID,
+                        listID: target.listID, expectedRevision: target.revision)
+                }.value
+                guard selection.householdID == target.householdID, selection.listID == target.listID else { return }
+                refresh()
+                hapticFeedback.play(.warning)
+                toastCenter?.show("Removed from grocery list", duration: .undo, action: ShoppingToastAction(
+                    title: "Undo", accessibilityIdentifier: "shopping.catalog.undoRemove"
+                ) {
+                    guard selection.householdID == target.householdID, selection.listID == target.listID else {
+                        errorMessage = "Return to the household where you removed the item to undo it."
                         return false
                     }
+                    Task {
+                        do {
+                            let restored = try await Task.detached(priority: .userInitiated) {
+                                try service.undoClear(operationID: operationID,
+                                    expectedHouseholdID: target.householdID, expectedListID: target.listID)
+                            }.value
+                            refresh()
+                            if restored == 0 {
+                                errorMessage = "The grocery changed after removal and could not be restored. Review the current list."
+                            }
+                        } catch { errorMessage = CatalogErrorCopy.message(error) }
+                    }
                     return true
-                } catch {
-                    errorMessage = CatalogErrorCopy.message(error)
-                    return false
-                }
-            })
-        } catch {
-            errorMessage = CatalogErrorCopy.message(error)
-            refresh()
+                })
+            } catch {
+                errorMessage = CatalogErrorCopy.message(error)
+                refresh()
+            }
         }
     }
 
     private func prepareIndividualAdd(_ item: Item, source: CatalogRowSource) {
         presentationSource = source
-        _ = prepareIndividualAdd(itemID: item.id, itemName: item.name, focusExisting: false)
-        if addConfirmation == nil { presentationSource = nil }
+        let itemID = item.id, itemName = item.name
+        Task {
+            _ = await prepareIndividualAdd(itemID: itemID, itemName: itemName, focusExisting: false)
+            if addConfirmation == nil { presentationSource = nil }
+        }
     }
 
-    private func prepareIndividualAdd(itemID: UUID, itemName: String, focusExisting: Bool = true) -> String? {
-        guard let preview = captureCatalogAdd(ids: [itemID]) else {
+    private func prepareIndividualAdd(itemID: UUID, itemName: String, focusExisting: Bool = true) async -> String? {
+        guard let preview = await captureCatalogAdd(ids: [itemID]) else {
             return errorMessage ?? "The catalog item or household is no longer available."
         }
         guard let entry = preview.token.entries.first else {
@@ -785,11 +818,11 @@ struct CatalogView: View {
         }
         switch entry.disposition {
         case .add:
-            guard applyCatalogAddResult(preview.token, renewCarted: false) != nil else {
+            guard await applyCatalogAddResult(preview.token, renewCarted: false) != nil else {
                 return errorMessage ?? "The catalog item could not be added."
             }
         case .focusExisting:
-            let result = applyCatalogAddResult(preview.token, renewCarted: false)
+            let result = await applyCatalogAddResult(preview.token, renewCarted: false)
             guard let result else {
                 return errorMessage ?? "The existing grocery could not be opened."
             }
@@ -809,17 +842,23 @@ struct CatalogView: View {
 
     private func prepareBatchAdd() {
         presentationSource = nil
-        guard let preview = captureCatalogAdd(ids: selectedIDs) else { return }
-        addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
+        let ids = selectedIDs
+        Task {
+            guard let preview = await captureCatalogAdd(ids: ids) else { return }
+            addConfirmation = CatalogAddConfirmation(preview: preview, itemName: nil)
+        }
     }
 
-    private func captureCatalogAdd(ids: Set<UUID>) -> CatalogAddPreview? {
+    private func captureCatalogAdd(ids: Set<UUID>) async -> CatalogAddPreview? {
         guard let service, let list = canonicalList, let householdID = list.household?.id else { return nil }
+        let listID = list.id
         do {
-            return try service.captureCatalogAdd(
-                itemIDs: ids, householdID: householdID, listID: list.id,
-                selectedStoreID: nil
-            )
+            let preview = try await Task.detached(priority: .userInitiated) {
+                try service.captureCatalogAdd(itemIDs: ids, householdID: householdID,
+                    listID: listID, selectedStoreID: nil)
+            }.value
+            guard selection.householdID == householdID, selection.listID == listID else { return nil }
+            return preview
         } catch {
             errorMessage = CatalogErrorCopy.message(error)
             return nil
@@ -827,14 +866,14 @@ struct CatalogView: View {
     }
 
     private func applyCatalogAdd(_ token: CatalogAddToken) {
-        _ = applyCatalogAddResult(token, renewCarted: true)
+        Task { _ = await applyCatalogAddResult(token, renewCarted: true) }
     }
 
     private func applyCatalogAdd(_ token: CatalogAddToken, renewCarted: Bool) {
-        _ = applyCatalogAddResult(token, renewCarted: renewCarted)
+        Task { _ = await applyCatalogAddResult(token, renewCarted: renewCarted) }
     }
 
-    private func applyCatalogAddResult(_ token: CatalogAddToken, renewCarted: Bool) -> CatalogAddResult? {
+    private func applyCatalogAddResult(_ token: CatalogAddToken, renewCarted: Bool) async -> CatalogAddResult? {
         defer { presentationSource = nil }
         guard let service, selection.householdID == token.householdID,
               selection.listID == token.listID else {
@@ -847,7 +886,10 @@ struct CatalogView: View {
             return nil
         }
         do {
-            let result = try service.applyCatalogAdd(token, renewCarted: renewCarted)
+            let result = try await Task.detached(priority: .userInitiated) {
+                try service.applyCatalogAdd(token, renewCarted: renewCarted)
+            }.value
+            guard selection.householdID == token.householdID, selection.listID == token.listID else { return nil }
             addConfirmation = nil
             clearSelection()
             let visibleNeedID = result.addedNeedIDs.first ?? result.renewedNeedIDs.first
@@ -892,19 +934,21 @@ struct CatalogView: View {
         guard let service, selection.householdID == token.householdID, selection.listID == token.listID else {
             batchPreview = nil; clearSelection(); return
         }
-        do {
-            let result = try service.applyManagementBatch(token)
-            batchPreview = nil
-            clearSelection()
-            refresh()
-            showCatalogNotice(
-                ManagementBatchCopy.result(result),
-                duration: result.retainedCount > 0 || result.changedCount > 0
-                    || result.missingCount > 0
-                    ? .attention : .success
-            )
-            hapticFeedback.play(token.action == .delete ? .warning : .success)
-        } catch { batchPreview = nil; errorMessage = CatalogErrorCopy.message(error) }
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.applyManagementBatch(token)
+                }.value
+                guard selection.householdID == token.householdID, selection.listID == token.listID else { return }
+                batchPreview = nil
+                clearSelection()
+                refresh()
+                showCatalogNotice(ManagementBatchCopy.result(result),
+                    duration: result.retainedCount > 0 || result.changedCount > 0
+                        || result.missingCount > 0 ? .attention : .success)
+                hapticFeedback.play(token.action == .delete ? .warning : .success)
+            } catch { batchPreview = nil; errorMessage = CatalogErrorCopy.message(error) }
+        }
     }
 
     private func clearSelection() { selectedIDs = []; editMode = .inactive }

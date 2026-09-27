@@ -5,6 +5,7 @@ struct LegacyCartReviewView: View {
     @State private var entries: [LegacyCartReviewSnapshot] = []
     @State private var error: String?
     @State private var resultMessage: String?
+    @State private var pendingDecisionIDs: Set<UUID> = []
 
     var body: some View {
         List {
@@ -17,7 +18,9 @@ struct LegacyCartReviewView: View {
                     if let quantity = entry.quantity { Text("Quantity: \(quantity)") }
                     if entry.oneTime { Text("One-time item").foregroundStyle(.secondary) }
                     Button("Claim as mine") { decide(entry, claim: true) }
+                        .disabled(pendingDecisionIDs.contains(entry.id))
                     Button("Discard old cart status", role: .destructive) { decide(entry, claim: false) }
+                        .disabled(pendingDecisionIDs.contains(entry.id))
                 }
             }
             if entries.isEmpty { Text("No old cart entries to review").foregroundStyle(.secondary) }
@@ -30,25 +33,36 @@ struct LegacyCartReviewView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Old cart entries")
-        .onAppear(perform: refresh)
+        .task { await refresh() }
         .alert("Couldn’t update entry", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error ?? "") }
     }
 
-    private func refresh() {
-        do { entries = try cart.service.pendingLegacyReview(householdID: cart.householdID, listID: cart.listID) }
+    private func refresh() async {
+        let service = cart.service
+        let householdID = cart.householdID
+        let listID = cart.listID
+        do { entries = try await Task.detached(priority: .userInitiated) {
+            try service.pendingLegacyReview(householdID: householdID, listID: listID)
+        }.value }
         catch { self.error = error.localizedDescription }
     }
 
     private func decide(_ entry: LegacyCartReviewSnapshot, claim: Bool) {
-        do {
-            try cart.service.decideLegacyReview(id: entry.id, claim: claim)
-            resultMessage = claim ? "Claimed as mine" : "Old cart status discarded"
-            refresh()
-            cart.refresh()
+        guard pendingDecisionIDs.insert(entry.id).inserted else { return }
+        let service = cart.service
+        Task {
+            defer { pendingDecisionIDs.remove(entry.id) }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try service.decideLegacyReview(id: entry.id, claim: claim)
+                }.value
+                resultMessage = claim ? "Claimed as mine" : "Old cart status discarded"
+                await refresh()
+                cart.refresh()
+            } catch { self.error = error.localizedDescription }
         }
-        catch { self.error = error.localizedDescription }
     }
 }
 

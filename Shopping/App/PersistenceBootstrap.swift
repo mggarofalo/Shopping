@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import SwiftUI
 
-struct PersistenceSelection: Equatable {
+struct PersistenceSelection: Equatable, Sendable {
     let householdID: UUID?
     let listID: UUID?
 }
@@ -719,17 +719,22 @@ final class PersistenceBootstrap: ObservableObject {
             do {
                 _ = try await historyConsumer.consume()
                 guard generation == requestedGeneration else { return }
-                if case .ready(let ready) = state,
-                   ready.householdID == nil,
-                   let selection = try ready.service.firstHouseholdSelection() {
-                    state = .ready(ReadyState(
-                        persistence: ready.persistence,
-                        service: ready.service,
-                        householdID: selection.householdID,
-                        listID: selection.listID,
-                        personalCart: makePersonalPresentation(selection: selection),
-                personalCartService: personalService
-                    ))
+                if case .ready(let ready) = state, ready.householdID == nil {
+                    let service = ready.service
+                    let selection = try await Task.detached(priority: .utility) {
+                        try service.firstHouseholdSelection()
+                    }.value
+                    guard generation == requestedGeneration else { return }
+                    if let selection {
+                        state = .ready(ReadyState(
+                            persistence: ready.persistence,
+                            service: ready.service,
+                            householdID: selection.householdID,
+                            listID: selection.listID,
+                            personalCart: makePersonalPresentation(selection: selection),
+                            personalCartService: personalService
+                        ))
+                    }
                 }
                 resumePendingCart()
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
@@ -768,10 +773,6 @@ final class PersistenceBootstrap: ObservableObject {
             } catch {
                 guard generation == requestedGeneration else { return }
                 shareAssociationError = error
-                if case .ready(let ready) = state,
-                   let journal = ready.persistence.shareAssociationJournal {
-                    pendingShareAssociationCount = (try? journal.pending().count) ?? pendingShareAssociationCount
-                }
             }
         }
     }

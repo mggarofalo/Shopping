@@ -9,6 +9,7 @@ struct RecentlyClearedView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var error: Error?
+    @State private var pendingRestoreIDs: Set<UUID> = []
 
     var body: some View {
         let canonicalList = GroceryRowScope.canonicalList(
@@ -43,6 +44,7 @@ struct RecentlyClearedView: View {
                                 .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                             }
                             .buttonStyle(.plain)
+                            .disabled(pendingRestoreIDs.contains(operation.id))
                             .accessibilityIdentifier("shopping.recovery.restore.\(operation.id.uuidString)")
                         }
                     }
@@ -57,6 +59,7 @@ struct RecentlyClearedView: View {
     }
 
     private func restore(_ operationID: UUID) {
+        guard !pendingRestoreIDs.contains(operationID) else { return }
         guard let service,
               let list = GroceryRowScope.canonicalList(
                 Array(lists), households: Array(households), selection: selection
@@ -65,38 +68,39 @@ struct RecentlyClearedView: View {
             error = GroceryAddError.householdUnavailable
             return
         }
-        do {
-            let expected = operationExpectedRestoreCount(operationID)
-            let restored = try service.undoClear(
-                operationID: operationID,
-                expectedHouseholdID: householdID,
-                expectedListID: list.id
-            )
-            let skipped = max(0, expected - restored)
-            if restored == 0 {
-                toastCenter?.show(
-                    "Nothing restored. These groceries were already restored or have newer changes.",
-                    duration: .attention
-                )
-            } else if skipped > 0 {
-                toastCenter?.show(
-                    "Restored \(restored); skipped \(skipped) with newer changes.",
-                    duration: .attention
-                )
-            } else {
-                toastCenter?.show(
-                    restored == 1 ? "Restored 1 item" : "Restored \(restored) items",
-                    duration: .success
-                )
-            }
-        } catch { self.error = error }
-    }
-
-    private func operationExpectedRestoreCount(_ operationID: UUID) -> Int {
-        guard let operation = operations.first(where: { $0.id == operationID }),
-              let snapshot = operation.snapshot,
-              let token = try? JSONDecoder().decode(ClearCartedToken.self, from: snapshot) else { return 0 }
-        return token.revisionsByNeedID.count
+        let listID = list.id
+        let snapshot = operations.first(where: { $0.id == operationID })?.snapshot
+        pendingRestoreIDs.insert(operationID)
+        Task {
+            defer { pendingRestoreIDs.remove(operationID) }
+            do {
+                let (expected, restored) = try await Task.detached(priority: .userInitiated) {
+                    let expected = snapshot.flatMap { try? JSONDecoder().decode(ClearCartedToken.self, from: $0) }
+                        .map { $0.revisionsByNeedID.count } ?? 0
+                    let restored = try service.undoClear(operationID: operationID,
+                        expectedHouseholdID: householdID, expectedListID: listID)
+                    return (expected, restored)
+                }.value
+                guard selection.householdID == householdID, selection.listID == listID else { return }
+                let skipped = max(0, expected - restored)
+                if restored == 0 {
+                    toastCenter?.show(
+                        "Nothing restored. These groceries were already restored or have newer changes.",
+                        duration: .attention
+                    )
+                } else if skipped > 0 {
+                    toastCenter?.show(
+                        "Restored \(restored); skipped \(skipped) with newer changes.",
+                        duration: .attention
+                    )
+                } else {
+                    toastCenter?.show(
+                        restored == 1 ? "Restored 1 item" : "Restored \(restored) items",
+                        duration: .success
+                    )
+                }
+            } catch { self.error = error }
+        }
     }
 }
 

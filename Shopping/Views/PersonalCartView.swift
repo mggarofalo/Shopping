@@ -9,6 +9,8 @@ struct PersonalCartView: View {
     @State private var selected: PersonalCartEntrySnapshot?
     @State private var checkout: PersonalCheckoutSheet?
     @State private var error: String?
+    @State private var isPreparingCheckout = false
+    @State private var pendingRemovalIDs: Set<UUID> = []
 
     private var visibleEntries: [PersonalCartEntrySnapshot] {
         let activeIDs = Set(stores.filter { !$0.isArchived && $0.household?.id == cart.householdID }.map(\.id))
@@ -59,12 +61,14 @@ struct PersonalCartView: View {
                     .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
                     .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                 }
-                .disabled(cart.isQuantityTransitionPending(entry.id))
+                .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
+                    cart.isCartTransitionPending(entry.needID))
                 .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
                 .swipeActions {
                     Button("Remove from cart", systemImage: "cart.badge.minus") { remove(entry) }
                         .tint(.orange)
-                        .disabled(cart.isQuantityTransitionPending(entry.id))
+                        .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
+                            cart.isCartTransitionPending(entry.needID))
                 }
                 .accessibilityAction(named: "Remove from cart") { remove(entry) }
             }
@@ -75,8 +79,9 @@ struct PersonalCartView: View {
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)
-                .disabled(visibleEntries.isEmpty || cart.error != nil ||
-                    visibleEntries.contains { cart.isQuantityTransitionPending($0.id) })
+                .disabled(isPreparingCheckout || visibleEntries.isEmpty || cart.error != nil ||
+                    visibleEntries.contains { pendingRemovalIDs.contains($0.id) || cart.isQuantityTransitionPending($0.id) ||
+                        cart.isCartTransitionPending($0.needID) })
                 .padding(8)
         }
         .sheet(item: $selected) { entry in
@@ -101,17 +106,33 @@ struct PersonalCartView: View {
     }
 
     private func remove(_ entry: PersonalCartEntrySnapshot) {
-        guard !cart.isQuantityTransitionPending(entry.id) else { return }
-        do { try cart.uncart(entry) } catch { self.error = error.localizedDescription }
+        guard !pendingRemovalIDs.contains(entry.id),
+              !cart.isQuantityTransitionPending(entry.id), !cart.isCartTransitionPending(entry.needID) else { return }
+        pendingRemovalIDs.insert(entry.id)
+        Task {
+            defer { pendingRemovalIDs.remove(entry.id) }
+            do { try await cart.uncart(entry) }
+            catch { self.error = error.localizedDescription }
+        }
     }
 
     private func prepare(_ entries: [PersonalCartEntrySnapshot]) {
-        guard !entries.contains(where: { cart.isQuantityTransitionPending($0.id) }) else { return }
-        do {
-            checkout = PersonalCheckoutSheet(token: try cart.service.prepareCheckout(
-                tokens: entries.map(\.token), storeID: navigation.selectedStoreID),
-                storeName: stores.first { $0.id == navigation.selectedStoreID }?.name)
-        } catch { self.error = error.localizedDescription }
+        guard !isPreparingCheckout,
+              !entries.contains(where: { cart.isQuantityTransitionPending($0.id) || cart.isCartTransitionPending($0.needID) }) else { return }
+        isPreparingCheckout = true
+        let service = cart.service
+        let tokens = entries.map(\.token)
+        let storeID = navigation.selectedStoreID
+        let storeName = stores.first { $0.id == storeID }?.name
+        Task {
+            defer { isPreparingCheckout = false }
+            do {
+                let token = try await Task.detached(priority: .userInitiated) {
+                    try service.prepareCheckout(tokens: tokens, storeID: storeID)
+                }.value
+                checkout = PersonalCheckoutSheet(token: token, storeName: storeName)
+            } catch { self.error = error.localizedDescription }
+        }
     }
 }
 

@@ -8,6 +8,8 @@ struct PersonalCartItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var error: String?
     @State private var checkout: PersonalCheckoutSheet?
+    @State private var isPreparingCheckout = false
+    @State private var isRemoving = false
 
     private var current: PersonalCartEntrySnapshot { cart.entries.first { $0.id == entry.id } ?? entry }
     private var quantityPending: Bool { cart.isQuantityTransitionPending(current.id) }
@@ -37,18 +39,25 @@ struct PersonalCartItemView: View {
                             Text(notice.purchaserName.map { "Already purchased by \($0)" } ?? "Already purchased")
                         }
                         Button("Buy anyway") { prepare() }
-                            .disabled(quantityPending)
+                            .disabled(quantityPending || isPreparingCheckout)
                     }
                 }
                 Button("Remove from my cart", role: .destructive) {
-                    do { try cart.uncart(current); dismiss() }
-                    catch { self.error = error.localizedDescription }
+                    guard !isRemoving else { return }
+                    isRemoving = true
+                    let entry = current
+                    Task {
+                        defer { isRemoving = false }
+                        do { try await cart.uncart(entry); dismiss() }
+                        catch { self.error = error.localizedDescription }
+                    }
                 }
-                .disabled(quantityPending)
+                .disabled(isRemoving || quantityPending || cart.isCartTransitionPending(current.needID))
             }
             .navigationTitle("Cart item")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(quantityPending) } }
-            .interactiveDismissDisabled(quantityPending)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }
+                .disabled(isRemoving || quantityPending || isPreparingCheckout || cart.isCartTransitionPending(current.needID)) } }
+            .interactiveDismissDisabled(isRemoving || quantityPending || isPreparingCheckout || cart.isCartTransitionPending(current.needID))
             .sheet(item: $checkout) { sheet in PersonalCheckoutView(cart: cart, token: sheet.token, storeName: sheet.storeName) }
             .alert("Couldn’t update cart", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -57,13 +66,28 @@ struct PersonalCartItemView: View {
     }
 
     private func setQuantity(_ quantity: Int64?) {
-        do { try cart.setQuantity(quantity, entry: current) }
-        catch { self.error = error.localizedDescription }
+        let entry = current
+        Task {
+            do { try await cart.setQuantity(quantity, entry: entry) }
+            catch { self.error = error.localizedDescription }
+        }
     }
 
     private func prepare() {
-        do { checkout = .init(token: try cart.service.prepareCheckout(tokens: [current.token], storeID: storeID), storeName: storeName) }
-        catch { self.error = error.localizedDescription }
+        guard !isPreparingCheckout, !quantityPending else { return }
+        isPreparingCheckout = true
+        let service = cart.service
+        let entryToken = current.token
+        let storeID = self.storeID
+        Task {
+            defer { isPreparingCheckout = false }
+            do {
+                let token = try await Task.detached(priority: .userInitiated) {
+                    try service.prepareCheckout(tokens: [entryToken], storeID: storeID)
+                }.value
+                checkout = .init(token: token, storeName: storeName)
+            } catch { self.error = error.localizedDescription }
+        }
     }
 }
 

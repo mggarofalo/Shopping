@@ -20,6 +20,9 @@ final class WatchPersistenceBootstrap {
             for store in coordinator.persistentStores { try coordinator.remove(store) }
         }
     }
+    private struct RetiringStore: @unchecked Sendable {
+        let persistence: PersistenceController
+    }
     private struct Preparation {
         let accountBinding: String
         let task: Task<PreparedStore, Error>
@@ -43,6 +46,7 @@ final class WatchPersistenceBootstrap {
     private let baseDirectory: URL
     private var current: Runtime?
     private var preparation: Preparation?
+    private var retirement: Task<Void, Error>?
     private var binding: String?
     private var observer: NSObjectProtocol?
     private var remoteObserver: NSObjectProtocol?
@@ -106,6 +110,15 @@ final class WatchPersistenceBootstrap {
 
     func runtime() async throws -> Runtime {
         if let detachmentError { throw detachmentError }
+        if let retirement {
+            do { try await retirement.value }
+            catch {
+                detachmentError = error
+                syncMessage = "The previous account store could not be closed. Relaunch Shopping to retry."
+                throw error
+            }
+            self.retirement = nil
+        }
         if (try? provider.currentSession()) == nil {
             lastRefresh = Date()
             await provider.refresh()
@@ -183,17 +196,21 @@ final class WatchPersistenceBootstrap {
         binding = nil
         lastRefresh = nil
         if let previous {
-            previous.persistence.writer.performAndWait { previous.persistence.writer.reset() }
-            previous.persistence.container.viewContext.reset()
-            let coordinator = previous.persistence.container.persistentStoreCoordinator
-            do { for store in coordinator.persistentStores { try coordinator.remove(store) } }
-            catch {
-                detachmentError = error
-                syncMessage = "The previous account store could not be closed. Relaunch Shopping to retry."
-            }
+            retirement = Self.retireStore(previous.persistence)
         }
         if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
         remoteObserver = nil
+    }
+
+    static func retireStore(_ persistence: PersistenceController) -> Task<Void, Error> {
+        persistence.container.viewContext.reset()
+        let retiring = RetiringStore(persistence: persistence)
+        return Task.detached(priority: .utility) {
+            let writer = retiring.persistence.writer
+            writer.performAndWait { writer.reset() }
+            let coordinator = retiring.persistence.container.persistentStoreCoordinator
+            for store in coordinator.persistentStores { try coordinator.remove(store) }
+        }
     }
 
     private func observeImports(_ runtime: Runtime) {

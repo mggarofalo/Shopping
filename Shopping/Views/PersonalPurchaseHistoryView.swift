@@ -4,6 +4,7 @@ struct PersonalPurchaseHistoryView: View {
     let cart: PersonalCartPresentation
     @State private var error: String?
     @State private var resultMessage: String?
+    @State private var pendingRestoreIDs: Set<UUID> = []
 
     var body: some View {
         List {
@@ -24,6 +25,7 @@ struct PersonalPurchaseHistoryView: View {
                         Text("Purchase undone").foregroundStyle(.secondary)
                     } else {
                         Button("Undo this purchase") { restore(purchase.id) }
+                            .disabled(pendingRestoreIDs.contains(purchase.id))
                     }
                 } header: { Text(purchase.createdAt, style: .date) }
             }
@@ -38,12 +40,19 @@ struct PersonalPurchaseHistoryView: View {
     }
 
     private func restore(_ id: UUID) {
-        do {
-            let result = try cart.service.restore(checkoutID: id)
-            resultMessage = "Restored \(result.purchasedCount) items; left \(result.skippedCount) unchanged. Other shoppers’ purchases and newer requests are retained."
-            if result.pendingPublication { resultMessage? += " Household sync pending." }
-            cart.refresh()
-        } catch { self.error = error.localizedDescription }
+        guard pendingRestoreIDs.insert(id).inserted else { return }
+        let service = cart.service
+        Task {
+            defer { pendingRestoreIDs.remove(id) }
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try service.restore(checkoutID: id)
+                }.value
+                resultMessage = "Restored \(result.purchasedCount) items; left \(result.skippedCount) unchanged. Other shoppers’ purchases and newer requests are retained."
+                if result.pendingPublication { resultMessage? += " Household sync pending." }
+                cart.refresh()
+            } catch { self.error = error.localizedDescription }
+        }
     }
 }
 

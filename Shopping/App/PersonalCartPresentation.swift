@@ -26,6 +26,8 @@ final class PersonalCartPresentation {
     private(set) var error: String?
     private var pendingCartState: [UUID: Bool] = [:]
     private var pendingQuantityIDs: Set<UUID> = []
+    private var inFlightNeedIDs: Set<UUID> = []
+    private var inFlightQuantityIDs: Set<UUID> = []
     private var refreshInProgress = false
     private var refreshRequested = false
     private var mutationRevision = 0
@@ -63,11 +65,11 @@ final class PersonalCartPresentation {
                     outstandingNeedIDs = snapshot.outstandingNeedIDs
                     presence = snapshot.presence
                     error = snapshot.householdError
-                    pendingCartState.removeAll()
-                    pendingQuantityIDs.removeAll()
+                    pendingCartState = pendingCartState.filter { inFlightNeedIDs.contains($0.key) }
+                    pendingQuantityIDs.formIntersection(inFlightQuantityIDs)
                 case .failure(let failure):
                     error = failure
-                    pendingQuantityIDs.removeAll()
+                    pendingQuantityIDs.formIntersection(inFlightQuantityIDs)
                 }
             } while refreshRequested
             refreshInProgress = false
@@ -112,27 +114,69 @@ final class PersonalCartPresentation {
         }
     }
 
-    func cart(_ needID: UUID) throws {
-        try service.cart(needID: needID, householdID: householdID, listID: listID)
+    func cart(_ needID: UUID) async throws {
+        guard !inFlightNeedIDs.contains(needID) else { return }
         pendingCartState[needID] = true
+        inFlightNeedIDs.insert(needID)
         mutationRevision += 1
-        refresh()
+        do {
+            let service = self.service, householdID = self.householdID, listID = self.listID
+            try await Task.detached(priority: .userInitiated) {
+                try service.cart(needID: needID, householdID: householdID, listID: listID)
+            }.value
+            inFlightNeedIDs.remove(needID)
+            mutationRevision += 1
+            refresh()
+        } catch {
+            inFlightNeedIDs.remove(needID)
+            pendingCartState.removeValue(forKey: needID)
+            mutationRevision += 1
+            refresh()
+            throw error
+        }
     }
 
-    func uncart(_ entry: PersonalCartEntrySnapshot) throws {
-        try service.uncart(entry.token)
-        entries.removeAll { $0.needID == entry.needID }
+    func uncart(_ entry: PersonalCartEntrySnapshot) async throws {
+        guard !inFlightNeedIDs.contains(entry.needID) else { return }
         pendingCartState[entry.needID] = false
+        inFlightNeedIDs.insert(entry.needID)
         mutationRevision += 1
-        refresh()
+        do {
+            let service = self.service
+            try await Task.detached(priority: .userInitiated) { try service.uncart(entry.token) }.value
+            entries.removeAll { $0.needID == entry.needID }
+            inFlightNeedIDs.remove(entry.needID)
+            mutationRevision += 1
+            refresh()
+        } catch {
+            inFlightNeedIDs.remove(entry.needID)
+            pendingCartState.removeValue(forKey: entry.needID)
+            mutationRevision += 1
+            refresh()
+            throw error
+        }
     }
 
-    func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) throws {
+    func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) async throws {
         guard !pendingQuantityIDs.contains(entry.id) else { return }
-        try service.setQuantity(quantity, token: entry.token)
         pendingQuantityIDs.insert(entry.id)
+        inFlightQuantityIDs.insert(entry.id)
         mutationRevision += 1
-        refresh()
+        do {
+            let service = self.service
+            try await Task.detached(priority: .userInitiated) {
+                try service.setQuantity(quantity, token: entry.token)
+            }.value
+            inFlightQuantityIDs.remove(entry.id)
+            mutationRevision += 1
+            refresh()
+        } catch {
+            inFlightQuantityIDs.remove(entry.id)
+            pendingQuantityIDs.remove(entry.id)
+            mutationRevision += 1
+            refresh()
+            throw error
+        }
     }
 }
 

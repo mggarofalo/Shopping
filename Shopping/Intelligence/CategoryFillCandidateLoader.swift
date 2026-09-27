@@ -14,9 +14,22 @@ struct CategoryFillCandidateSnapshot: Equatable, Sendable {
     let candidates: [CategoryFillCandidate]
 }
 
-@MainActor
 struct CategoryFillCandidateLoader {
     static let maximumCandidateCount = 8
+
+    func loadInBackground(
+        coordinator: NSPersistentStoreCoordinator,
+        selection: PersistenceSelection,
+        categoryID: UUID,
+        purchaseFilter: PurchaseFilter
+    ) async throws -> CategoryFillCandidateSnapshot {
+        let context = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        context.persistentStoreCoordinator = coordinator
+        return try await context.perform {
+            try load(from: context, selection: selection, categoryID: categoryID,
+                purchaseFilter: purchaseFilter)
+        }
+    }
 
     func load(
         from context: NSManagedObjectContext,
@@ -78,5 +91,4 @@ struct CategoryFillCandidateLoader {
         )
     }
 }
-
 

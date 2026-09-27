@@ -16,17 +16,19 @@ struct ManagementNameEditor: View {
     let unavailableMessage: String
     @FocusState private var nameFocused: Bool
     let available: Bool
+    let busy: Bool
     let onSave: () -> Void
     let onCancel: () -> Void
 
     private var canSave: Bool {
-        available && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        available && !busy && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField(fieldTitle, text: $name)
+                    .disabled(busy)
                     .accessibilityIdentifier(fieldIdentifier)
                     .focused($nameFocused)
                     .submitLabel(.done)
@@ -42,13 +44,16 @@ struct ManagementNameEditor: View {
             }
             .navigationTitle(title)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel).disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onSave) { Image(systemName: "checkmark") }
                         .accessibilityLabel(saveLabel)
                         .disabled(!canSave)
                 }
             }
+            .interactiveDismissDisabled(busy)
         }
     }
 }
