@@ -8,5 +8,7 @@
     <string>$(SHOPPING_CLOUDKIT_ENVIRONMENT)</string>
     <key>CKSharingSupported</key>
     <true/>
+    <key>UIBackgroundModes</key>
+    <array><string>remote-notification</string></array>
 </dict>
 </plist>

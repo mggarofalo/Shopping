@@ -28,6 +28,42 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(service.loadCount, 1)
     }
 
+    func testImportedDataRequestsAWatchSnapshotWithoutChangingAuthority() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let originalAuthority = session.snapshot.authorityID
+        let imported = expectation(description: "Imported data loaded")
+        service.onLoad = { if service.loadCount == 2 { imported.fulfill() } }
+        service.value.statusMessage = "Imported grocery change"
+
+        service.onChange?(.dataChanged)
+
+        await fulfillment(of: [imported], timeout: 2)
+        await Task.yield()
+        XCTAssertEqual(service.loadCount, 2)
+        XCTAssertEqual(session.snapshot.statusMessage, "Imported grocery change")
+        XCTAssertEqual(session.snapshot.authorityID, originalAuthority)
+    }
+
+    func testActiveRefreshWaitsBeforeFirstReadAndStopsWhenCancelled() async {
+        let coordinator = WatchActiveRefreshCoordinator(interval: .milliseconds(50))
+        let refreshed = expectation(description: "Active fallback read")
+        var readCount = 0
+        let task = Task {
+            await coordinator.run {
+                readCount += 1
+                refreshed.fulfill()
+            }
+        }
+        XCTAssertEqual(readCount, 0)
+        await fulfillment(of: [refreshed], timeout: 2)
+        let countAtCancellation = readCount
+        task.cancel()
+        await task.value
+        XCTAssertEqual(readCount, countAtCancellation)
+    }
+
     func testFailedSaveRetainsSnapshotAndOpaqueCommand() async {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
@@ -195,6 +231,7 @@ private final class SpyService: WatchShoppingService {
     var onChange: (@MainActor (WatchServiceChange) -> Void)?
     var value = WatchPreviewService.sample
     var loadCount = 0
+    var onLoad: (() -> Void)?
     var shouldFail = false
     var commands: [WatchShoppingCommand] = []
     var checkoutTokens: [String] = []
@@ -211,6 +248,7 @@ private final class SpyService: WatchShoppingService {
     init() { value.canCheckout = true }
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
         loadCount += 1
+        onLoad?()
         return value
     }
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {

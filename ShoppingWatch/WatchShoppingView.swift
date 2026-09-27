@@ -4,6 +4,7 @@ struct WatchShoppingView: View {
     @Bindable var session: WatchShoppingSession
     @Environment(\.scenePhase) private var scenePhase
     @State private var initialLoadCompleted = false
+    private let activeRefresh = WatchActiveRefreshCoordinator()
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,10 @@ struct WatchShoppingView: View {
         .task {
             await session.reload()
             initialLoadCompleted = true
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await activeRefresh.run { await session.reload() }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && initialLoadCompleted { Task { await session.reload() } }
