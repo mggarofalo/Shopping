@@ -88,7 +88,7 @@ struct CloudSyncStatus: Equatable {
         }
         if !active.isEmpty { return "iCloud is working. Changes are saved on this device." }
         if lastUpload != nil || lastDownload != nil {
-            return "Recent iCloud activity completed. This does not confirm another device has received your changes."
+            return "Recent iCloud activity completed."
         }
         return "Waiting for iCloud activity. Saved data is available on this device."
     }

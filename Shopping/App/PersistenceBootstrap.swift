@@ -8,6 +8,19 @@ struct PersistenceSelection: Equatable {
     let listID: UUID?
 }
 
+struct SharingStatusPresentation: Equatable {
+    let symbol: String
+    let title: String
+    let details: String
+}
+
+private struct SharingStatusPresentationEnvironmentKey: EnvironmentKey {
+    static let defaultValue = SharingStatusPresentation(
+        symbol: "internaldrive", title: "Saved on this device",
+        details: "Saved on this device. iCloud setup has not been completed."
+    )
+}
+
 private struct SharingStatusEnvironmentKey: EnvironmentKey {
     static let defaultValue = "Saved on this device. iCloud setup has not been completed."
 }
@@ -25,6 +38,10 @@ private struct PersistenceSelectionEnvironmentKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    var sharingStatusPresentation: SharingStatusPresentation {
+        get { self[SharingStatusPresentationEnvironmentKey.self] }
+        set { self[SharingStatusPresentationEnvironmentKey.self] = newValue }
+    }
     var sharingStatusDescription: String {
         get { self[SharingStatusEnvironmentKey.self] }
         set { self[SharingStatusEnvironmentKey.self] = newValue }
@@ -134,11 +151,34 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     var sharingStatusDescription: String {
-        guard personalMode else { return "Saved on this device. iCloud setup has not been completed." }
-        guard let accountProvider, (try? accountProvider.currentSession()) != nil else {
-            return "Your iCloud account is not ready. Saved groceries are retained on this device."
+        sharingStatusPresentation.details
+    }
+
+    var sharingStatusPresentation: SharingStatusPresentation {
+        guard personalMode else {
+            return SharingStatusPresentation(symbol: "internaldrive", title: "Saved on this device",
+                details: "Saved on this device. iCloud setup has not been completed.")
         }
-        return cloudStatus.message
+        guard let accountProvider, (try? accountProvider.currentSession()) != nil else {
+            return SharingStatusPresentation(symbol: "exclamationmark.icloud", title: "iCloud account needs attention",
+                details: "Your iCloud account is not ready. Saved groceries are retained on this device.")
+        }
+        let symbol: String
+        let title: String
+        if cloudStatus.hasFailure {
+            symbol = "exclamationmark.icloud"
+            title = "Sync needs attention"
+        } else if cloudStatus.isWorking {
+            symbol = "arrow.triangle.2.circlepath.icloud"
+            title = "iCloud working"
+        } else if cloudStatus.lastUpload != nil || cloudStatus.lastDownload != nil {
+            symbol = "checkmark.icloud"
+            title = "Recent iCloud activity"
+        } else {
+            symbol = "icloud"
+            title = "Waiting for iCloud"
+        }
+        return SharingStatusPresentation(symbol: symbol, title: title, details: cloudStatus.message)
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {

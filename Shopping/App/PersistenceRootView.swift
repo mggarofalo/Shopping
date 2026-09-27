@@ -48,6 +48,7 @@ struct PersistenceRootView: View {
         }
         .environmentObject(bootstrap)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
+        .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { bootstrap.applicationDidEnterForeground() }
         }
