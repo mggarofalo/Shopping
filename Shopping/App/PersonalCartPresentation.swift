@@ -25,6 +25,7 @@ final class PersonalCartPresentation {
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
     private(set) var error: String?
     private var pendingCartState: [UUID: Bool] = [:]
+    private var pendingQuantityIDs: Set<UUID> = []
     private var refreshInProgress = false
     private var refreshRequested = false
     private var mutationRevision = 0
@@ -63,8 +64,10 @@ final class PersonalCartPresentation {
                     presence = snapshot.presence
                     error = snapshot.householdError
                     pendingCartState.removeAll()
+                    pendingQuantityIDs.removeAll()
                 case .failure(let failure):
                     error = failure
+                    pendingQuantityIDs.removeAll()
                 }
             } while refreshRequested
             refreshInProgress = false
@@ -97,6 +100,8 @@ final class PersonalCartPresentation {
 
     func isCartTransitionPending(_ needID: UUID) -> Bool { pendingCartState[needID] != nil }
 
+    func isQuantityTransitionPending(_ entryID: UUID) -> Bool { pendingQuantityIDs.contains(entryID) }
+
     func visibleEntries(filter: GroceryNeedFilter, activeStoreIDs: Set<UUID>) -> [PersonalCartEntrySnapshot] {
         entries.filter { entry in
             filter.purchase.matches(PurchaseRuleValue(explicitStoreIDs: entry.storeIDs,
@@ -123,7 +128,9 @@ final class PersonalCartPresentation {
     }
 
     func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) throws {
+        guard !pendingQuantityIDs.contains(entry.id) else { return }
         try service.setQuantity(quantity, token: entry.token)
+        pendingQuantityIDs.insert(entry.id)
         mutationRevision += 1
         refresh()
     }

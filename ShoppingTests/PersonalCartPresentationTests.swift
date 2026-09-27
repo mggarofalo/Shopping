@@ -104,6 +104,35 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testQuantityControlsWaitForFreshMembershipToken() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let itemID = try needs.createItem(name: "Milk", householdID: scope.householdID)
+        let needID = try needs.addRememberedNeed(itemID: itemID,
+            listID: scope.listID, householdID: scope.householdID)
+        let provider = FixedSession(session: try ShopperSession.authenticated(
+            containerIdentifier: "iCloud.shopping.presentation-tests", environment: "Development", accountRecordName: "alice"))
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider)
+        try service.cart(needID: needID, householdID: scope.householdID, listID: scope.listID)
+        let presentation = PersonalCartPresentation(service: service,
+            householdID: scope.householdID, listID: scope.listID)
+        try await waitUntil { presentation.entries.count == 1 }
+
+        let first = try XCTUnwrap(presentation.entries.first)
+        try presentation.setQuantity(2, entry: first)
+        XCTAssertTrue(presentation.isQuantityTransitionPending(first.id))
+        try presentation.setQuantity(3, entry: first)
+        try await waitUntil { !presentation.isQuantityTransitionPending(first.id) }
+        XCTAssertEqual(presentation.entries.first?.quantity, 2)
+
+        let fresh = try XCTUnwrap(presentation.entries.first)
+        try presentation.setQuantity(3, entry: fresh)
+        try await waitUntil { !presentation.isQuantityTransitionPending(first.id) }
+        XCTAssertEqual(presentation.entries.first?.quantity, 3)
+    }
+
+    @MainActor
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while !condition() {
