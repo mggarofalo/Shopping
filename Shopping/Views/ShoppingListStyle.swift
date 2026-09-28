@@ -10,6 +10,12 @@ enum ShoppingListMetrics {
 }
 
 extension View {
+    /// Catalog is the row reference: the 44-point content minimum precedes padding.
+    func shoppingItemRow() -> some View {
+        frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+            .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
+    }
+
     func shoppingListRowInsets() -> some View {
         listRowInsets(ShoppingListMetrics.rowInsets)
     }
@@ -66,6 +72,7 @@ enum ManagementBatchCopy {
         let noun: String
         switch preview.token.entity {
         case .store: noun = "stores"
+        case .person: noun = "people"
         case .category: noun = "categories"
         case .catalogItem: noun = "catalog items"
         }

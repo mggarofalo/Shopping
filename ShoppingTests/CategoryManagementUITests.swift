@@ -3,6 +3,48 @@ import XCTest
 final class CategoryManagementUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testPeopleUseStoresSelectionControlsAndKeepAssignedPeopleOnDelete() {
+        let app = launchPopulated()
+        openSettings(in: app)
+        app.buttons["Stores"].tap()
+        XCTAssertTrue(app.buttons["shopping.stores.select"].existsOrAppears(timeout: 3))
+        let selectSize = app.buttons["shopping.stores.select"].frame.size
+        let addSize = app.buttons["shopping.stores.add"].frame.size
+        app.navigationBars["Stores"].buttons.firstMatch.tap()
+        app.buttons["People"].tap()
+        let select = app.buttons["shopping.people.select"]
+        XCTAssertTrue(select.existsOrAppears(timeout: 3))
+        XCTAssertEqual(select.label, "Select")
+        XCTAssertEqual(select.frame.height, selectSize.height, accuracy: 1)
+        XCTAssertEqual(select.frame.width, selectSize.width, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.people.add"].frame.height, addSize.height, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.people.add"].frame.width, addSize.width, accuracy: 1)
+        select.tap()
+        let selectAll = app.buttons["shopping.people.selectAll"]
+        XCTAssertTrue(selectAll.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.people.done"].isHittable)
+        XCTAssertFalse(app.buttons["shopping.people.add"].exists)
+        selectAll.tap()
+        XCTAssertEqual(selectAll.label, "Deselect All")
+        selectAll.tap()
+        XCTAssertEqual(selectAll.label, "Select All")
+        app.buttons["shopping.people.done"].tap()
+        XCTAssertTrue(select.existsOrAppears(timeout: 3))
+        select.tap()
+        selectAll.tap()
+        app.buttons["shopping.people.batchDelete"].tap()
+        XCTAssertTrue(app.buttons["Confirm"].existsOrAppears(timeout: 3))
+        app.buttons["Confirm"].tap()
+        XCTAssertTrue(app.alerts["People updated"].existsOrAppears(timeout: 3))
+        app.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts["Michael"].exists)
+        XCTAssertTrue(app.staticTexts["Archived"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Normalized People selection after safe removal"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testCategoryCreateStagedRenameAndImmediateUndoableRemoval() {
         let app = XCUIApplication()
         let storePath = FileManager.default.temporaryDirectory

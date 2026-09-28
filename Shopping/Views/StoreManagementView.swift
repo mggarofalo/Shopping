@@ -98,26 +98,16 @@ struct StoreManagementView: View {
         .environment(\.editMode, $editMode)
         .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Stores")
         .toolbar {
-            if editMode.isEditing {
-                ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(selectedIDs == Set(householdStores.map(\.id)) ? "Deselect All" : "Select All") {
-                        toggleAll()
-                    }
-                    .accessibilityIdentifier("shopping.stores.selectAll")
+            ShoppingCollectionToolbar(
+                isSelecting: editMode.isEditing, allSelected: selectedIDs == Set(householdStores.map(\.id)),
+                selectAvailable: selectionAvailable && !householdStores.isEmpty, addAvailable: selectionAvailable,
+                addTitle: "Add store", identifierPrefix: "shopping.stores",
+                select: { editMode = .active }, add: beginCreate, done: clearSelection,
+                toggleAll: {
+                    let visible = Set(householdStores.map(\.id))
+                    selectedIDs = selectedIDs == visible ? [] : visible
                 }
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 8) {
-                        Button("Select") { editMode = .active }
-                            .disabled(!selectionAvailable || householdStores.isEmpty)
-                            .accessibilityIdentifier("shopping.stores.select")
-                        Button { beginCreate() } label: { Label("Add store", systemImage: "plus") }
-                            .disabled(!selectionAvailable)
-                            .accessibilityIdentifier("shopping.stores.add")
-                    }
-                }
-            }
+            )
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if editMode.isEditing {

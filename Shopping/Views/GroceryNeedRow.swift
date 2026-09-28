@@ -2,18 +2,7 @@ import CoreData
 import SwiftUI
 import UIKit
 
-private struct GroceryTitleAlignment: AlignmentID {
-    static func defaultValue(in dimensions: ViewDimensions) -> CGFloat {
-        dimensions[VerticalAlignment.center]
-    }
-}
-
-private extension VerticalAlignment {
-    static let groceryTitle = VerticalAlignment(GroceryTitleAlignment.self)
-}
-
 struct GroceryNeedRow: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.hapticFeedback) private var hapticFeedback
@@ -34,21 +23,25 @@ struct GroceryNeedRow: View {
 
 
     var body: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .groceryTitle, spacing: 12))
-        layout {
+        ShoppingItemColumns {
             detailsControl
-            if storeIndicator != nil || need.quantity != nil {
-                controls.fixedSize(horizontal: true, vertical: false)
-                    .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
-                    .frame(
-                        maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
-                        alignment: .trailing
-                    )
-                    .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 12 : 0)
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if let storeIndicator {
+                        Image(systemName: storeIndicator.symbol)
+                            .imageScale(.small)
+                            .foregroundStyle(Color.grocerySecondary)
+                            .accessibilityHidden(true)
+                    }
+                    ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
+                        hasSavedStores: !assignedStores.isEmpty,
+                        hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil)
+                        .accessibilityHidden(true)
+                }
+                if need.quantity != nil { controls }
             }
         }
+        .shoppingItemRow()
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if let onCartedChange {
                 Button {
@@ -125,30 +118,29 @@ struct GroceryNeedRow: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 4) {
-            if let storeIndicator {
-                Image(systemName: storeIndicator.symbol)
-                    .imageScale(.small)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) { quantityControls }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .trailing, spacing: 0) { quantityControls }
+        }
+    }
+
+    @ViewBuilder
+    private var quantityControls: some View {
+        if let quantity = need.quantity {
+            if let onQuantityChange {
+                quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
+                Text("\(quantity)")
+                    .monospacedDigit()
+                    .fixedSize()
                     .foregroundStyle(Color.grocerySecondary)
-                    .frame(width: 20)
-                    // The row's accessibility value already announces this rule.
-                    .accessibilityHidden(true)
-            }
-            if let quantity = need.quantity {
-                if let onQuantityChange {
-                    quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
-                    Text("\(quantity)")
-                        .monospacedDigit()
-                        .fixedSize()
-                        .foregroundStyle(Color.grocerySecondary)
-                        .accessibilityLabel("Quantity \(quantity)")
-                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                    quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
-                } else {
-                    Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
-                        .accessibilityLabel("Quantity \(quantity)")
-                        .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                }
+                    .accessibilityLabel("Quantity \(quantity)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+                quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
+            } else {
+                Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
+                    .accessibilityLabel("Quantity \(quantity)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
             }
         }
     }
@@ -192,7 +184,6 @@ struct GroceryNeedRow: View {
                         .accessibilityHidden(true)
                 }
             }
-            .alignmentGuide(.groceryTitle) { $0[VerticalAlignment.center] }
             if need.kind == NeedKind.oneTime.rawValue {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
@@ -201,11 +192,6 @@ struct GroceryNeedRow: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
-            Text(storeSummary)
-                .font(.caption)
-                .foregroundStyle(Color.grocerySecondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
             if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
             if !presenceNames.isEmpty {
                 Text("In cart: " + presenceNames.joined(separator: ", "))
@@ -214,7 +200,6 @@ struct GroceryNeedRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
         .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -239,16 +224,22 @@ struct GroceryNeedRow: View {
 
     private var title: String { need.item?.name ?? need.title }
 
+    private var assignedStores: Set<Store> {
+        need.item?.stores ?? (need.kind == NeedKind.oneTime.rawValue ? need.oneTimeStores : nil) ?? []
+    }
+
+    private var anyStore: Bool {
+        need.item?.anyStore ?? (need.kind == NeedKind.oneTime.rawValue && need.oneTimeAnyStore)
+    }
+
+    private var storeLabels: [String] {
+        assignedStores.map { $0.isArchived ? "\($0.name) (archived)" : $0.name }.sorted()
+    }
+
     private var storeSummary: String {
-        let oneTime = need.kind == NeedKind.oneTime.rawValue
-        let assigned = need.item?.stores ?? (oneTime ? need.oneTimeStores : nil) ?? []
-        let labels = assigned.map { $0.isArchived ? "\($0.name) (archived)" : $0.name }
-        return CatalogSuggestionPurchaseSummary.text(
-            anyStore: need.item?.anyStore ?? (oneTime && need.oneTimeAnyStore),
-            savedStoreLabels: labels,
-            hasSavedStores: !assigned.isEmpty,
-            hasResolvedIdentity: oneTime || need.item != nil
-        )
+        CatalogSuggestionPurchaseSummary.text(anyStore: anyStore, savedStoreLabels: storeLabels,
+            hasSavedStores: !assignedStores.isEmpty,
+            hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil)
     }
 
     private var storeIndicator: GroceryStoreScopeIndicator? {
