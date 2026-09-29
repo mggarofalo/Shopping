@@ -278,22 +278,55 @@ final class WatchPersistenceBootstrap {
         do {
             let runtime = try await runtime()
             let session = try runtime.provider.currentSession()
-            guard metadata.containerIdentifier == session.containerIdentifier,
-                  let cloud = runtime.persistence.container as? NSPersistentCloudKitContainer,
-                  let store = runtime.persistence.store(for: .participantShared) else { throw PersonalCartError.scopeChanged }
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                cloud.acceptShareInvitations(from: [metadata], into: store) { _, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume() }
+            let share = HomeEffectShare(recordName: metadata.share.recordID.recordName,
+                zoneName: metadata.share.recordID.zoneID.zoneName, zoneOwnerName: metadata.share.recordID.zoneID.ownerName)
+            try await runtime.persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) { @MainActor in
+                _ = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
+                try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
+                let (cloud, store) = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
+                        if let error { continuation.resume(throwing: error) }
+                        else if let accepted, accepted.count == 1, let result = accepted.first,
+                                result.containerIdentifier == metadata.containerIdentifier,
+                                result.share.recordID == metadata.share.recordID {
+                            continuation.resume()
+                        } else { continuation.resume(throwing: PersonalCartError.unavailable) }
+                    }
                 }
+                try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
+                _ = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
             }
             guard generation == authorityGeneration, current?.persistence === runtime.persistence else { return }
             guard try runtime.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
             syncMessage = "Invitation accepted. Waiting for your household to arrive."
         } catch {
             guard generation == authorityGeneration else { return }
-            syncMessage = "The household invitation could not be accepted. \(CloudSyncStatus.Failure.classify(error).message)"
+            syncMessage = (error as? HomeLeaveError)?.localizedDescription
+                ?? "The household invitation could not be accepted. \(CloudSyncStatus.Failure.classify(error).message)"
         }
         onDataChanged?()
+    }
+
+    private func acceptanceEnvironment(_ runtime: Runtime, session: ShopperSession,
+        metadata: CKShare.Metadata, generation: Int) throws -> (NSPersistentCloudKitContainer, NSPersistentStore) {
+        guard generation == authorityGeneration, current?.persistence === runtime.persistence,
+              case .ready(let verified) = provider.state, verified == session,
+              try runtime.provider.currentSession() == session,
+              runtime.persistence.personalCartInitialBinding == session.accountBinding else { throw PersonalCartError.accountChanged }
+        guard metadata.containerIdentifier == session.containerIdentifier, metadata.share.publicPermission == .none,
+              metadata.participantRole == .privateUser,
+              metadata.participantPermission == .readWrite || metadata.participantPermission == .readOnly,
+              metadata.participantStatus == .pending || metadata.participantStatus == .accepted,
+              case .managed(_, let sharedURL, let containerID) = runtime.persistence.configuration,
+              containerID == session.containerIdentifier,
+              sharedURL.deletingLastPathComponent().lastPathComponent == session.accountBinding,
+              let cloud = runtime.persistence.container as? NSPersistentCloudKitContainer,
+              let store = runtime.persistence.store(for: .participantShared), store.url == sharedURL,
+              cloud.persistentStoreCoordinator.persistentStores.contains(where: { $0 === store }),
+              let description = cloud.persistentStoreDescriptions.first(where: { $0.url == sharedURL }),
+              description.cloudKitContainerOptions?.containerIdentifier == containerID,
+              description.cloudKitContainerOptions?.databaseScope == .shared else { throw PersonalCartError.scopeChanged }
+        return (cloud, store)
     }
 }

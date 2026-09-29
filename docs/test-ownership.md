@@ -521,3 +521,22 @@ to synchronize before explicit leave submission. These tests do not invoke Cloud
 prove participant leave, uncertain native outcome reconciliation, or rejoin UI.
 Submitted operations require reconciliation; they cannot automatically retransmit
 the zone purge. Native adapters, acceptance gates, and live proof remain required.
+
+### Participant join ordering (SHOPPING-129)
+
+`HomeJoinGateTests` owns rejection of pending leaves across every share record
+in the same account/container/environment/owner zone, block-first and
+checkpoint-first import ordering, and cart/checkout/restore effects imported
+before the lifecycle history they reference. Until a referenced block arrives,
+its zone cannot be classified safely and joining waits. Once history is complete,
+another zone remains independent. A completed leave opens this gate without
+granting membership or replaying old effects. An unclassified restore still waits
+for its declared scope or original checkout. Account-private reads stay scoped to
+the captured session; native callers must also verify that account remains active.
+
+The held-callback test proves local zone operations retain their turn through
+caller cancellation and native failure, while another zone proceeds. iPhone
+invitation import/acceptance and Watch acceptance use this gate and revalidate
+their native account/store environment. This is local ordering, not a cross-device
+or server conditional-purge guarantee. Native leave and explicit rejoin activation
+still require integration and real two-account proof.

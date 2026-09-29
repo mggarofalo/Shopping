@@ -46,6 +46,10 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
     }
 
     func existingShare(identity: HomeShareIdentity) async throws -> Bool {
+        try await withJoinGate(identity) { try await self.readExistingShare(identity: identity) }
+    }
+
+    private func readExistingShare(identity: HomeShareIdentity) async throws -> Bool {
         let (cloud, _) = try environment()
         let context = cloud.newBackgroundContext()
         return try await context.perform {
@@ -64,6 +68,10 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
     }
 
     func accept(metadataArchive: Data, identity: HomeShareIdentity) async throws {
+        try await withJoinGate(identity) { try await self.acceptInvitation(metadataArchive: metadataArchive, identity: identity) }
+    }
+
+    private func acceptInvitation(metadataArchive: Data, identity: HomeShareIdentity) async throws {
         let metadata = try Self.decode(metadataArchive)
         try Self.validate(metadata, session: session)
         guard Self.identity(of: metadata.share) == identity else {
@@ -98,6 +106,10 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
     }
 
     func importedHome(identity: HomeShareIdentity) async throws -> HomeGraphIdentity? {
+        try await withJoinGate(identity) { try await self.readImportedHome(identity: identity) }
+    }
+
+    private func readImportedHome(identity: HomeShareIdentity) async throws -> HomeGraphIdentity? {
         let (cloud, _) = try environment()
         // This synchronous reader confines its work to the serial writer. This async
         // non-main-actor transport is called off the UI actor, as are native share lookups.
@@ -124,7 +136,9 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
                     && $0.graph.rootURI == root.objectID.uriRepresentation().absoluteString
             }
             guard candidates.count <= 1 else { throw ManagedHomeInvitationError.ambiguousHome }
-            guard let candidate = candidates.first, candidate.access != .unresolved,
+            // Structural readiness must remain reachable for explicit rejoin.
+            // Discovery's blocked write authority is not an incomplete graph.
+            guard let candidate = candidates.first,
                   root.id == candidate.graph.householdID,
                   let list = root.groceryList, list.household == root,
                   list.id == candidate.graph.listID, list.objectID.persistentStore === store else {
@@ -149,6 +163,20 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
             _ = try self.environment()
             // No need-count condition: a complete imported home may have no groceries.
             return candidate.graph
+        }
+    }
+
+    private func withJoinGate<Value: Sendable>(_ identity: HomeShareIdentity,
+        operation: @Sendable () async throws -> Value) async throws -> Value {
+        let share = HomeEffectShare(recordName: identity.recordName, zoneName: identity.zoneName, zoneOwnerName: identity.zoneOwnerName)
+        return try await persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) {
+            _ = try self.environment()
+            try await HomeJoinGate.validate(persistence: self.persistence, session: self.session, share: share)
+            _ = try self.environment()
+            let result = try await operation()
+            try await HomeJoinGate.validate(persistence: self.persistence, session: self.session, share: share)
+            _ = try self.environment()
+            return result
         }
     }
 
