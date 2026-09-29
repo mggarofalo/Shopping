@@ -3,12 +3,22 @@ import CoreData
 /// CloudKit traverses relationships when sharing. Validate the complete reachable graph,
 /// including archived data, before giving Core Data any root to share.
 enum HomeShareGraphValidator {
-    enum Failure: Error, Equatable {
+    enum Failure: LocalizedError, Equatable {
         case incompleteHome
         case foreignObject
         case privateObject
         case ambiguousIdentity
         case unsupportedEntity(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .incompleteHome: return "This home is still loading. Wait for iCloud, then try sharing again."
+            case .foreignObject: return "Some saved data belongs to a different home. Sharing is unavailable; your groceries are retained."
+            case .privateObject: return "Sharing stopped to protect private cart data. Your groceries and carts are retained."
+            case .ambiguousIdentity: return "This home’s saved identities conflict. Sharing is unavailable; your groceries are retained."
+            case .unsupportedEntity: return "This version cannot safely share all of this home’s data. Update the app before sharing."
+            }
+        }
     }
 
     static let sharedEntities: Set<String> = [

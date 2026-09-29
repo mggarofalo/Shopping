@@ -134,6 +134,7 @@ final class PersistenceBootstrap: ObservableObject {
     private let defaults: UserDefaults
     let homeCoordinator: ActiveHomeCoordinator
     let editorDrafts: HomeEditorDraftStore
+    private let homeShareProvisioner = HomeShareProvisioner()
     private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
     private let accountStoreDirectory: () throws -> URL
     private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
@@ -873,6 +874,25 @@ final class PersistenceBootstrap: ObservableObject {
             // Keep the committed graph available to normal discovery and explicit selection.
         }
         return result()
+    }
+
+    /// Configured entry point for invitation UI and the development sharing harness.
+    /// A prepared share is not evidence that its grocery graph has exported.
+    func prepareSelectedHomeShare(retryInterrupted: Bool = false) async throws -> PreparedHomeShare {
+        guard case .ready(let ready) = state, let scope = ready.homeScope,
+              homeCoordinator.homes.contains(where: { $0.graph == scope.graph && $0.access == .owner }),
+              let url = ready.persistence.primaryStore?.url else { throw HomeSharingError.ownerRequired }
+        let transport = ManagedHomeShareTransport(persistence: ready.persistence,
+            authority: ready.presentation.commandAuthority)
+        let journalURL = url.deletingLastPathComponent().appendingPathComponent(
+            "share-provisioning-" + scope.preferenceNamespace + ".json")
+        let result = try await homeShareProvisioner.prepare(scope: scope, journalURL: journalURL,
+            transport: transport, retryInterrupted: retryInterrupted)
+        guard ready.presentation.isActive, homeCoordinator.activeScope == scope else {
+            throw HomeSharingError.scopeChanged
+        }
+        retryShareAssociations()
+        return result
     }
 
     func pendingHomeCreation() async throws -> HomeCreationCommand? {

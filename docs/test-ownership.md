@@ -285,3 +285,11 @@ one-time and shared recovery records, exclusion of the separate private graph,
 and rejection of foreign-home relationships and duplicate child identities.
 These local checks do not establish CloudKit share creation, export, or server-side
 failure recovery; managed transport and live evidence have separate owners.
+
+`HomeShareProvisionerTests` owns existing-share reuse, persisted identity mismatch,
+missing known-share retention, lost callback reconciliation, explicit same-root replay,
+foreign-journal rejection, failed local preparation, and concurrent/cancelled waiters.
+Its held callback and observed active request count force overlap deterministically.
+The production adapter is compiled against actual managed APIs; these mock cases
+cannot prove native crash atomicity, cross-device serialization or exported privacy.
+See `docs/architecture/home-share-provisioning.md` for that boundary and live gates.
