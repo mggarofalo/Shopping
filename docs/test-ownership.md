@@ -538,5 +538,41 @@ The held-callback test proves local zone operations retain their turn through
 caller cancellation and native failure, while another zone proceeds. iPhone
 invitation import/acceptance and Watch acceptance use this gate and revalidate
 their native account/store environment. This is local ordering, not a cross-device
-or server conditional-purge guarantee. Native leave and explicit rejoin activation
-still require integration and real two-account proof.
+or server conditional-purge guarantee. Native leave still requires integration. Explicit rejoin activation is covered
+below; both paths still require real two-account proof.
+
+### Explicit rejoin authority (SHOPPING-129)
+
+`HomeRejoinTests` owns SQLite capture/commit against a complete loss boundary,
+rejection of a newer loss, same-entry idempotency across reopen, a distinct grant
+after a later loss, and unchanged historical cart/checkout/restore payloads and
+publication authority. It also owns read-only membership with private cleanup,
+exact graph/account/store validation, pending-leave rejection, and transaction
+rollback if presentation or individual Open authority retires before saving.
+
+`HomeAdoptionBootstrapTests` owns the real bootstrap Open/Not now wiring: only
+explicit Open verifies membership and grants; resolved entries cannot grant
+again; a new loss, retired presentation, or replacement invitation rejects a
+held callback. The held journal scenario checks both an existing Open and a new
+Open after synchronous ingress while the old entry is still published. Both
+completions are bounded before the test releases and drains the journal queue.
+These fixtures use isolated plain SQLite stores and substitute the native
+membership verification boundary. They do not establish CloudKit acceptance,
+server permissions, or cross-device convergence.
+
+`ActiveHomeCoordinatorTests.testExplicitMembershipRenewalRetiresCapturedAuthorityForTheSameGraph`
+owns generation renewal and rejection of an older discovery result even when the
+selected graph is unchanged. Initial bootstrap discovery can overlap the next
+explicit refresh; the integration fixture waits boundedly for the already-running
+discovery to publish its unresolved state rather than assuming its own request won.
+
+The September 29 explicit-rejoin checkpoint passed 42 focused tests, all 484
+`ShoppingFast` tests, and all 47 Watch unit tests on the local iOS/watchOS 26.5
+simulators. The unchanged source was recorded in
+`/tmp/shopping-129-rejoin-corrected-source.json`; result bundles are
+`/tmp/shopping-129-rejoin-{corrected,fast,watch}.xcresult`. All three have zero
+skips and zero xcresult runtime warnings. Existing coordinator fixtures still
+emit Core Data model-ambiguity log warnings; this is not a warning-free log claim.
+The earlier 18-pass/4-fail discovery-timing result remains preserved at
+`/tmp/shopping-129-rejoin-focused.xcresult`. This checkpoint does not prove native
+leave, pre-acceptance loss retention, or live sharing.

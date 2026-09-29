@@ -202,8 +202,8 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let originalNeedID: UUID?
     }
 
-    /// These are two plain SQLite stores. Only the choice authority's participant-store
-    /// lookup is substituted; no native share acceptance or CloudKit transport is simulated.
+    /// These are two plain SQLite stores. The participant-store lookup and native
+    /// rejoin verification boundary are substituted; no CloudKit result is proven.
     private func importedInvitation(originalHome: Bool = true, ready: Bool = true,
                                     unrelatedInvitation: Bool = false) async throws -> ImportedInvitationFixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -269,10 +269,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
 
     private func openImportedFixture(_ fixture: ImportedInvitationFixture,
                                      accountProvider: ShopperSessionProvider? = nil,
-                                     detectedShare: HomeShareIdentity = HomeShareIdentity(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner")) async throws -> PersistenceBootstrap {
+                                     detectedShare: HomeShareIdentity = HomeShareIdentity(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
+                                     verifyMembership: @escaping @Sendable (HomeNativeAccessIdentity) async throws -> Void = { _ in },
+                                     observeInvitationWorker: (HomeInvitationWorker) -> Void = { _ in }) async throws -> PersistenceBootstrap {
         let inbox = try HomeInvitationInbox(url: fixture.inboxURL,
             containerIdentifier: "iCloud.test.imported-choice", environment: "Development")
-        let invitations = HomeInvitationController(inbox: inbox)
+        let worker = HomeInvitationWorker(inbox: inbox)
+        observeInvitationWorker(worker)
+        let invitations = HomeInvitationController(worker: worker)
+        await invitations.prepare()
         let privateURL = fixture.privateURL
         let participantURL = fixture.participantURL
         let bootstrap = PersistenceBootstrap(defaults: fixture.defaults, invitations: invitations,
@@ -280,6 +285,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             participantStoreForHomeChoice: { persistence in
                 persistence.container.persistentStoreCoordinator.persistentStores.first { $0.url == participantURL }
             }, invitationShareIdentity: { _, _, _ in detectedShare },
+            makeHomeRejoinVerifier: { _ in LocalRejoinVerifier(refreshMembership: verifyMembership) },
             activateAccountStore: { source, _, _, importing in
                 XCTAssertNil(source)
                 XCTAssertFalse(importing)
@@ -290,6 +296,201 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await bootstrap.runLoadingTransition()
         _ = try await waitForReady(bootstrap)
         return bootstrap
+    }
+
+    private struct LocalRejoinVerifier: HomeRejoinVerifying {
+        let refreshMembership: @Sendable (HomeNativeAccessIdentity) async throws -> Void
+        func validate(_ identity: HomeNativeAccessIdentity, in repository: PersonalCartRepository) throws {
+            guard let provider = repository.persistence.personalCartSessionProvider as? ShopperSessionProvider,
+                  case .ready(let session) = provider.state, session == repository.session else {
+                throw PersonalCartError.accountChanged
+            }
+        }
+        func refresh(_ identity: HomeNativeAccessIdentity) async throws { try await refreshMembership(identity) }
+    }
+
+    private func blockedInvitedHome(_ fixture: ImportedInvitationFixture, bootstrap: PersistenceBootstrap) async throws -> PersonalCartService {
+        try await bootstrap.selectHome(try XCTUnwrap(fixture.original))
+        let ready = try await waitForReady(bootstrap)
+        let cart = try XCTUnwrap(ready.personalCartService)
+        try cart.blockHomeEffects(householdID: fixture.invited.householdID, listID: fixture.invited.listID,
+            share: HomeEffectShare(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
+            reason: .revoked, operationID: UUID())
+        try await bootstrap.refreshHomes()
+        // Startup replay can already own a newer discovery request. Wait for its
+        // publication instead of assuming this refresh necessarily won that race.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.homes.first(where: { $0.graph == fixture.invited })?.access != .unresolved,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.homes.first { $0.graph == fixture.invited }?.access, .unresolved)
+        return cart
+    }
+
+    private func access(_ cart: PersonalCartService, graph: HomeGraphIdentity) throws -> HomeEffectAccess {
+        try cart.transact(save: false) { try $0.homeEffectAccess(householdID: graph.householdID, listID: graph.listID) }
+    }
+
+    func testExplicitOpenRejoinsBlockedHomeButResolvedEntryCannotGrantAgain() async throws {
+        let fixture = try await importedInvitation()
+        let verification = RejoinVerificationProbe()
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: { await verification.record($0) })
+        let originalCart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let blocked = try access(originalCart, graph: fixture.invited).capturedAuthority
+        let before = try await waitForReady(bootstrap)
+        try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+        let opened = try await waitForReady(bootstrap)
+        XCTAssertEqual(opened.homeScope?.graph, fixture.invited)
+        XCTAssertFalse(before.presentation.isActive)
+        let current = try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited)
+        XCTAssertFalse(current.requiresExplicitRejoin)
+        XCTAssertFalse(current.permitsPublication(blocked), "Pre-rejoin private changes keep their old authority")
+        let calls = await verification.identities
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?.rootURI, fixture.invited.rootURI)
+        XCTAssertEqual(calls.first?.share.recordName, "invited-share")
+        do {
+            try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+            XCTFail("A resolved entry cannot mint another grant")
+        } catch { }
+        XCTAssertEqual(try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited).currentGrants.count, 1)
+    }
+
+    func testNotNowLeavesBlockedMembershipQuarantinedAndDoesNotVerifyOrGrant() async throws {
+        let fixture = try await importedInvitation()
+        let verification = RejoinVerificationProbe()
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: { await verification.record($0) })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        try await bootstrap.keepCurrentHome(entryID: fixture.entryID)
+        XCTAssertTrue(try access(cart, graph: fixture.invited).requiresExplicitRejoin)
+        XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
+        let calls = await verification.identities
+        XCTAssertTrue(calls.isEmpty)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.original)
+    }
+
+    func testNewLossDuringHeldNativeVerificationPreventsGrant() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Membership verification held")
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: {
+            await held.hold($0) { started.fulfill() }
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let open = Task { try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited) }
+        await fulfillment(of: [started], timeout: 2)
+        try cart.blockHomeEffects(householdID: fixture.invited.householdID, listID: fixture.invited.listID,
+            share: HomeEffectShare(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
+            reason: .revoked, operationID: UUID())
+        await held.release()
+        do { try await open.value; XCTFail("A fresh loss must win over the captured rejoin") }
+        catch { XCTAssertEqual(error as? PersonalCartError, .scopeChanged) }
+        XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
+        XCTAssertFalse(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+    }
+
+    func testRenewedInvitationInvalidatesHeldOpenChoiceBeforeItsGrant() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Membership verification held")
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: {
+            await held.hold($0) { started.fulfill() }
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let open = Task { try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited) }
+        await fulfillment(of: [started], timeout: 2)
+        let controller = try XCTUnwrap(bootstrap.invitations)
+        let entry = try XCTUnwrap(controller.allEntries.first { $0.id == fixture.entryID })
+        let renewed = try await controller.enqueue(identity: entry.identity, metadataArchive: Data([2]), participantPending: true)
+        XCTAssertEqual(renewed.id, entry.id)
+        await held.release()
+        do { try await open.value; XCTFail("A renewed entry must retire the older Open choice") }
+        catch { XCTAssertEqual(error as? UICommandAuthority.Failure, .retired) }
+        XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
+        XCTAssertTrue(try access(cart, graph: fixture.invited).requiresExplicitRejoin)
+    }
+
+    func testRetiredPresentationDuringHeldVerificationCannotSaveGrant() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Membership verification held")
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: {
+            await held.hold($0) { started.fulfill() }
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let open = Task { try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited) }
+        await fulfillment(of: [started], timeout: 2)
+        bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await held.release()
+        do { try await open.value; XCTFail("A retired presentation cannot restore membership") }
+        catch { }
+        XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
+        await bootstrap.runLoadingTransition()
+    }
+
+    func testInvitationIngressRetiresOpenBeforeBlockedJournalPublishesReplacement() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Membership verification held")
+        var observedWorker: HomeInvitationWorker?
+        let bootstrap = try await openImportedFixture(fixture, verifyMembership: {
+            await held.hold($0) { started.fulfill() }
+        }, observeInvitationWorker: { observedWorker = $0 })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let finished = expectation(description: "Old Open finishes while the journal remains held")
+        let open = Task { () -> Result<Void, Error> in
+            let result: Result<Void, Error>
+            do {
+                try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+                result = .success(())
+            } catch { result = .failure(error) }
+            finished.fulfill()
+            return result
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let worker = try XCTUnwrap(observedWorker)
+        let workerHeld = expectation(description: "Journal worker held")
+        let releaseWorker = DispatchSemaphore(value: 0)
+        defer { releaseWorker.signal() }
+        worker.perform({ _ in workerHeld.fulfill(); releaseWorker.wait() }, completion: { _ in })
+        await fulfillment(of: [workerHeld], timeout: 2)
+        let controller = try XCTUnwrap(bootstrap.invitations)
+        let old = try XCTUnwrap(controller.allEntries.first { $0.id == fixture.entryID })
+        let ingress = expectation(description: "Replacement link received before journal publication")
+        let invalidate = controller.onChoiceInvalidated
+        controller.onChoiceInvalidated = { identity in invalidate?(identity); ingress.fulfill() }
+        let renewed = Task { try await controller.enqueue(identity: old.identity, metadataArchive: Data([3]), participantPending: true) }
+        await fulfillment(of: [ingress], timeout: 2)
+        XCTAssertEqual(controller.allEntries.first { $0.id == fixture.entryID }, old)
+        await held.release()
+        // A regression must fail boundedly, then free the journal and drain both
+        // tasks rather than hanging the test on a queued activation checkpoint.
+        await fulfillment(of: [finished], timeout: 2)
+        controller.onChoiceInvalidated = invalidate
+        let retryFinished = expectation(description: "A new Open cannot use the stale entry during ingress")
+        let retryOpen = Task { () -> Result<Void, Error> in
+            let result: Result<Void, Error>
+            do {
+                try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+                result = .success(())
+            } catch { result = .failure(error) }
+            retryFinished.fulfill()
+            return result
+        }
+        await fulfillment(of: [retryFinished], timeout: 2)
+        releaseWorker.signal()
+        _ = try await renewed.value
+        switch await open.value {
+        case .success: XCTFail("Synchronous link ingress must retire the earlier Open choice")
+        case .failure(let error): XCTAssertEqual(error as? UICommandAuthority.Failure, .retired)
+        }
+        switch await retryOpen.value {
+        case .success: XCTFail("An Open started after ingress must also wait for the replacement entry")
+        case .failure(let error):
+            guard case HomeInvitationInbox.Error.invalidState = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
     }
 
     func testNotNowKeepsOriginalScopeAndPrivateCartAndResolvesOnlyChosenInvitation() async throws {
@@ -432,4 +633,17 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         } catch ManagedHomeInvitationError.accountUnavailable { }
     }
 
+}
+
+private actor RejoinVerificationProbe {
+    private(set) var identities: [HomeNativeAccessIdentity] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    func record(_ identity: HomeNativeAccessIdentity) { identities.append(identity) }
+    func hold(_ identity: HomeNativeAccessIdentity, started: @Sendable () -> Void) async {
+        record(identity)
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0; started() }
+    }
+    func release() { released = true; continuation?.resume(); continuation = nil }
 }

@@ -49,6 +49,21 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertEqual(selected.activeScope?.graph, invited.graph)
     }
 
+    func testExplicitMembershipRenewalRetiresCapturedAuthorityForTheSameGraph() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        coordinator.bind(try session())
+        let invited = home("Invited", store: "shared")
+        try discover([invited], using: coordinator)
+        let scope = try XCTUnwrap(coordinator.activeScope), generation = coordinator.generation
+        let discovery = try XCTUnwrap(coordinator.beginDiscovery())
+        try coordinator.select(invited.graph, renewingAuthority: true)
+        XCTAssertEqual(coordinator.activeScope, scope)
+        XCTAssertFalse(coordinator.isCurrent(scope: scope, generation: generation))
+        XCTAssertFalse(coordinator.reconcile(HomeDiscovery(homes: [], hasIncompleteRoots: true), request: discovery))
+        XCTAssertEqual(coordinator.activeScope, scope)
+    }
+
     func testTwoRootsRequireExplicitChoiceAndRelaunchRestoresExactGraph() throws {
         let (coordinator, defaults, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
