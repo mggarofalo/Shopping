@@ -610,3 +610,51 @@ and `final-source.json` retain evidence. Earlier 490-test Fast evidence is also
 preserved. Existing model-ambiguity log warnings remain separate from xcresult
 runtime warnings. Independent correctness and test-evidence review found no
 remaining issue after the final gate and first-join checks were added.
+
+### Participant leave execution (SHOPPING-129)
+
+`ManagedHomeLeaveTransportTests` owns the production prepare/execute/reconcile
+sequence with unique SQLite stores and a simulated platform backend. It checks
+committed authorization and quarantine before purge, at-most-once submission,
+private cart/history retention after actual fixture graph deletion, read-only
+participant leave, rejection of owner/pending/public or changed participants,
+known same-zone scope collisions, wrong returned zones, and account changes
+during a held callback. Held callbacks have bounded arrival checks and are always
+released and drained before teardown. Stores are detached before fixture removal.
+
+UI authority must remain current through the atomic confirmation save. After that
+durable handoff, the account service owns completion: quarantine may itself
+retire the screen. A covering rejoin grant still retires destructive authority.
+`HomeLeaveLedgerTests` owns the final pre-purge submitted/uncompleted/quarantine
+check and a covering grant arriving after the submission checkpoint. The transport
+suite owns the corresponding refusal to invoke purge and both sides of the UI
+authority handoff.
+
+The relaunch case detaches and reopens the same SQLite store, reconstructs its
+service/backend/transport, and proves that a submitted uncertain command never
+purges again. A readable or failed zone observation stays pending. An absent zone
+requires fresh local absence of both original home and list before completion.
+Quarantine and private history survive that completion. A crash after the submitted
+marker but before the native call remains uncertain; no timeout or generic error
+is converted into permission to resend a destructive operation.
+
+The backend fixture supplies native membership, environment/mapping verification,
+zone observations, and purge completion. Tests do not establish CloudKit mapping,
+permission propagation, server zone deletion, or actual cross-device cleanup. The
+production adapter uses a nonnil captured participant store and exact zone; only
+zone-not-found from an exact zone fetch counts as absence, never a missing share
+or permission failure. Native device proof and confirmation/status UI remain
+required before release exposure.
+
+The September 29 native-leave checkpoint passed 21 leave-focused tests, then 26
+including the home-creation concurrency fixture, all 506 Fast tests, and 47 Watch
+unit tests. Result bundles are `/tmp/shopping-129-leave-relaunch-focused.xcresult`,
+`/tmp/shopping-129-leave-discovery-focused.xcresult`,
+`/tmp/shopping-129-leave-validated-fast.xcresult`, and
+`/tmp/shopping-129-leave-watch.xcresult`; logs and
+`/tmp/shopping-129-leave-validated-source.json` retain source evidence. All have
+zero skips and zero xcresult runtime warnings. Existing Core Data model-ambiguity
+log warnings remain. The earlier `leave-final-fast` bundle retains 505 passes and
+one failure: a superseded discovery request returned before the newer request
+published. The fixture now waits boundedly for that publication after each single
+refresh, preserving its no-duplicate-creation and selection assertions.

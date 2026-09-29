@@ -24,6 +24,25 @@ extension PersonalCartRepository {
         }.sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
+    /// The submission marker alone is not a permanent destructive capability.
+    /// Recheck just before invoking native purge: a covering grant may have
+    /// arrived while the adapter was awaiting other validation work.
+    func requireCurrentHomeLeaveSubmission(_ command: HomeLeaveCommand) throws {
+        guard let retained = try homeLeaves().first(where: { $0.id == command.id }),
+              retained.command == command, retained.submitted, !retained.completed else {
+            throw PersonalCartError.scopeChanged
+        }
+        let records = try values(HomeAccessRecord.self, kind: "homeAccess")
+        guard records[command.quarantineID] == command.quarantine else { throw PersonalCartError.incompleteImport }
+        for (id, record) in records {
+            try record.validate()
+            guard record.id == id else { throw PersonalCartError.corruptRecord }
+            if record.scope == command.origin.scope,
+               case .joined(let observed) = record.action,
+               observed.contains(command.quarantineID) { throw PersonalCartError.scopeChanged }
+        }
+    }
+
     func homeLeaveEvidence(scope: HomeEffectScope) throws -> HomeLeaveEvidence {
         guard scope == homeEffectScope(householdID: scope.householdID, listID: scope.listID) else {
             throw PersonalCartError.accountChanged

@@ -90,6 +90,56 @@ final class HomeLeaveLedgerTests: XCTestCase {
         XCTAssertTrue(try access(f).requiresExplicitRejoin)
     }
 
+    func testFinalPurgeAuthorizationRequiresSubmittedAndIncompleteLeave() throws {
+        let f = try fixture(), command = f.command
+        try f.cart.retainHomeLeave(command)
+        XCTAssertThrowsError(try f.cart.transact(save: false) {
+            try $0.requireCurrentHomeLeaveSubmission(command)
+        }) { XCTAssertEqual($0 as? PersonalCartError, .scopeChanged) }
+
+        XCTAssertTrue(try f.cart.beginHomeLeaveSubmission(command, identity: command.origin, storeURL: command.storeURL))
+        XCTAssertNoThrow(try f.cart.transact(save: false) {
+            try $0.requireCurrentHomeLeaveSubmission(command)
+        })
+
+        try f.cart.completeHomeLeave(command)
+        XCTAssertThrowsError(try f.cart.transact(save: false) {
+            try $0.requireCurrentHomeLeaveSubmission(command)
+        }) { XCTAssertEqual($0 as? PersonalCartError, .scopeChanged) }
+        let status = try XCTUnwrap(f.cart.retainedHomeLeaves().first)
+        XCTAssertTrue(status.submitted)
+        XCTAssertTrue(status.completed)
+        XCTAssertTrue(try access(f).requiresExplicitRejoin)
+    }
+
+    func testCoveringGrantAfterSubmissionRetiresFinalPurgeAuthorizationWithoutErasingEvidence() throws {
+        let f = try fixture(), command = f.command
+        try f.cart.retainHomeLeave(command)
+        XCTAssertTrue(try f.cart.beginHomeLeaveSubmission(command, identity: command.origin, storeURL: command.storeURL))
+        XCTAssertNoThrow(try f.cart.transact(save: false) {
+            try $0.requireCurrentHomeLeaveSubmission(command)
+        })
+
+        // A different replica's explicit rejoin arrives while native validation
+        // is in flight, after the at-most-once submission checkpoint was saved.
+        let grant = HomeAccessRecord(id: UUID(), scope: command.origin.scope, share: command.origin.share,
+            action: .joined(observedBlockIDs: [command.quarantineID]))
+        try f.cart.transact { try $0.insert(id: grant.id, kind: "homeAccess", command: grant, value: grant) }
+        XCTAssertThrowsError(try f.cart.transact(save: false) {
+            try $0.requireCurrentHomeLeaveSubmission(command)
+        }) { XCTAssertEqual($0 as? PersonalCartError, .scopeChanged) }
+
+        let status = try XCTUnwrap(f.cart.retainedHomeLeaves().first)
+        XCTAssertEqual(status.command, command)
+        XCTAssertTrue(status.submitted)
+        XCTAssertFalse(status.completed)
+        XCTAssertTrue(status.requiresResolution)
+        let retained = try f.cart.transact(save: false) { try $0.values(HomeAccessRecord.self, kind: "homeAccess") }
+        XCTAssertEqual(retained[command.quarantineID], command.quarantine)
+        XCTAssertEqual(retained[grant.id], grant)
+        XCTAssertFalse(try f.cart.beginHomeLeaveSubmission(command, identity: command.origin, storeURL: command.storeURL))
+    }
+
     func testCheckpointBeforeCommandOrBlockImportsFailsClosedAndCannotAuthorizePurge() throws {
         let f = try fixture(), command = f.command
         let checkpoint = HomeLeaveCheckpoint(command: command, stage: .completed)
