@@ -123,8 +123,23 @@ struct HomeDetailsView: View {
                         Text("Removing members keeps your home and groceries. Cancelled invitations will not be shared again; if a delayed invitation appears, the app will try to remove it when membership is checked.")
                     }
                 }
+                if snapshot.access != .owner && snapshot.source == .server {
+                    Section {
+                        Button("Leave home", role: .destructive) {
+                            Task { await model.prepareLeave() }
+                        }
+                        .disabled(!model.canLeave)
+                        .accessibilityIdentifier("shopping.home.leave")
+                    }
+                }
             }
             Section {
+                if let status = model.leaveStatus {
+                    Text(status.completed
+                         ? "You have left this home. Your personal cart and history are retained."
+                         : "Leaving this home is still being verified. Your personal cart and history are retained.")
+                        .accessibilityIdentifier("shopping.home.leaveStatus")
+                }
                 Label(syncStatus.title, systemImage: syncStatus.symbol)
                 Text(syncStatus.details).foregroundStyle(.secondary)
                 if let error = model.error {
@@ -183,6 +198,11 @@ struct HomeDetailsView: View {
                     Button("Cancel") { model.removalConfirmation = nil }
                 } }
             }
+        }
+        .sheet(item: $model.leaveConfirmation) { command in
+            HomeLeaveConfirmationView(homeName: command.homeName, canConfirm: model.canLeave,
+                onConfirm: { Task { await model.confirmLeave(command) } },
+                onCancel: { model.leaveConfirmation = nil })
         }
         .sheet(isPresented: $showingNameEditor) {
             VStack(spacing: 0) {

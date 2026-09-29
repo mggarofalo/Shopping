@@ -19,8 +19,14 @@ struct PersistenceRootView: View {
                             ContentUnavailableView {
                                 Label("Waiting for your household", systemImage: "icloud")
                             } description: {
-                                Text(bootstrap.sharingStatusDescription)
-                                Text("Your existing groceries will appear after import. An empty cache does not create another household.")
+                                if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) {
+                                    Text("Leaving a home is still being verified. Open Homes to check its status. Your personal cart and history remain saved.")
+                                } else if bootstrap.homeLeaveStatuses.contains(where: \.completed) {
+                                    Text("Your personal cart and history remain saved after leaving. Choose a home when you are ready.")
+                                } else {
+                                    Text(bootstrap.sharingStatusDescription)
+                                    Text("Your existing groceries will appear after import. An empty cache does not create another household.")
+                                }
                             } actions: {
                                 NavigationLink("Choose a home") {
                                     HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)

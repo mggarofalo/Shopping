@@ -1,6 +1,106 @@
 import XCTest
 
 final class HomeDetailsUITests: XCTestCase {
+    func testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome() {
+        let app = launch(role: "contributor", rootGoneLeave: true)
+        openHomeDetails(app)
+        let homeName = app.staticTexts["shopping.home.name"].label
+        let leave = app.buttons["shopping.home.leave"]
+        reveal(leave, in: app)
+        leave.tap()
+        let confirm = app.buttons["shopping.home.confirmLeave"]
+        reveal(confirm, in: app)
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        let chooseHome = app.buttons["Choose a home"]
+        XCTAssertTrue(chooseHome.existsOrAppears(timeout: 8))
+        XCTAssertTrue(chooseHome.isHittable)
+        XCTAssertTrue(app.staticTexts["Waiting for your household"].exists)
+        XCTAssertTrue(app.staticTexts["Leaving a home is still being verified. Open Homes to check its status. Your personal cart and history remain saved."].exists)
+        chooseHome.tap()
+        XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
+        XCTAssertFalse(app.buttons["shopping.home.choice." + homeName].exists,
+            "The deleted shared root must not remain available as a home choice")
+        let retainedStatus = app.staticTexts.matching(NSPredicate(format:
+            "identifier BEGINSWITH %@", "shopping.home.leaveStatus.")).element
+        reveal(retainedStatus, in: app)
+        XCTAssertEqual(retainedStatus.label, "Leaving this home is not yet confirmed")
+        XCTAssertTrue(app.staticTexts[homeName].exists)
+        let retainedCopy = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
+            "Your personal cart and purchase history stay saved.")).element
+        reveal(retainedCopy, in: app)
+        XCTAssertTrue(retainedCopy.label.contains("Unsent checkout and undo changes won’t be sent automatically if you join again."))
+        let check = app.buttons["shopping.home.checkLeaveStatus"]
+        reveal(check, in: app)
+        let checking = app.descendants(matching: .any)
+            .matching(identifier: "shopping.home.checkingLeaveStatus").element
+        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            check.isEnabled && !checking.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
+        check.tap()
+        let error = app.staticTexts["shopping.home.leaveError"]
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            checking.exists && !check.isEnabled && !error.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed,
+            "The tap must start a new check and clear its previous result")
+        XCTAssertTrue(checking.waitForNonExistence(timeout: 8))
+        XCTAssertTrue(check.isEnabled)
+        reveal(error, in: app)
+        XCTAssertEqual(error.label, "iCloud has not confirmed leaving this home. Your personal cart and history remain saved.")
+        XCTAssertEqual(retainedStatus.label, "Leaving this home is not yet confirmed")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH %@", "shopping.home.resumeLeave.")).element.exists,
+            "An already submitted uncertain leave must not offer a second submission")
+    }
+
+    func testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome() {
+        let app = launch(role: "contributor")
+        openHomeDetails(app)
+        let homeName = app.staticTexts["shopping.home.name"].label
+        let leave = app.buttons["shopping.home.leave"]
+        reveal(leave, in: app)
+        XCTAssertTrue(leave.isEnabled)
+        leave.tap()
+        let confirm = app.buttons["shopping.home.confirmLeave"]
+        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Leave home?"].exists)
+        // The underlying details title has its own identifier. Exclude that
+        // background element and require one visible disclosure title.
+        let disclosureNames = app.staticTexts.matching(NSPredicate(format:
+            "label == %@ AND identifier != %@", homeName, "shopping.home.name"))
+        XCTAssertEqual(disclosureNames.count, 1)
+        XCTAssertTrue(disclosureNames.element.isHittable)
+        let unsent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
+            "Changes that have not finished syncing may not reach the home.")).element
+        reveal(unsent, in: app)
+        let retained = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
+            "Your personal cart and purchase history stay saved.")).element
+        reveal(retained, in: app)
+        XCTAssertTrue(retained.label.contains("Unsent checkout and undo changes won’t be sent automatically if you join again."))
+        let cancel = app.buttons["shopping.home.cancelLeave"]
+        XCTAssertTrue(cancel.existsOrAppears(timeout: 3))
+        XCTAssertTrue(cancel.isHittable)
+        cancel.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        let status = app.staticTexts["shopping.home.leaveStatus"]
+        XCTAssertFalse(status.exists, "Cancel must not submit a leave operation")
+        reveal(leave, in: app)
+        XCTAssertTrue(leave.isEnabled)
+        leave.tap()
+        reveal(confirm, in: app)
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        reveal(status, in: app)
+        XCTAssertEqual(status.label,
+            "Leaving this home is still being verified. Your personal cart and history are retained.")
+        XCTAssertTrue(leave.exists)
+        XCTAssertFalse(leave.isEnabled, "An unresolved leave cannot be submitted again")
+        XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
+    }
+
     func testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor() {
         let app = launch(role: "owner")
         openHomeDetails(app)
@@ -119,7 +219,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
     }
 
-    private func launch(role: String, largestText: Bool = false) -> XCUIApplication {
+    private func launch(role: String, largestText: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -128,6 +228,7 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
+        if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
         if largestText {
             app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }

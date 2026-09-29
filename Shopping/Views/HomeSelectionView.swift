@@ -71,6 +71,9 @@ struct HomeSelectionView: View {
                     Button("Check again") { bootstrap.applicationDidEnterForeground() }
                 }
             }
+            if !bootstrap.homeLeaveStatuses.isEmpty || bootstrap.homeLeaveStatusError != nil {
+                HomeLeaveStatusSection(bootstrap: bootstrap)
+            }
             if coordinator.pendingInvitation {
                 Text("An invitation is waiting. Your current home stays selected until you choose to join.")
             }

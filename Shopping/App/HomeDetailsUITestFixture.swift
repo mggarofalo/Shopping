@@ -6,12 +6,14 @@ import Foundation
 final class HomeDetailsUITestFixture {
     static func make(scope: ActiveHomeScope, name: String,
                      rename: @escaping @MainActor (String) async throws -> Void,
+                     leaveOverride: HomeDetailsLeaveActions? = nil,
                      environment: [String: String] = ProcessInfo.processInfo.environment) -> HomeDetailsActions? {
         guard let path = environment["SHOPPING_UI_TEST_STORE_PATH"],
               !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let value = environment["SHOPPING_UI_TEST_HOME_MEMBERS"],
               let access = HomeMembershipSnapshot.Access(rawValue: value) else { return nil }
-        let fixture = HomeDetailsUITestFixture(scope: scope, name: name, access: access)
+        let fixture = HomeDetailsUITestFixture(scope: scope, name: name, access: access,
+            storeURL: URL(fileURLWithPath: path))
         return HomeDetailsActions(
             refresh: { fixture.snapshot },
             pending: { fixture.pending },
@@ -27,21 +29,26 @@ final class HomeDetailsUITestFixture {
                 fixture.name = name
             }, removals: HomeDetailsRemovalActions(
                 prepare: { try fixture.prepareRemoval($0, participantID: $1) },
-                confirm: { try fixture.confirmRemoval($0) }, retry: { fixture.snapshot }))
+                confirm: { try fixture.confirmRemoval($0) }, retry: { fixture.snapshot }),
+                leave: leaveOverride ?? HomeDetailsLeaveActions(prepare: { try fixture.prepareLeave() },
+                    confirm: { try fixture.confirmLeave($0) }))
     }
 
     private let scope: ActiveHomeScope
     private let access: HomeMembershipSnapshot.Access
+    private let storeURL: URL
+    private var preparedLeave: HomeLeaveCommand?
     private var name: String
     private var members: [HomeMember]
     private var pending: HomeMembershipCoordinator.Pending?
     private var invitationNumber = 0
     private var removals: [HomeMembershipRemovalStatus] = []
 
-    private init(scope: ActiveHomeScope, name: String, access: HomeMembershipSnapshot.Access) {
+    private init(scope: ActiveHomeScope, name: String, access: HomeMembershipSnapshot.Access, storeURL: URL) {
         self.scope = scope
         self.name = name
         self.access = access
+        self.storeURL = storeURL
         var members = [HomeMember(id: "fixture-owner", name: "Morgan", role: .owner,
             acceptance: .accepted, isCurrentUser: access == .owner, canResend: false)]
         if access != .owner {
@@ -61,6 +68,28 @@ final class HomeDetailsUITestFixture {
             homeName: name, access: access,
             currentParticipantID: access == .owner ? "fixture-owner" : "fixture-current",
             members: members, changeTag: "fixture-\(invitationNumber)", observedAt: Date(), source: .server, removals: removals)
+    }
+
+    private func prepareLeave() throws -> HomeLeaveCommand {
+        guard access != .owner else { throw HomeMembershipError.unsupportedAccess }
+        let command = HomeLeaveCommand(id: UUID(), origin: HomeNativeAccessIdentity(
+            scope: HomeEffectScope(fixtureScope: scope), storeIdentifier: scope.graph.storeIdentifier,
+            rootURI: scope.graph.rootURI,
+            share: HomeEffectShare(recordName: "fixture-share", zoneName: "fixture-zone", zoneOwnerName: "fixture-owner")),
+            storeURL: storeURL, participantID: "fixture-current", homeName: name,
+            evidence: HomeLeaveEvidence(checkoutIDs: [], restoreIDs: [], unresolvedRestoreIDs: [], cartGenerations: []),
+            confirmedAt: Date())
+        try command.validate()
+        preparedLeave = command
+        return command
+    }
+
+    private func confirmLeave(_ command: HomeLeaveCommand) throws -> HomeLeaveStatus {
+        guard access != .owner, preparedLeave == command else { throw HomeMembershipError.scopeChanged }
+        preparedLeave = nil
+        // Presentation-only simulation: no ledger write, membership mutation, or
+        // native purge occurs, and this fixture never claims leave completion.
+        return HomeLeaveStatus(command: command, submitted: true, completed: false)
     }
 
     private func prepareRemoval(_ purpose: HomeMembershipRemoval.Purpose,
@@ -119,6 +148,16 @@ final class HomeDetailsUITestFixture {
     private func delivery(id: UUID, participantID: String) -> HomeInvitationDelivery {
         HomeInvitationDelivery(id: id, scope: scope, participantID: participantID,
             url: URL(string: "https://example.invalid/invitation/\(participantID)")!)
+    }
+}
+// This copies a presentation identity only; it does not create account authority.
+private extension HomeEffectScope {
+    init(fixtureScope: ActiveHomeScope) {
+        accountBinding = fixtureScope.accountBinding
+        containerIdentifier = fixtureScope.containerIdentifier
+        environment = fixtureScope.environment
+        householdID = fixtureScope.graph.householdID
+        listID = fixtureScope.graph.listID
     }
 }
 #endif

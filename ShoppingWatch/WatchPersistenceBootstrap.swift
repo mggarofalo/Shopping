@@ -231,7 +231,7 @@ final class WatchPersistenceBootstrap {
                 do {
                     let imported = try await runtime.history.consumeSummary()
                     guard self.current?.persistence === runtime.persistence else { return }
-                    if imported.transactionCount > 0 { runtime.persistence.homeNativeAccess.invalidateVerification() }
+                    runtime.persistence.homeNativeAccess.applyImportedHistory(imported)
                     await self.drainAssociations(runtime)
                     guard self.current?.persistence === runtime.persistence else { return }
                     if imported.requiresAccessRefresh { self.refreshHomeAccess(recheckIfRunning: true) }

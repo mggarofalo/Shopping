@@ -144,6 +144,12 @@ final class PersistenceBootstrap: ObservableObject {
     private let accountStoreDirectory: (() throws -> URL)?
     private let participantStoreForHomeChoice: (PersistenceController) -> NSPersistentStore?
     private let invitationShareIdentity: @MainActor @Sendable (PersistenceController, ShopperSession, HomeGraphIdentity) async throws -> HomeShareIdentity?
+    private let makeHomeLeaveTransport: @Sendable (PersonalCartService) -> ManagedHomeLeaveTransport
+    @Published private(set) var homeLeaveStatuses: [HomeLeaveStatus] = []
+    @Published private(set) var homeLeaveStatusError: String?
+    @Published private(set) var isCheckingHomeLeaves = false
+    @Published private(set) var homeLeaveResumingID: UUID?
+    private var homeLeaveRefreshID: UUID?
     private let makeHomeRejoinVerifier: @Sendable (PersonalCartService) -> any HomeRejoinVerifying
     private var invitationActivations: [UUID: (entry: HomeInvitationInbox.Entry, authority: UICommandAuthority)] = [:]
     private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
@@ -213,6 +219,7 @@ final class PersistenceBootstrap: ObservableObject {
         invitationShareIdentity: @escaping @MainActor @Sendable (PersistenceController, ShopperSession, HomeGraphIdentity) async throws -> HomeShareIdentity? = {
             try await ManagedHomeInvitationTransport(persistence: $0, session: $1).shareIdentity(for: $2)
         },
+        makeHomeLeaveTransport: @escaping @Sendable (PersonalCartService) -> ManagedHomeLeaveTransport = { ManagedHomeLeaveTransport(cart: $0, persistence: $0.persistence) },
         makeHomeRejoinVerifier: @escaping @Sendable (PersonalCartService) -> any HomeRejoinVerifying = { ManagedHomeRejoinVerifier(cart: $0) },
         activateAccountStore: @escaping @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { try PersistenceBootstrap.productionAccountActivation(source: $0, session: $1, base: $2, importLegacy: $3) }
     ) {
@@ -226,6 +233,7 @@ final class PersistenceBootstrap: ObservableObject {
         self.accountStoreDirectory = accountStoreDirectory
         self.participantStoreForHomeChoice = participantStoreForHomeChoice
         self.invitationShareIdentity = invitationShareIdentity
+        self.makeHomeLeaveTransport = makeHomeLeaveTransport
         self.makeHomeRejoinVerifier = makeHomeRejoinVerifier
         self.activateAccountStore = activateAccountStore
         cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
@@ -378,6 +386,30 @@ final class PersistenceBootstrap: ObservableObject {
                     }
                     return try productionAccountActivation(source: source, session: session, base: base, importLegacy: approved)
                 }
+#if DEBUG
+                let rootGoneLeaveFixture = HomeLeaveRootGoneUITestBackend.isEnabled(processInfo.environment)
+#endif
+                let participantStoreLookup: (PersistenceController) -> NSPersistentStore? = { persistence in
+#if DEBUG
+                    if rootGoneLeaveFixture { return persistence.primaryStore }
+#endif
+                    return persistence.store(for: .participantShared)
+                }
+                let shareLookup: @MainActor @Sendable (PersistenceController, ShopperSession, HomeGraphIdentity) async throws -> HomeShareIdentity? = { persistence, session, graph in
+#if DEBUG
+                    if rootGoneLeaveFixture { return HomeLeaveRootGoneUITestBackend.share }
+#endif
+                    return try await ManagedHomeInvitationTransport(persistence: persistence, session: session).shareIdentity(for: graph)
+                }
+                let leaveTransportFactory: @Sendable (PersonalCartService) -> ManagedHomeLeaveTransport = { cart in
+#if DEBUG
+                    if rootGoneLeaveFixture {
+                        return ManagedHomeLeaveTransport(cart: cart, persistence: cart.persistence,
+                            backend: HomeLeaveRootGoneUITestBackend(cart: cart))
+                    }
+#endif
+                    return ManagedHomeLeaveTransport(cart: cart, persistence: cart.persistence)
+                }
                 var fixtureInvitations: HomeInvitationController?
 #if DEBUG
                 if activeHomesFixture || homeAdoptionFixture {
@@ -401,7 +433,9 @@ final class PersistenceBootstrap: ObservableObject {
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment,
                         defaults: fixtureDefaults, invitations: fixtureInvitations, makeAccountProvider: providerFactory,
-                        accountStoreDirectory: accountDirectory, activateAccountStore: activate
+                        accountStoreDirectory: accountDirectory, participantStoreForHomeChoice: participantStoreLookup,
+                        invitationShareIdentity: shareLookup, makeHomeLeaveTransport: leaveTransportFactory,
+                        activateAccountStore: activate
                     )
 #if DEBUG
                     if activeHomesFixture {
@@ -428,7 +462,9 @@ final class PersistenceBootstrap: ObservableObject {
                 }
                 let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) },
                     defaults: fixtureDefaults, invitations: fixtureInvitations, makeAccountProvider: providerFactory,
-                    accountStoreDirectory: accountDirectory, activateAccountStore: activate)
+                    accountStoreDirectory: accountDirectory, participantStoreForHomeChoice: participantStoreLookup,
+                        invitationShareIdentity: shareLookup, makeHomeLeaveTransport: leaveTransportFactory,
+                        activateAccountStore: activate)
                 if unavailableSetup || activeHomesFixture || homeAdoptionFixture {
                     bootstrap.personalMode = activeHomesFixture || fixtureDefaults.bool(forKey: personalModeKey)
                 }
@@ -628,6 +664,7 @@ final class PersistenceBootstrap: ObservableObject {
         if case .ready(let ready) = state { previous = ready } else { previous = pendingRetirement }
         pendingRetirement = previous
         previous?.presentation.retire()
+        clearHomeLeavePresentation()
         invitations?.configure(session: nil)
         homeCoordinator.bind(nil)
         generation += 1
@@ -647,6 +684,7 @@ final class PersistenceBootstrap: ObservableObject {
             Task {
                 await accountProvider.refresh()
                 configureInvitations()
+                Task { await refreshHomeLeaveStatuses() }
                 await refreshHomeAccessAndReplay()
             }
         } else { resumePendingCart() }
@@ -895,6 +933,7 @@ final class PersistenceBootstrap: ObservableObject {
         associationWorker = nil
         homeAccessRefreshID = nil
         personalService = nil
+        clearHomeLeavePresentation()
         cloudMonitor.reset()
         if let ready = previous {
             ready.persistence.container.viewContext.reset()
@@ -1137,8 +1176,8 @@ final class PersistenceBootstrap: ObservableObject {
             do {
                 let imported = try await historyConsumer.consumeSummary()
                 guard generation == requestedGeneration else { return }
-                if imported.transactionCount > 0, case .ready(let ready) = state {
-                    ready.persistence.homeNativeAccess.invalidateVerification()
+                if case .ready(let ready) = state {
+                    ready.persistence.homeNativeAccess.applyImportedHistory(imported)
                 }
                 try await refreshHomes()
                 if imported.requiresAccessRefresh { resumePendingCart(recheckIfRunning: true) }
@@ -1429,17 +1468,150 @@ final class PersistenceBootstrap: ObservableObject {
                         journalURL: url, transport: transport)
                     try validateMembershipPresentation(ready, scope: scope)
                     return result
-                }))
+                }), leave: HomeDetailsLeaveActions(
+                    prepare: { [self] in try await prepareHomeLeave(scope: scope) },
+                    confirm: { [self] command in try await confirmHomeLeave(command, scope: scope) }))
 #if DEBUG
         if let fixture = homeDetailsFixtures[scope] { return fixture }
         if let fixture = HomeDetailsUITestFixture.make(scope: scope,
             name: homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home",
-            rename: actions.rename) {
+            rename: actions.rename,
+            leaveOverride: HomeLeaveRootGoneUITestBackend.isEnabled(ProcessInfo.processInfo.environment) ? actions.leave : nil) {
             homeDetailsFixtures[scope] = fixture
             return fixture
         }
 #endif
         return actions
+    }
+
+    func prepareHomeLeave(scope: ActiveHomeScope) async throws -> HomeLeaveCommand {
+        let (ready, _, _) = try membershipContext(scope)
+        guard let cart = personalService, cart.persistence === ready.persistence,
+              let provider = accountProvider,
+              participantStoreForHomeChoice(ready.persistence)?.identifier == scope.graph.storeIdentifier else {
+            throw HomeMembershipError.scopeChanged
+        }
+        let session = try verifiedSession(provider)
+        guard let share = try await invitationShareIdentity(ready.persistence, session, scope.graph) else {
+            throw HomeMembershipError.shareUnavailable
+        }
+        try validateMembershipPresentation(ready, scope: scope)
+        let identity = HomeNativeAccessIdentity(scope: HomeEffectScope(session: session,
+            householdID: scope.graph.householdID, listID: scope.graph.listID),
+            storeIdentifier: scope.graph.storeIdentifier, rootURI: scope.graph.rootURI,
+            share: HomeEffectShare(recordName: share.recordName, zoneName: share.zoneName, zoneOwnerName: share.zoneOwnerName))
+        let command = try await makeHomeLeaveTransport(cart).prepare(identity: identity,
+            authority: ready.presentation.commandAuthority)
+        try validateMembershipPresentation(ready, scope: scope)
+        return command
+    }
+
+    func confirmHomeLeave(_ command: HomeLeaveCommand, scope: ActiveHomeScope) async throws -> HomeLeaveStatus {
+        let (ready, _, _) = try membershipContext(scope)
+        guard let cart = personalService, cart.persistence === ready.persistence,
+              let provider = accountProvider else { throw HomeMembershipError.scopeChanged }
+        let session = try verifiedSession(provider)
+        guard command.origin.scope == HomeEffectScope(session: session,
+            householdID: scope.graph.householdID, listID: scope.graph.listID),
+              command.origin.storeIdentifier == scope.graph.storeIdentifier,
+              command.origin.rootURI == scope.graph.rootURI else { throw HomeMembershipError.scopeChanged }
+        let requestGeneration = generation
+        do {
+            let result = try await makeHomeLeaveTransport(cart).execute(command, authority: ready.presentation.commandAuthority)
+            await publishHomeLeaveOutcome(cart: cart, generation: requestGeneration)
+            return result
+        } catch {
+            await publishHomeLeaveOutcome(cart: cart, generation: requestGeneration)
+            throw error
+        }
+    }
+
+    /// An already-retained but unsubmitted confirmation can be finished without
+    /// reopening the shared graph's retired screen. Submitted uncertainty only observes.
+    func resumeHomeLeave(_ command: HomeLeaveCommand) async throws {
+        guard homeLeaveResumingID == nil, let cart = personalService,
+              let status = homeLeaveStatuses.first(where: { $0.command == command }), canResumeHomeLeave(status) else {
+            throw HomeMembershipError.scopeChanged
+        }
+        let requestGeneration = generation
+        homeLeaveResumingID = command.id
+        defer { if generation == requestGeneration, homeLeaveResumingID == command.id { homeLeaveResumingID = nil } }
+        do {
+            _ = try await makeHomeLeaveTransport(cart).execute(command)
+            await publishHomeLeaveOutcome(cart: cart, generation: requestGeneration)
+        } catch {
+            await publishHomeLeaveOutcome(cart: cart, generation: requestGeneration)
+            throw error
+        }
+    }
+
+    func canResumeHomeLeave(_ status: HomeLeaveStatus) -> Bool {
+        guard let provider = accountProvider, (try? verifiedSession(provider)) != nil else { return false }
+        return !status.submitted && !status.completed && homeLeaveIsOnThisDevice(status.command)
+    }
+
+    func homeLeaveIsOnThisDevice(_ command: HomeLeaveCommand) -> Bool {
+        guard case .ready(let ready) = state, let provider = accountProvider,
+              let session = try? provider.currentSession(),
+              command.origin.scope == HomeEffectScope(session: session,
+                householdID: command.origin.scope.householdID, listID: command.origin.scope.listID),
+              let store = participantStoreForHomeChoice(ready.persistence) else { return false }
+        return store.identifier == command.origin.storeIdentifier
+            && store.url?.standardizedFileURL == command.storeURL.standardizedFileURL
+    }
+
+    private func publishHomeLeaveOutcome(cart: PersonalCartService, generation requestedGeneration: Int) async {
+        guard generation == requestedGeneration, personalService === cart else { return }
+        await refreshHomeLeaveStatuses(reconcile: false)
+        guard generation == requestedGeneration, personalService === cart else { return }
+        try? await refreshHomes()
+    }
+
+    /// Account-wide private status remains available when the shared root is gone.
+    /// Publish retained evidence first; remote checks never submit another purge.
+    func refreshHomeLeaveStatuses(reconcile: Bool = true) async {
+        guard case .ready(let ready) = state, let cart = personalService,
+              cart.persistence === ready.persistence, let provider = accountProvider,
+              let session = try? provider.currentSession(), cart.initialAccountBinding == session.accountBinding else { return }
+        let requestGeneration = generation, requestID = UUID()
+        homeLeaveRefreshID = requestID
+        isCheckingHomeLeaves = true
+        defer { if homeLeaveRefreshID == requestID { homeLeaveRefreshID = nil; isCheckingHomeLeaves = false } }
+        @MainActor func isCurrent() -> Bool {
+            generation == requestGeneration && personalService === cart && homeLeaveRefreshID == requestID
+                && (try? provider.currentSession()) == session
+        }
+        do {
+            let retained = try await Task.detached(priority: .utility) { try cart.retainedHomeLeaves() }.value
+            guard isCurrent() else { return }
+            homeLeaveStatuses = retained
+            homeLeaveStatusError = nil
+            guard reconcile, (try? verifiedSession(provider)) == session else { return }
+            var observedFailure = false
+            let transport = makeHomeLeaveTransport(cart)
+            for status in retained where status.submitted && !status.completed {
+                guard isCurrent() else { return }
+                guard (try? verifiedSession(provider)) == session else { break }
+                guard homeLeaveIsOnThisDevice(status.command) else { continue }
+                do { _ = try await transport.reconcile(status.command) }
+                catch { observedFailure = true }
+            }
+            let refreshed = try await Task.detached(priority: .utility) { try cart.retainedHomeLeaves() }.value
+            guard isCurrent() else { return }
+            homeLeaveStatuses = refreshed
+            if observedFailure { homeLeaveStatusError = "iCloud has not confirmed leaving this home. Your personal cart and history remain saved." }
+        } catch {
+            guard isCurrent() else { return }
+            homeLeaveStatusError = "Saved leave status could not be checked. Your personal cart and history remain saved."
+        }
+    }
+
+    private func clearHomeLeavePresentation() {
+        homeLeaveRefreshID = nil
+        homeLeaveStatuses = []
+        homeLeaveStatusError = nil
+        isCheckingHomeLeaves = false
+        homeLeaveResumingID = nil
     }
 
     private func membershipContext(_ scope: ActiveHomeScope) throws -> (ReadyState, URL, ManagedHomeMembershipTransport) {
@@ -1497,6 +1669,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func resumePendingCart(recheckIfRunning: Bool = false) {
+        Task { await refreshHomeLeaveStatuses() }
         Task { await refreshHomeAccessAndReplay(recheckIfRunning: recheckIfRunning) }
     }
 

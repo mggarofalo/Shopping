@@ -25,6 +25,14 @@ final class HomeNativeAccessGate: @unchecked Sendable {
     private var sequence: UInt64 = 0
     private var states: [HomeNativeAccessIdentity: State] = [:]
 
+    /// Access-only imports already constrain publication through the durable
+    /// ledger. Invalidating their native observations without another native pass
+    /// would strand unrelated homes and discard valid in-flight responses.
+    func applyImportedHistory(_ summary: PersistentHistoryConsumer.Summary) {
+        guard summary.requiresAccessRefresh else { return }
+        invalidateVerification()
+    }
+
     func invalidateVerification() {
         lock.withLock {
             for identity in states.keys {

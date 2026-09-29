@@ -643,8 +643,8 @@ zone observations, and purge completion. Tests do not establish CloudKit mapping
 permission propagation, server zone deletion, or actual cross-device cleanup. The
 production adapter uses a nonnil captured participant store and exact zone; only
 zone-not-found from an exact zone fetch counts as absence, never a missing share
-or permission failure. Native device proof and confirmation/status UI remain
-required before release exposure.
+or permission failure. Native device proof remains required before release exposure. The confirmation
+and status UI proof is recorded below.
 
 The September 29 native-leave checkpoint passed 21 leave-focused tests, then 26
 including the home-creation concurrency fixture, all 506 Fast tests, and 47 Watch
@@ -658,3 +658,73 @@ log warnings remain. The earlier `leave-final-fast` bundle retains 505 passes an
 one failure: a superseded discovery request returned before the newer request
 published. The fixture now waits boundedly for that publication after each single
 refresh, preserving its no-duplicate-creation and selection assertions.
+
+
+## Leave confirmation and retained status (SHOPPING-129)
+
+`HomeDetailsModelTests` owns accepted-participant eligibility, exact command and
+scope matching, cancellation, repeated confirmation, and stale prepare/confirm
+completion after presentation retirement. The native transport remains the owner
+of durable authorization, quarantine, and at-most-once purge behavior.
+
+`HomeDetailsUITests/testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome`
+owns the visible unsynced-change/private-history disclosure, Cancel returning
+without submission, Leave now producing an honest pending result, and disabling
+a repeated leave. Its isolated DEBUG fixture provides native membership and an
+uncertain callback only; it does not seed a completed leave or prove CloudKit.
+
+`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome`
+performs Leave now through the real transport and private ledger, with a DEBUG
+backend simulating loss of the native callback after exact root/list deletion.
+It opens Choose a home, verifies the removed root is unavailable and retained
+leave status remains reachable, then checks the explicit status action's
+idle → checking → uncertain-result transition. The bounded simulated network
+response makes that interaction distinguishable from an earlier automatic check;
+no completed leave or expected status result is seeded before the user action.
+
+`HomeLeaveBootstrapTests` owns the real bootstrap integration with unique private
+and participant SQLite stores: confirmed leave preserves private cart/history,
+does not select an unrelated home, and retains account-wide status after root
+removal and reopening. A cached offline account can read its retained status but
+cannot resume or query native membership. A late status callback cannot publish
+into a different account. An unsubmitted durable confirmation can resume on its
+original store; submitted uncertainty only reconciles and never purges again.
+
+The initial 24-test model/bootstrap run passed its assertions but emitted
+post-suite missing-SQLite errors (`/tmp/shopping-129-leave-bootstrap-focused`).
+Its account-change fixture had left the replacement account's asynchronous load
+unfinished before deleting its directory. The corrected fixture gives each
+account separate store paths, awaits the replacement runtime, and verifies store
+detachment before cleanup. The focused five-test rerun
+(`/tmp/shopping-129-leave-bootstrap-isolation.xcresult` and `.log`) passed with
+zero skips/runtime warnings and no Core Data errors or missing-path messages.
+Pre-existing model-ambiguity warnings remain separately tracked by SHOPPING-131.
+
+Final integration review caught an access-only import invalidating every native
+access observation without scheduling another verification pass. Phone and Watch
+now share `HomeNativeAccessGate.applyImportedHistory`: durable access facts remain
+enforced by the ledger, while only ordinary imports invalidate native verification.
+`HomeNativeAccessGateTests` proves two verified homes survive an access-only import,
+a held observation can finish without an extra pass, and ordinary imports still
+invalidate verification and request a trailing pass. The focused gate, permission,
+and bootstrap run passed all 24 tests (`/tmp/shopping-129-leave-history-focused`).
+
+The final UI/backend source passed 519 Fast tests and 47 Watch unit tests, with
+zero skips and zero xcresult runtime warnings (`/tmp/shopping-129-leave-ui-fast`
+and `/tmp/shopping-129-leave-ui-watch`). Raw Fast Core Data errors came only from
+the two intentional invalid-store load tests; model-ambiguity warnings remain.
+Source hashes are retained in `/tmp/shopping-129-leave-ui-final-source.json`.
+
+The new Cancel/Leave workflow passed independently. The root-gone workflow first
+proved navigation, then gained a stronger assertion of the status check's actual
+transition. Its first strengthened run failed because the query assumed a
+ProgressIndicator accessibility type; the stable-identifier query now requires
+one matching element without assuming that type. The failure remains in
+`/tmp/shopping-129-leave-ui-validated.xcresult`; the corrected single-test run
+`/tmp/shopping-129-leave-status-interaction-ui.xcresult` passed with no skips or
+runtime warnings. No product behavior or assertion was disabled to pass it.
+
+The unchanged final source also passed all six standard acceptance UI workflows
+(`/tmp/shopping-129-leave-ui-acceptance.xcresult` and `.log`), with zero skips.
+The same four negative/non-finite frame runtime warnings remain tracked by
+SHOPPING-131; this run does not claim those warnings are resolved.

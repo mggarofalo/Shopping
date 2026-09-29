@@ -9,13 +9,14 @@ final class HomeNativeAccessGateTests: XCTestCase {
         let started: XCTestExpectation
         private(set) var count = 0
         private var release: CheckedContinuation<Void, Never>?
+        private var firstReleased = false
         init(gate: HomeNativeAccessGate, home: HomeNativeAccessIdentity, started: XCTestExpectation) {
             self.gate = gate; self.home = home; self.started = started
         }
         func run() async -> String? {
             count += 1
             let request = gate.begin(home)
-            if count == 1 {
+            if count == 1, !firstReleased {
                 await withCheckedContinuation { continuation in
                     release = continuation
                     started.fulfill()
@@ -23,7 +24,7 @@ final class HomeNativeAccessGateTests: XCTestCase {
             }
             return gate.finish(request, access: .writable) ? nil : "Stale observation"
         }
-        func finishFirst() { release?.resume(); release = nil }
+        func finishFirst() { firstReleased = true; release?.resume(); release = nil }
     }
 
     private func identity(account: String = "A", store: String = "shared", root: String = "root",
@@ -148,13 +149,57 @@ final class HomeNativeAccessGateTests: XCTestCase {
         XCTAssertFalse(resolved.permitsPublication(resolved.capturedAuthority))
     }
 
+    func testAccessOnlyImportPreservesNativeVerificationForBothHomes() throws {
+        let gate = HomeNativeAccessGate()
+        let homeA = try identity(root: "home-A", share: "share-A")
+        let homeB = try identity(root: "home-B", share: "share-B")
+        let requestA = gate.begin(homeA), requestB = gate.begin(homeB)
+        XCTAssertTrue(gate.finish(requestA, access: .writable))
+        XCTAssertTrue(gate.finish(requestB, access: .writable))
+
+        // Imported loss/permission facts for A remain enforced by the private
+        // ledger; they must not silently invalidate B's native verification.
+        gate.applyImportedHistory(.init(transactionCount: 1, requiresAccessRefresh: false))
+        XCTAssertTrue(gate.isCurrent(requestA))
+        XCTAssertTrue(gate.isCurrent(requestB))
+        XCTAssertTrue(gate.permitsPublication(homeA))
+        XCTAssertTrue(gate.permitsPublication(homeB))
+    }
+
+    func testAccessOnlyImportPreservesHeldNativeCompletionWithoutSchedulingAnotherPass() async throws {
+        let queue = HomeAccessRefreshQueue(), gate = HomeNativeAccessGate()
+        let homeA = try identity(root: "home-A", share: "share-A")
+        let homeB = try identity(root: "home-B", share: "share-B")
+        XCTAssertTrue(gate.finish(gate.begin(homeB), access: .writable))
+        let started = expectation(description: "Native verification held during access-only import")
+        let native = HeldNativePass(gate: gate, home: homeA, started: started)
+        let pending = Task { await queue.run(recheckIfRunning: false) { await native.run() } }
+        await fulfillment(of: [started], timeout: 2)
+        gate.applyImportedHistory(.init(transactionCount: 1, requiresAccessRefresh: false))
+        XCTAssertFalse(gate.permitsPublication(homeA), "An unfinished read is still unverified")
+        XCTAssertTrue(gate.permitsPublication(homeB))
+        // Access-only history deliberately queues no native recheck. Its callback
+        // must remain current or A would stay blocked until another foreground.
+        await native.finishFirst()
+        let failure = await pending.value
+        let passes = await native.count
+        XCTAssertNil(failure)
+        XCTAssertEqual(passes, 1)
+        XCTAssertTrue(gate.permitsPublication(homeA))
+        XCTAssertTrue(gate.permitsPublication(homeB))
+    }
+
     func testOrdinaryImportDuringHeldNativePassQueuesFreshVerification() async throws {
         let queue = HomeAccessRefreshQueue(), gate = HomeNativeAccessGate(), home = try identity()
+        let otherHome = try identity(root: "other-home", share: "other-share")
+        XCTAssertTrue(gate.finish(gate.begin(otherHome), access: .writable))
         let started = expectation(description: "Native verification held")
         let native = HeldNativePass(gate: gate, home: home, started: started)
         let first = Task { await queue.run(recheckIfRunning: false) { await native.run() } }
         await fulfillment(of: [started], timeout: 2)
-        gate.invalidateVerification() // An ordinary import invalidates the in-flight read.
+        gate.applyImportedHistory(.init(transactionCount: 1, requiresAccessRefresh: true))
+        XCTAssertFalse(gate.permitsPublication(home), "Ordinary domain imports still require fresh native verification")
+        XCTAssertFalse(gate.permitsPublication(otherHome), "Previously verified homes are invalidated for a domain import")
         let imported = Task { await queue.run(recheckIfRunning: true) { await native.run() } }
         let deadline = ContinuousClock.now + .seconds(2)
         while await queue.pendingRequestCount == 0, ContinuousClock.now < deadline { await Task.yield() }
