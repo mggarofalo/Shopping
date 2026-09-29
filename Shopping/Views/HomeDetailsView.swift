@@ -99,7 +99,6 @@ struct HomeDetailsView: View {
             if phase == .active { Task { await model.refresh() } }
         }
         .onChange(of: bootstrap.cloudStatus) { _, _ in Task { await model.refresh() } }
-        .refreshable { await model.refresh() }
         .sheet(isPresented: $showingInvitationExplanation, onDismiss: {
             guard requestedInvitation else { return }
             requestedInvitation = false

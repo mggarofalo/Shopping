@@ -15,6 +15,7 @@ actor HomeMembershipCoordinator {
         let task: Task<Void, Never>
     }
     private var tails: [ActiveHomeScope: Tail] = [:]
+    private(set) var activeRequestCount = 0
 
     func refresh(scope: ActiveHomeScope, journalURL: URL,
                  transport: any HomeMembershipTransport) async throws -> HomeMembershipSnapshot {
@@ -84,6 +85,8 @@ actor HomeMembershipCoordinator {
 
     private func serialized<Value: Sendable>(scope: ActiveHomeScope,
         operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        activeRequestCount += 1
+        defer { activeRequestCount -= 1 }
         let previous = tails[scope]?.task
         let id = UUID()
         let task = Task {

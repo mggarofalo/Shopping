@@ -4,27 +4,67 @@ import XCTest
 @MainActor
 final class HomeDetailsModelTests: XCTestCase {
     @MainActor
-    private final class Gate<Value> {
-        private var started = false
-        private var startWaiter: CheckedContinuation<Void, Never>?
-        private var continuation: CheckedContinuation<Value, Never>?
+    private final class Gate<Value: Sendable> {
+        enum Failure: Error { case actionDidNotStart, multipleWaiters }
+        private enum State {
+            case idle
+            case waiting(CheckedContinuation<Value, Error>)
+            case finished(Result<Value, Error>)
+        }
+        private var state: State = .idle
+        private let started = XCTestExpectation(description: "Action reached its controlled boundary")
 
-        func wait() async -> Value {
-            await withCheckedContinuation { continuation in
-                self.continuation = continuation
-                started = true
-                startWaiter?.resume()
-                startWaiter = nil
+        init() { started.assertForOverFulfill = false }
+
+        func wait() async throws -> Value {
+            switch state {
+            case .finished(let result): return try result.get()
+            case .waiting: throw Failure.multipleWaiters
+            case .idle: break
+            }
+            return try await withCheckedThrowingContinuation { continuation in
+                state = .waiting(continuation)
+                started.fulfill()
             }
         }
-        func waitUntilStarted() async {
-            guard !started else { return }
-            await withCheckedContinuation { startWaiter = $0 }
+        func waitUntilStarted() async throws {
+            let result = await XCTWaiter.fulfillment(of: [started], timeout: 2)
+            XCTAssertEqual(result, .completed, "The action returned or failed before reaching its controlled boundary")
+            guard result == .completed else { throw Failure.actionDidNotStart }
         }
-        func finish(_ value: Value) {
-            continuation?.resume(returning: value)
-            continuation = nil
+        func finish(_ value: Value) { resolve(.success(value)) }
+        func cancel() { resolve(.failure(CancellationError())) }
+
+        private func resolve(_ result: Result<Value, Error>) {
+            switch state {
+            case .finished: return
+            case .idle: state = .finished(result)
+            case .waiting(let continuation):
+                state = .finished(result)
+                continuation.resume(with: result)
+            }
         }
+    }
+
+    /// Always release the controlled suspension and drain its task, including when a
+    /// fixture read throws before the test reaches finish(). Cancellation is terminal
+    /// even when the action reaches the gate only after the startup timeout.
+    private func withGateTask<Value: Sendable>(_ gate: Gate<Value>,
+        operation: @escaping @MainActor () async throws -> Void,
+        body: @MainActor (Task<Void, Error>) async throws -> Void) async throws {
+        let task = Task { try await operation() }
+        do {
+            try await gate.waitUntilStarted()
+            try await body(task)
+        } catch {
+            gate.cancel()
+            task.cancel()
+            _ = await task.result
+            throw error
+        }
+        gate.cancel()
+        task.cancel()
+        _ = await task.result
     }
 
     @MainActor
@@ -119,14 +159,14 @@ final class HomeDetailsModelTests: XCTestCase {
         let scope = try scope()
         let actions = Actions(value: snapshot(scope: scope))
         let gate = Gate<HomeMembershipSnapshot>()
-        actions.refreshOperation = { await gate.wait() }
+        actions.refreshOperation = { try await gate.wait() }
         let model = HomeDetailsModel(scope: scope, actions: actions.actions)
-        let operation = Task { await model.refresh() }
-        await gate.waitUntilStarted()
-        XCTAssertTrue(model.busy)
-        model.retire()
-        gate.finish(actions.value)
-        await operation.value
+        try await withGateTask(gate, operation: { await model.refresh() }) { operation in
+            XCTAssertTrue(model.busy)
+            model.retire()
+            gate.finish(actions.value)
+            try await operation.value
+        }
         XCTAssertNil(model.snapshot)
         XCTAssertFalse(model.isCurrent)
         XCTAssertFalse(model.busy)
@@ -220,14 +260,14 @@ final class HomeDetailsModelTests: XCTestCase {
         let scope = try scope()
         let actions = Actions(value: snapshot(scope: scope))
         let gate = Gate<HomeInvitationDelivery>()
-        actions.inviteOperation = { await gate.wait() }
+        actions.inviteOperation = { try await gate.wait() }
         let model = HomeDetailsModel(scope: scope, actions: actions.actions)
         await model.refresh()
-        let operation = Task { await model.invite() }
-        await gate.waitUntilStarted()
-        model.retire()
-        gate.finish(actions.delivery)
-        await operation.value
+        try await withGateTask(gate, operation: { await model.invite() }) { operation in
+            model.retire()
+            gate.finish(actions.delivery)
+            try await operation.value
+        }
         XCTAssertNil(model.delivery)
         XCTAssertFalse(model.busy)
         await model.presented(actions.delivery)
@@ -293,24 +333,24 @@ final class HomeDetailsModelTests: XCTestCase {
         var renameCalls = 0
         let contributor = try XCTUnwrap(HomeDetailsUITestFixture.make(scope: scope, name: "Original", rename: { _ in
             renameCalls += 1
-            let succeeded = await (renameCalls == 1 ? failedWrite : successfulWrite).wait()
+            let succeeded = try await (renameCalls == 1 ? failedWrite : successfulWrite).wait()
             if !succeeded { throw HomeMembershipError.membershipChanged }
         }, environment: ["SHOPPING_UI_TEST_STORE_PATH": path, "SHOPPING_UI_TEST_HOME_MEMBERS": "contributor"]))
-        let failed = Task { try await contributor.rename("Rejected draft") }
-        await failedWrite.waitUntilStarted()
-        let beforeFailure = try await contributor.refresh()
-        XCTAssertEqual(beforeFailure.homeName, "Original", "Fixture must await the real rename callback")
-        failedWrite.finish(false)
-        do { try await failed.value; XCTFail("Rename failure must propagate") }
-        catch { XCTAssertEqual(error as? HomeMembershipError, .membershipChanged) }
+        try await withGateTask(failedWrite, operation: { try await contributor.rename("Rejected draft") }) { failed in
+            let beforeFailure = try await contributor.refresh()
+            XCTAssertEqual(beforeFailure.homeName, "Original", "Fixture must await the real rename callback")
+            failedWrite.finish(false)
+            do { try await failed.value; XCTFail("Rename failure must propagate") }
+            catch { XCTAssertEqual(error as? HomeMembershipError, .membershipChanged) }
+        }
         let afterFailure = try await contributor.refresh()
         XCTAssertEqual(afterFailure.homeName, "Original")
-        let successful = Task { try await contributor.rename("Updated") }
-        await successfulWrite.waitUntilStarted()
-        let beforeSuccess = try await contributor.refresh()
-        XCTAssertEqual(beforeSuccess.homeName, "Original")
-        successfulWrite.finish(true)
-        try await successful.value
+        try await withGateTask(successfulWrite, operation: { try await contributor.rename("Updated") }) { successful in
+            let beforeSuccess = try await contributor.refresh()
+            XCTAssertEqual(beforeSuccess.homeName, "Original")
+            successfulWrite.finish(true)
+            try await successful.value
+        }
         let afterSuccess = try await contributor.refresh()
         XCTAssertEqual(afterSuccess.homeName, "Updated")
         XCTAssertEqual(renameCalls, 2)

@@ -193,14 +193,27 @@ final class HomeMembershipCoordinatorTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(5))
         }
         let held = await transport.isHeld
-        guard held else { first.cancel(); XCTFail("Native operation did not start"); return }
+        guard held else {
+            first.cancel()
+            await transport.release()
+            _ = await first.result
+            XCTFail("Native operation did not start")
+            return
+        }
         first.cancel()
         let second = Task { try await coordinator.invite(scope: scope, journalURL: url, transport: transport) }
         let refresh = Task { try await coordinator.refresh(scope: scope, journalURL: url, transport: transport) }
+        let queueDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await coordinator.activeRequestCount != 3, ContinuousClock.now < queueDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let queued = await coordinator.activeRequestCount
+        XCTAssertEqual(queued, 3, "Both commands must enter the coordinator while the native operation remains held.")
         await transport.release()
-        let firstDelivery = try await first.value
-        let secondDelivery = try await second.value
-        _ = try await refresh.value
+        let results = await (first.result, second.result, refresh.result)
+        let firstDelivery = try results.0.get()
+        let secondDelivery = try results.1.get()
+        _ = try results.2.get()
         XCTAssertEqual(firstDelivery.id, secondDelivery.id)
         let counts = await transport.counts()
         XCTAssertEqual(counts.created, 1)
@@ -274,7 +287,13 @@ private actor MembershipTransportDouble: HomeMembershipTransport {
     func setOwner(_ value: Bool) { owner = value }
     func setURLFailure(_ value: Bool) { failURL = value }
     func counts() -> Counts { Counts(created: created, added: added, refreshed: refreshed, urls: urls) }
-    func release() { let continuation = held; held = nil; continuation?.resume() }
+    func release() {
+        // Latch release even if startup failed before reaching the native callback.
+        mode = .succeed
+        let continuation = held
+        held = nil
+        continuation?.resume()
+    }
     func include(_ id: String, acceptance: HomeMember.Acceptance) {
         members.removeAll { $0.id == id }
         members.append(HomeMember(id: id, name: nil, role: .contributor, acceptance: acceptance,
