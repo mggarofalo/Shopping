@@ -273,3 +273,30 @@ The DEBUG `SHOPPING_UI_TEST_ACTIVE_HOMES` flag operates only under the existing
 unique UI-test store path. It replaces account lookup and store opening with local
 fixtures while exercising production bootstrap/coordinator code. It cannot prove
 CloudKit membership, account permissions, invitation delivery or two-phone sharing.
+
+## Recoverable home creation and graph audit (SHOPPING-125)
+
+`HomeCreationTests` owns durable intent before saving, replay after reopening the
+SQLite store, preservation of a subsequently renamed home, account/store rejection,
+write-denial rollback, partial-graph refusal, and stale acknowledgment/resume
+identity. `ActiveHomeBootstrapTests` retains the production bootstrap wiring.
+`HomeShareGraphTests` owns complete relationship traversal, archived constraints,
+one-time and shared recovery records, exclusion of the separate private graph,
+and rejection of foreign-home relationships and duplicate child identities.
+These local checks do not establish CloudKit share creation, export, or server-side
+failure recovery; managed transport and live evidence have separate owners.
+
+`HomeShareProvisionerTests` owns existing-share reuse, persisted identity mismatch,
+missing known-share retention, lost callback reconciliation, explicit same-root replay,
+foreign-journal rejection, failed local preparation, and concurrent/cancelled waiters.
+Its held callback and observed active request count force overlap deterministically.
+The production adapter is compiled against actual managed APIs; these mock cases
+cannot prove native crash atomicity, cross-device serialization or exported privacy.
+See `docs/architecture/home-share-provisioning.md` for that boundary and live gates.
+
+`PersonalCartUITests/testResumeUnacknowledgedHomeCreationRetainsOriginalHomeAfterRelaunch`
+owns the rendered pending-creation resume control, disabled name editing, retention
+of the only original home/groceries and durable acknowledgment after another relaunch.
+Its DEBUG fixture seeds an unacknowledged command for the existing populated home
+only under the fresh UI-test store and active-home fixture flags. The fixture flag is
+removed before relaunch so the test exercises the journal, not repeated seeding.

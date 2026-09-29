@@ -134,6 +134,7 @@ final class PersistenceBootstrap: ObservableObject {
     private let defaults: UserDefaults
     let homeCoordinator: ActiveHomeCoordinator
     let editorDrafts: HomeEditorDraftStore
+    private let homeShareProvisioner = HomeShareProvisioner()
     private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
     private let accountStoreDirectory: () throws -> URL
     private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
@@ -321,6 +322,15 @@ final class PersistenceBootstrap: ObservableObject {
                     if activeHomesFixture {
                         bootstrap.personalMode = true
                         bootstrap.preloadedPreviewEnvironment = nil
+                        if processInfo.environment["SHOPPING_UI_TEST_PENDING_HOME_CREATION"] == "1",
+                           let store = environment.persistence.primaryStore {
+                            let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.shopping-homes",
+                                environment: "Development", accountRecordName: "isolated-home-test-account")
+                            let pending = HomeCreationCommand(id: UUID(), session: session, storeIdentifier: store.identifier,
+                                householdID: environment.ids.householdID, listID: environment.ids.listID, name: "Preview household")
+                            try JSONEncoder().encode(pending).write(
+                                to: HomeCreationJournal.location(storeURL: storeURL, session: session), options: .atomic)
+                        }
                     }
                     bootstrap.personalFixture = !activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
                     bootstrap.personalNoticeFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] == "1"
@@ -824,12 +834,14 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     struct CreatedHome {
+        let command: HomeCreationCommand
+        let journalURL: URL
         let householdID: UUID
         let listID: UUID
         let selected: Bool
     }
 
-    func createHome(name: String, beforeSelectionReconciliation: () async -> Void = {}) async throws -> CreatedHome {
+    func createHome(name: String, resuming: HomeCreationCommand? = nil, beforeSelectionReconciliation: () async -> Void = {}) async throws -> CreatedHome {
         guard !isCreatingHome, case .ready(let ready) = state,
               let provider = accountProvider else { throw ShopperSessionError.setupRequired }
         let session = try provider.currentSession()
@@ -837,13 +849,18 @@ final class PersistenceBootstrap: ObservableObject {
         isCreatingHome = true
         defer { isCreatingHome = false }
         let service = ready.service
+        let (journalURL, storeIdentifier) = try creationJournalLocation(ready: ready, session: session)
+        let command = try await Task.detached(priority: .userInitiated) {
+            try HomeCreationJournal(url: journalURL).begin(name: name, session: session, storeIdentifier: storeIdentifier, resuming: resuming)
+        }.value
         let created = try await Task.detached(priority: .userInitiated) {
-            try service.createHousehold(name: name)
+            try service.createHousehold(command: command)
         }.value
         // Creation has committed. A refresh, account transition or metadata read failure
         // cannot turn that durable success into a retryable creation error.
         func result() -> CreatedHome {
-            CreatedHome(householdID: created.householdID, listID: created.listID,
+            CreatedHome(command: command, journalURL: journalURL,
+                householdID: created.householdID, listID: created.listID,
                 selected: homeCoordinator.activeScope?.accountBinding == session.accountBinding
                     && homeCoordinator.activeScope?.graph.householdID == created.householdID
                     && homeCoordinator.activeScope?.graph.listID == created.listID)
@@ -866,6 +883,52 @@ final class PersistenceBootstrap: ObservableObject {
             // Keep the committed graph available to normal discovery and explicit selection.
         }
         return result()
+    }
+
+    /// Configured entry point for invitation UI and the development sharing harness.
+    /// A prepared share is not evidence that its grocery graph has exported.
+    func prepareSelectedHomeShare(retryInterrupted: Bool = false) async throws -> PreparedHomeShare {
+        guard case .ready(let ready) = state, let scope = ready.homeScope,
+              homeCoordinator.homes.contains(where: { $0.graph == scope.graph && $0.access == .owner }),
+              let url = ready.persistence.primaryStore?.url else { throw HomeSharingError.ownerRequired }
+        let transport = ManagedHomeShareTransport(persistence: ready.persistence,
+            authority: ready.presentation.commandAuthority)
+        let journalURL = url.deletingLastPathComponent().appendingPathComponent(
+            "share-provisioning-" + scope.preferenceNamespace + ".json")
+        let result = try await homeShareProvisioner.prepare(scope: scope, journalURL: journalURL,
+            transport: transport, retryInterrupted: retryInterrupted)
+        guard ready.presentation.isActive, homeCoordinator.activeScope == scope else {
+            throw HomeSharingError.scopeChanged
+        }
+        retryShareAssociations()
+        return result
+    }
+
+    func pendingHomeCreation() async throws -> HomeCreationCommand? {
+        guard case .ready(let ready) = state, let provider = accountProvider else { return nil }
+        let session = try provider.currentSession()
+        let (url, storeIdentifier) = try creationJournalLocation(ready: ready, session: session)
+        let pending = try await Task.detached(priority: .utility) {
+            try HomeCreationJournal(url: url).pending(session: session, storeIdentifier: storeIdentifier)
+        }.value
+        guard ready.presentation.isActive, try provider.currentSession() == session else { return nil }
+        return pending
+    }
+
+    func acknowledgeHomeCreation(_ created: CreatedHome) async throws {
+        try await Task.detached(priority: .utility) {
+            try HomeCreationJournal(url: created.journalURL).acknowledge(created.command)
+        }.value
+    }
+
+    private func creationJournalLocation(ready: ReadyState, session: ShopperSession) throws -> (URL, String) {
+        guard ready.persistence.personalCartInitialBinding == session.accountBinding else {
+            throw ShopperSessionError.accountChanged
+        }
+        guard let store = ready.persistence.primaryStore, let url = store.url else {
+            throw PersistenceSetupError.missingPrimaryStoreURL
+        }
+        return (HomeCreationJournal.location(storeURL: url, session: session), store.identifier)
     }
 
     private func applyHomeSelection(to ready: ReadyState) {
