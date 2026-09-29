@@ -141,4 +141,84 @@ final class HomePermissionTests: XCTestCase {
         }) { XCTAssertEqual($0 as? PersistencePermissionError, .updateDenied) }
         XCTAssertEqual(try entry(f).needID, f.needID)
     }
+
+    func testImportedAccessFactsMergeWithoutTriggeringAnotherNativeObservation() async throws {
+        let f = try fixture()
+        let directory = try XCTUnwrap(f.persistence.primaryStore?.url?.deletingLastPathComponent())
+        let consumer = PersistentHistoryConsumer(persistence: f.persistence,
+            checkpoints: FileHistoryCheckpointStore(directory: directory.appendingPathComponent("History")))
+        let initial = try await consumer.consumeSummary()
+        XCTAssertEqual(initial.transactionCount, 0, "Local app commands do not trigger network verification")
+        let imported = f.persistence.simulationContext()
+        defer { imported.performAndWait { imported.reset() } }
+        try imported.performAndWait {
+            imported.transactionAuthor = "test.cloud.import"
+            let value = HomeAccessRecord(id: UUID(),
+                scope: HomeEffectScope(session: f.session, householdID: f.homeID, listID: f.listID),
+                share: share, action: .blocked(.revoked))
+            let record = PersonalCartRecord(context: imported)
+            record.id = value.id
+            record.accountBinding = f.session.accountBinding
+            record.kind = "homeAccess"
+            record.command = try PersonalCartCoding.encode(value)
+            record.payload = try PersonalCartCoding.encode(value)
+            try imported.save()
+        }
+        let observationImport = try await consumer.consumeSummary()
+        XCTAssertEqual(observationImport.transactionCount, 1)
+        XCTAssertFalse(observationImport.requiresAccessRefresh, "Observation records must not cause cross-device network/write loops")
+        let snapshot = try HomeDiscoveryService(persistence: f.persistence).discover()
+        XCTAssertEqual(snapshot.homes.first?.access, .unresolved, "The imported restriction must still affect local access")
+        try imported.performAndWait {
+            let need = try XCTUnwrap(imported.fetch(Need.fetchRequest()).first)
+            need.title = "Imported grocery update"
+            try imported.save()
+        }
+        let domainImport = try await consumer.consumeSummary()
+        XCTAssertEqual(domainImport.transactionCount, 1)
+        XCTAssertTrue(domainImport.requiresAccessRefresh, "Ordinary imports still revalidate access before replay")
+        let repeated = try await consumer.consumeSummary()
+        XCTAssertEqual(repeated.transactionCount, 0)
+        XCTAssertFalse(repeated.requiresAccessRefresh)
+    }
+
+    @MainActor
+    func testDiscoveryRetiresSelectedPermissionScopeAndDoesNotReplaceLostHome() throws {
+        let f = try fixture()
+        let suite = "HomePermissionSelection." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let coordinator = ActiveHomeCoordinator(defaults: defaults)
+        coordinator.bind(f.session)
+        let discovery = HomeDiscoveryService(persistence: f.persistence)
+        func reconcile() throws {
+            let request = try XCTUnwrap(coordinator.beginDiscovery())
+            XCTAssertTrue(coordinator.reconcile(try discovery.discover(), request: request))
+        }
+        try reconcile()
+        let originalScope = try XCTUnwrap(coordinator.activeScope)
+        let initialGeneration = coordinator.generation
+        try restrict(f)
+        try reconcile()
+        XCTAssertEqual(coordinator.activeScope, originalScope)
+        XCTAssertEqual(coordinator.homes.first?.access, .restricted)
+        XCTAssertFalse(coordinator.isCurrent(scope: originalScope, generation: initialGeneration))
+        let restrictedGeneration = coordinator.generation
+        try reconcile()
+        XCTAssertEqual(coordinator.generation, restrictedGeneration, "Unchanged observations must not recreate the screen repeatedly")
+        try makeWritable(f)
+        try reconcile()
+        XCTAssertEqual(coordinator.homes.first?.access, .owner)
+        XCTAssertGreaterThan(coordinator.generation, restrictedGeneration)
+        _ = try f.service.createHousehold(name: "Other owned home")
+        try f.cart.blockHomeEffects(householdID: f.homeID, listID: f.listID, share: share, reason: .revoked, operationID: UUID())
+        try reconcile()
+        XCTAssertEqual(coordinator.readiness, .selectedHomeUnavailable)
+        XCTAssertNil(coordinator.activeScope)
+        XCTAssertEqual(try entry(f).needID, f.needID)
+        let reopened = ActiveHomeCoordinator(defaults: defaults)
+        reopened.bind(f.session)
+        XCTAssertTrue(reopened.reconcile(try discovery.discover(), request: try XCTUnwrap(reopened.beginDiscovery())))
+        XCTAssertEqual(reopened.readiness, .selectedHomeUnavailable, "Do not automatically select the other home after relaunch")
+    }
 }

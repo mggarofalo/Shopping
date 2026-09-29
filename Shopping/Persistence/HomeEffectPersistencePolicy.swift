@@ -24,6 +24,8 @@ enum HomeEffectPersistencePolicy {
         let repository = PersonalCartRepository(persistence: controller, context: context, session: session)
         for home in homes {
             guard let list = home.groceryList else { throw PersonalCartError.unavailable }
+            let native = try repository.nativeCommandAccess(for: home)
+            guard native != .readOnly, native != .lost else { throw PersistencePermissionError.updateDenied }
             let access = try repository.homeEffectAccess(householdID: home.id, listID: list.id)
             guard access.permitsPublication(access.capturedAuthority) else { throw PersistencePermissionError.updateDenied }
         }

@@ -52,6 +52,7 @@ extension PersonalCartRepository {
 
     func homeEffectMayPublish(kind: HomeEffectKind, subjectID: UUID,
                              householdID: UUID, listID: UUID) throws -> Bool {
+        guard try nativePublicationAllowed(householdID: householdID, listID: listID) else { return false }
         let authority: HomeEffectAuthority
         switch kind {
         case .checkout:

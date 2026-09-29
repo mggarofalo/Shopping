@@ -164,6 +164,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var accountLoadInProgress = false
     private var pendingRetirement: ReadyState?
     private var personalService: PersonalCartService?
+    private var homeAccessRefreshID: UUID?
     private var retainedLocalRecord: HomeAdoptionJournal.Record?
     private var retainedLocalConfiguration: PersistenceConfiguration?
     private var localHomeName: String?
@@ -633,10 +634,10 @@ final class PersistenceBootstrap: ObservableObject {
             Task {
                 await accountProvider.refresh()
                 configureInvitations()
+                await refreshHomeAccessAndReplay()
             }
-        }
+        } else { resumePendingCart() }
         invitations?.checkAgain()
-        resumePendingCart()
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
         Task {
@@ -879,6 +880,7 @@ final class PersistenceBootstrap: ObservableObject {
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver); self.associationObserver = nil }
         historyConsumer = nil
         associationWorker = nil
+        homeAccessRefreshID = nil
         personalService = nil
         cloudMonitor.reset()
         if let ready = previous {
@@ -947,13 +949,12 @@ final class PersistenceBootstrap: ObservableObject {
                         discovery = try HomeDiscoveryService(persistence: persistence).discover()
                     }
                     var cartService: PersonalCartService?
-                    var resumeError: String?
+                    let resumeError: String? = nil
                     if personalMode, let accountProvider {
                         let cart = PersonalCartService(persistence: persistence, sessionProvider: accountProvider)
                         try cart.captureLegacyReview()
                         cartService = cart
-                        do { try cart.resumePending() }
-                        catch { resumeError = error.localizedDescription }
+                        discovery = try HomeDiscoveryService(persistence: persistence).discover()
                     }
                     return PreparedStore(configuration: resolved, persistence: persistence,
                         service: service, selection: selection, personalCartService: cartService,
@@ -1050,8 +1051,7 @@ final class PersistenceBootstrap: ObservableObject {
                 let cartService = PersonalCartService(persistence: persistence, sessionProvider: accountProvider)
                 try cartService.captureLegacyReview()
                 personalService = cartService
-                do { try cartService.resumePending() }
-                catch { shareAssociationError = error }
+
             }
             if Self.consumesPersistentHistory(for: resolvedConfiguration) {
                 let checkpointDirectory = (resolvedConfiguration.stores.first?.url?.deletingLastPathComponent())
@@ -1083,6 +1083,7 @@ final class PersistenceBootstrap: ObservableObject {
                 personalCartService: personalService
             ))
             configureInvitations()
+            resumePendingCart()
             consumeHistory()
             retryShareAssociations()
         } catch {
@@ -1121,10 +1122,13 @@ final class PersistenceBootstrap: ObservableObject {
         let requestedGeneration = generation
         Task {
             do {
-                _ = try await historyConsumer.consume()
+                let imported = try await historyConsumer.consumeSummary()
                 guard generation == requestedGeneration else { return }
+                if imported.transactionCount > 0, case .ready(let ready) = state {
+                    ready.persistence.homeNativeAccess.invalidateVerification()
+                }
                 try await refreshHomes()
-                resumePendingCart()
+                if imported.requiresAccessRefresh { resumePendingCart(recheckIfRunning: true) }
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
             } catch {
                 guard generation == requestedGeneration else { return }
@@ -1303,9 +1307,17 @@ final class PersistenceBootstrap: ObservableObject {
         let actions = HomeDetailsActions(
             refresh: { [self] in
                 let (ready, url, transport) = try membershipContext(scope)
-                let result = try await homeMembershipCoordinator.refresh(scope: scope, journalURL: url, transport: transport)
+                await refreshHomeAccessAndReplay()
                 try validateMembershipPresentation(ready, scope: scope)
-                return result
+                do {
+                    let result = try await homeMembershipCoordinator.refresh(scope: scope, journalURL: url, transport: transport)
+                    try await refreshHomes()
+                    try validateMembershipPresentation(ready, scope: scope)
+                    return result
+                } catch {
+                    try? await refreshHomes()
+                    throw error
+                }
             },
             pending: { [self] in
                 let (ready, url, _) = try membershipContext(scope)
@@ -1428,20 +1440,27 @@ final class PersistenceBootstrap: ObservableObject {
             personalCartService: personalService))
     }
 
-    private func resumePendingCart() {
+    private func resumePendingCart(recheckIfRunning: Bool = false) {
+        Task { await refreshHomeAccessAndReplay(recheckIfRunning: recheckIfRunning) }
+    }
+
+    private func refreshHomeAccessAndReplay(recheckIfRunning: Bool = false) async {
         guard let personalService else { return }
-        let requestedGeneration = generation
-        Task {
-            let failure = await Task.detached(priority: .utility) { () -> String? in
-                do { try personalService.resumePending(); return nil }
-                catch { return error.localizedDescription }
-            }.value
-            guard generation == requestedGeneration, self.personalService === personalService else { return }
-            if let failure {
-                shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: failure])
-            }
+        let requestedGeneration = generation, requestID = UUID()
+        homeAccessRefreshID = requestID
+        let failure = await personalService.refreshNativeHomeAccessAndReplay(recheckIfRunning: recheckIfRunning)
+        guard generation == requestedGeneration, self.personalService === personalService,
+              homeAccessRefreshID == requestID else { return }
+        homeAccessRefreshID = nil
+        if let failure {
+            shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: failure])
+        } else if (shareAssociationError as NSError?)?.domain == "ShoppingCartResume" {
+            shareAssociationError = nil
         }
+        do { try await refreshHomes() }
+        catch { shareAssociationError = error }
+        if case .ready(let ready) = state { ready.personalCart?.refresh() }
     }
 
     private func retryShareAssociations() {

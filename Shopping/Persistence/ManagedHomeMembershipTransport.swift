@@ -258,6 +258,17 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
 
     private func fetch(_ identity: HomeShareIdentity, scope: ActiveHomeScope, role: PersistenceStoreRole) async throws -> CKShare {
         _ = try environment(scope)
+        if role == .participantShared {
+            guard let privateRecords, let provider = persistence.personalCartSessionProvider else { throw HomeMembershipError.shareUnavailable }
+            let session = try provider.currentSession()
+            let target = HomeNativeAccessIdentity(
+                scope: HomeEffectScope(session: session, householdID: scope.graph.householdID, listID: scope.graph.listID),
+                storeIdentifier: scope.graph.storeIdentifier, rootURI: scope.graph.rootURI,
+                share: HomeEffectShare(recordName: identity.recordName, zoneName: identity.zoneName, zoneOwnerName: identity.zoneOwnerName))
+            let result = try await ManagedHomeAccessObserver(cart: privateRecords, persistence: persistence).verifiedShare(target)
+            _ = try environment(scope)
+            return result
+        }
         let container = CKContainer(identifier: scope.containerIdentifier)
         let database = role == .ownerPrivate ? container.privateCloudDatabase : container.sharedCloudDatabase
         let id = CKRecord.ID(recordName: identity.recordName,

@@ -54,8 +54,10 @@ final class WatchPersistenceBootstrap {
     private var shareObserver: NSObjectProtocol?
     private var lastRefresh: Date?
     private var authorityGeneration = 0
+    private var accessRefreshID: UUID?
     private var detachmentError: Error?
     private(set) var syncMessage: String?
+    private var accessMessage: String?
 
     init(bundle: Bundle = .main, baseDirectory: URL? = nil) throws {
         guard let container = bundle.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
@@ -92,11 +94,11 @@ final class WatchPersistenceBootstrap {
         let cached: Bool
         if case .cached = provider.state { cached = true } else { cached = false }
         return associationStatus.projectedMessage(cloudStatus: cloudSync.status,
-            cachedAccount: cached, otherMessage: syncMessage)
+            cachedAccount: cached, otherMessage: accessMessage ?? syncMessage)
     }
 
     func syncStatus(additionalMessage: String? = nil) -> WatchSyncStatus {
-        var messages = [additionalMessage, syncMessage, associationStatus.message].compactMap { $0 }
+        var messages = [additionalMessage, syncMessage, accessMessage, associationStatus.message].compactMap { $0 }
         if case .cached = provider.state {
             messages.append("Using saved data. Changes sync when a connection returns.")
         }
@@ -177,17 +179,24 @@ final class WatchPersistenceBootstrap {
             object: persistence, queue: .main) { [weak self] _ in
                 Task { @MainActor in await self?.drainAssociations(runtime) }
             }
+        refreshHomeAccess()
         return runtime
     }
 
     private func accountChanged() {
         let next = try? provider.currentSession().accountBinding
-        guard binding != nil, next != binding else { return }
+        guard binding != nil else { return }
+        guard next != binding else {
+            if case .ready = provider.state { refreshHomeAccess() }
+            return
+        }
         authorityGeneration += 1
+        accessRefreshID = nil
         preparation = nil
         cloudSync.reset()
         associationStatus.reset()
         syncMessage = nil
+        accessMessage = nil
         onAuthorityInvalidated?()
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
         associationObserver = nil
@@ -220,10 +229,12 @@ final class WatchPersistenceBootstrap {
             Task { @MainActor in
                 guard let self, self.current?.persistence === runtime.persistence else { return }
                 do {
-                    _ = try await runtime.history.consume()
+                    let imported = try await runtime.history.consumeSummary()
                     guard self.current?.persistence === runtime.persistence else { return }
+                    if imported.transactionCount > 0 { runtime.persistence.homeNativeAccess.invalidateVerification() }
                     await self.drainAssociations(runtime)
                     guard self.current?.persistence === runtime.persistence else { return }
+                    if imported.requiresAccessRefresh { self.refreshHomeAccess(recheckIfRunning: true) }
                     self.onDataChanged?()
                 } catch {
                     guard self.current?.persistence === runtime.persistence else { return }
@@ -231,6 +242,22 @@ final class WatchPersistenceBootstrap {
                     self.onDataChanged?()
                 }
             }
+        }
+    }
+
+    /// Native access refresh is independent of local snapshot loading. In
+    /// particular, the active-list timer and store switching never await it.
+    func refreshHomeAccess(recheckIfRunning: Bool = false) {
+        guard let runtime = current else { return }
+        let requestID = UUID(), generation = authorityGeneration
+        accessRefreshID = requestID
+        Task { [weak self] in
+            let failure = await runtime.cart.refreshNativeHomeAccessAndReplay(recheckIfRunning: recheckIfRunning)
+            guard let self, self.authorityGeneration == generation,
+                  self.current?.persistence === runtime.persistence, self.accessRefreshID == requestID else { return }
+            self.accessRefreshID = nil
+            self.accessMessage = failure.map { _ in "Saved cart available. Home access could not be verified; shared changes are waiting." }
+            self.onDataChanged?()
         }
     }
 

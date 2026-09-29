@@ -25,7 +25,7 @@ final class HomeDiscoveryService: @unchecked Sendable {
                     incomplete = true
                     continue
                 }
-                let access: HomeCandidate.Access
+                var access: HomeCandidate.Access
                 switch persistence.role(of: store) {
                 case .local, .ownerPrivate: access = .owner
                 case .participantShared:
@@ -34,6 +34,18 @@ final class HomeDiscoveryService: @unchecked Sendable {
                             && cloud.canUpdateRecord(forManagedObjectWith: list.objectID) ? .contributor : .restricted
                     } else { access = .unresolved }
                 case nil: access = .unresolved
+                }
+                if persistence.personalCartsEnabled, let provider = persistence.personalCartSessionProvider {
+                    let session = try provider.currentSession()
+                    guard session.accountBinding == persistence.personalCartInitialBinding else { throw PersonalCartError.accountChanged }
+                    let repository = PersonalCartRepository(persistence: persistence, context: persistence.writer, session: session)
+                    let retained = try repository.homeEffectAccess(householdID: root.id, listID: list.id)
+                    if retained.requiresExplicitRejoin { access = .unresolved }
+                    else if !retained.permitsPublication(retained.capturedAuthority) { access = .restricted }
+                    if let native = try? repository.nativeCommandAccess(for: root) {
+                        if native == .lost { access = .unresolved }
+                        else if native == .readOnly, access != .unresolved { access = .restricted }
+                    }
                 }
                 homes.append(HomeCandidate(graph: HomeGraphIdentity(storeIdentifier: storeID,
                     rootURI: root.objectID.uriRepresentation().absoluteString,

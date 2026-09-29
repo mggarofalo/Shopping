@@ -447,9 +447,9 @@ The same suite covers rejoin without old outbox replay, newly captured work afte
 fresh grant, conflicting-share grants, and drain/detach/reopen persistence. The
 existing personal-cart tests retain ownership of reducers, native permission-policy
 simulation, private recovery, and normal two-replica ordering. These are local ledger
-proofs; the native metadata observer, exact participant-zone leave operation, and
-explicit invitation activation must still supply verified lifecycle events before
-SHOPPING-129 can be complete.
+proofs; native observation is covered separately below. Exact participant-zone
+leave and explicit rejoin still need integration and real-device verification
+before SHOPPING-129 can be complete.
 
 ### Temporary permission restrictions (SHOPPING-129)
 
@@ -462,3 +462,46 @@ restriction import fails closed. Household save enforcement covers new descendan
 and both original and destination homes of a relationship move; unrelated owned
 homes remain writable. These local persistence checks do not prove native CloudKit
 observation, leave, or real-device sharing.
+
+### Native access observation and runtime publication (SHOPPING-129)
+
+`HomeNativeAccessGateTests` owns initially unverified publication, transient refresh,
+late-response fencing, conservative failed retention, account/store/root/share
+isolation, portable read-only version deduplication, independent native-loss
+identities, narrow known-share error
+classification, and native-loss retention when an earlier grant imports late.
+The production recorder is used directly for causal ordering checks: a later rejoin
+must not authorize effects stamped with the earlier grant. Writable observation
+resolves only its captured restriction boundary and never creates a membership grant.
+The same test owner checks the shared refresh queue: concurrent foreground readers
+coalesce, while an ordinary import invalidating a held check retains a trailing
+check and returns its final result to every waiting caller.
+
+`HomePermissionTests` also owns discovery overlays, presentation-generation changes
+for effective permission changes, unchanged-observation stability, history merging
+without observation-only network feedback loops, and retaining an
+unavailable selected home across relaunch instead of selecting another home.
+`WatchShoppingSessionTests` owns explicit native-refresh dispatch separate from
+local reload/store switching and session busy state. `PersistentWatchShoppingServiceTests`
+checks imported read-only facts retiring a checkout capture while keeping private
+quantity and removal available. It also holds the real shared refresh queue while
+the SQLite service uses the production managed load-recovery policy, requiring
+cached loads, store switching, quantity changes and removal to finish before that
+queue is released. The bounded check drains both tasks on failure; it does not
+exercise native transport or account setup. Its fixture now drains and detaches the original
+store before directory cleanup; existing separately reopened fixture stores retain
+their own teardown obligations.
+
+The native adapter reads exact managed participant shares and verifies account,
+attached store, graph, and share identity around requests. Both apps gate shared
+publication and private-intent demand projection, including replay outside the
+selected home. Background checks do not occupy Watch snapshot loading. These are
+local code and simulator proofs, not evidence of real CloudKit delivery, permission
+propagation, device responsiveness, participant leave, or explicit rejoin. Those
+remain required by SHOPPING-129/30 and the device responsiveness protocol.
+
+The Watch status assertion for completed activity was synchronized with the
+existing shared message adopted in main `838c22e` (SHOPPING-146–152). It now checks
+`Recent iCloud activity completed.` exactly, as the iPhone owner already does,
+instead of expecting the removed disclaimer. The first native-access Watch run
+retains that stale-assertion failure; it is not treated as a passing validation.

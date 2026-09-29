@@ -2,7 +2,7 @@ import Foundation
 
 /// Portable account-private identities; neither store URLs nor managed object IDs
 /// are authority across devices. Native share verification happens before a grant.
-struct HomeEffectScope: Codable, Equatable, Sendable {
+struct HomeEffectScope: Codable, Equatable, Hashable, Sendable {
     let accountBinding: String
     let containerIdentifier: String
     let environment: String
@@ -127,6 +127,8 @@ struct HomeEffectAccess {
         hasCompletePermissions && unresolvedRestrictionIDs.isEmpty
             && authority.observedRestrictionIDs.isSubset(of: restrictionIDs) && permitsMembership(authority)
     }
+
+    var requiresExplicitRejoin: Bool { !permitsMembership(capturedAuthority) }
 
     private func permitsMembership(_ authority: HomeEffectAuthority) -> Bool {
         guard hasCompleteBoundary, hasConsistentShare, authority.observedBlockIDs == blockIDs else { return false }

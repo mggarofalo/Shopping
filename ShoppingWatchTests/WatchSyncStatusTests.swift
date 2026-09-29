@@ -10,7 +10,7 @@ final class WatchSyncStatusTests: XCTestCase {
         cloud.record(.init(store: "private", operation: .upload, started: Date(timeIntervalSince1970: 1), ended: Date(), failure: nil))
         let finished = WatchSyncStatus(cloud: cloud)
         XCTAssertEqual(finished.state, .recentActivity)
-        XCTAssertTrue(finished.details.contains("does not confirm another device"))
+        XCTAssertEqual(finished.details, "Recent iCloud activity completed.")
     }
 
     func testSetupCompletionAloneDoesNotBecomeCompletedSync() {

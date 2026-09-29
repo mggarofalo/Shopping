@@ -19,6 +19,9 @@ extension PersonalCartService {
         }
         try transact { repository in
             if try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) != nil { return }
+            let home = try repository.household(householdID)
+            let native = try repository.nativeCommandAccess(for: home)
+            guard native != .readOnly, native != .lost else { throw PersonalCartError.quarantined }
             let access = try repository.homeEffectAccess(householdID: householdID, listID: listID)
             let authority = access.capturedAuthority
             guard access.permitsPublication(authority) else { throw PersonalCartError.quarantined }

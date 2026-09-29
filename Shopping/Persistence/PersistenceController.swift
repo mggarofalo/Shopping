@@ -28,6 +28,8 @@ final class PersistenceController {
     var personalCartsEnabled = false
     var personalCartInitialBinding: String?
     var personalCartSessionProvider: (any ShopperSessionProviding)?
+    let homeNativeAccess = HomeNativeAccessGate()
+    let homeAccessRefreshQueue = HomeAccessRefreshQueue()
     let writer: NSManagedObjectContext
     let configuration: PersistenceConfiguration
     let permissionPolicy: PersistencePermissionPolicy

@@ -30,7 +30,10 @@ struct WatchShoppingView: View {
             await activeRefresh.run { await session.reload() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && initialLoadCompleted { Task { await session.reload() } }
+            if phase == .active && initialLoadCompleted {
+                session.refreshHomeAccess()
+                Task { await session.reload() }
+            }
         }
     }
 
