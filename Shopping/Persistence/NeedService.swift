@@ -850,6 +850,38 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    /// Renaming never changes a home's identity or moves its graph between stores.
+    /// Permission is checked by the normal save policy for the exact imported root.
+    func renameHome(name: String, scope: ActiveHomeScope) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard let session = try self.persistence.personalCartSessionProvider?.currentSession(),
+                  session.accountBinding == scope.accountBinding,
+                  session.containerIdentifier == scope.containerIdentifier,
+                  session.environment == scope.environment else { throw ShopperSessionError.accountChanged }
+            let graph = scope.graph
+            guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
+                throw NeedServiceError.scopeChanged
+            }
+            let rootRequest = Household.fetchRequest()
+            rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
+            let listRequest = GroceryList.fetchRequest()
+            listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
+            let roots = try context.fetch(rootRequest)
+            let lists = try context.fetch(listRequest)
+            guard roots.count == 1, lists.count == 1,
+                  let root = roots.first, let list = lists.first,
+                  !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
+                  let store = root.objectID.persistentStore,
+                  self.persistence.role(of: store) != nil,
+                  store.identifier == graph.storeIdentifier,
+                  root.objectID.uriRepresentation().absoluteString == graph.rootURI,
+                  list.objectID.persistentStore == store,
+                  root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+            root.name = name
+        }
+    }
+
     /// Retries only the identities from a durable, explicitly initiated creation command.
     /// A partial or ambiguous match is retained for recovery, never replaced with new IDs.
     func createHousehold(command: HomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {

@@ -374,3 +374,31 @@ production defaults and native invitation transport remain intact. The offline c
 also distinguishes cached authority for local metadata lookup from the stricter
 verified-account gate for native acceptance/import. This is local orchestration
 proof, not native sharing or cloud-delivery evidence.
+
+## Home members and invitation delivery (SHOPPING-128)
+
+`HomeMembershipCoordinatorTests` owns the durable one-time participant archive,
+per-home serialization through native completion, cancellation, restart at each
+submission checkpoint, uncertain-result reconciliation, and explicit resend. An
+absent participant after an uncertain submission never authorizes another write.
+The submitted-before-native crash window deliberately remains uncertain here;
+SHOPPING-129 must provide explicit durable owner resolution before module release.
+`ManagedHomeMembershipTransportTests` checks the real SDK factory and secure archive
+round trip, including stable participant identity and contributor permission. It
+does not save a share or prove server acceptance.
+
+`HomeNameTests` owns exact account/store/root/list routing, actual permission-policy
+rollback, retired command rejection, and unchanged People and private carts.
+`HomeDetailsModelTests` owns owner/contributor/restricted affordances, stale results,
+explicit delivery acknowledgement, pending versus accepted presentation, failed
+rename recovery, and the isolated UI fixture's contract.
+
+`HomeDetailsUITests` owns the disclosure's cancellation boundary, the ordinary system
+URL share sheet, retaining and resending a pending invitation after closing that
+sheet, contributor renaming through SQLite and relaunch, and restricted membership
+with long names at accessibility text size. Its DEBUG fixture requires an explicit
+role and unique UI-test store; membership is simulated in memory while renaming
+uses the real command. It never sends a message, opens a join URL, or grants native
+membership. These scenarios are in the broader UI suite; the six routine acceptance
+scenarios remain unchanged. Real link acceptance, revocation, cross-account delivery
+and physical accessibility remain SHOPPING-30 evidence.
