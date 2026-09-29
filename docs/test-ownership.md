@@ -505,3 +505,19 @@ existing shared message adopted in main `838c22e` (SHOPPING-146–152). It now c
 `Recent iCloud activity completed.` exactly, as the iPhone owner already does,
 instead of expecting the removed disclaimer. The first native-access Watch run
 retains that stale-assertion failure; it is not treated as a passing validation.
+
+### Participant leave durability (SHOPPING-129)
+
+`HomeLeaveLedgerTests` owns atomic private leave authorization and quarantine,
+retention across SQLite reopen, original-store identity checks, at-most-once
+native-submission authorization, completion without a membership grant, and
+retirement of an old destructive authorization by a covering rejoin grant.
+Checkpoint-first imports carry the full command and require their missing block;
+failed saves retain neither half. Captured unpublished checkout/restore IDs and
+cart generations are evidence; the permanent membership boundary also covers old
+effects arriving after confirmation. Unknown legacy restores are retained as
+unresolved evidence, and incomplete earlier private imports do not require a peer
+to synchronize before explicit leave submission. These tests do not invoke CloudKit purge or
+prove participant leave, uncertain native outcome reconciliation, or rejoin UI.
+Submitted operations require reconciliation; they cannot automatically retransmit
+the zone purge. Native adapters, acceptance gates, and live proof remain required.

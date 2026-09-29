@@ -20,7 +20,7 @@ extension PersonalCartRepository {
         let checkouts = try values(PersonalCheckoutIntent.self, kind: "checkout")
         let restores = try values(PersonalRestoreIntent.self, kind: "restore")
         let edits = try values(PersonalCartCommandResult.self, kind: "cart").values.compactMap(\.edit)
-        var required: Set<UUID> = []
+        var required = Set(try homeLeaves().filter { $0.command.origin.scope == scope }.map { $0.command.quarantineID })
         var requiredRestrictions: Set<UUID> = []
         for intent in checkouts.values where intent.token.householdID == householdID && intent.token.listID == listID {
             required.formUnion(intent.token.homeEffectAuthority?.observedBlockIDs ?? [])

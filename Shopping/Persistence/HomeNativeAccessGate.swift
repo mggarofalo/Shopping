@@ -1,7 +1,7 @@
 import Foundation
 
 /// Native observations belong to one attached graph and share, not a display name.
-struct HomeNativeAccessIdentity: Hashable, Sendable {
+struct HomeNativeAccessIdentity: Codable, Hashable, Sendable {
     let scope: HomeEffectScope
     let storeIdentifier: String
     let rootURI: String
