@@ -21,8 +21,10 @@ extension PersonalCartRepository {
         let restores = try values(PersonalRestoreIntent.self, kind: "restore")
         let edits = try values(PersonalCartCommandResult.self, kind: "cart").values.compactMap(\.edit)
         var required: Set<UUID> = []
+        var requiredRestrictions: Set<UUID> = []
         for intent in checkouts.values where intent.token.householdID == householdID && intent.token.listID == listID {
             required.formUnion(intent.token.homeEffectAuthority?.observedBlockIDs ?? [])
+            requiredRestrictions.formUnion(intent.token.homeEffectAuthority?.observedRestrictionIDs ?? [])
         }
         for restore in restores.values {
             if let declared = restore.homeEffectScope {
@@ -38,11 +40,14 @@ extension PersonalCartRepository {
                 continue
             }
             required.formUnion(restore.homeEffectAuthority?.observedBlockIDs ?? [])
+            requiredRestrictions.formUnion(restore.homeEffectAuthority?.observedRestrictionIDs ?? [])
         }
         for edit in edits where edit.snapshot.householdID == householdID && edit.snapshot.listID == listID {
             required.formUnion(edit.snapshot.token.homeEffectAuthority?.observedBlockIDs ?? [])
+            requiredRestrictions.formUnion(edit.snapshot.token.homeEffectAuthority?.observedRestrictionIDs ?? [])
         }
-        return try HomeEffectAccess(records: records.values.filter { $0.scope == scope }, requiredBlockIDs: required)
+        return try HomeEffectAccess(records: records.values.filter { $0.scope == scope }, requiredBlockIDs: required,
+            requiredRestrictionIDs: requiredRestrictions)
     }
 
     func homeEffectMayPublish(kind: HomeEffectKind, subjectID: UUID,
@@ -77,7 +82,9 @@ extension PersonalCartRepository {
             }
             authority = HomeEffectAuthority(observedBlockIDs: tokens.reduce(into: Set<UUID>()) {
                 $0.formUnion(($1.homeEffectAuthority ?? .legacy).observedBlockIDs)
-            }, grantID: original.grantID)
+            }, grantID: original.grantID, observedRestrictionIDs: tokens.reduce(into: Set<UUID>()) {
+                $0.formUnion(($1.homeEffectAuthority ?? .legacy).observedRestrictionIDs)
+            })
         }
         return try homeEffectAccess(householdID: householdID, listID: listID).permitsPublication(authority)
     }

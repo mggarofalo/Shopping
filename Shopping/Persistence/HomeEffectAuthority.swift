@@ -29,6 +29,8 @@ struct HomeAccessRecord: Codable, Equatable, Sendable {
     enum Action: Codable, Equatable, Sendable {
         case blocked(Loss)
         case joined(observedBlockIDs: Set<UUID>)
+        case readOnly
+        case writable(observedRestrictionIDs: Set<UUID>)
     }
     let id: UUID
     let scope: HomeEffectScope
@@ -45,6 +47,9 @@ struct HomeAccessRecord: Codable, Equatable, Sendable {
         if case .joined(let ids) = action, ids.contains(PersistenceModel.unsetID) {
             throw PersonalCartError.corruptRecord
         }
+        if case .writable(let ids) = action, ids.contains(PersistenceModel.unsetID) {
+            throw PersonalCartError.corruptRecord
+        }
     }
 }
 
@@ -52,7 +57,21 @@ struct HomeAccessRecord: Codable, Equatable, Sendable {
 struct HomeEffectAuthority: Codable, Equatable, Hashable, Sendable {
     let observedBlockIDs: Set<UUID>
     let grantID: UUID?
+    var observedRestrictionIDs: Set<UUID> = []
     static let legacy = HomeEffectAuthority(observedBlockIDs: [], grantID: nil)
+
+    private enum CodingKeys: String, CodingKey { case observedBlockIDs, grantID, observedRestrictionIDs }
+    init(observedBlockIDs: Set<UUID>, grantID: UUID?, observedRestrictionIDs: Set<UUID> = []) {
+        self.observedBlockIDs = observedBlockIDs
+        self.grantID = grantID
+        self.observedRestrictionIDs = observedRestrictionIDs
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        observedBlockIDs = try values.decode(Set<UUID>.self, forKey: .observedBlockIDs)
+        grantID = try values.decodeIfPresent(UUID.self, forKey: .grantID)
+        observedRestrictionIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .observedRestrictionIDs) ?? []
+    }
 }
 
 enum HomeEffectKind: String, Codable, Sendable { case checkout, restore, cartGeneration }
@@ -63,8 +82,11 @@ struct HomeEffectAccess {
     let records: [HomeAccessRecord]
     let blockIDs: Set<UUID>
     let hasCompleteBoundary: Bool
+    let restrictionIDs: Set<UUID>
+    let unresolvedRestrictionIDs: Set<UUID>
+    let hasCompletePermissions: Bool
 
-    init(records: [HomeAccessRecord], requiredBlockIDs: Set<UUID> = []) throws {
+    init(records: [HomeAccessRecord], requiredBlockIDs: Set<UUID> = [], requiredRestrictionIDs: Set<UUID> = []) throws {
         for record in records { try record.validate() }
         guard Set(records.map(\.id)).count == records.count,
               Set(records.map { $0.scope.accountBinding }).count <= 1,
@@ -75,12 +97,21 @@ struct HomeEffectAccess {
             if case .joined(let observed) = record.action { ids.formUnion(observed) }
         }
         hasCompleteBoundary = blockIDs == imported
+        let restrictions = Set(records.compactMap { if case .readOnly = $0.action { $0.id } else { nil } })
+        let restored = records.reduce(into: Set<UUID>()) { ids, record in
+            if case .writable(let observed) = record.action { ids.formUnion(observed) }
+        }
+        restrictionIDs = restrictions.union(restored).union(requiredRestrictionIDs)
+        unresolvedRestrictionIDs = restrictionIDs.subtracting(restored)
+        hasCompletePermissions = restrictionIDs == restrictions
     }
 
     var capturedAuthority: HomeEffectAuthority {
-        guard hasCompleteBoundary, hasConsistentShare else { return HomeEffectAuthority(observedBlockIDs: blockIDs, grantID: nil) }
+        guard hasCompleteBoundary, hasConsistentShare else {
+            return HomeEffectAuthority(observedBlockIDs: blockIDs, grantID: nil, observedRestrictionIDs: restrictionIDs)
+        }
         return HomeEffectAuthority(observedBlockIDs: blockIDs,
-            grantID: currentGrants.map(\.id).max { $0.uuidString < $1.uuidString })
+            grantID: currentGrants.map(\.id).max { $0.uuidString < $1.uuidString }, observedRestrictionIDs: restrictionIDs)
     }
 
     var currentGrants: [HomeAccessRecord] {
@@ -93,6 +124,11 @@ struct HomeEffectAccess {
     private var hasConsistentShare: Bool { Set(currentGrants.map(\.share)).count <= 1 }
 
     func permitsPublication(_ authority: HomeEffectAuthority) -> Bool {
+        hasCompletePermissions && unresolvedRestrictionIDs.isEmpty
+            && authority.observedRestrictionIDs.isSubset(of: restrictionIDs) && permitsMembership(authority)
+    }
+
+    private func permitsMembership(_ authority: HomeEffectAuthority) -> Bool {
         guard hasCompleteBoundary, hasConsistentShare, authority.observedBlockIDs == blockIDs else { return false }
         guard let grantID = authority.grantID else { return blockIDs.isEmpty }
         return records.contains {
@@ -102,9 +138,11 @@ struct HomeEffectAccess {
     }
 
     func validateCapture(_ authority: HomeEffectAuthority) throws {
-        guard authority.observedBlockIDs == blockIDs else { throw PersonalCartError.scopeChanged }
+        guard authority.observedBlockIDs == blockIDs, authority.observedRestrictionIDs == restrictionIDs else {
+            throw PersonalCartError.scopeChanged
+        }
         // A fresh private-only capture while access is lost stays private even if a
         // grant subsequently arrives. A claimed grant must still be fully imported.
-        if authority.grantID != nil, !permitsPublication(authority) { throw PersonalCartError.scopeChanged }
+        if authority.grantID != nil, !permitsMembership(authority) { throw PersonalCartError.scopeChanged }
     }
 }

@@ -107,7 +107,8 @@ extension PersonalCartService {
             let access = try repository.homeEffectAccess(householdID: checkout.token.householdID, listID: checkout.token.listID)
             var restore = PersonalRestoreIntent(checkoutID: checkoutID, restoredNeedIDs: restored)
             restore.homeEffectAuthority = HomeEffectAuthority(
-                observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs), grantID: priorAuthority.grantID)
+                observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs), grantID: priorAuthority.grantID,
+                observedRestrictionIDs: priorAuthority.observedRestrictionIDs.union(access.restrictionIDs))
             restore.homeEffectScope = repository.homeEffectScope(householdID: checkout.token.householdID,
                 listID: checkout.token.listID)
             try repository.insert(id: operationID, kind: "restore", command: command, value: restore)

@@ -450,3 +450,15 @@ simulation, private recovery, and normal two-replica ordering. These are local l
 proofs; the native metadata observer, exact participant-zone leave operation, and
 explicit invitation activation must still supply verified lifecycle events before
 SHOPPING-129 can be complete.
+
+### Temporary permission restrictions (SHOPPING-129)
+
+`HomePermissionTests` owns observed read-only restrictions and fresh writable
+resolution, separately from permanent leave/revocation quarantine. It checks stale
+checkout captures, private quantity/uncart/history and recovery, resuming temporarily
+paused publication, distinct observations versus idempotent retries, and rejecting
+an older writable result after a newer read-only observation. Writable-before-
+restriction import fails closed. Household save enforcement covers new descendants
+and both original and destination homes of a relationship move; unrelated owned
+homes remain writable. These local persistence checks do not prove native CloudKit
+observation, leave, or real-device sharing.

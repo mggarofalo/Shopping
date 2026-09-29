@@ -75,7 +75,8 @@ extension PersonalCartService {
             let priorAuthority = token.homeEffectAuthority ?? .legacy
             let access = try repository.homeEffectAccess(householdID: token.householdID, listID: token.listID)
             let retainedAuthority = HomeEffectAuthority(observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs),
-                grantID: priorAuthority.grantID)
+                grantID: priorAuthority.grantID,
+                observedRestrictionIDs: priorAuthority.observedRestrictionIDs.union(access.restrictionIDs))
             let updated = PersonalCartEntrySnapshot(title: entry.title, quantity: removing ? entry.quantity : quantity,
                 notes: entry.notes, categoryID: entry.categoryID, categoryName: entry.categoryName,
                 categoryOrder: entry.categoryOrder, urgency: entry.urgency, anyStore: entry.anyStore,
