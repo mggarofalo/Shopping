@@ -115,6 +115,47 @@ final class HomeInvitationControllerTests: XCTestCase {
         XCTAssertTrue(f.controller.hasPendingActivation, "Ready import still requires explicit adoption")
     }
 
+    func testHiddenInFlightInvitationReturnsIfAcceptanceNeedsRetry() async throws {
+        let f = try fixture()
+        let transport = InvitationFakeTransport(fails: true, hold: true)
+        defer { Task { await transport.complete() } }
+        f.controller.configure(session: f.session, sharedStoreIdentifier: "shared", transport: transport)
+        try await waitUntilAccepting(transport)
+        f.controller.dismiss(f.entry.id)
+        await transport.complete()
+        try await settle(f.controller)
+        guard case .failed = f.controller.entries.first?.state else {
+            return XCTFail("A hidden native failure must return with its retry action")
+        }
+        XCTAssertTrue(f.controller.isVisible)
+        XCTAssertTrue(f.controller.hasPendingActivation)
+    }
+
+    func testHiddenAcceptedInvitationReturnsForAnExplicitReadyHomeDecision() async throws {
+        let f = try fixture()
+        let graph = HomeGraphIdentity(storeIdentifier: "shared", rootURI: "test://invited-home",
+            householdID: UUID(), listID: UUID())
+        let transport = InvitationFakeTransport(graph: graph, importFails: true)
+        f.controller.configure(session: f.session, sharedStoreIdentifier: "shared", transport: transport)
+        try await settle(f.controller)
+        XCTAssertEqual(f.controller.entries.first?.state, .loading)
+        f.controller.dismiss(f.entry.id)
+        try await settle(f.controller)
+        XCTAssertTrue(f.controller.entries.isEmpty)
+        XCTAssertTrue(f.controller.hasPendingActivation)
+        await transport.setImportFailure(false)
+        f.controller.checkAgain()
+        try await settle(f.controller)
+        XCTAssertEqual(f.controller.entries.first?.state, .ready(graph))
+        XCTAssertTrue(f.controller.isVisible, "An accepted hidden invitation must remain reachable once ready")
+        XCTAssertTrue(f.controller.hasPendingActivation)
+        try await f.controller.resolveActivation(f.entry.id)
+        XCTAssertTrue(f.controller.entries.isEmpty)
+        XCTAssertFalse(f.controller.hasPendingActivation)
+        let calls = await transport.accepted
+        XCTAssertEqual(calls, ["first"], "Showing the decision must not accept again")
+    }
+
     func testPendingReinvitationBypassesStaleLocallyAcceptedMembership() async throws {
         let f = try fixture()
         let graph = HomeGraphIdentity(storeIdentifier: "shared", rootURI: "test://home",
@@ -123,6 +164,8 @@ final class HomeInvitationControllerTests: XCTestCase {
         f.controller.configure(session: f.session, sharedStoreIdentifier: "shared", transport: transport)
         try await settle(f.controller)
         try await f.controller.resolveActivation(f.entry.id)
+        XCTAssertTrue(f.controller.entries.isEmpty, "An explicit home decision closes the invitation prompt")
+        XCTAssertFalse(f.controller.hasPendingActivation)
         try await f.controller.enqueue(identity: f.entry.identity, metadataArchive: Data([9]), participantPending: true)
         f.controller.checkAgain()
         try await settle(f.controller)

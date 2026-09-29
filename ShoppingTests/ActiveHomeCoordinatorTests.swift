@@ -26,6 +26,29 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.reconcile(HomeDiscovery(homes: homes, hasIncompleteRoots: incomplete), request: request))
     }
 
+    func testNotNowWithoutCurrentHomePreventsAutomaticSelectionAfterRelaunch() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let invited = home("Invited", store: "shared")
+        coordinator.bind(try session())
+        coordinator.setInvitationPending(true)
+        try discover([invited], using: coordinator)
+        coordinator.deferSelection()
+        coordinator.setInvitationPending(false)
+        try discover([invited], using: coordinator)
+        XCTAssertNil(coordinator.activeScope)
+        let reopened = ActiveHomeCoordinator(defaults: defaults)
+        reopened.bind(try session())
+        try discover([invited], using: reopened)
+        XCTAssertEqual(reopened.readiness, .choiceRequired)
+        try reopened.select(invited.graph)
+        XCTAssertEqual(reopened.activeScope?.graph, invited.graph)
+        let selected = ActiveHomeCoordinator(defaults: defaults)
+        selected.bind(try session())
+        try discover([invited], using: selected)
+        XCTAssertEqual(selected.activeScope?.graph, invited.graph)
+    }
+
     func testTwoRootsRequireExplicitChoiceAndRelaunchRestoresExactGraph() throws {
         let (coordinator, defaults, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }

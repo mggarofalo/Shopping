@@ -278,7 +278,7 @@ final class HomeInvitationInbox {
         try commit(updated)
     }
 
-    /// SHOPPING-127 calls this only after an explicit, successful choice of this graph.
+    /// Resolve only after explicitly opening the invited home or choosing to keep the current home.
     func resolveActivation(id: UUID) throws {
         let index = try currentIndex(id)
         guard case .ready = entries[index].state else { throw Error.invalidState }

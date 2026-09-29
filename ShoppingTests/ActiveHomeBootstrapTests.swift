@@ -17,6 +17,9 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         for index in 0..<homeCount {
             _ = try NeedService(persistence: persistence).createHousehold(name: "Home \(index + 1)")
         }
+        for store in persistence.container.persistentStoreCoordinator.persistentStores {
+            try persistence.container.persistentStoreCoordinator.remove(store)
+        }
         var invitations: HomeInvitationController?
         if pendingInvitation {
             let inbox = try HomeInvitationInbox(url: root.appendingPathComponent("invitations.json"),
@@ -37,12 +40,24 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             accountStoreDirectory: { root },
             activateAccountStore: { _, _, _, _ in .local(storeURL: accountURL) }
         )
+        retireBeforeCleanup(bootstrap)
         bootstrap.start()
         try await waitForReady(bootstrap)
-        bootstrap.activatePersonalCarts(importLegacy: false)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
         await bootstrap.runLoadingTransition()
         try await waitForReady(bootstrap)
         return bootstrap
+    }
+
+    private func retireBeforeCleanup(_ bootstrap: PersistenceBootstrap) {
+        addTeardownBlock { @MainActor in
+            if case .ready(let ready) = bootstrap.state {
+                bootstrap.presentationDidDisappear(ready.presentation.id)
+            }
+            bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+            await bootstrap.runLoadingTransition()
+        }
     }
 
     private func waitForReady(_ bootstrap: PersistenceBootstrap) async throws {
@@ -72,6 +87,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             metadataArchive: Data([1]))
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: root.appendingPathComponent("Local.sqlite")) },
             invitations: HomeInvitationController(inbox: inbox))
+        retireBeforeCleanup(bootstrap)
         bootstrap.start()
         try await waitForReady(bootstrap)
         XCTAssertNil(try ready(bootstrap).householdID)
@@ -92,9 +108,9 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(bootstrap.homeCoordinator.readiness, .choiceRequired)
         XCTAssertNil(try ready(bootstrap).householdID)
         let homes = bootstrap.homeCoordinator.homes
-        try bootstrap.selectHome(homes[0].graph)
+        try await bootstrap.selectHome(homes[0].graph)
         let old = try ready(bootstrap)
-        try bootstrap.selectHome(homes[1].graph)
+        try await bootstrap.selectHome(homes[1].graph)
         XCTAssertFalse(old.presentation.isActive)
         XCTAssertEqual(try ready(bootstrap).householdID, homes[1].graph.householdID)
         XCTAssertThrowsError(try old.service.createCategory(name: "Stale", householdID: homes[0].graph.householdID))
@@ -114,7 +130,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertFalse(previous.presentation.isActive)
         XCTAssertNotEqual(first.householdID, second.householdID)
         XCTAssertEqual(Set(bootstrap.homeCoordinator.homes.map(\.graph.householdID)), [first.householdID, second.householdID])
-        try bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.graph.householdID == first.householdID }).graph)
+        try await bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.graph.householdID == first.householdID }).graph)
         XCTAssertEqual(try ready(bootstrap).householdID, first.householdID)
     }
 

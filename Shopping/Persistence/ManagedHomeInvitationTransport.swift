@@ -152,12 +152,49 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
         }
     }
 
-    private func environment() throws -> (NSPersistentCloudKitContainer, NSPersistentStore) {
-        // A cached offline cart session does not authorize accepting a new invitation.
-        guard let provider = persistence.personalCartSessionProvider as? ShopperSessionProvider,
-              case .ready(let verified) = provider.state else {
+    /// Resolve one selected graph to its actual share, rather than treating every home
+    /// in the participant store as belonging to the same outstanding invitation.
+    func shareIdentity(for graph: HomeGraphIdentity) async throws -> HomeShareIdentity? {
+        let (cloud, _) = try environment(allowCachedLookup: true)
+        let context = cloud.newBackgroundContext()
+        return try await context.perform {
+            let (cloud, store) = try self.environment(allowCachedLookup: true)
+            guard graph.storeIdentifier == store.identifier,
+                  let uri = URL(string: graph.rootURI),
+                  let objectID = cloud.persistentStoreCoordinator.managedObjectID(forURIRepresentation: uri),
+                  objectID.persistentStore === store,
+                  let root = try context.existingObject(with: objectID) as? Household,
+                  root.id == graph.householdID,
+                  let list = root.groceryList, list.id == graph.listID,
+                  list.household == root, list.objectID.persistentStore === store else {
+                throw ManagedHomeInvitationError.ambiguousHome
+            }
+            let shares = try cloud.fetchShares(matching: [root.objectID, list.objectID])
+            guard let rootShare = shares[root.objectID], let listShare = shares[list.objectID] else {
+                _ = try self.environment(allowCachedLookup: true)
+                return nil
+            }
+            try Self.validateAcceptedShare(rootShare)
+            try Self.validateAcceptedShare(listShare)
+            let identity = Self.identity(of: rootShare)
+            guard identity == Self.identity(of: listShare) else { throw ManagedHomeInvitationError.ambiguousHome }
+            _ = try self.environment(allowCachedLookup: true)
+            return identity
+        }
+    }
+
+    private func environment(allowCachedLookup: Bool = false) throws -> (NSPersistentCloudKitContainer, NSPersistentStore) {
+        guard let provider = persistence.personalCartSessionProvider as? ShopperSessionProvider else {
             throw ManagedHomeInvitationError.accountUnavailable
         }
+        let verified: ShopperSession
+        switch provider.state {
+        case .ready(let current): verified = current
+        case .cached(let current) where allowCachedLookup: verified = current
+        default: throw ManagedHomeInvitationError.accountUnavailable
+        }
+        // Only read-only local share mapping can use cached authority. Accept/import
+        // retain their verified-online gate; an invalidated binding is never usable.
         guard verified == session, try provider.currentSession() == session,
               persistence.personalCartInitialBinding == session.accountBinding else {
             throw ManagedHomeInvitationError.accountChanged

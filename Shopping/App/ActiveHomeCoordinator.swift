@@ -78,6 +78,7 @@ final class ActiveHomeCoordinator: ObservableObject {
     private var requestSequence: UInt64 = 0
     private var session: ShopperSession?
     private var savedScope: ActiveHomeScope?
+    private var selectionDeferred = false
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -94,6 +95,7 @@ final class ActiveHomeCoordinator: ObservableObject {
         homes = []
         pendingInvitation = false
         savedScope = nil
+        selectionDeferred = session.map { defaults.bool(forKey: key($0) + ".deferred") } ?? false
         readiness = session == nil ? .accountUnavailable : .waitingForImport
         if let session, let data = defaults.data(forKey: key(session)),
            let saved = try? JSONDecoder().decode(ActiveHomeScope.self, from: data),
@@ -123,7 +125,7 @@ final class ActiveHomeCoordinator: ObservableObject {
             readiness = homes.contains { $0.graph == savedScope.graph && $0.access != .unresolved }
                 ? .ready(savedScope) : .selectedHomeUnavailable
         } else if homes.count == 1, !discovery.hasIncompleteRoots,
-                  grouped.count == discovery.homes.count, !pendingInvitation,
+                  grouped.count == discovery.homes.count, !pendingInvitation, !selectionDeferred,
                   let home = homes.first, home.access != .unresolved {
             activate(home.graph, session: request.session)
         } else {
@@ -143,6 +145,14 @@ final class ActiveHomeCoordinator: ObservableObject {
         activate(graph, session: session)
     }
 
+    /// Not now is durable even when there is no current home to keep selected.
+    /// Later discovery must not interpret the sole accepted home as an implicit choice.
+    func deferSelection() {
+        guard let session else { return }
+        selectionDeferred = true
+        defaults.set(true, forKey: key(session) + ".deferred")
+    }
+
     func setInvitationPending(_ pending: Bool) { pendingInvitation = pending }
 
     func isCurrent(scope: ActiveHomeScope, generation: UInt64) -> Bool {
@@ -152,6 +162,8 @@ final class ActiveHomeCoordinator: ObservableObject {
     private func activate(_ graph: HomeGraphIdentity, session: ShopperSession) {
         let scope = ActiveHomeScope(session: session, graph: graph)
         savedScope = scope
+        selectionDeferred = false
+        defaults.removeObject(forKey: key(session) + ".deferred")
         readiness = .ready(scope)
         if let data = try? JSONEncoder().encode(scope) { defaults.set(data, forKey: key(session)) }
     }
