@@ -133,6 +133,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var mountedPresentations: Set<UUID> = []
     private let defaults: UserDefaults
     let homeCoordinator: ActiveHomeCoordinator
+    let invitations: HomeInvitationController?
     let editorDrafts: HomeEditorDraftStore
     private let homeShareProvisioner = HomeShareProvisioner()
     private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
@@ -169,6 +170,7 @@ final class PersistenceBootstrap: ObservableObject {
         configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() },
         preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil,
         defaults: UserDefaults = .standard,
+        invitations: HomeInvitationController? = nil,
         makeAccountProvider: @escaping (URL) throws -> ShopperSessionProvider = PersistenceBootstrap.productionAccountProvider,
         accountStoreDirectory: @escaping () throws -> URL = PersistenceBootstrap.productionAccountDirectory,
         activateAccountStore: @escaping @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { try PersistenceBootstrap.productionAccountActivation(source: $0, session: $1, base: $2, importLegacy: $3) }
@@ -176,12 +178,17 @@ final class PersistenceBootstrap: ObservableObject {
         self.configuration = configuration
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
         self.defaults = defaults
+        self.invitations = invitations
         self.homeCoordinator = ActiveHomeCoordinator(defaults: defaults)
         self.editorDrafts = HomeEditorDraftStore(defaults: defaults)
         self.makeAccountProvider = makeAccountProvider
         self.accountStoreDirectory = accountStoreDirectory
         self.activateAccountStore = activateAccountStore
         cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
+        invitations?.onChange = { [weak self] in
+            guard let self else { return }
+            self.homeCoordinator.setInvitationPending(self.invitations?.hasPendingActivation == true)
+        }
     }
 
     nonisolated private static func productionAccountDirectory() throws -> URL {
@@ -309,13 +316,29 @@ final class PersistenceBootstrap: ObservableObject {
                     if activeHomesFixture { return .local(storeURL: storeURL) }
                     return try productionAccountActivation(source: source, session: session, base: base, importLegacy: approved)
                 }
+                var fixtureInvitations: HomeInvitationController?
+#if DEBUG
+                if activeHomesFixture {
+                    let inboxURL = storeURL.deletingLastPathComponent()
+                        .appendingPathComponent(storeURL.lastPathComponent + "-invitations/inbox.json")
+                    let inbox = try HomeInvitationInbox(url: inboxURL,
+                        containerIdentifier: "iCloud.test.shopping-homes", environment: "Development")
+                    if processInfo.environment["SHOPPING_UI_TEST_PENDING_INVITATION"] == "1",
+                       processInfo.environment["SHOPPING_UI_TEST_FIXTURE"] != nil {
+                        try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.shopping-homes",
+                            environment: "Development", share: HomeShareIdentity(recordName: "fixture-share",
+                                zoneName: "fixture-zone", zoneOwnerName: "fixture-owner")), metadataArchive: Data([1]))
+                    }
+                    fixtureInvitations = HomeInvitationController(inbox: inbox)
+                }
+#endif
                 if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
                     let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment,
-                        defaults: fixtureDefaults, makeAccountProvider: providerFactory,
+                        defaults: fixtureDefaults, invitations: fixtureInvitations, makeAccountProvider: providerFactory,
                         accountStoreDirectory: accountDirectory, activateAccountStore: activate
                     )
 #if DEBUG
@@ -339,7 +362,7 @@ final class PersistenceBootstrap: ObservableObject {
                     return bootstrap
                 }
                 let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) },
-                    defaults: fixtureDefaults, makeAccountProvider: providerFactory,
+                    defaults: fixtureDefaults, invitations: fixtureInvitations, makeAccountProvider: providerFactory,
                     accountStoreDirectory: accountDirectory, activateAccountStore: activate)
                 if unavailableSetup || activeHomesFixture { bootstrap.personalMode = activeHomesFixture || fixtureDefaults.bool(forKey: personalModeKey) }
 #if DEBUG
@@ -350,7 +373,7 @@ final class PersistenceBootstrap: ObservableObject {
                 return PersistenceBootstrap(configuration: { throw error })
             }
         }
-        let bootstrap = PersistenceBootstrap()
+        let bootstrap = PersistenceBootstrap(invitations: .shared)
         bootstrap.personalMode = UserDefaults.standard.bool(forKey: personalModeKey)
         return bootstrap
     }
@@ -457,7 +480,16 @@ final class PersistenceBootstrap: ObservableObject {
 
     func start() {
         guard case .loading = state, transition == nil else { return }
-        if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
+        guard let invitations else {
+            if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
+            return
+        }
+        let requestedGeneration = generation
+        Task {
+            await invitations.prepare()
+            guard generation == requestedGeneration, case .loading = state, transition == nil else { return }
+            if personalMode { activatePersonalCarts(importLegacy: false) } else { load() }
+        }
     }
 
     func retry() {
@@ -498,6 +530,7 @@ final class PersistenceBootstrap: ObservableObject {
         if case .ready(let ready) = state { previous = ready } else { previous = pendingRetirement }
         pendingRetirement = previous
         previous?.presentation.retire()
+        invitations?.configure(session: nil)
         homeCoordinator.bind(nil)
         generation += 1
         let next = Transition(previous: previous, action: action)
@@ -512,7 +545,13 @@ final class PersistenceBootstrap: ObservableObject {
 
     func applicationDidEnterForeground() {
         guard case .ready = state, transition == nil else { return }
-        if let accountProvider { Task { await accountProvider.refresh() } }
+        if let accountProvider {
+            Task {
+                await accountProvider.refresh()
+                configureInvitations()
+            }
+        }
+        invitations?.checkAgain()
         resumePendingCart()
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
@@ -608,6 +647,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private var allowsLocalHouseholdCreation: Bool {
+        if invitations?.hasPendingActivation == true { return false }
 #if DEBUG
         return !personalMode && !personalFixture
 #else
@@ -625,6 +665,7 @@ final class PersistenceBootstrap: ObservableObject {
         let personalMode = self.personalMode
         let session = try? accountProvider?.currentSession()
         homeCoordinator.bind(session)
+        configureInvitations()
         let discoveryRequest = homeCoordinator.beginDiscovery()
         Task {
             do {
@@ -766,6 +807,7 @@ final class PersistenceBootstrap: ObservableObject {
                 homeGeneration: homeCoordinator.generation,
                 personalCartService: personalService
             ))
+            configureInvitations()
             consumeHistory()
             retryShareAssociations()
         } catch {
@@ -824,6 +866,20 @@ final class PersistenceBootstrap: ObservableObject {
         guard generation == requestedGeneration, ready.presentation.isActive,
               try accountProvider?.currentSession() == request.sessionForValidation else { return }
         if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
+        configureInvitations()
+    }
+
+    private func configureInvitations() {
+        guard let invitations else { return }
+        var verifiedSession: ShopperSession?
+        if case .ready(let session) = accountProvider?.state { verifiedSession = session }
+        if let session = verifiedSession, case .ready(let ready) = state,
+           ready.persistence.personalCartInitialBinding == session.accountBinding,
+           let store = ready.persistence.store(for: .participantShared) {
+            invitations.configure(session: session, sharedStoreIdentifier: store.identifier,
+                transport: ManagedHomeInvitationTransport(persistence: ready.persistence, session: session))
+        } else { invitations.configure(session: verifiedSession) }
+        homeCoordinator.setInvitationPending(invitations.hasPendingActivation)
     }
 
     func selectHome(_ graph: HomeGraphIdentity) throws {

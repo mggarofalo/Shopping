@@ -300,3 +300,26 @@ of the only original home/groceries and durable acknowledgment after another rel
 Its DEBUG fixture seeds an unacknowledged command for the existing populated home
 only under the fresh UI-test store and active-home fixture flags. The fixture flag is
 removed before relaunch so the test exercises the journal, not repeated seeding.
+
+## Incoming invitations (SHOPPING-126)
+
+`HomeInvitationInboxTests` owns durable pre-authentication ingress, full share identity,
+account binding, duplicate coalescing, explicit retry, replacement metadata, in-flight
+dismissal, restart before/after acceptance, corrupted-journal preservation, and activation
+holds. Its worker tests hold lazy opening off-main, establish main-actor progress,
+assert FIFO snapshots, and retain later work after an operation fails.
+`HomeInvitationControllerTests` owns orchestration with a simulated transport:
+store/account readiness, already-joined lookup, sequential invitations, replacement links
+arriving during another acceptance, sanitized offline errors, account switches, and import
+failure recovery without repeated acceptance. A gated startup test keeps an incoming
+invitation's activation hold while an earlier empty worker snapshot publishes. Pending
+renewals after acceptance invalidate old import tokens. Their returned graph values do not prove
+native imported relationships or CloudKit membership.
+
+`ActiveHomeBootstrapTests/testColdInvitationRestoresSelectionHoldBeforeFirstHomeDiscovery`
+owns the production bootstrap ordering which prevents sole-home autoactivation.
+`PersonalCartUITests/testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries`
+owns the rendered invitation notice, dismissal, and retention after relaunch. Its DEBUG
+fixture requires a unique UI-test store and the active-home fixture; the seed flag is
+removed before relaunch. It uses no real CloudKit account or archived native capability.
+Native cold/warm delivery and real two-account sharing remain SHOPPING-30 proof.

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ActiveHomeBootstrapTests: XCTestCase {
-    private func makeBootstrap(homeCount: Int) async throws -> PersistenceBootstrap {
+    private func makeBootstrap(homeCount: Int, pendingInvitation: Bool = false) async throws -> PersistenceBootstrap {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = "HomeBootstrap." + UUID().uuidString
@@ -17,9 +17,18 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         for index in 0..<homeCount {
             _ = try NeedService(persistence: persistence).createHousehold(name: "Home \(index + 1)")
         }
+        var invitations: HomeInvitationController?
+        if pendingInvitation {
+            let inbox = try HomeInvitationInbox(url: root.appendingPathComponent("invitations.json"),
+                containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development")
+            try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.home-bootstrap",
+                environment: "Development", share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
+                metadataArchive: Data([1]))
+            invitations = HomeInvitationController(inbox: inbox)
+        }
         let bootstrap = PersistenceBootstrap(
             configuration: { .local(storeURL: root.appendingPathComponent("Legacy.sqlite")) },
-            defaults: defaults,
+            defaults: defaults, invitations: invitations,
             makeAccountProvider: { base in
                 try ShopperSessionProvider(containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development",
                     cacheDirectory: base.appendingPathComponent("Bindings"), lookup: .init(
@@ -51,6 +60,31 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             throw NSError(domain: "HomeBootstrapTests", code: 1)
         }
         return ready
+    }
+
+    func testColdInvitationDoesNotCreateAnEmptyLocalHomeBeforeAccountSetup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let inbox = try HomeInvitationInbox(url: root.appendingPathComponent("invites/inbox.json"),
+            containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development")
+        try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.home-bootstrap",
+            environment: "Development", share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
+            metadataArchive: Data([1]))
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: root.appendingPathComponent("Local.sqlite")) },
+            invitations: HomeInvitationController(inbox: inbox))
+        bootstrap.start()
+        try await waitForReady(bootstrap)
+        XCTAssertNil(try ready(bootstrap).householdID)
+        XCTAssertTrue(try ready(bootstrap).service.isPersistentStoreEmpty())
+    }
+
+    func testColdInvitationRestoresSelectionHoldBeforeFirstHomeDiscovery() async throws {
+        let bootstrap = try await makeBootstrap(homeCount: 1, pendingInvitation: true)
+        XCTAssertTrue(bootstrap.homeCoordinator.pendingInvitation)
+        XCTAssertNil(try ready(bootstrap).homeScope)
+        XCTAssertEqual(bootstrap.homeCoordinator.readiness, .choiceRequired)
+        XCTAssertEqual(bootstrap.homeCoordinator.homes.count, 1)
+        XCTAssertTrue(try XCTUnwrap(bootstrap.invitations).hasPendingActivation)
     }
 
     func testTwoHomesRequireChoiceAndSwitchRetiresCapturedCommands() async throws {

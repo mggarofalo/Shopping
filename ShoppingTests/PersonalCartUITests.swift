@@ -150,6 +150,32 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].waitForExistence(timeout: 3))
     }
 
+    func testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries() {
+        let app = launch(activeHomes: true, pendingInvitation: true)
+        let notice = app.buttons["shopping.home.invitation"]
+        XCTAssertTrue(notice.existsOrAppears(timeout: 8))
+        XCTAssertTrue(notice.isHittable)
+        notice.tap()
+        XCTAssertTrue(app.staticTexts["Invitation waiting"].existsOrAppears(timeout: 3))
+        app.buttons["Dismiss invitation"].tap()
+        XCTAssertTrue(notice.waitForNonExistence(timeout: 5))
+        let choose = app.buttons["Choose a home"]
+        XCTAssertTrue(choose.existsOrAppears(timeout: 3))
+        choose.tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Homes"].tap()
+        let original = app.buttons["shopping.home.choice.Preview household"]
+        XCTAssertTrue(original.existsOrAppears(timeout: 3))
+        XCTAssertEqual(original.value as? String, "Owner, Selected")
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_PENDING_INVITATION")
+        app.launch()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        XCTAssertFalse(notice.exists)
+    }
+
     func testCreateAndSwitchHomesPreservesOriginalGroceriesAfterRelaunch() {
         let app = launch(activeHomes: true)
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
@@ -237,12 +263,13 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertNotEqual(name.value as? String, "Unfinished milk")
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false) -> XCUIApplication {
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        if pendingInvitation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_INVITATION"] = "1" }
         if activeHomes { app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1" }
         if pendingHomeCreation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_HOME_CREATION"] = "1" }
         if personalCart { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1" }
