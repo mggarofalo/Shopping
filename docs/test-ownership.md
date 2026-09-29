@@ -402,3 +402,32 @@ uses the real command. It never sends a message, opens a join URL, or grants nat
 membership. These scenarios are in the broader UI suite; the six routine acceptance
 scenarios remain unchanged. Real link acceptance, revocation, cross-account delivery
 and physical accessibility remain SHOPPING-30 evidence.
+
+## Member removal and cancelled invitations (SHOPPING-129)
+
+`HomeMembershipRemovalTests` owns explicit cancellation of a submitted invitation
+whose native outcome is unknown, version-one journal migration, retained archives,
+late participant appearance, suppressed delivery during a held native callback,
+imported owner authorizations, exact captured member sets, and explicit retry after
+an uncertain removal. A later invitation is never implicitly included in an older
+stop-sharing command. Cancelling an attempt does not automatically create its
+replacement.
+
+`HomeMembershipPrivateLedgerTests` owns append-only, account-private retention,
+idempotency, conflicting operation identifiers, preservation of home/People/cart
+records, SQLite reopen, and portable logical-home/share matching across devices.
+It resets contexts and detaches stores before reopening or deleting fixture files.
+These tests do not prove private CloudKit export or another device's import.
+
+`HomeDetailsModelTests` owns confirmation identity, dismissal without authorization,
+retired presentation fencing, and retained retry state after removal failure.
+`HomeDetailsUITests` owns cancelling and confirming contributor removal, continued
+owner access, and independent resend/removal buttons within the same member row.
+Its isolated membership fixture never calls native removal or sends an invitation.
+
+The contract prototype models a departing contributor remaining in the roster as
+pending. It does not prove the native shared-zone purge, invitation reuse, offline
+cache erasure, or private-effect quarantine. Participant leave, access observation,
+rejoin authority, and outbox quarantine need their own implementation and coverage
+before SHOPPING-129 is complete; all real-account behavior remains gated by
+SHOPPING-30.
