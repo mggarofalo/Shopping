@@ -13,11 +13,15 @@ struct HomeMembershipSnapshot: Equatable, Sendable {
     let changeTag: String?
     let observedAt: Date
     let source: Source
+    var removals: [HomeMembershipRemovalStatus] = []
 
     var canInvite: Bool { access == .owner }
     var canEditName: Bool { access != .restricted }
     var acceptedOtherCount: Int { members.filter { !$0.isCurrentUser && $0.acceptance == .accepted }.count }
     var pendingCount: Int { members.filter { !$0.isCurrentUser && $0.acceptance == .pending }.count }
+    func canResend(_ member: HomeMember) -> Bool {
+        member.canResend && !removals.contains { $0.removal.participantIDs.contains(member.id) }
+    }
 }
 
 struct HomeMember: Equatable, Identifiable, Sendable {
@@ -58,12 +62,16 @@ protocol HomeMembershipTransport: Sendable {
     func makeInvitationParticipant(scope: ActiveHomeScope) async throws -> HomeInviteMaterial
     func addInvitation(_ material: HomeInviteMaterial, expected: HomeMembershipSnapshot) async throws -> HomeMembershipSnapshot
     func invitationURL(participantID: String, scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> URL
+    func retainedRemovals(scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> [HomeMembershipRemoval]
+    func retainRemoval(_ removal: HomeMembershipRemoval, scope: ActiveHomeScope) async throws
+    func removeParticipants(_ participantIDs: Set<String>, expected: HomeMembershipSnapshot) async throws -> HomeMembershipSnapshot
 }
 
 enum HomeMembershipError: Error, LocalizedError, Equatable {
     case ownerRequired, unsupportedAccess, scopeChanged, unsupportedVersion
     case shareUnavailable, membershipChanged, invalidParticipant, missingURL
     case outcomeUncertain, invitationAlreadyAccepted, invitationUnavailable, invalidJournal
+    case invitationCancelled, noMembersToRemove
 
     var errorDescription: String? {
         switch self {
@@ -79,6 +87,8 @@ enum HomeMembershipError: Error, LocalizedError, Equatable {
         case .invitationAlreadyAccepted: return "This invitation has already been accepted. Create a new invitation for another person."
         case .invitationUnavailable: return "This invitation is no longer available. Refresh this home’s members."
         case .invalidJournal: return "The saved invitation could not be verified. Your home and its members have been retained."
+        case .invitationCancelled: return "This invitation attempt was cancelled. It will not be sent again."
+        case .noMembersToRemove: return "There are no other members or invitations to remove."
         }
     }
 }

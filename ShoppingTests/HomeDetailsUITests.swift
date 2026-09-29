@@ -1,6 +1,33 @@
 import XCTest
 
 final class HomeDetailsUITests: XCTestCase {
+    func testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor() {
+        let app = launch(role: "owner")
+        openHomeDetails(app)
+        let remove = app.buttons["shopping.home.remove.fixture-long-name"]
+        reveal(remove, in: app)
+        remove.tap()
+        let confirm = app.buttons["shopping.home.confirmRemoval"]
+        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Alexandra Penelope Montgomery-Wellington"].exists)
+        app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
+        remove.tap()
+        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        let counts = app.staticTexts["shopping.home.memberCounts"]
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "0 other accepted members · 0 pending invitations")
+        XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.remove.fixture-owner"].exists)
+        XCTAssertFalse(remove.exists)
+        let invite = app.buttons["shopping.home.invite"]
+        reveal(invite, in: app)
+        XCTAssertTrue(invite.isEnabled)
+    }
+
     func testOwnerDisclosureCancelAndShareCancellationKeepPendingInvitationAvailableToResend() {
         let app = launch(role: "owner")
         openHomeDetails(app)
@@ -42,6 +69,8 @@ final class HomeDetailsUITests: XCTestCase {
         openHomeDetails(app)
         XCTAssertTrue(app.staticTexts["Taylor · You"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.stopSharing"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
         let rename = app.buttons["shopping.home.rename"]
         reveal(rename, in: app, towardTop: true)
         XCTAssertTrue(rename.isEnabled)

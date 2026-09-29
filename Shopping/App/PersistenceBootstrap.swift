@@ -1341,7 +1341,27 @@ final class PersistenceBootstrap: ObservableObject {
                 try await Task.detached(priority: .userInitiated) { try service.renameHome(name: name, scope: scope) }.value
                 try validateMembershipPresentation(ready, scope: scope)
                 try await refreshHomes()
-            })
+            }, removals: HomeDetailsRemovalActions(
+                prepare: { [self] purpose, participantID in
+                    let (ready, url, transport) = try membershipContext(scope)
+                    let result = try await homeMembershipCoordinator.prepareRemoval(purpose: purpose,
+                        participantID: participantID, scope: scope, journalURL: url, transport: transport)
+                    try validateMembershipPresentation(ready, scope: scope)
+                    return result
+                }, confirm: { [self] confirmation in
+                    let (ready, url, transport) = try membershipContext(scope)
+                    guard confirmation.removal.origin == scope else { throw HomeMembershipError.scopeChanged }
+                    let result = try await homeMembershipCoordinator.confirmRemoval(confirmation,
+                        scope: scope, journalURL: url, transport: transport)
+                    try validateMembershipPresentation(ready, scope: scope)
+                    return result
+                }, retry: { [self] in
+                    let (ready, url, transport) = try membershipContext(scope)
+                    let result = try await homeMembershipCoordinator.retryRemovals(scope: scope,
+                        journalURL: url, transport: transport)
+                    try validateMembershipPresentation(ready, scope: scope)
+                    return result
+                }))
 #if DEBUG
         if let fixture = homeDetailsFixtures[scope] { return fixture }
         if let fixture = HomeDetailsUITestFixture.make(scope: scope,
@@ -1362,7 +1382,7 @@ final class PersistenceBootstrap: ObservableObject {
         let journalURL = storeURL.deletingLastPathComponent().appendingPathComponent(
             "home-invitation-" + scope.preferenceNamespace + ".json")
         return (ready, journalURL, ManagedHomeMembershipTransport(persistence: ready.persistence,
-            authority: ready.presentation.commandAuthority))
+            authority: ready.presentation.commandAuthority, privateRecords: ready.personalCartService))
     }
 
     private func validateMembershipPresentation(_ ready: ReadyState, scope: ActiveHomeScope) throws {

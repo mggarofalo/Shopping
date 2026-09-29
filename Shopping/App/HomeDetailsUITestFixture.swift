@@ -25,7 +25,9 @@ final class HomeDetailsUITestFixture {
                 guard access != .restricted else { throw HomeMembershipError.unsupportedAccess }
                 try await rename(name)
                 fixture.name = name
-            })
+            }, removals: HomeDetailsRemovalActions(
+                prepare: { try fixture.prepareRemoval($0, participantID: $1) },
+                confirm: { try fixture.confirmRemoval($0) }, retry: { fixture.snapshot }))
     }
 
     private let scope: ActiveHomeScope
@@ -34,6 +36,7 @@ final class HomeDetailsUITestFixture {
     private var members: [HomeMember]
     private var pending: HomeMembershipCoordinator.Pending?
     private var invitationNumber = 0
+    private var removals: [HomeMembershipRemovalStatus] = []
 
     private init(scope: ActiveHomeScope, name: String, access: HomeMembershipSnapshot.Access) {
         self.scope = scope
@@ -57,7 +60,39 @@ final class HomeDetailsUITestFixture {
             share: HomeShareIdentity(recordName: "fixture-share", zoneName: "fixture-zone", zoneOwnerName: "fixture-owner"),
             homeName: name, access: access,
             currentParticipantID: access == .owner ? "fixture-owner" : "fixture-current",
-            members: members, changeTag: "fixture-\(invitationNumber)", observedAt: Date(), source: .server)
+            members: members, changeTag: "fixture-\(invitationNumber)", observedAt: Date(), source: .server, removals: removals)
+    }
+
+    private func prepareRemoval(_ purpose: HomeMembershipRemoval.Purpose,
+                                participantID: String?) throws -> HomeMembershipRemovalConfirmation {
+        guard access == .owner else { throw HomeMembershipError.ownerRequired }
+        let ids: Set<String>
+        switch purpose {
+        case .cancelInvitation:
+            guard let pending else { throw HomeMembershipError.invitationUnavailable }
+            ids = [pending.participantID]
+        case .removeMember:
+            guard let participantID, members.contains(where: { $0.id == participantID && !$0.isCurrentUser && $0.role != .owner }) else {
+                throw HomeMembershipError.invalidParticipant
+            }
+            ids = [participantID]
+        case .stopSharing: ids = Set(members.filter { !$0.isCurrentUser && $0.role != .owner }.map(\.id))
+        }
+        let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: snapshot.share!,
+            ownerParticipantID: "fixture-owner", participantIDs: ids,
+            cancelledInvitationID: purpose == .cancelInvitation ? pending?.id : nil, purpose: purpose, confirmedAt: Date())
+        try removal.validate()
+        return HomeMembershipRemovalConfirmation(removal: removal, homeName: name,
+            memberNames: members.filter { ids.contains($0.id) }.map(\.label))
+    }
+
+    private func confirmRemoval(_ confirmation: HomeMembershipRemovalConfirmation) throws -> HomeMembershipSnapshot {
+        guard access == .owner, confirmation.removal.origin == scope else { throw HomeMembershipError.scopeChanged }
+        try confirmation.removal.validate()
+        members.removeAll { confirmation.removal.participantIDs.contains($0.id) }
+        if let pending, confirmation.removal.participantIDs.contains(pending.participantID) { self.pending = nil }
+        removals.append(HomeMembershipRemovalStatus(removal: confirmation.removal, absentObservedAt: Date()))
+        return snapshot
     }
 
     private func invite() throws -> HomeInvitationDelivery {

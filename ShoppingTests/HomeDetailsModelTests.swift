@@ -79,6 +79,7 @@ final class HomeDetailsModelTests: XCTestCase {
         var acknowledged: [UUID] = []
         var invitationRetries: [Bool] = []
         var resent: [String] = []
+        var removalActions: HomeDetailsRemovalActions?
 
         init(value: HomeMembershipSnapshot) {
             self.value = value
@@ -99,7 +100,7 @@ final class HomeDetailsModelTests: XCTestCase {
             }, acknowledge: { delivery in self.acknowledged.append(delivery.id) }, rename: { name in
                 self.renamed.append(name)
                 if let failure = self.renameFailure { throw failure }
-            })
+            }, removals: removalActions)
         }
     }
 
@@ -108,6 +109,71 @@ final class HomeDetailsModelTests: XCTestCase {
             environment: "Development", accountRecordName: "owner")
         return ActiveHomeScope(session: session, graph: HomeGraphIdentity(storeIdentifier: UUID().uuidString,
             rootURI: "x-coredata://isolated/Household/" + UUID().uuidString, householdID: UUID(), listID: UUID()))
+    }
+
+    func testRemovalPreparationHasNoEffectUntilMatchingConfirmationAndRetirementFencesResult() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: actions.value.share!,
+            ownerParticipantID: "self", participantIDs: ["friend"], cancelledInvitationID: nil,
+            purpose: .removeMember, confirmedAt: Date())
+        let confirmation = HomeMembershipRemovalConfirmation(removal: removal, homeName: "Our home", memberNames: ["Friend"])
+        let gate = Gate<HomeMembershipSnapshot>()
+        var confirmations: [UUID] = []
+        actions.removalActions = HomeDetailsRemovalActions(prepare: { _, _ in confirmation }, confirm: {
+            confirmations.append($0.id)
+            return try await gate.wait()
+        }, retry: { actions.value })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        XCTAssertEqual(model.removalConfirmation?.id, confirmation.id)
+        XCTAssertTrue(confirmations.isEmpty)
+        model.removalConfirmation = nil
+        await model.confirmRemoval(confirmation)
+        XCTAssertTrue(confirmations.isEmpty, "Dismissing confirmation must not authorize removal")
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        try await withGateTask(gate, operation: { await model.confirmRemoval(confirmation) }) { task in
+            XCTAssertEqual(confirmations, [confirmation.id])
+            XCTAssertNil(model.removalConfirmation)
+            model.retire()
+            gate.finish(actions.value)
+            try await task.value
+            XCTAssertFalse(model.isCurrent)
+            XCTAssertFalse(model.canManageMembers)
+            XCTAssertNil(model.removalConfirmation)
+        }
+    }
+
+    func testRemovalFailureShowsRetainedRetryStateWithoutAutomaticSecondConfirmation() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: actions.value.share!,
+            ownerParticipantID: "self", participantIDs: ["friend"], cancelledInvitationID: nil,
+            purpose: .removeMember, confirmedAt: Date())
+        let confirmation = HomeMembershipRemovalConfirmation(removal: removal, homeName: "Our home", memberNames: ["Friend"])
+        var confirmations = 0, retries = 0
+        actions.removalActions = HomeDetailsRemovalActions(prepare: { _, _ in confirmation }, confirm: { _ in
+            confirmations += 1
+            actions.value.removals = [HomeMembershipRemovalStatus(removal: removal, requiresRetry: true)]
+            throw HomeMembershipError.outcomeUncertain
+        }, retry: {
+            retries += 1
+            actions.value.removals = [HomeMembershipRemovalStatus(removal: removal, absentObservedAt: Date())]
+            return actions.value
+        })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        await model.confirmRemoval(confirmation)
+        XCTAssertEqual(confirmations, 1)
+        XCTAssertEqual(retries, 0)
+        XCTAssertNotNil(model.error)
+        XCTAssertTrue(model.snapshot?.removals.first?.requiresRetry ?? false)
+        await model.retryRemovals()
+        XCTAssertEqual(retries, 1)
+        XCTAssertNotNil(model.snapshot?.removals.first?.absentObservedAt)
+        XCTAssertNil(model.error)
     }
 
     private func snapshot(scope: ActiveHomeScope, access: HomeMembershipSnapshot.Access = .owner,
