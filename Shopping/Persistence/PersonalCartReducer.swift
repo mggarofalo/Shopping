@@ -49,7 +49,8 @@ struct PersonalCartReducer {
                 urgency: saved.urgency, anyStore: saved.anyStore, storeIDs: saved.storeIDs,
                 purchaseRulesResolved: saved.purchaseRulesResolved,
                 token: PersonalCartEntryToken(accountBinding: accountBinding, householdID: householdID,
-                                              listID: listID, needID: needID, generation: saved.id, evidence: allIDs),
+                                              listID: listID, needID: needID, generation: saved.id, evidence: allIDs,
+                                              homeEffectAuthority: saved.token.homeEffectAuthority),
                 purchaseNotices: purchases.filter { $0.capture.entry.needID == needID }
                     .map { PersonalPurchaseNotice(receiptID: $0.id, purchaserName: nil) },
                 demandAvailable: saved.demandAvailable

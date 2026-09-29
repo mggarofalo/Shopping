@@ -2,7 +2,7 @@ import CoreData
 
 enum PersonalCartSnapshotBuilder {
     static func make(need: Need, session: ShopperSession, generation: UUID,
-                     evidence: Set<UUID>, quantity: Int64?) throws -> PersonalCartEntrySnapshot {
+                     evidence: Set<UUID>, quantity: Int64?, homeEffectAuthority: HomeEffectAuthority? = nil) throws -> PersonalCartEntrySnapshot {
         guard let list = need.list, let household = list.household,
               need.id != PersistenceModel.unsetID else { throw PersonalCartError.unavailable }
         let oneTime = need.kind == NeedKind.oneTime.rawValue
@@ -25,7 +25,7 @@ enum PersonalCartSnapshotBuilder {
             categoryOrder: category?.displayOrder ?? Int64.max, urgency: need.urgency,
             anyStore: anyStore, storeIDs: Set(stores.map(\.id)), purchaseRulesResolved: resolved,
             token: PersonalCartEntryToken(accountBinding: session.accountBinding, householdID: household.id,
-                                          listID: list.id, needID: need.id, generation: generation, evidence: evidence),
+                                          listID: list.id, needID: need.id, generation: generation, evidence: evidence, homeEffectAuthority: homeEffectAuthority),
             purchaseNotices: [], demandAvailable: !need.archived && resolved
         )
     }

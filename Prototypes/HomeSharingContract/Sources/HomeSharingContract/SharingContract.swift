@@ -95,7 +95,11 @@ final class MockCloud {
             // Exact captured set: a later newly invited participant is not an implicit target.
             share.participants.removeAll { capturedIDs.contains($0.id) }
         case .leave:
-            share.participants.removeAll { $0.account == intent.actor }
+            // Shared-zone departure can return the participant to invited status.
+            // It does not promise permanent capability revocation or roster deletion.
+            for index in share.participants.indices where share.participants[index].account == intent.actor {
+                share.participants[index].acceptance = .pending
+            }
         }
         share.version += 1
         // Neither owner roster updates nor participant departure deletes the owner's graph.
@@ -187,7 +191,7 @@ final class SharingContract {
         case .remove(let targets):
             satisfied = targets.isDisjoint(with: observed.participants.map(\.id))
         case .leave:
-            satisfied = !observed.participants.contains { $0.account == actor }
+            satisfied = !observed.participants.contains { $0.account == actor && $0.acceptance == .accepted }
         }
         next.observedShare = observed
         next.intents[index].stage = satisfied ? .applied : .conflict

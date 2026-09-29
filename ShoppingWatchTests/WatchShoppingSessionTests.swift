@@ -46,6 +46,20 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(session.snapshot.authorityID, originalAuthority)
     }
 
+    func testExplicitNativeRefreshDoesNotOccupySessionOrRunOnLocalReloads() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        XCTAssertEqual(service.accessRefreshCount, 0)
+        session.refreshHomeAccess()
+        XCTAssertEqual(service.accessRefreshCount, 1)
+        XCTAssertFalse(session.isBusy)
+        await session.reload(storeID: UUID())
+        XCTAssertEqual(service.accessRefreshCount, 1, "A local reload or store switch must not launch another network request")
+        let removed = await session.perform(.remove(token: "saved-private-entry"))
+        XCTAssertTrue(removed, "Dispatching refresh must not occupy the session's command state")
+    }
+
     func testActiveRefreshWaitsBeforeFirstReadAndStopsWhenCancelled() async {
         let coordinator = WatchActiveRefreshCoordinator(interval: .milliseconds(50))
         let refreshed = expectation(description: "Active fallback read")
@@ -363,6 +377,7 @@ private final class SpyService: WatchShoppingService {
     var value = WatchPreviewService.sample
     var loadCount = 0
     var requestedStores: [UUID?] = []
+    var accessRefreshCount = 0
     var onLoad: (() -> Void)?
     var suspendNextLoad = false
     var loadStarted: (() -> Void)?
@@ -381,6 +396,7 @@ private final class SpyService: WatchShoppingService {
     var captureRows = WatchPreviewService.previewCheckout.rows
 
     init() { value.canCheckout = true }
+    func refreshHomeAccess() { accessRefreshCount += 1 }
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
         loadCount += 1
         requestedStores.append(storeID)

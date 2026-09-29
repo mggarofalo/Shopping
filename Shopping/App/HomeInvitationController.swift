@@ -24,6 +24,9 @@ final class HomeInvitationController: ObservableObject {
     @Published private(set) var hasVerifiedAccount = false
     @Published private(set) var hasPendingActivation = true
     var onChange: (() -> Void)?
+    /// Retire an outstanding Open choice at ingress, before the journal worker
+    /// can publish its replacement entry. The callback performs no file work.
+    var onChoiceInvalidated: ((HomeInvitationIdentity) -> Void)?
     private(set) var allEntries: [HomeInvitationInbox.Entry] = []
     private let worker: HomeInvitationWorker
     private var session: ShopperSession?
@@ -33,6 +36,7 @@ final class HomeInvitationController: ObservableObject {
     private var drainAgain = false
     private var pendingWork = 0
     private var pendingIngress = 0
+    private var pendingChoiceChanges: [UUID: HomeInvitationIdentity] = [:]
     private var persistedActivationHold = true
     private var loaded = false
     private var snapshotRevision: UInt64 = 0
@@ -55,6 +59,17 @@ final class HomeInvitationController: ObservableObject {
     var isProcessing: Bool { draining || pendingWork > 0 }
     var isVisible: Bool { !entries.isEmpty || (!hasVerifiedAccount && hasPendingActivation) || problem != nil }
 
+    func hasPendingChoiceChange(for identity: HomeInvitationIdentity) -> Bool {
+        pendingChoiceChanges.values.contains(identity)
+    }
+
+    private func beginChoiceChange(_ identity: HomeInvitationIdentity) -> UUID {
+        let id = UUID()
+        pendingChoiceChanges[id] = identity
+        onChoiceInvalidated?(identity)
+        return id
+    }
+
     /// Bootstrap waits here before deciding whether an empty local store may create a home.
     func prepare() async {
         guard !loaded else { return }
@@ -63,18 +78,20 @@ final class HomeInvitationController: ObservableObject {
     }
 
     func receive(_ metadata: CKShare.Metadata) {
+        let id = metadata.share.recordID
+        let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String ?? ""
+        let identity = HomeInvitationIdentity(containerIdentifier: metadata.containerIdentifier, environment: environment,
+            share: HomeShareIdentity(recordName: id.recordName, zoneName: id.zoneID.zoneName, zoneOwnerName: id.zoneID.ownerName))
+        let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
-        let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String ?? ""
         submit({ inbox in
-            let id = metadata.share.recordID
-            return try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: metadata.containerIdentifier,
-                environment: environment, share: HomeShareIdentity(recordName: id.recordName,
-                    zoneName: id.zoneID.zoneName, zoneOwnerName: id.zoneID.ownerName)),
+            return try inbox.enqueue(identity: identity,
                 metadataArchive: ManagedHomeInvitationTransport.archive(metadata),
                 participantPending: metadata.participantStatus == .pending)
         }) { [weak self] result in
             guard let self else { return }
+            pendingChoiceChanges.removeValue(forKey: change)
             pendingIngress -= 1
             publish()
             if case .failure = result {
@@ -88,9 +105,10 @@ final class HomeInvitationController: ObservableObject {
     @discardableResult
     func enqueue(identity: HomeInvitationIdentity, metadataArchive: Data,
                  participantPending: Bool = false) async throws -> HomeInvitationInbox.Entry {
+        let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
-        defer { pendingIngress -= 1; publish() }
+        defer { pendingChoiceChanges.removeValue(forKey: change); pendingIngress -= 1; publish() }
         let entry = try await perform {
             try $0.enqueue(identity: identity, metadataArchive: metadataArchive, participantPending: participantPending)
         }
@@ -127,12 +145,19 @@ final class HomeInvitationController: ObservableObject {
     }
 
     func dismiss(_ id: UUID) {
+        let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
         submit({ try $0.dismiss(id: id) }) { [weak self] result in
+            if let change { self?.pendingChoiceChanges.removeValue(forKey: change) }
             if case .failure = result { self?.problem = "The invitation could not be dismissed. Try again." }
+            self?.publish()
         }
     }
 
-    func resolveActivation(_ id: UUID) async throws { try await perform { try $0.resolveActivation(id: id) } }
+    func resolveActivation(_ id: UUID) async throws {
+        let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
+        defer { if let change { pendingChoiceChanges.removeValue(forKey: change) }; publish() }
+        try await perform { try $0.resolveActivation(id: id) }
+    }
     func checkAgain() {
         submit({ _ in () }) { [weak self] result in
             if case .success = result { self?.process() }

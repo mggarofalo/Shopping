@@ -12,10 +12,12 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
     }
     private let persistence: PersistenceController
     private let authority: UICommandAuthority
+    private let privateRecords: PersonalCartService?
 
-    init(persistence: PersistenceController, authority: UICommandAuthority) {
+    init(persistence: PersistenceController, authority: UICommandAuthority, privateRecords: PersonalCartService?) {
         self.persistence = persistence
         self.authority = authority
+        self.privateRecords = privateRecords
     }
 
     func refresh(scope: ActiveHomeScope) async throws -> HomeMembershipSnapshot {
@@ -87,6 +89,10 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
             guard !share.participants.contains(where: { $0.__participantID == material.participantID }) else {
                 throw HomeMembershipError.membershipChanged
             }
+            let removals = try await retainedRemovals(scope: scope, share: identity)
+            guard !removals.contains(where: { $0.participantIDs.contains(material.participantID) }) else {
+                throw HomeMembershipError.invitationCancelled
+            }
             let participant = try Self.restoredParticipant(material)
             share.addParticipant(participant)
             // Never change publicPermission as a shortcut: doing so may remove participants.
@@ -128,8 +134,78 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         guard participant.role == .privateUser, participant.permission == .readWrite,
               participant.acceptanceStatus == .pending else { throw HomeMembershipError.invalidParticipant }
         guard let url = ShoppingOneTimeInvitationURL(share, participantID) else { throw HomeMembershipError.missingURL }
+        let removals = try await retainedRemovals(scope: scope, share: identity)
+        guard !removals.contains(where: { $0.participantIDs.contains(participantID) }) else { throw HomeMembershipError.invitationCancelled }
         _ = try environment(scope)
         return url
+    }
+
+    func retainedRemovals(scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> [HomeMembershipRemoval] {
+        let (_, _, role) = try environment(scope)
+        guard role == .ownerPrivate else { return [] }
+        guard let privateRecords else { throw HomeMembershipError.shareUnavailable }
+        let result = try await Task.detached(priority: .utility) {
+            try privateRecords.retainedHomeMemberRemovals(scope: scope, share: share)
+        }.value
+        _ = try environment(scope)
+        return result
+    }
+
+    func retainRemoval(_ removal: HomeMembershipRemoval, scope: ActiveHomeScope) async throws {
+        let (cloud, store, role) = try environment(scope)
+        guard role == .ownerPrivate, let privateRecords,
+              removal.matches(scope: scope, share: removal.share) else { throw HomeMembershipError.ownerRequired }
+        let graph = try await graph(scope, cloud: cloud, store: store)
+        guard graph.share == removal.share else { throw HomeMembershipError.scopeChanged }
+        try await Task.detached(priority: .userInitiated) { try privateRecords.retainHomeMemberRemoval(removal) }.value
+        _ = try environment(scope)
+    }
+
+    func removeParticipants(_ participantIDs: Set<String>, expected: HomeMembershipSnapshot) async throws -> HomeMembershipSnapshot {
+        let scope = expected.scope
+        let cloud: NSPersistentCloudKitContainer
+        let store: NSPersistentStore
+        let graph: Graph
+        let share: CKShare
+        do {
+            let (currentCloud, currentStore, role) = try environment(scope)
+            guard role == .ownerPrivate, let identity = expected.share else { throw HomeMembershipError.ownerRequired }
+            cloud = currentCloud; store = currentStore
+            graph = try await self.graph(scope, cloud: cloud, store: store)
+            guard graph.share == identity else { throw HomeMembershipError.scopeChanged }
+            share = try await fetch(identity, scope: scope, role: role)
+            let fresh = try snapshot(share, scope: scope, graph: graph, role: role)
+            try requireOwner(fresh)
+            guard !participantIDs.isEmpty, !participantIDs.contains(fresh.currentParticipantID!),
+                  !share.participants.contains(where: { participantIDs.contains($0.__participantID) && $0.role == .owner }) else {
+                throw HomeMembershipError.invalidParticipant
+            }
+            guard fresh.changeTag == expected.changeTag, fresh.members == expected.members else { throw HomeMembershipError.membershipChanged }
+            let authorizations = try await retainedRemovals(scope: scope, share: identity)
+            let authorized = authorizations.reduce(into: Set<String>()) { $0.formUnion($1.participantIDs) }
+            guard participantIDs.isSubset(of: authorized) else { throw HomeMembershipError.invalidParticipant }
+            let targets = share.participants.filter { participantIDs.contains($0.__participantID) }
+            guard !targets.isEmpty else { return fresh }
+            for target in targets { share.removeParticipant(target) }
+            _ = try environment(scope)
+        } catch {
+            throw HomeMembershipNotSubmitted(reason: error as? HomeMembershipError ?? .shareUnavailable)
+        }
+        let saved: CKShare = try await withCheckedThrowingContinuation { continuation in
+            cloud.persistUpdatedShare(share, in: store) { saved, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let saved { continuation.resume(returning: saved) }
+                else { continuation.resume(throwing: HomeMembershipError.outcomeUncertain) }
+            }
+        }
+        _ = try environment(scope)
+        guard Self.identity(saved) == expected.share else { throw HomeMembershipError.scopeChanged }
+        // Callback confirms this managed export; a new server read confirms current
+        // membership. Neither claim implies that offline peers erased their caches.
+        let observed = try await fetch(Self.identity(saved), scope: scope, role: .ownerPrivate)
+        let result = try snapshot(observed, scope: scope, graph: graph, role: .ownerPrivate)
+        try requireOwner(result)
+        return result
     }
 
     private func environment(_ scope: ActiveHomeScope) throws -> (NSPersistentCloudKitContainer, NSPersistentStore, PersistenceStoreRole) {
@@ -184,6 +260,17 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
 
     private func fetch(_ identity: HomeShareIdentity, scope: ActiveHomeScope, role: PersistenceStoreRole) async throws -> CKShare {
         _ = try environment(scope)
+        if role == .participantShared {
+            guard let privateRecords, let provider = persistence.personalCartSessionProvider else { throw HomeMembershipError.shareUnavailable }
+            let session = try provider.currentSession()
+            let target = HomeNativeAccessIdentity(
+                scope: HomeEffectScope(session: session, householdID: scope.graph.householdID, listID: scope.graph.listID),
+                storeIdentifier: scope.graph.storeIdentifier, rootURI: scope.graph.rootURI,
+                share: HomeEffectShare(recordName: identity.recordName, zoneName: identity.zoneName, zoneOwnerName: identity.zoneOwnerName))
+            let result = try await ManagedHomeAccessObserver(cart: privateRecords, persistence: persistence).verifiedShare(target)
+            _ = try environment(scope)
+            return result
+        }
         let container = CKContainer(identifier: scope.containerIdentifier)
         let database = role == .ownerPrivate ? container.privateCloudDatabase : container.sharedCloudDatabase
         let id = CKRecord.ID(recordName: identity.recordName,

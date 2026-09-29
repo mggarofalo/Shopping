@@ -153,7 +153,8 @@ final class SharingContractTests: XCTestCase {
             XCTAssertTrue(reopened.checkpoint.pendingHouseholdEffects.isEmpty)
             XCTAssertEqual(cloud.share.groceryIDs, snapshot().groceryIDs)
             XCTAssertEqual(cloud.share.privateCartIDs, snapshot().privateCartIDs)
-            XCTAssertEqual(cloud.share.participants.map(\.id), ["pending-link"])
+            XCTAssertEqual(cloud.share.participants.map(\.id), ["claimed-link", "pending-link"])
+            XCTAssertEqual(cloud.share.participants.first { $0.account == "wife" }?.acceptance, .pending)
         }
     }
 

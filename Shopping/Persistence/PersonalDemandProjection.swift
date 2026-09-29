@@ -15,6 +15,8 @@ enum PersonalDemandProjection {
         let intents = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
         let restores = try repository.values(PersonalRestoreIntent.self, kind: "restore")
         for (id, intent) in intents where intent.token.householdID == householdID {
+            guard try repository.homeEffectMayPublish(kind: .checkout, subjectID: id,
+                householdID: householdID, listID: intent.token.listID) else { continue }
             for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
                 let needID = capture.entry.needID
                 guard !restores.values.contains(where: { $0.checkoutID == id && $0.restoredNeedIDs.contains(needID) }),

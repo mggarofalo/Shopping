@@ -54,8 +54,10 @@ final class WatchPersistenceBootstrap {
     private var shareObserver: NSObjectProtocol?
     private var lastRefresh: Date?
     private var authorityGeneration = 0
+    private var accessRefreshID: UUID?
     private var detachmentError: Error?
     private(set) var syncMessage: String?
+    private var accessMessage: String?
 
     init(bundle: Bundle = .main, baseDirectory: URL? = nil) throws {
         guard let container = bundle.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
@@ -92,11 +94,11 @@ final class WatchPersistenceBootstrap {
         let cached: Bool
         if case .cached = provider.state { cached = true } else { cached = false }
         return associationStatus.projectedMessage(cloudStatus: cloudSync.status,
-            cachedAccount: cached, otherMessage: syncMessage)
+            cachedAccount: cached, otherMessage: accessMessage ?? syncMessage)
     }
 
     func syncStatus(additionalMessage: String? = nil) -> WatchSyncStatus {
-        var messages = [additionalMessage, syncMessage, associationStatus.message].compactMap { $0 }
+        var messages = [additionalMessage, syncMessage, accessMessage, associationStatus.message].compactMap { $0 }
         if case .cached = provider.state {
             messages.append("Using saved data. Changes sync when a connection returns.")
         }
@@ -177,17 +179,24 @@ final class WatchPersistenceBootstrap {
             object: persistence, queue: .main) { [weak self] _ in
                 Task { @MainActor in await self?.drainAssociations(runtime) }
             }
+        refreshHomeAccess()
         return runtime
     }
 
     private func accountChanged() {
         let next = try? provider.currentSession().accountBinding
-        guard binding != nil, next != binding else { return }
+        guard binding != nil else { return }
+        guard next != binding else {
+            if case .ready = provider.state { refreshHomeAccess() }
+            return
+        }
         authorityGeneration += 1
+        accessRefreshID = nil
         preparation = nil
         cloudSync.reset()
         associationStatus.reset()
         syncMessage = nil
+        accessMessage = nil
         onAuthorityInvalidated?()
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
         associationObserver = nil
@@ -220,10 +229,12 @@ final class WatchPersistenceBootstrap {
             Task { @MainActor in
                 guard let self, self.current?.persistence === runtime.persistence else { return }
                 do {
-                    _ = try await runtime.history.consume()
+                    let imported = try await runtime.history.consumeSummary()
                     guard self.current?.persistence === runtime.persistence else { return }
+                    runtime.persistence.homeNativeAccess.applyImportedHistory(imported)
                     await self.drainAssociations(runtime)
                     guard self.current?.persistence === runtime.persistence else { return }
+                    if imported.requiresAccessRefresh { self.refreshHomeAccess(recheckIfRunning: true) }
                     self.onDataChanged?()
                 } catch {
                     guard self.current?.persistence === runtime.persistence else { return }
@@ -231,6 +242,22 @@ final class WatchPersistenceBootstrap {
                     self.onDataChanged?()
                 }
             }
+        }
+    }
+
+    /// Native access refresh is independent of local snapshot loading. In
+    /// particular, the active-list timer and store switching never await it.
+    func refreshHomeAccess(recheckIfRunning: Bool = false) {
+        guard let runtime = current else { return }
+        let requestID = UUID(), generation = authorityGeneration
+        accessRefreshID = requestID
+        Task { [weak self] in
+            let failure = await runtime.cart.refreshNativeHomeAccessAndReplay(recheckIfRunning: recheckIfRunning)
+            guard let self, self.authorityGeneration == generation,
+                  self.current?.persistence === runtime.persistence, self.accessRefreshID == requestID else { return }
+            self.accessRefreshID = nil
+            self.accessMessage = failure.map { _ in "Saved cart available. Home access could not be verified; shared changes are waiting." }
+            self.onDataChanged?()
         }
     }
 
@@ -251,22 +278,59 @@ final class WatchPersistenceBootstrap {
         do {
             let runtime = try await runtime()
             let session = try runtime.provider.currentSession()
-            guard metadata.containerIdentifier == session.containerIdentifier,
-                  let cloud = runtime.persistence.container as? NSPersistentCloudKitContainer,
-                  let store = runtime.persistence.store(for: .participantShared) else { throw PersonalCartError.scopeChanged }
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                cloud.acceptShareInvitations(from: [metadata], into: store) { _, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume() }
+            let share = HomeEffectShare(recordName: metadata.share.recordID.recordName,
+                zoneName: metadata.share.recordID.zoneID.zoneName, zoneOwnerName: metadata.share.recordID.zoneID.ownerName)
+            try await runtime.persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) { @MainActor in
+                _ = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
+                try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
+                try await HomeInvitationAcceptance.perform(
+                    preflight: ManagedHomeAccessObserver(cart: runtime.cart, persistence: runtime.persistence),
+                    share: share, session: session) { @MainActor in
+                    let (cloud, store) = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
+                            if let error { continuation.resume(throwing: error) }
+                            else if let accepted, accepted.count == 1, let result = accepted.first,
+                                    result.containerIdentifier == metadata.containerIdentifier,
+                                    result.share.recordID == metadata.share.recordID {
+                                continuation.resume()
+                            } else { continuation.resume(throwing: PersonalCartError.unavailable) }
+                        }
+                    }
                 }
+                try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
+                _ = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
             }
             guard generation == authorityGeneration, current?.persistence === runtime.persistence else { return }
             guard try runtime.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
             syncMessage = "Invitation accepted. Waiting for your household to arrive."
         } catch {
             guard generation == authorityGeneration else { return }
-            syncMessage = "The household invitation could not be accepted. \(CloudSyncStatus.Failure.classify(error).message)"
+            syncMessage = (error as? HomeLeaveError)?.localizedDescription
+                ?? "The household invitation could not be accepted. \(CloudSyncStatus.Failure.classify(error).message)"
         }
         onDataChanged?()
+    }
+
+    private func acceptanceEnvironment(_ runtime: Runtime, session: ShopperSession,
+        metadata: CKShare.Metadata, generation: Int) throws -> (NSPersistentCloudKitContainer, NSPersistentStore) {
+        guard generation == authorityGeneration, current?.persistence === runtime.persistence,
+              case .ready(let verified) = provider.state, verified == session,
+              try runtime.provider.currentSession() == session,
+              runtime.persistence.personalCartInitialBinding == session.accountBinding else { throw PersonalCartError.accountChanged }
+        guard metadata.containerIdentifier == session.containerIdentifier, metadata.share.publicPermission == .none,
+              metadata.participantRole == .privateUser,
+              metadata.participantPermission == .readWrite || metadata.participantPermission == .readOnly,
+              metadata.participantStatus == .pending || metadata.participantStatus == .accepted,
+              case .managed(_, let sharedURL, let containerID) = runtime.persistence.configuration,
+              containerID == session.containerIdentifier,
+              sharedURL.deletingLastPathComponent().lastPathComponent == session.accountBinding,
+              let cloud = runtime.persistence.container as? NSPersistentCloudKitContainer,
+              let store = runtime.persistence.store(for: .participantShared), store.url == sharedURL,
+              cloud.persistentStoreCoordinator.persistentStores.contains(where: { $0 === store }),
+              let description = cloud.persistentStoreDescriptions.first(where: { $0.url == sharedURL }),
+              description.cloudKitContainerOptions?.containerIdentifier == containerID,
+              description.cloudKitContainerOptions?.databaseScope == .shared else { throw PersonalCartError.scopeChanged }
+        return (cloud, store)
     }
 }

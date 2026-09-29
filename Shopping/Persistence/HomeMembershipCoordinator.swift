@@ -21,8 +21,8 @@ actor HomeMembershipCoordinator {
                  transport: any HomeMembershipTransport) async throws -> HomeMembershipSnapshot {
         try await serialized(scope: scope) {
             let journal = HomeInviteJournal(url: journalURL)
+            let snapshot = try await Self.refreshMembership(scope: scope, journal: journal, transport: transport)
             let intent = try journal.load(scope: scope)
-            let snapshot = try await transport.refresh(scope: scope)
             try Self.validate(snapshot, scope: scope, share: intent?.share)
             if var intent, let member = try Self.member(intent.material.participantID, in: snapshot),
                member.acceptance == .pending || member.acceptance == .accepted {
@@ -38,7 +38,10 @@ actor HomeMembershipCoordinator {
         try await serialized(scope: scope) {
             let journal = HomeInviteJournal(url: journalURL)
             let saved = try journal.load(scope: scope)
-            let snapshot = try await transport.refresh(scope: scope)
+            let snapshot = try await Self.refreshMembership(scope: scope, journal: journal, transport: transport)
+            if let saved, try journal.isSuppressed(saved.material.participantID, scope: scope) {
+                throw HomeMembershipError.invitationCancelled
+            }
             let share = try Self.ownerShare(snapshot, scope: scope, share: saved?.share)
             let intent: HomeInviteJournal.Intent
             if let saved { intent = saved }
@@ -55,8 +58,9 @@ actor HomeMembershipCoordinator {
         try await serialized(scope: scope) {
             let journal = HomeInviteJournal(url: journalURL)
             let intent = try journal.load(scope: scope)
-            let snapshot = try await transport.refresh(scope: scope)
+            let snapshot = try await Self.refreshMembership(scope: scope, journal: journal, transport: transport)
             let share = try Self.ownerShare(snapshot, scope: scope, share: intent?.share)
+            guard try !journal.isSuppressed(participantID, scope: scope) else { throw HomeMembershipError.invitationCancelled }
             if let intent, intent.material.participantID == participantID {
                 return try await Self.observedDelivery(intent, snapshot: snapshot, journal: journal, transport: transport)
             }
@@ -64,6 +68,7 @@ actor HomeMembershipCoordinator {
             guard member.acceptance != .accepted else { throw HomeMembershipError.invitationAlreadyAccepted }
             guard member.acceptance == .pending else { throw HomeMembershipError.outcomeUncertain }
             let url = try await transport.invitationURL(participantID: participantID, scope: scope, share: share)
+            guard try !journal.isSuppressed(participantID, scope: scope) else { throw HomeMembershipError.invitationCancelled }
             return HomeInvitationDelivery(id: UUID(), scope: scope, participantID: participantID, url: url)
         }
     }
@@ -80,6 +85,63 @@ actor HomeMembershipCoordinator {
             try HomeInviteJournal(url: journalURL).load(scope: scope).map {
                 Pending(id: $0.id, participantID: $0.material.participantID, phase: $0.phase)
             }
+        }
+    }
+
+    func prepareRemoval(purpose: HomeMembershipRemoval.Purpose, participantID: String? = nil,
+        scope: ActiveHomeScope, journalURL: URL, transport: any HomeMembershipTransport) async throws -> HomeMembershipRemovalConfirmation {
+        try await serialized(scope: scope) {
+            let journal = HomeInviteJournal(url: journalURL)
+            let snapshot = try await Self.refreshMembership(scope: scope, journal: journal, transport: transport)
+            let share = try Self.ownerShare(snapshot, scope: scope, share: nil)
+            let targets: Set<String>
+            let cancelledID: UUID?
+            switch purpose {
+            case .cancelInvitation:
+                guard let pending = try journal.load(scope: scope) else { throw HomeMembershipError.invitationUnavailable }
+                guard pending.share == share else { throw HomeMembershipError.membershipChanged }
+                targets = [pending.material.participantID]
+                cancelledID = pending.id
+            case .removeMember:
+                guard let participantID, snapshot.members.contains(where: { $0.id == participantID && !$0.isCurrentUser && $0.role != .owner }) else {
+                    throw HomeMembershipError.invalidParticipant
+                }
+                targets = [participantID]
+                cancelledID = nil
+            case .stopSharing:
+                targets = Set(snapshot.members.filter { !$0.isCurrentUser && $0.role != .owner }.map(\.id))
+                cancelledID = nil
+            }
+            guard !targets.isEmpty else { throw HomeMembershipError.noMembersToRemove }
+            let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: share,
+                ownerParticipantID: snapshot.currentParticipantID!, participantIDs: targets,
+                cancelledInvitationID: cancelledID, purpose: purpose, confirmedAt: Date())
+            try removal.validate()
+            return HomeMembershipRemovalConfirmation(removal: removal, homeName: snapshot.homeName,
+                memberNames: snapshot.members.filter { targets.contains($0.id) }.map(\.label))
+        }
+    }
+
+    func confirmRemoval(_ confirmation: HomeMembershipRemovalConfirmation, scope: ActiveHomeScope,
+        journalURL: URL, transport: any HomeMembershipTransport) async throws -> HomeMembershipSnapshot {
+        let removal = confirmation.removal
+        try removal.validate()
+        guard removal.matches(scope: scope, share: removal.share) else { throw HomeMembershipError.scopeChanged }
+        // Record cancellation immediately, even while an earlier native write holds
+        // the mutation queue. Its late callback must never deliver this capability.
+        try await transport.retainRemoval(removal, scope: scope)
+        let journal = HomeInviteJournal(url: journalURL)
+        try journal.importRemovals([removal], scope: scope, share: removal.share)
+        return try await serialized(scope: scope) {
+            try await Self.refreshMembership(scope: scope, journal: journal, transport: transport, retryRemovals: true)
+        }
+    }
+
+    func retryRemovals(scope: ActiveHomeScope, journalURL: URL,
+        transport: any HomeMembershipTransport) async throws -> HomeMembershipSnapshot {
+        try await serialized(scope: scope) {
+            try await Self.refreshMembership(scope: scope, journal: HomeInviteJournal(url: journalURL),
+                transport: transport, retryRemovals: true)
         }
     }
 
@@ -100,6 +162,7 @@ actor HomeMembershipCoordinator {
 
     private static func perform(_ saved: HomeInviteJournal.Intent, observed: HomeMembershipSnapshot,
                                 journal: HomeInviteJournal, transport: any HomeMembershipTransport) async throws -> HomeInvitationDelivery {
+        guard try !journal.isSuppressed(saved.material.participantID, scope: saved.scope) else { throw HomeMembershipError.invitationCancelled }
         if try member(saved.material.participantID, in: observed) != nil || saved.phase != .prepared {
             return try await observedDelivery(saved, snapshot: observed, journal: journal, transport: transport)
         }
@@ -144,7 +207,45 @@ actor HomeMembershipCoordinator {
         }
         let url = try await transport.invitationURL(participantID: saved.material.participantID,
             scope: saved.scope, share: saved.share)
+        guard try !journal.isSuppressed(saved.material.participantID, scope: saved.scope) else { throw HomeMembershipError.invitationCancelled }
         return HomeInvitationDelivery(id: saved.id, scope: saved.scope, participantID: saved.material.participantID, url: url)
+    }
+
+    private static func refreshMembership(scope: ActiveHomeScope, journal: HomeInviteJournal,
+        transport: any HomeMembershipTransport, retryRemovals: Bool = false) async throws -> HomeMembershipSnapshot {
+        var snapshot = try await transport.refresh(scope: scope)
+        try validate(snapshot, scope: scope, share: try journal.load(scope: scope)?.share)
+        guard snapshot.access == .owner, let share = snapshot.share else { return snapshot }
+        _ = try ownerShare(snapshot, scope: scope, share: share)
+        let retained = try await transport.retainedRemovals(scope: scope, share: share)
+        try journal.importRemovals(retained, scope: scope, share: share)
+        try journal.observed(snapshot)
+        let statuses = try journal.removals(scope: scope)
+        let eligible = statuses.filter { $0.absentObservedAt == nil && (!$0.requiresRetry || retryRemovals) }
+        let present = Set(snapshot.members.filter { !$0.isCurrentUser && $0.role != .owner }.map(\.id))
+        let targets = eligible.reduce(into: Set<String>()) { $0.formUnion($1.removal.participantIDs) }.intersection(present)
+        if !targets.isEmpty {
+            try journal.markRemovalAttempt(participantIDs: targets, scope: scope)
+            do {
+                snapshot = try await transport.removeParticipants(targets, expected: snapshot)
+                _ = try ownerShare(snapshot, scope: scope, share: share)
+                try journal.observed(snapshot)
+                guard targets.isDisjoint(with: snapshot.members.map(\.id)) else { throw HomeMembershipError.outcomeUncertain }
+            } catch {
+                let original = error
+                // Lost completion may follow a successful removal. Absence is an
+                // observation, not permission to discard retained cancellation data.
+                let fresh = try await transport.refresh(scope: scope)
+                _ = try ownerShare(fresh, scope: scope, share: share)
+                try journal.observed(fresh)
+                guard targets.isDisjoint(with: fresh.members.map(\.id)) else {
+                    throw (original as? HomeMembershipNotSubmitted)?.reason ?? original
+                }
+                snapshot = fresh
+            }
+        }
+        snapshot.removals = try journal.removals(scope: scope)
+        return snapshot
     }
 
     private static func validate(_ snapshot: HomeMembershipSnapshot, scope: ActiveHomeScope,

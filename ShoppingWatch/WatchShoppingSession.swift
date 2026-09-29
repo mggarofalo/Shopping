@@ -49,6 +49,8 @@ final class WatchShoppingSession {
         Task { await reload() }
     }
 
+    func refreshHomeAccess() { service.refreshHomeAccess() }
+
     func reload(storeID: UUID? = nil) async {
         if let storeID {
             // Store selection is an explicit action: its caller may dismiss only

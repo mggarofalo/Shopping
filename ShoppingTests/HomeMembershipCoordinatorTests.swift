@@ -260,7 +260,7 @@ final class HomeMembershipCoordinatorTests: XCTestCase {
     }
 }
 
-private actor MembershipTransportDouble: HomeMembershipTransport {
+actor MembershipTransportDouble: HomeMembershipTransport {
     enum Mode { case succeed, notSubmitted, applyThenFail, fail, hold }
     struct Counts: Sendable { let created: Int; let added: Int; let refreshed: Int; let urls: Int }
     static let share = HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")
@@ -276,6 +276,10 @@ private actor MembershipTransportDouble: HomeMembershipTransport {
     private var refreshed = 0
     private var urls = 0
     private var held: CheckedContinuation<Void, Never>?
+    private var removals: [UUID: HomeMembershipRemoval] = [:]
+    private var removalMode = Mode.succeed
+    private var failRetention = false
+    private(set) var removedParticipants: [Set<String>] = []
     private(set) var submittedMaterials: [HomeInviteMaterial] = []
     private(set) var journalAtSubmission: [HomeInviteJournal.Intent] = []
     private(set) var refreshOverlappedAdd = false
@@ -286,6 +290,9 @@ private actor MembershipTransportDouble: HomeMembershipTransport {
     func setTag(_ value: String) { tag = value }
     func setOwner(_ value: Bool) { owner = value }
     func setURLFailure(_ value: Bool) { failURL = value }
+    func setRemovalMode(_ value: Mode) { removalMode = value }
+    func setRetentionFailure(_ value: Bool) { failRetention = value }
+    func importAuthorizations(_ values: [HomeMembershipRemoval]) { for value in values { removals[value.id] = value } }
     func counts() -> Counts { Counts(created: created, added: added, refreshed: refreshed, urls: urls) }
     func release() {
         // Latch release even if startup failed before reaching the native callback.
@@ -330,5 +337,27 @@ private actor MembershipTransportDouble: HomeMembershipTransport {
         urls += 1
         if failURL { throw HomeMembershipError.missingURL }
         return URL(string: "https://example.invalid/\(participantID)")!
+    }
+
+    func retainedRemovals(scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> [HomeMembershipRemoval] {
+        removals.values.filter { $0.matches(scope: scope, share: share) }
+    }
+
+    func retainRemoval(_ removal: HomeMembershipRemoval, scope: ActiveHomeScope) async throws {
+        guard owner else { throw HomeMembershipError.ownerRequired }
+        guard !failRetention else { throw HomeMembershipError.shareUnavailable }
+        guard removal.matches(scope: self.scope, share: Self.share), scope == self.scope else { throw HomeMembershipError.scopeChanged }
+        if let previous = removals[removal.id], previous != removal { throw HomeMembershipError.invalidJournal }
+        removals[removal.id] = removal
+    }
+
+    func removeParticipants(_ participantIDs: Set<String>, expected: HomeMembershipSnapshot) async throws -> HomeMembershipSnapshot {
+        guard owner, expected.scope == scope, !participantIDs.contains("owner") else { throw HomeMembershipError.ownerRequired }
+        removedParticipants.append(participantIDs)
+        if removalMode == .fail { throw HomeMembershipError.shareUnavailable }
+        members.removeAll { participantIDs.contains($0.id) }
+        tag = UUID().uuidString
+        if removalMode == .applyThenFail { throw HomeMembershipError.outcomeUncertain }
+        return snapshot()
     }
 }

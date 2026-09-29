@@ -96,7 +96,10 @@ struct PersonalCartRepository {
         return values
     }
 
-    func publish<T: Codable & Equatable>(_ value: T, id: UUID, kind: String, householdID: UUID) throws {
+    func publish<T: Codable & Equatable>(_ value: T, id: UUID, kind: String, householdID: UUID,
+        listID: UUID, effectKind: HomeEffectKind, effectID: UUID) throws {
+        guard try homeEffectMayPublish(kind: effectKind, subjectID: effectID,
+            householdID: householdID, listID: listID) else { throw PersonalCartError.quarantined }
         let household = try household(householdID)
         if let cloud = persistence.container as? NSPersistentCloudKitContainer,
            !cloud.canUpdateRecord(forManagedObjectWith: household.objectID) {
