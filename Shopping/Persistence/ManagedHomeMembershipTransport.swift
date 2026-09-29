@@ -43,7 +43,9 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
 
     @available(iOS 18.0, *)
     static func makeParticipantMaterial() throws -> HomeInviteMaterial {
-        let participant = CKShare.Participant.oneTimeURLParticipant()
+        guard let participant = ShoppingMakeOneTimeLinkParticipant() else {
+            throw HomeMembershipError.unsupportedVersion
+        }
         participant.permission = .readWrite
         participant.role = .privateUser
         let id = participant.__participantID
@@ -131,7 +133,7 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         guard participant.acceptanceStatus != .accepted else { throw HomeMembershipError.invitationAlreadyAccepted }
         guard participant.role == .privateUser, participant.permission == .readWrite,
               participant.acceptanceStatus == .pending else { throw HomeMembershipError.invalidParticipant }
-        guard let url = share.__oneTimeURL(forParticipantID: participantID) else { throw HomeMembershipError.missingURL }
+        guard let url = ShoppingOneTimeInvitationURL(share, participantID) else { throw HomeMembershipError.missingURL }
         let removals = try await retainedRemovals(scope: scope, share: identity)
         guard !removals.contains(where: { $0.participantIDs.contains(participantID) }) else { throw HomeMembershipError.invitationCancelled }
         _ = try environment(scope)
@@ -309,7 +311,7 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
             let canResend: Bool
             if #available(iOS 18.0, *) {
                 canResend = access == .owner && status == .pending && role == .contributor
-                    && share.__oneTimeURL(forParticipantID: participant.__participantID) != nil
+                    && ShoppingOneTimeInvitationURL(share, participant.__participantID) != nil
             } else { canResend = false }
             return HomeMember(id: participant.__participantID, name: name, role: role,
                 acceptance: status, isCurrentUser: participant.__participantID == current.__participantID, canResend: canResend)
