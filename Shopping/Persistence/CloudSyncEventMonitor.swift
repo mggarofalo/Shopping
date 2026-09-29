@@ -57,7 +57,7 @@ final class CloudSyncEventMonitor {
                 let events = result?.result as? [NSPersistentCloudKitContainer.Event] ?? []
                 Task { @MainActor in
                     guard let self, generation == self.generation, self.container === cloud else { return }
-                    for event in events { self.record(event, from: cloud, publish: false) }
+                    for event in events { self.record(event, from: cloud, origin: .history, publish: false) }
                     self.schedulePublication()
                 }
             } catch {
@@ -68,7 +68,8 @@ final class CloudSyncEventMonitor {
     }
 
     private func record(_ event: NSPersistentCloudKitContainer.Event,
-                        from source: NSPersistentCloudKitContainer, publish: Bool = true) {
+                        from source: NSPersistentCloudKitContainer, origin: CloudSyncStatus.Source = .live,
+                        publish: Bool = true) {
         let operation: CloudSyncStatus.Operation
         switch event.type {
         case .setup: operation = .setup
@@ -76,21 +77,22 @@ final class CloudSyncEventMonitor {
         case .export: operation = .upload
         @unknown default: return
         }
-        record(.init(store: event.storeIdentifier, operation: operation,
+        record(.init(identifier: event.identifier, store: event.storeIdentifier, operation: operation,
             started: event.startDate, ended: event.endDate,
             failure: event.endDate == nil || event.succeeded ? nil : event.error.map { CloudSyncStatus.Failure.classify($0) } ?? .unknown),
-            from: source, publish: publish)
+            from: source, origin: origin, publish: publish)
     }
 
     // Both live notifications and recorded startup history pass through the same authority check.
-    func receive(_ event: CloudSyncStatus.Event, from source: NSPersistentCloudKitContainer) {
-        record(event, from: source, publish: true)
+    func receive(_ event: CloudSyncStatus.Event, from source: NSPersistentCloudKitContainer,
+                 origin: CloudSyncStatus.Source = .live) {
+        record(event, from: source, origin: origin, publish: true)
     }
 
     private func record(_ event: CloudSyncStatus.Event, from source: NSPersistentCloudKitContainer,
-                        publish: Bool) {
+                        origin: CloudSyncStatus.Source, publish: Bool) {
         guard source === container else { return }
-        status.record(event)
+        status.record(event, source: origin)
         if publish { schedulePublication() }
     }
 

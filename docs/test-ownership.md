@@ -728,3 +728,41 @@ The unchanged final source also passed all six standard acceptance UI workflows
 (`/tmp/shopping-129-leave-ui-acceptance.xcresult` and `.log`), with zero skips.
 The same four negative/non-finite frame runtime warnings remain tracked by
 SHOPPING-131; this run does not claim those warnings are resolved.
+
+
+## Scoped sharing status foundation (SHOPPING-130)
+
+`CloudSyncStatusTests` now owns native event identity, duplicate/out-of-order
+hydration, overlapping same-operation activity, equal-start failure cohorts,
+private/shared failure isolation, and historical unfinished events. An unfinished
+historical event remains an unknown observation, not current busy state. The
+native monitor passes Apple's event UUID and history/live origin. Existing Watch
+presentation and the 200-event/750 ms coalescing test remain separate owners.
+
+`HomeSharingStatusTests` owns pure composition of account, home access,
+invitation/import, store observations, known saved checkout/undo work, owner
+sharing preparation, and account-wide leave status. Unavailable access dominates
+an engine success; one store's success cannot hide another's failure. Known
+pending operations remain visible after an observed upload. No status claims
+other-device delivery or offers force sync.
+
+`HomeSharingWorkSnapshotTests` owns account/home-qualified, read-only private
+operation counts, checkpoint-value exclusion, held work as a subset, and partial
+restore imports with known versus unassigned homes. The read uses existing ledger
+validation in one writer transaction, makes a fixed number of ledger queries,
+and calls no native permission or publication API. Foreground publication still
+needs a matching account, service, local graph, and presentation.
+
+The foundation passed 33 focused tests and all 545 Fast tests, with zero skips or
+xcresult runtime warnings. Evidence: `/tmp/shopping-130-status-foundation-focused`
+and `/tmp/shopping-130-foundation-fast` result bundles/logs, plus
+`/tmp/shopping-130-status-foundation-source.json`. The initial compile failure in
+`/tmp/shopping-130-status-foundation` is preserved: the new work snapshot source
+was registered in the Watch build phase instead of the phone phase; target
+membership was corrected before the successful runs. Two independent reviews
+found no surviving defect. Bootstrap/UI wiring, bounded actions, announcements,
+and a real UI workflow remain required to complete SHOPPING-130.
+
+The same foundation source passed all 55 Watch unit tests with zero skips or
+runtime warnings (`/tmp/shopping-130-foundation-watch.xcresult` and `.log`),
+including the shared CloudSyncStatus tests and existing Watch status behavior.
