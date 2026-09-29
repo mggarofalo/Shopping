@@ -39,7 +39,8 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         )
         bootstrap.start()
         try await waitForReady(bootstrap)
-        bootstrap.activatePersonalCarts(importLegacy: false)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
         await bootstrap.runLoadingTransition()
         try await waitForReady(bootstrap)
         return bootstrap
@@ -92,9 +93,9 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(bootstrap.homeCoordinator.readiness, .choiceRequired)
         XCTAssertNil(try ready(bootstrap).householdID)
         let homes = bootstrap.homeCoordinator.homes
-        try bootstrap.selectHome(homes[0].graph)
+        try await bootstrap.selectHome(homes[0].graph)
         let old = try ready(bootstrap)
-        try bootstrap.selectHome(homes[1].graph)
+        try await bootstrap.selectHome(homes[1].graph)
         XCTAssertFalse(old.presentation.isActive)
         XCTAssertEqual(try ready(bootstrap).householdID, homes[1].graph.householdID)
         XCTAssertThrowsError(try old.service.createCategory(name: "Stale", householdID: homes[0].graph.householdID))
@@ -114,7 +115,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertFalse(previous.presentation.isActive)
         XCTAssertNotEqual(first.householdID, second.householdID)
         XCTAssertEqual(Set(bootstrap.homeCoordinator.homes.map(\.graph.householdID)), [first.householdID, second.householdID])
-        try bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.graph.householdID == first.householdID }).graph)
+        try await bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.graph.householdID == first.householdID }).graph)
         XCTAssertEqual(try ready(bootstrap).householdID, first.householdID)
     }
 

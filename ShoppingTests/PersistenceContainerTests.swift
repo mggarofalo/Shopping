@@ -574,8 +574,12 @@ extension PersistenceContainerTests {
         let accountRequested = expectation(description: "Account opens after outgoing presentation retirement")
         var providerCalled = false
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: sourceURL) },
-            preloadedPreviewEnvironment: fixture, defaults: defaults, makeAccountProvider: { _ in
+            preloadedPreviewEnvironment: fixture, defaults: defaults, makeAccountProvider: { base in
                 providerCalled = true
+                return try ShopperSessionProvider(containerIdentifier: "iCloud.test.retirement", environment: "Development",
+                    cacheDirectory: base.appendingPathComponent("Bindings"), lookup: .init(
+                        status: { .available }, recordName: { "account-A" }))
+            }, accountStoreDirectory: { directory }, activateAccountStore: { _, _, _, _ in
                 accountRequested.fulfill()
                 throw Expected.stopBeforeCloudAccount
             })
@@ -596,9 +600,11 @@ extension PersistenceContainerTests {
         context.processPendingChanges()
 
         // This is the real setup command, with real mounted GroceriesView FRCs and notifications.
-        bootstrap.activatePersonalCarts(importLegacy: true)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        XCTAssertTrue(providerCalled)
+        XCTAssertTrue(ready.presentation.isActive, "Account verification must precede retirement")
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: true)
         XCTAssertFalse(ready.presentation.isActive)
-        XCTAssertFalse(providerCalled)
         XCTAssertEqual(ready.persistence.container.persistentStoreCoordinator.persistentStores.count, 1)
         XCTAssertFalse(stores[0].name.isEmpty)
         // Already queued presentation callbacks must be harmless even before SwiftUI unmounts it.
@@ -607,7 +613,8 @@ extension PersistenceContainerTests {
         XCTAssertFalse(bootstrap.isPresentationMounted(ready.presentation.id))
         XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         guard case .failed = bootstrap.state else { return XCTFail("Expected isolated provider failure") }
-        XCTAssertEqual(defaults.string(forKey: "shopping.personalCart.pendingImport"), sourceURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("HomeAdoption.json").path))
+        XCTAssertFalse(defaults.string(forKey: "shopping.personalCart.pendingImport") == sourceURL.path)
         let reopened = try PersistenceController(storeURL: sourceURL)
         defer {
             let coordinator = reopened.container.persistentStoreCoordinator
@@ -686,9 +693,11 @@ extension PersistenceContainerTests {
         guard case .failed = bootstrap.state else { return XCTFail("Expected original retirement to complete") }
         bootstrap.activatePersonalCarts(importLegacy: false)
         await bootstrap.runLoadingTransition()
+        try await waitForReady(bootstrap)
         XCTAssertEqual(providerAttempts, 1)
-        bootstrap.retry()
+        bootstrap.activatePersonalCarts(importLegacy: false)
         await bootstrap.runLoadingTransition()
+        try await waitForReady(bootstrap)
         XCTAssertEqual(providerAttempts, 2, "Rejected activation must not leave account loading latched")
     }
 

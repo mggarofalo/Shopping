@@ -323,3 +323,54 @@ owns the rendered invitation notice, dismissal, and retention after relaunch. It
 fixture requires a unique UI-test store and the active-home fixture; the seed flag is
 removed before relaunch. It uses no real CloudKit account or archived native capability.
 Native cold/warm delivery and real two-account sharing remain SHOPPING-30 proof.
+
+## Safe home adoption (SHOPPING-127)
+
+`HomeAdoptionSnapshotTests` owns exact persisted graph verification across the real
+`PersonalCartActivation` SQLite copy: domain UUIDs/relationships, archived-only
+restrictions, optional quantities, one-time identities, ordering/People, opaque
+recovery data, unchanged cart attribution, and detection of changed values.
+`HomeAdoptionJournalTests` owns durable approval/copy/verification checkpoints,
+account and source-store mismatch, existing destination refusal, corrupt approval
+retention, and completed retries preserving later edits.
+
+`HomeAdoptionBootstrapTests` owns keeping the mounted original usable when account
+verification fails, rejecting stale approval, detaching before account opening, and
+returning to the original local home—including offline relaunch. The existing mounted
+Groceries/FRC retirement scenario in `PersistenceContainerTests` retains its real UI
+mount/unmount and post-retirement command checks; the injected failure now occurs
+at account-store activation, after successful account verification and detachment.
+This replaces the previous assumption that identity lookup itself should retire the
+original view. `ActiveHomeBootstrapTests` now explicitly awaits preparation/approval
+before inspecting retirement, rather than assuming synchronous account lookup.
+
+`ActiveHomeCoordinatorTests` owns durable Not now behavior when no home is active,
+plus the existing exact-home/account selection boundaries.
+`HomeInvitationControllerTests` owns hiding a resolved invitation and reopening a
+fresh pending grant. Simulated import and decision evidence does not establish native
+share receipt or the two-iPhone invitation workflow; SHOPPING-30 retains that gate.
+
+`PersonalCartUITests/testInvitationSetupKeepsOriginalOnDeviceAndReturnsAfterRelaunch`
+owns the visible named setup choice, Not now followed by reconnect, keeping the home
+on-device, navigating back to its groceries, and relaunch without fixture reseeding.
+Its original and simulated account stores have distinct identities; its account,
+invitation journal and preferences are scoped to the unique UI fixture.
+`testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch` replaces the old
+setup-failure expectation that the original UI should retire before identity lookup:
+it now asserts the visible error and usable original groceries before and after
+relaunch. These tests do not simulate a native accepted share.
+
+The controller recovery tests also own resurfacing hidden in-flight invitations
+when import is ready or native acceptance fails. Hiding progress cannot remove the
+only in-app path to an explicit home decision or retry.
+
+The imported-home cases in `HomeAdoptionBootstrapTests` execute the actual Open and
+Not now commands with two distinct SQLite stores. They own exact invitation-entry
+resolution, original-home/private-cart retention and return, no-original deferral
+across refresh and relaunch, blocking an invitation still loading in the general
+picker, and allowing a different previously joined share in the same store. The
+fixture substitutes participant-store attachment and share-identity lookup only;
+production defaults and native invitation transport remain intact. The offline case
+also distinguishes cached authority for local metadata lookup from the stricter
+verified-account gate for native acceptance/import. This is local orchestration
+proof, not native sharing or cloud-delivery evidence.

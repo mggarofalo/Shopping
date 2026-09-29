@@ -6,16 +6,44 @@ struct HomeSelectionView: View {
     @State private var error: String?
     @State private var newHomeName = ""
     @State private var isSubmittingHome = false
+    @State private var isSelectingHome = false
     @State private var pendingCreation: HomeCreationCommand?
     @State private var createdHome: PersistenceBootstrap.CreatedHome?
 
     var body: some View {
         List {
+            if bootstrap.isShowingRetainedLocalHome {
+                Section {
+                    Text("This home is saved on this device. Your iCloud homes stay separate.")
+                    Button("Return to iCloud homes") {
+                        Task {
+                            do { try await bootstrap.connectBackToAccount() }
+                            catch { self.error = error.localizedDescription }
+                        }
+                    }
+                }
+            } else if let name = bootstrap.retainedLocalHomeName {
+                Section {
+                    Button("Open \(name) on this device") {
+                        Task {
+                            do { try await bootstrap.openRetainedLocalHome() }
+                            catch { self.error = error.localizedDescription }
+                        }
+                    }
+                } footer: {
+                    Text("This home’s groceries are kept separately on this device.")
+                }
+            }
             Section {
                 ForEach(coordinator.homes) { home in
                     Button {
-                        do { try bootstrap.selectHome(home.graph) }
-                        catch { self.error = error.localizedDescription }
+                        guard !isSelectingHome else { return }
+                        isSelectingHome = true
+                        Task {
+                            defer { isSelectingHome = false }
+                            do { try await bootstrap.selectHome(home.graph) }
+                            catch { self.error = error.localizedDescription }
+                        }
                     } label: {
                         HStack {
                             VStack(alignment: .leading) {
@@ -28,7 +56,7 @@ struct HomeSelectionView: View {
                             }
                         }
                     }
-                    .disabled(home.access == .unresolved)
+                    .disabled(isSelectingHome || home.access == .unresolved)
                     .accessibilityLabel(home.name)
                     .accessibilityValue(accessDescription(home.access)
                         + (coordinator.activeScope?.graph == home.graph ? ", Selected" : ""))

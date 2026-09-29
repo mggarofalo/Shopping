@@ -141,8 +141,15 @@ final class HomeInvitationController: ObservableObject {
 
     private func publish() {
         hasPendingActivation = persistedActivationHold || pendingIngress > 0
-        entries = allEntries.filter {
-            ($0.session == nil || $0.session == session) && !$0.dismissalRequested && $0.state != .dismissed
+        entries = allEntries.filter { entry in
+            let needsAttention: Bool
+            switch entry.state {
+            case .ready, .failed: needsAttention = entry.acceptanceAttempted
+            default: needsAttention = false
+            }
+            return (entry.session == nil || entry.session == session)
+                && (!entry.dismissalRequested || needsAttention)
+                && !entry.activationResolved && entry.state != .dismissed
         }
         onChange?()
     }

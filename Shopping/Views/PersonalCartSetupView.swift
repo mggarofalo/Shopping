@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PersonalCartSetupView: View {
+    @EnvironmentObject private var bootstrap: PersistenceBootstrap
     let activate: (Bool) -> Void
     @State private var confirmingImport = false
 
@@ -16,6 +17,11 @@ struct PersonalCartSetupView: View {
             } footer: {
                 Text("Copy only from the first device. On your other devices, use the existing iCloud groceries. The original local data is retained.")
             }
+            if let error = bootstrap.shareAssociationError {
+                Text(error.localizedDescription)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("shopping.home.setup.error")
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Personal carts")
@@ -28,4 +34,4 @@ struct PersonalCartSetupView: View {
     }
 }
 
-#Preview { NavigationStack { PersonalCartSetupView(activate: { _ in }) } }
+#Preview { NavigationStack { PersonalCartSetupView(activate: { _ in }) }.environmentObject(PersistenceBootstrap()) }

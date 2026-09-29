@@ -53,7 +53,7 @@ final class PersonalCartUITests: XCTestCase {
             "shopping.personalCart.item.", "Strawberries")).firstMatch.waitForExistence(timeout: 3))
     }
 
-    func testHouseholdSetupCopyRetiresVisibleGroceriesBeforeAccountFailureAndRelaunch() {
+    func testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch() {
         let app = launch(personalCart: false, unavailableSetup: true)
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
@@ -61,15 +61,15 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Personal carts"].waitForExistence(timeout: 3))
         app.buttons["Copy this device’s groceries to iCloud"].tap()
         app.buttons["Copy groceries"].tap()
-        XCTAssertTrue(app.staticTexts["Groceries unavailable"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["shopping.persistence.retry"].exists)
-        app.buttons["Technical details"].tap()
-        XCTAssertTrue(app.staticTexts["Your iCloud account is temporarily unavailable. Try again later."].exists)
+        XCTAssertTrue(app.staticTexts["Your iCloud account is temporarily unavailable. Try again later."].existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.navigationBars["Personal carts"].exists)
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
         app.terminate()
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         app.launch()
-        XCTAssertTrue(app.staticTexts["Groceries unavailable"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["shopping.persistence.retry"].exists)
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
     }
 
     func testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute() {
@@ -263,12 +263,55 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertNotEqual(name.value as? String, "Unfinished milk")
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false) -> XCUIApplication {
+    func testInvitationSetupKeepsOriginalOnDeviceAndReturnsAfterRelaunch() {
+        let app = launch(personalCart: false, homeAdoption: true)
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        let invitation = app.buttons["shopping.home.invitation"]
+        XCTAssertTrue(invitation.existsOrAppears(timeout: 3))
+        XCTAssertTrue(invitation.isHittable)
+        invitation.tap()
+        let connect = app.buttons["Connect to iCloud"]
+        XCTAssertTrue(connect.existsOrAppears(timeout: 3))
+        connect.tap()
+        let keepOriginal = app.buttons["Keep Preview household on this device"]
+        XCTAssertTrue(keepOriginal.existsOrAppears(timeout: 5))
+        app.buttons["Not now"].tap()
+        XCTAssertTrue(connect.existsOrAppears(timeout: 3))
+        XCTAssertTrue(connect.isHittable)
+        connect.tap()
+        XCTAssertTrue(keepOriginal.existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Your current home is Preview household. Its groceries will stay separate from the invited home."].exists)
+        XCTAssertTrue(keepOriginal.isHittable)
+        keepOriginal.tap()
+        let done = app.navigationBars["Home invitations"].buttons["Done"]
+        XCTAssertTrue(done.existsOrAppears(timeout: 3))
+        done.tap()
+        XCTAssertTrue(app.staticTexts["Waiting for your household"].existsOrAppears(timeout: 8))
+        app.buttons["Choose a home"].tap()
+        let openOriginal = app.buttons["Open Preview household on this device"]
+        XCTAssertTrue(openOriginal.existsOrAppears(timeout: 3))
+        XCTAssertTrue(openOriginal.isHittable)
+        openOriginal.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Homes"].tap()
+        XCTAssertTrue(app.buttons["Return to iCloud homes"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["This home is saved on this device. Your iCloud homes stay separate."].exists)
+    }
+
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        if homeAdoption { app.launchEnvironment["SHOPPING_UI_TEST_HOME_ADOPTION"] = "1" }
         if pendingInvitation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_INVITATION"] = "1" }
         if activeHomes { app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1" }
         if pendingHomeCreation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_HOME_CREATION"] = "1" }

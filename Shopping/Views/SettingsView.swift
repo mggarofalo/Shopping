@@ -27,7 +27,7 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
-                    if selection.homeScope != nil {
+                    if selection.homeScope != nil || bootstrap.isShowingRetainedLocalHome || bootstrap.retainedLocalHomeName != nil {
                         NavigationLink("Homes") {
                             HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
                         }
