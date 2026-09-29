@@ -35,6 +35,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 20: Service Performance Audit | `db962891-9c59-4de1-a6d7-054a5262afd7` | SHOPPING-153/154: move costly iPhone and Watch work behind background workers, then finish the remaining management and recovery commands with authority checks and timing evidence. |
 | Phase 21: TestFlight Release Operations | `bbc17b87-4640-4442-9713-22830ae7d12a` | SHOPPING-155/156: publish the UI and performance changes as 1.2.1, document patch/minor decisions, and preserve the dual-target signing fallback until SHOPPING-132 repairs hosted uploads. |
 | Phase 22: UI Normalization | `6af6dc13-3c8d-4305-aa7e-e57a6b874e63` | SHOPPING-157: shared Catalog row geometry, store/filter controls, and Stores selection interactions including People. |
+| Phase 23: UI Normalization Release | `1ecd3b87-16ce-4fec-a433-31cc2baee7ae` | SHOPPING-158: publish the verified Phase 22 UI corrections as patch 1.2.2 with matching iPhone/Watch versions and exact-source TestFlight distribution evidence. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
