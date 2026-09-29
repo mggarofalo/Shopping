@@ -576,7 +576,8 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.cart.transact { repository in
             let receiptID = PersonalCartCoding.stableID("purchase", purchase.operationID.uuidString, f.needID.uuidString)
             let forged = HouseholdRetractionEvent(id: UUID(), receiptIDs: [receiptID])
-            try repository.publish(forged, id: forged.id, kind: "retraction", householdID: f.householdID)
+            try repository.publish(forged, id: forged.id, kind: "retraction", householdID: f.householdID,
+                listID: f.listID, effectKind: .checkout, effectID: purchase.operationID)
         }
         XCTAssertTrue(try f.cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
         _ = try f.cart.restore(checkoutID: purchase.operationID)

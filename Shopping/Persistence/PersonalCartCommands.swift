@@ -19,6 +19,9 @@ extension PersonalCartService {
         }
         try transact { repository in
             if try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) != nil { return }
+            let access = try repository.homeEffectAccess(householdID: householdID, listID: listID)
+            let authority = access.capturedAuthority
+            guard access.permitsPublication(authority) else { throw PersonalCartError.quarantined }
             let existing = try self.entries(householdID: householdID, listID: listID, repository: repository)
             if existing.contains(where: { $0.needID == needID }) {
                 try repository.insert(id: operationID, kind: "cart", command: command,
@@ -30,7 +33,8 @@ extension PersonalCartService {
             }
             let ancestors = try self.evidence(needID: needID, repository: repository)
             let snapshot = try PersonalCartSnapshotBuilder.make(need: need, session: repository.session,
-                generation: UUID(), evidence: ancestors.union([operationID]), quantity: quantityOverride ?? need.quantity)
+                generation: UUID(), evidence: ancestors.union([operationID]), quantity: quantityOverride ?? need.quantity,
+                homeEffectAuthority: authority)
             guard snapshot.purchaseRulesResolved else { throw PersonalCartError.unavailable }
             if let expectedStoreID {
                 let household = try repository.household(householdID)
@@ -68,13 +72,17 @@ extension PersonalCartService {
                                       value: PersonalCartCommandResult(edit: nil, skipped: true))
                 return true
             }
+            let priorAuthority = token.homeEffectAuthority ?? .legacy
+            let access = try repository.homeEffectAccess(householdID: token.householdID, listID: token.listID)
+            let retainedAuthority = HomeEffectAuthority(observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs),
+                grantID: priorAuthority.grantID)
             let updated = PersonalCartEntrySnapshot(title: entry.title, quantity: removing ? entry.quantity : quantity,
                 notes: entry.notes, categoryID: entry.categoryID, categoryName: entry.categoryName,
                 categoryOrder: entry.categoryOrder, urgency: entry.urgency, anyStore: entry.anyStore,
                 storeIDs: entry.storeIDs, purchaseRulesResolved: entry.purchaseRulesResolved,
                 token: PersonalCartEntryToken(accountBinding: token.accountBinding, householdID: token.householdID,
                     listID: token.listID, needID: token.needID, generation: token.generation,
-                    evidence: token.evidence.union([operationID])),
+                    evidence: token.evidence.union([operationID]), homeEffectAuthority: retainedAuthority),
                 purchaseNotices: entry.purchaseNotices, demandAvailable: entry.demandAvailable)
             let edit = PersonalCartEdit(id: operationID, action: removing ? .remove : .quantity,
                                         snapshot: updated, ancestors: token.evidence)

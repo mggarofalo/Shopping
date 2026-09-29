@@ -7,6 +7,7 @@ struct PersonalCartEntryToken: Codable, Equatable, Hashable, Sendable {
     let needID: UUID
     let generation: UUID
     let evidence: Set<UUID>
+    var homeEffectAuthority: HomeEffectAuthority? = nil
 }
 
 struct PersonalPurchaseNotice: Codable, Equatable, Sendable {
@@ -49,6 +50,7 @@ struct PersonalCheckoutToken: Codable, Equatable, Sendable {
     let storeID: UUID?
     let captures: [PersonalCheckoutCapture]
     var storeName: String? = nil
+    var homeEffectAuthority: HomeEffectAuthority? = nil
     var entries: [PersonalCartEntryToken] { captures.map(\.entry.token) }
 }
 
@@ -80,11 +82,12 @@ struct PersonalCartPresenceSnapshot: Equatable, Sendable {
 
 enum PersonalCartError: Error, Equatable, LocalizedError {
     case accountChanged, unavailable, scopeChanged, staleEntry, invalidQuantity
-    case reusedOperationID, corruptRecord, incompleteImport, purchasedNoticeRequired, permissionDenied
+    case reusedOperationID, corruptRecord, incompleteImport, purchasedNoticeRequired, permissionDenied, quarantined
 
     var errorDescription: String? {
         switch self {
         case .accountChanged: return "Your account changed. Reopen your cart after account setup."
+        case .quarantined: return "This change is retained privately and will not be sent to the home from an earlier membership."
         case .unavailable: return "This item is no longer available. Your saved cart is retained."
         case .scopeChanged: return "The shopping scope changed. Review the cart again."
         case .staleEntry: return "This cart entry changed. Review it and try again."

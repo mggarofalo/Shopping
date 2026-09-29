@@ -13,7 +13,8 @@ extension PersonalCartService {
 
     private func quarantineUnavailable(_ publish: () throws -> Void) throws {
         do { try publish() }
-        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable { return }
+        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable
+            || error == .quarantined || error == .incompleteImport { return }
         catch is PersistencePermissionError { return }
     }
 
@@ -22,11 +23,14 @@ extension PersonalCartService {
             guard let intent = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")[id] else {
                 throw PersonalCartError.corruptRecord
             }
+            guard try repository.homeEffectMayPublish(kind: .checkout, subjectID: id,
+                householdID: intent.token.householdID, listID: intent.token.listID) else { throw PersonalCartError.quarantined }
             for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
                 let receiptID = PersonalCartCoding.stableID("purchase", id.uuidString, capture.entry.needID.uuidString)
                 let receipt = HouseholdPurchaseEvent(id: receiptID, checkoutID: id, shopperID: repository.session.shopperID,
                     householdID: intent.token.householdID, listID: intent.token.listID, capture: capture)
-                try repository.publish(receipt, id: receiptID, kind: "purchase", householdID: intent.token.householdID)
+                try repository.publish(receipt, id: receiptID, kind: "purchase", householdID: intent.token.householdID,
+                    listID: intent.token.listID, effectKind: .checkout, effectID: id)
             }
         }
         try failurePoint?("afterShared")
@@ -39,16 +43,21 @@ extension PersonalCartService {
 
     func publishRestore(id: UUID) throws {
         try transact { repository in
-            guard let restore = try repository.values(PersonalRestoreIntent.self, kind: "restore")[id],
-                  let checkout = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")[restore.checkoutID] else {
+            guard let restore = try repository.values(PersonalRestoreIntent.self, kind: "restore")[id] else {
                 throw PersonalCartError.corruptRecord
             }
+            guard let checkout = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")[restore.checkoutID] else {
+                throw PersonalCartError.incompleteImport
+            }
+            guard try repository.homeEffectMayPublish(kind: .restore, subjectID: id,
+                householdID: checkout.token.householdID, listID: checkout.token.listID) else { throw PersonalCartError.quarantined }
             let receipts = Set(restore.restoredNeedIDs.map {
                 PersonalCartCoding.stableID("purchase", restore.checkoutID.uuidString, $0.uuidString)
             })
             if !receipts.isEmpty {
                 let event = HouseholdRetractionEvent(id: id, receiptIDs: receipts)
-                try repository.publish(event, id: id, kind: "retraction", householdID: checkout.token.householdID)
+                try repository.publish(event, id: id, kind: "retraction", householdID: checkout.token.householdID,
+                    listID: checkout.token.listID, effectKind: .restore, effectID: id)
             }
         }
         try transact { repository in
@@ -69,6 +78,10 @@ extension PersonalCartService {
                     guard let reference = group.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first?.snapshot else { return }
                     let entries = try self.entries(householdID: reference.householdID, listID: reference.listID, repository: repository)
                     let entry = entries.first { $0.needID == needID }
+                    let tips = group.filter { candidate in !group.contains { $0.ancestors.contains(candidate.id) } }
+                    guard let generation = entry?.id ?? tips.max(by: { $0.id.uuidString < $1.id.uuidString })?.snapshot.id else {
+                        throw PersonalCartError.corruptRecord
+                    }
                     let evidence = Set(group.map(\.id))
                     let checkoutIDs = try repository.values(PersonalCheckoutIntent.self, kind: "checkout").filter {
                         $0.value.accepted.contains(needID)
@@ -84,9 +97,10 @@ extension PersonalCartService {
                         needID.uuidString, allEvidence.map(\.uuidString).sorted().joined(separator: ","))
                     let event = HouseholdPresenceEvent(id: id, shopperID: repository.session.shopperID,
                         householdID: reference.householdID, listID: reference.listID, needID: needID,
-                        quantity: entry?.quantity, generation: entry?.id ?? reference.id,
+                        quantity: entry?.quantity, generation: generation,
                         evidence: allEvidence, removed: entry == nil)
-                    try repository.publish(event, id: id, kind: "presence", householdID: reference.householdID)
+                    try repository.publish(event, id: id, kind: "presence", householdID: reference.householdID,
+                        listID: reference.listID, effectKind: .cartGeneration, effectID: generation)
                 }
             }
         }

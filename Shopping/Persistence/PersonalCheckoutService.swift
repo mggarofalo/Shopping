@@ -22,6 +22,8 @@ extension PersonalCartService {
             }
             var token = PersonalCheckoutToken(id: UUID(), accountBinding: first.accountBinding,
                 householdID: first.householdID, listID: first.listID, storeID: storeID, captures: captures)
+            token.homeEffectAuthority = try repository.homeEffectAccess(householdID: first.householdID,
+                listID: first.listID).capturedAuthority
             if let storeID {
                 let request = Store.fetchRequest()
                 request.predicate = NSPredicate(format: "id == %@ AND household.id == %@ AND isArchived == NO", storeID as CVarArg, first.householdID as CVarArg)
@@ -38,6 +40,8 @@ extension PersonalCartService {
         let intent = try transact { repository -> PersonalCheckoutIntent in
             guard repository.session.accountBinding == token.accountBinding else { throw PersonalCartError.accountChanged }
             if let prior = try repository.replay(id: operationID, kind: "checkout", command: command, as: PersonalCheckoutIntent.self) { return prior }
+            try repository.homeEffectAccess(householdID: token.householdID, listID: token.listID)
+                .validateCapture(token.homeEffectAuthority ?? .legacy)
             guard Set(token.captures.map(\.entry.needID)).count == token.captures.count else {
                 throw PersonalCartError.corruptRecord
             }
@@ -72,7 +76,7 @@ extension PersonalCartService {
         try failurePoint?("afterIntent")
         var pending = false
         do { try publishCheckout(id: operationID) }
-        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable { pending = true }
+        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
         catch is PersistencePermissionError { pending = true }
         try? republishPresence()
         return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: intent.accepted,
@@ -99,13 +103,19 @@ extension PersonalCartService {
                       try HouseholdDemandProjection.evidence(needID: needID, householdID: checkout.token.householdID, in: repository.context) == capture.demandEvidence else { continue }
                 restored.insert(needID)
             }
-            let restore = PersonalRestoreIntent(checkoutID: checkoutID, restoredNeedIDs: restored)
+            let priorAuthority = checkout.token.homeEffectAuthority ?? .legacy
+            let access = try repository.homeEffectAccess(householdID: checkout.token.householdID, listID: checkout.token.listID)
+            var restore = PersonalRestoreIntent(checkoutID: checkoutID, restoredNeedIDs: restored)
+            restore.homeEffectAuthority = HomeEffectAuthority(
+                observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs), grantID: priorAuthority.grantID)
+            restore.homeEffectScope = repository.homeEffectScope(householdID: checkout.token.householdID,
+                listID: checkout.token.listID)
             try repository.insert(id: operationID, kind: "restore", command: command, value: restore)
             return (restore, checkout.accepted)
         }
         var pending = false
         do { try publishRestore(id: operationID) }
-        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable { pending = true }
+        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
         catch is PersistencePermissionError { pending = true }
         try? republishPresence()
         return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: result.0.restoredNeedIDs,

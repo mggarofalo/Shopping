@@ -431,3 +431,22 @@ cache erasure, or private-effect quarantine. Participant leave, access observati
 rejoin authority, and outbox quarantine need their own implementation and coverage
 before SHOPPING-129 is complete; all real-account behavior remains gated by
 SHOPPING-30.
+
+### Private-effect quarantine core (SHOPPING-129)
+
+`HomeEffectQuarantineTests` owns the account-private access-loss boundary, explicit
+fresh grants, stale checkout captures, private history/cleanup, and scope isolation.
+SQLite replicas deliver private checkout, quantity/removal, and restore records
+before lifecycle dependencies; a restore also arrives before its checkout. These
+orders must not publish household effects or fulfill shared demand. Authority and
+observed loss dependencies are embedded in the immutable effects, so an absent
+separate record is never mistaken for legacy authorization. Genuine older checkout
+payloads remain readable before any observed loss.
+
+The same suite covers rejoin without old outbox replay, newly captured work after a
+fresh grant, conflicting-share grants, and drain/detach/reopen persistence. The
+existing personal-cart tests retain ownership of reducers, native permission-policy
+simulation, private recovery, and normal two-replica ordering. These are local ledger
+proofs; the native metadata observer, exact participant-zone leave operation, and
+explicit invitation activation must still supply verified lifecycle events before
+SHOPPING-129 can be complete.
