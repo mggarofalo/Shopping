@@ -173,13 +173,21 @@ final class HomeJoinGateTests: XCTestCase {
         leave.cancel()
         let otherZone = HomeParticipantZone(session: f.session,
             share: HomeEffectShare(recordName: "share", zoneName: "independent", zoneOwnerName: "owner"))
-        try await coordinator.perform(in: otherZone) { await native.record("other zone") }
+        let independentCompleted = expectation(description: "Another zone proceeds before the held callback")
+        let independent = Task {
+            try await coordinator.perform(in: otherZone) { await native.record("other zone") }
+            independentCompleted.fulfill()
+        }
+        // A queue-scope regression must fail within this bound, then release
+        // the held callback so the test can drain its operations and finish.
+        await fulfillment(of: [independentCompleted], timeout: 2)
         let before = await native.events
         XCTAssertEqual(before, ["other zone"], "Cancellation is not native completion")
         await native.release()
         do { _ = try await leave.value; XCTFail("The native failure must remain visible") }
         catch { XCTAssertTrue(error is HeldParticipantOperation.Failure) }
         try await join.value
+        try await independent.value
         let after = await native.events
         XCTAssertEqual(after, ["other zone", "leave callback", "join"])
     }
