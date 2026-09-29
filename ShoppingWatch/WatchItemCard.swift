@@ -54,8 +54,7 @@ struct WatchItemCard: View {
                 if item.isInOwnCart && item.canRemove {
                     Button("Remove from your cart", role: .destructive) {
                         Task {
-                            await session.perform(.remove(token: item.commandToken))
-                            if session.errorMessage == nil { dismiss() }
+                            if await session.perform(.remove(token: item.commandToken)) { dismiss() }
                         }
                     }
                     .disabled(session.isBusy)

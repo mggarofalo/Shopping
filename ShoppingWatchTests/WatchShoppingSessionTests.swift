@@ -64,6 +64,137 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(readCount, countAtCancellation)
     }
 
+    func testAddDuringHeldRefreshIsRetainedOnceAndImportsCoalesce() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Background read held")
+        service.suspendNextLoad = true
+        service.loadStarted = { started.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertFalse(session.isBusy, "Ordinary reads must not disable Add")
+        let command = WatchShoppingCommand.add(token: "captured-occurrence", quantity: 3)
+        let reserved = expectation(description: "Add reserved")
+        let adding = Task { reserved.fulfill(); return await session.perform(command) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertTrue(session.isBusy, "Reserve the explicit action while its prior read finishes")
+        XCTAssertTrue(service.commands.isEmpty, "Service operations must remain serialized")
+        for _ in 0..<20 { service.onChange?(.dataChanged) }
+        // The periodic coordinator uses this same local reload entry point.
+        await session.reload()
+        await Task.yield()
+        service.loadContinuation?.resume(returning: service.value)
+        await refresh.value
+        let applied = await adding.value
+        XCTAssertTrue(applied)
+        XCTAssertEqual(service.commands, [command])
+        XCTAssertEqual(service.loadCount, 3, "Initial read, held read, one coalesced follow-up")
+        XCTAssertFalse(session.isBusy)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testQueuedAddCannotRunUnderReplacementAuthority() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let old = service.value
+        let started = expectation(description: "Old-account read held")
+        service.suspendNextLoad = true
+        service.loadStarted = { started.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [started], timeout: 2)
+        let reserved = expectation(description: "Old-account Add reserved")
+        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "old-account", quantity: 2)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        service.value.authorityID = "replacement-account"
+        service.onChange?(.authorityInvalidated)
+        await Task.yield()
+        service.loadContinuation?.resume(returning: old)
+        await refresh.value
+        let applied = await adding.value
+        XCTAssertFalse(applied)
+        XCTAssertTrue(service.commands.isEmpty)
+        XCTAssertEqual(session.snapshot.authorityID, "replacement-account")
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testQueuedAddRejectsChangedHomeAndKeepsActionableFeedback() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Prior home read held")
+        service.suspendNextLoad = true
+        service.loadStarted = { started.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [started], timeout: 2)
+        let reserved = expectation(description: "Old-home Add reserved")
+        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "old-home", quantity: nil)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        service.value.authorityID = "another-home"
+        service.loadContinuation?.resume(returning: service.value)
+        await refresh.value
+        let applied = await adding.value
+        XCTAssertFalse(applied)
+        XCTAssertTrue(service.commands.isEmpty)
+        XCTAssertEqual(session.errorMessage, PersonalCartError.scopeChanged.localizedDescription)
+        await session.reload()
+        XCTAssertNotNil(session.errorMessage)
+    }
+
+    func testPeriodicRefreshCoalescesWhileLoadHeldAndPreservesStoreChoice() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Local refresh held")
+        service.suspendNextLoad = true
+        service.loadStarted = { started.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [started], timeout: 2)
+        let timerFired = expectation(description: "Periodic refresh requested")
+        var didFire = false
+        let periodic = Task {
+            await WatchActiveRefreshCoordinator(interval: .milliseconds(1)).run {
+                await session.reload()
+                if !didFire { didFire = true; timerFired.fulfill() }
+            }
+        }
+        await fulfillment(of: [timerFired], timeout: 2)
+        periodic.cancel()
+        await periodic.value
+        XCTAssertFalse(session.isBusy)
+        let reserved = expectation(description: "Store selection reserved")
+        var selectionFinished = false
+        let selection = Task {
+            reserved.fulfill()
+            await session.reload(storeID: WatchPreviewService.secondStoreID)
+            selectionFinished = true
+        }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertFalse(selectionFinished, "The store chooser must await the actual selected snapshot")
+        XCTAssertTrue(session.isBusy)
+        XCTAssertEqual(service.loadCount, 2)
+        service.loadContinuation?.resume(returning: service.value)
+        await refresh.value
+        await selection.value
+        XCTAssertEqual(service.loadCount, 4)
+        XCTAssertEqual(session.snapshot.selectedStoreID, WatchPreviewService.secondStoreID)
+        XCTAssertEqual(service.requestedStores.last, WatchPreviewService.secondStoreID)
+        XCTAssertFalse(session.isBusy)
+    }
+
+    func testRefreshCannotEraseFailedCommandFeedback() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.shouldFail = true
+        let applied = await session.perform(.add(token: "stale-token", quantity: 2))
+        XCTAssertFalse(applied)
+        XCTAssertEqual(session.errorMessage, "Save failed")
+        await session.reload()
+        XCTAssertEqual(session.errorMessage, "Save failed", "A periodic read must not dismiss the error alert")
+    }
+
     func testFailedSaveRetainsSnapshotAndOpaqueCommand() async {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
@@ -231,7 +362,11 @@ private final class SpyService: WatchShoppingService {
     var onChange: (@MainActor (WatchServiceChange) -> Void)?
     var value = WatchPreviewService.sample
     var loadCount = 0
+    var requestedStores: [UUID?] = []
     var onLoad: (() -> Void)?
+    var suspendNextLoad = false
+    var loadStarted: (() -> Void)?
+    var loadContinuation: CheckedContinuation<WatchShoppingSnapshot, Never>?
     var shouldFail = false
     var commands: [WatchShoppingCommand] = []
     var checkoutTokens: [String] = []
@@ -248,7 +383,16 @@ private final class SpyService: WatchShoppingService {
     init() { value.canCheckout = true }
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
         loadCount += 1
+        requestedStores.append(storeID)
+        if let storeID { value.selectedStoreID = storeID }
         onLoad?()
+        if suspendNextLoad {
+            suspendNextLoad = false
+            return await withCheckedContinuation { continuation in
+                loadContinuation = continuation
+                loadStarted?()
+            }
+        }
         return value
     }
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
