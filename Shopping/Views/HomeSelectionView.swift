@@ -91,7 +91,10 @@ struct HomeSelectionView: View {
         }
         .navigationTitle("Homes")
         .task {
-            do { pendingCreation = try await bootstrap.pendingHomeCreation() }
+            do {
+                try await bootstrap.refreshHomes()
+                pendingCreation = try await bootstrap.pendingHomeCreation()
+            }
             catch { self.error = error.localizedDescription }
         }
     }

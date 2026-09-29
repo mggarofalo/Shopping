@@ -14,7 +14,7 @@ struct PersistenceRootView: View {
             case .ready(let ready):
                 Group {
                     if !ready.presentation.isActive { EmptyView() }
-                    else if (ready.persistence.configuration.isManaged || ready.personalCartService != nil) && ready.householdID == nil {
+                    else if ready.householdID == nil {
                         NavigationStack {
                             ContentUnavailableView {
                                 Label("Waiting for your household", systemImage: "icloud")
@@ -48,6 +48,11 @@ struct PersistenceRootView: View {
                     ))
             case .failed(let error):
                 PersistenceRecoveryView(error: error, retry: bootstrap.retry)
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if let invitations = bootstrap.invitations {
+                HomeInvitationNotice(invitations: invitations, bootstrap: bootstrap)
             }
         }
         .environmentObject(bootstrap)
