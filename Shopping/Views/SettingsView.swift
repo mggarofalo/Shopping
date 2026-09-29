@@ -27,6 +27,10 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
+                    if let scope = selection.homeScope {
+                        HomeSummaryLink(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator,
+                            scope: scope, status: sharingStatus.title)
+                    }
                     if selection.homeScope != nil || bootstrap.isShowingRetainedLocalHome || bootstrap.retainedLocalHomeName != nil {
                         NavigationLink("Homes") {
                             HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
@@ -78,6 +82,26 @@ struct SettingsView: View {
         .accessibilityIdentifier("shopping.appearance")
     }
 
+}
+
+private struct HomeSummaryLink: View {
+    @ObservedObject var bootstrap: PersistenceBootstrap
+    @ObservedObject var coordinator: ActiveHomeCoordinator
+    let scope: ActiveHomeScope
+    let status: String
+    private var name: String { coordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home" }
+
+    var body: some View {
+        NavigationLink {
+            HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
+        } label: {
+            VStack(alignment: .leading) {
+                Text(name)
+                Text("Home details · \(status)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("shopping.settings.homeDetails")
+    }
 }
 
 #Preview("Store settings · archived") { ShoppingPreviewHost(.archivedStore) { SettingsView() } }

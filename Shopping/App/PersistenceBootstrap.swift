@@ -136,6 +136,10 @@ final class PersistenceBootstrap: ObservableObject {
     let invitations: HomeInvitationController?
     let editorDrafts: HomeEditorDraftStore
     private let homeShareProvisioner = HomeShareProvisioner()
+    private let homeMembershipCoordinator = HomeMembershipCoordinator()
+#if DEBUG
+    private var homeDetailsFixtures: [ActiveHomeScope: HomeDetailsActions] = [:]
+#endif
     private let makeAccountProvider: ((URL) throws -> ShopperSessionProvider)?
     private let accountStoreDirectory: (() throws -> URL)?
     private let participantStoreForHomeChoice: (PersistenceController) -> NSPersistentStore?
@@ -1293,6 +1297,77 @@ final class PersistenceBootstrap: ObservableObject {
         }
         retryShareAssociations()
         return result
+    }
+
+    func homeDetailsActions(scope: ActiveHomeScope) -> HomeDetailsActions {
+        let actions = HomeDetailsActions(
+            refresh: { [self] in
+                let (ready, url, transport) = try membershipContext(scope)
+                let result = try await homeMembershipCoordinator.refresh(scope: scope, journalURL: url, transport: transport)
+                try validateMembershipPresentation(ready, scope: scope)
+                return result
+            },
+            pending: { [self] in
+                let (ready, url, _) = try membershipContext(scope)
+                let result = try await homeMembershipCoordinator.pending(scope: scope, journalURL: url)
+                try validateMembershipPresentation(ready, scope: scope)
+                return result
+            },
+            invite: { [self] retry in
+                guard #available(iOS 18.0, *) else { throw HomeMembershipError.unsupportedVersion }
+                let (ready, url, transport) = try membershipContext(scope)
+                _ = try await prepareSelectedHomeShare(retryInterrupted: retry)
+                try validateMembershipPresentation(ready, scope: scope)
+                let result = try await homeMembershipCoordinator.invite(scope: scope, journalURL: url, transport: transport)
+                try validateMembershipPresentation(ready, scope: scope)
+                return result
+            },
+            resend: { [self] participantID in
+                let (ready, url, transport) = try membershipContext(scope)
+                let result = try await homeMembershipCoordinator.resend(participantID: participantID,
+                    scope: scope, journalURL: url, transport: transport)
+                try validateMembershipPresentation(ready, scope: scope)
+                return result
+            },
+            acknowledge: { [self] delivery in
+                guard delivery.scope == scope else { throw HomeMembershipError.scopeChanged }
+                let (ready, url, _) = try membershipContext(scope)
+                try await homeMembershipCoordinator.acknowledge(delivery, journalURL: url)
+                try validateMembershipPresentation(ready, scope: scope)
+            },
+            rename: { [self] name in
+                let (ready, _, _) = try membershipContext(scope)
+                let service = ready.service
+                try await Task.detached(priority: .userInitiated) { try service.renameHome(name: name, scope: scope) }.value
+                try validateMembershipPresentation(ready, scope: scope)
+                try await refreshHomes()
+            })
+#if DEBUG
+        if let fixture = homeDetailsFixtures[scope] { return fixture }
+        if let fixture = HomeDetailsUITestFixture.make(scope: scope,
+            name: homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home",
+            rename: actions.rename) {
+            homeDetailsFixtures[scope] = fixture
+            return fixture
+        }
+#endif
+        return actions
+    }
+
+    private func membershipContext(_ scope: ActiveHomeScope) throws -> (ReadyState, URL, ManagedHomeMembershipTransport) {
+        guard case .ready(let ready) = state,
+              let store = ready.persistence.storeBindings.first(where: { $0.store.identifier == scope.graph.storeIdentifier })?.store,
+              let storeURL = store.url else { throw HomeMembershipError.scopeChanged }
+        try validateMembershipPresentation(ready, scope: scope)
+        let journalURL = storeURL.deletingLastPathComponent().appendingPathComponent(
+            "home-invitation-" + scope.preferenceNamespace + ".json")
+        return (ready, journalURL, ManagedHomeMembershipTransport(persistence: ready.persistence,
+            authority: ready.presentation.commandAuthority))
+    }
+
+    private func validateMembershipPresentation(_ ready: ReadyState, scope: ActiveHomeScope) throws {
+        guard ready.presentation.isActive, ready.homeScope == scope,
+              homeCoordinator.activeScope == scope else { throw HomeMembershipError.scopeChanged }
     }
 
     func pendingHomeCreation() async throws -> HomeCreationCommand? {
