@@ -29,11 +29,19 @@ struct FileHistoryCheckpointStore: HistoryCheckpointStore {
 }
 
 actor PersistentHistoryConsumer {
+    struct Summary: Sendable {
+        var transactionCount = 0
+        var requiresAccessRefresh = false
+        mutating func include(_ other: Summary) {
+            transactionCount += other.transactionCount
+            requiresAccessRefresh = requiresAccessRefresh || other.requiresAccessRefresh
+        }
+    }
     private let persistence: PersistenceController
     private let checkpoints: HistoryCheckpointStore
     private var processing = false
     private var passRequested = false
-    private var waiters: [CheckedContinuation<Int, Error>] = []
+    private var waiters: [CheckedContinuation<Summary, Error>] = []
 
     init(persistence: PersistenceController, checkpoints: HistoryCheckpointStore) {
         self.persistence = persistence
@@ -41,17 +49,21 @@ actor PersistentHistoryConsumer {
     }
 
     @discardableResult
-    func consume() async throws -> Int {
+    func consume() async throws -> Int { try await consumeSummary().transactionCount }
+
+    /// Permission observations must be merged and checkpointed, but must not
+    /// recursively trigger fresh observations on every account replica.
+    func consumeSummary() async throws -> Summary {
         passRequested = true
         if processing {
             return try await withCheckedThrowingContinuation { waiters.append($0) }
         }
         processing = true
         do {
-            var total = 0
+            var total = Summary()
             while passRequested {
                 passRequested = false
-                total += try await consumeAllStores()
+                total.include(try await consumeAllStores())
             }
             processing = false
             let pending = waiters
@@ -67,15 +79,15 @@ actor PersistentHistoryConsumer {
         }
     }
 
-    private func consumeAllStores() async throws -> Int {
-        var count = 0
+    private func consumeAllStores() async throws -> Summary {
+        var count = Summary()
         for binding in persistence.storeBindings {
-            count += try await consume(role: binding.role, store: binding.store)
+            count.include(try await consume(role: binding.role, store: binding.store))
         }
         return count
     }
 
-    private func consume(role: PersistenceStoreRole, store: NSPersistentStore) async throws -> Int {
+    private func consume(role: PersistenceStoreRole, store: NSPersistentStore) async throws -> Summary {
         guard let identifier = store.identifier ?? (store.metadata[NSStoreUUIDKey] as? String) else {
             throw PersistenceSetupError.missingPersistentStoreIdentifier
         }
@@ -91,7 +103,7 @@ actor PersistentHistoryConsumer {
         after token: NSPersistentHistoryToken?,
         role: PersistenceStoreRole,
         store: NSPersistentStore
-    ) async throws -> Int {
+    ) async throws -> Summary {
         let context = persistence.container.newBackgroundContext()
         context.name = "Shopping history consumer \(role.rawValue)"
         let transactions: [NSPersistentHistoryTransaction] = try await context.perform {
@@ -115,6 +127,18 @@ actor PersistentHistoryConsumer {
         if transactions.isEmpty {
             await persistence.container.viewContext.perform { self.persistence.container.viewContext.refreshAllObjects() }
         }
-        return relevant.count
+        let requiresAccessRefresh = await context.perform {
+            for transaction in relevant {
+                guard let changes = transaction.changes, !changes.isEmpty else { return true }
+                for change in changes {
+                    guard change.changeType != .delete,
+                          change.changedObjectID.entity.name == "PersonalCartRecord",
+                          let record = (try? context.existingObject(with: change.changedObjectID)) as? PersonalCartRecord,
+                          record.kind == "homeAccess" else { return true }
+                }
+            }
+            return false
+        }
+        return Summary(transactionCount: relevant.count, requiresAccessRefresh: requiresAccessRefresh)
     }
 }

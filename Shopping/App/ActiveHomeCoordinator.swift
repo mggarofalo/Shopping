@@ -136,11 +136,11 @@ final class ActiveHomeCoordinator: ObservableObject {
         return true
     }
 
-    func select(_ graph: HomeGraphIdentity) throws {
+    func select(_ graph: HomeGraphIdentity, renewingAuthority: Bool = false) throws {
         guard let session, homes.contains(where: { $0.graph == graph && $0.access != .unresolved }) else {
             throw NeedServiceError.scopeChanged
         }
-        guard activeScope?.graph != graph else { return }
+        guard activeScope?.graph != graph || renewingAuthority else { return }
         generation &+= 1
         activate(graph, session: session)
     }

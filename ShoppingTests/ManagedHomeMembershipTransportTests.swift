@@ -5,7 +5,8 @@ import XCTest
 final class ManagedHomeMembershipTransportTests: XCTestCase {
     func testNativeOneTimeParticipantStartsPendingWithoutRecipientLookupIdentity() throws {
         guard #available(iOS 18.0, *) else { throw XCTSkip("One-time invitation participants require iOS 18") }
-        let participant = CKShare.Participant.oneTimeURLParticipant()
+        let participant = try XCTUnwrap(ShoppingMakeOneTimeLinkParticipant(),
+            "The public one-time participant factory must be present on this supported runtime")
         // This is an SDK/runtime contract check, not a simulated acceptance result.
         // If it fails, the adapter's pending-only archive validation must be reconsidered.
         XCTAssertEqual(participant.acceptanceStatus, .pending)

@@ -18,6 +18,8 @@ struct PersonalCheckoutIntent: Codable, Equatable {
 struct PersonalRestoreIntent: Codable, Equatable {
     let checkoutID: UUID
     let restoredNeedIDs: Set<UUID>
+    var homeEffectAuthority: HomeEffectAuthority? = nil
+    var homeEffectScope: HomeEffectScope? = nil
 }
 
 struct HouseholdDemandEvent: Codable, Equatable {

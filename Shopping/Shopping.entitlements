@@ -10,5 +10,7 @@
     <array><string>iCloud.com.mggarofalo.shopping</string></array>
     <key>com.apple.developer.icloud-services</key>
     <array><string>CloudKit</string></array>
+    <key>com.apple.developer.icloud-extended-share-access</key>
+    <array><string>InProcessOneTimeLinks</string></array>
 </dict>
 </plist>

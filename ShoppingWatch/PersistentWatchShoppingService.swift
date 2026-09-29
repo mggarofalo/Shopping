@@ -3,6 +3,9 @@ import os
 
 @MainActor
 final class PersistentWatchShoppingService: WatchShoppingService {
+    enum LoadRecoveryPolicy: Sendable {
+        case localReplay, verifiedBackgroundReplay
+    }
     private struct LoadedValues: Sendable {
         let projection: WatchPersistentProjection
         let own: [PersonalCartEntrySnapshot]
@@ -20,6 +23,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var provider: (any ShopperSessionProviding)?
     private let preferredHouseholdID: UUID?
     private let householdWritable: ((UUID) -> Bool)?
+    private let loadRecoveryPolicy: LoadRecoveryPolicy?
     private var selectionURL: URL?
     private var selectedStoreID: UUID?
     private var authorityID: String?
@@ -37,19 +41,22 @@ final class PersistentWatchShoppingService: WatchShoppingService {
 
     init(persistence: PersistenceController, sessionProvider: any ShopperSessionProviding,
          preferredHouseholdID: UUID? = nil, selectionURL: URL? = nil,
-         householdWritable: (@MainActor (UUID) -> Bool)? = nil, cartService: PersonalCartService? = nil) {
+         householdWritable: (@MainActor (UUID) -> Bool)? = nil, cartService: PersonalCartService? = nil,
+         loadRecoveryPolicy: LoadRecoveryPolicy? = nil) {
         bootstrap = nil
         cart = cartService ?? PersonalCartService(persistence: persistence, sessionProvider: sessionProvider)
         provider = sessionProvider
         self.preferredHouseholdID = preferredHouseholdID
         self.selectionURL = selectionURL
         self.householdWritable = householdWritable
+        self.loadRecoveryPolicy = loadRecoveryPolicy
     }
 
     private init(bootstrap: WatchPersistenceBootstrap) {
         self.bootstrap = bootstrap
         preferredHouseholdID = nil
         householdWritable = nil
+        loadRecoveryPolicy = nil
         bootstrap.onAuthorityInvalidated = { [weak self] in self?.invalidateAuthority() }
         bootstrap.onDataChanged = { [weak self] in self?.onChange?(.dataChanged) }
         bootstrap.onSyncChanged = { [weak self] _ in
@@ -62,8 +69,11 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         bootstrap = nil
         preferredHouseholdID = nil
         householdWritable = nil
+        loadRecoveryPolicy = nil
         startupError = error
     }
+
+    func refreshHomeAccess() { bootstrap?.refreshHomeAccess() }
 
     func invalidateAuthority() {
         if authorityID != nil { onChange?(.authorityInvalidated) }
@@ -108,6 +118,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
         let preferredHouseholdID = self.preferredHouseholdID
         let selectionURL = self.selectionURL
+        let recoveryPolicy = loadRecoveryPolicy ?? (cart.persistence.configuration.isManaged
+            ? .verifiedBackgroundReplay : .localReplay)
         let loaded = try await Task.detached(priority: .userInitiated) { [cart] () throws -> LoadedValues? in
             let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
             os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch snapshot read", signpostID: signpostID)
@@ -116,8 +128,12 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 .flatMap { try? JSONDecoder().decode(Selection.self, from: $0) }
             let savedHousehold = saved?.accountBinding == session.accountBinding ? saved?.householdID : nil
             var recoveryMessage: String?
-            do { try cart.resumePending() }
-            catch { recoveryMessage = "Saved cart available. Some household changes are waiting to sync." }
+            // Managed outbox replay belongs to the independent verified-access
+            // pass. Local-only stores have no native permission preflight.
+            if recoveryPolicy == .localReplay {
+                do { try cart.resumePending() }
+                catch { recoveryMessage = "Saved cart available. Some household changes are waiting to sync." }
+            }
             guard let projection = try WatchPersistentProjection.read(cart: cart,
                 preferredHouseholdID: preferredHouseholdID ?? savedHousehold, writable: nil) else { return nil }
             let scope = projection.scope

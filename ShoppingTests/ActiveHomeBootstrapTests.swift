@@ -134,21 +134,32 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(try ready(bootstrap).householdID, first.householdID)
     }
 
+    private func waitForPublishedHomes(_ bootstrap: PersistenceBootstrap, count: Int) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.homes.count != count, ContinuousClock.now < deadline {
+            // A newer startup/history request can supersede the awaited refresh.
+            // Observe its publication without issuing another discovery action.
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.homes.count, count)
+    }
+
     func testConcurrentDiscoveryCannotReportCommittedCreationAsFailure() async throws {
         let bootstrap = try await makeBootstrap(homeCount: 1)
         var reachedBoundary = false
         let created = try await bootstrap.createHome(name: "Created during refresh") {
             // The creation's discovery request exists and its snapshot was fetched.
             // Force another request to supersede it before it can reconcile.
-            do { try await bootstrap.refreshHomes() }
-            catch { XCTFail("Intervening discovery failed: \(error)") }
+            do {
+                try await bootstrap.refreshHomes()
+                try await waitForPublishedHomes(bootstrap, count: 2)
+            } catch { XCTFail("Intervening discovery failed: \(error)") }
             reachedBoundary = true
-            XCTAssertEqual(bootstrap.homeCoordinator.homes.count, 2)
         }
         XCTAssertTrue(reachedBoundary)
         XCTAssertFalse(created.selected)
         try await bootstrap.refreshHomes()
-        XCTAssertEqual(bootstrap.homeCoordinator.homes.count, 2)
+        try await waitForPublishedHomes(bootstrap, count: 2)
         XCTAssertEqual(bootstrap.homeCoordinator.homes.filter { $0.graph.householdID == created.householdID }.count, 1)
         XCTAssertFalse(bootstrap.isCreatingHome)
     }

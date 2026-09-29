@@ -11,11 +11,16 @@ protocol WatchShoppingService: AnyObject {
     // Invalidate synchronously before an account/authority switch, even during an async command.
     // Ordinary durable imports preserve the current captured checkout.
     var onChange: (@MainActor (WatchServiceChange) -> Void)? { get set }
+    func refreshHomeAccess()
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot
     func captureCheckout(storeID: UUID) async throws -> WatchCheckoutPreview
     func checkout(token: String) async throws -> WatchActionResult
     func restore(token: String) async throws -> WatchActionResult
+}
+
+extension WatchShoppingService {
+    func refreshHomeAccess() {}
 }
 
 // Explicit unavailable/setup presentation, also used for startup failures and previews.

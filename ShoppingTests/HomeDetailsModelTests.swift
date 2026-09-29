@@ -79,6 +79,8 @@ final class HomeDetailsModelTests: XCTestCase {
         var acknowledged: [UUID] = []
         var invitationRetries: [Bool] = []
         var resent: [String] = []
+        var removalActions: HomeDetailsRemovalActions?
+        var leaveActions: HomeDetailsLeaveActions?
 
         init(value: HomeMembershipSnapshot) {
             self.value = value
@@ -99,7 +101,7 @@ final class HomeDetailsModelTests: XCTestCase {
             }, acknowledge: { delivery in self.acknowledged.append(delivery.id) }, rename: { name in
                 self.renamed.append(name)
                 if let failure = self.renameFailure { throw failure }
-            })
+            }, removals: removalActions, leave: leaveActions)
         }
     }
 
@@ -108,6 +110,266 @@ final class HomeDetailsModelTests: XCTestCase {
             environment: "Development", accountRecordName: "owner")
         return ActiveHomeScope(session: session, graph: HomeGraphIdentity(storeIdentifier: UUID().uuidString,
             rootURI: "x-coredata://isolated/Household/" + UUID().uuidString, householdID: UUID(), listID: UUID()))
+    }
+
+    private func leaveSnapshot(scope: ActiveHomeScope,
+        access: HomeMembershipSnapshot.Access = .contributor,
+        acceptance: HomeMember.Acceptance = .accepted) -> HomeMembershipSnapshot {
+        snapshot(scope: scope, access: access, members: [HomeMember(id: "self", name: "You",
+            role: access == .owner ? .owner : (access == .restricted ? .restricted : .contributor),
+            acceptance: acceptance, isCurrentUser: true, canResend: false)])
+    }
+
+    private func leaveCommand(scope: ActiveHomeScope, origin: HomeNativeAccessIdentity? = nil,
+        participantID: String = "self") throws -> HomeLeaveCommand {
+        let session = try ShopperSession.authenticated(containerIdentifier: scope.containerIdentifier,
+            environment: scope.environment, accountRecordName: "owner")
+        return HomeLeaveCommand(id: UUID(), origin: origin ?? HomeNativeAccessIdentity(
+            scope: HomeEffectScope(session: session, householdID: scope.graph.householdID, listID: scope.graph.listID),
+            storeIdentifier: scope.graph.storeIdentifier, rootURI: scope.graph.rootURI,
+            share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
+            storeURL: URL(fileURLWithPath: "/tmp/" + UUID().uuidString + ".sqlite"),
+            participantID: participantID, homeName: "Our home",
+            evidence: HomeLeaveEvidence(checkoutIDs: [], restoreIDs: [], unresolvedRestoreIDs: [], cartGenerations: []),
+            confirmedAt: Date())
+    }
+
+    func testAcceptedContributorAndReadOnlyMemberCanConfirmLeaveOnlyOnceWithoutClaimingCompletion() async throws {
+        for access in [HomeMembershipSnapshot.Access.contributor, .restricted] {
+            let scope = try scope()
+            let command = try leaveCommand(scope: scope)
+            let actions = Actions(value: leaveSnapshot(scope: scope, access: access))
+            var prepared = 0, confirmed: [UUID] = []
+            actions.leaveActions = HomeDetailsLeaveActions(prepare: {
+                prepared += 1
+                return command
+            }, confirm: {
+                confirmed.append($0.id)
+                return HomeLeaveStatus(command: $0, submitted: true, completed: false)
+            })
+            let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+            await model.refresh()
+            XCTAssertTrue(model.canLeave)
+            await model.prepareLeave()
+            XCTAssertEqual(prepared, 1)
+            XCTAssertEqual(model.leaveConfirmation, command)
+            XCTAssertTrue(confirmed.isEmpty, "Preparing disclosure does not authorize leaving")
+            await model.confirmLeave(command)
+            await model.confirmLeave(command)
+            XCTAssertEqual(confirmed, [command.id])
+            XCTAssertNil(model.leaveConfirmation)
+            let status = try XCTUnwrap(model.leaveStatus)
+            XCTAssertTrue(status.submitted)
+            XCTAssertFalse(status.completed, "A pending result must not claim that native leave completed")
+            XCTAssertTrue(status.requiresResolution)
+            XCTAssertFalse(model.canLeave)
+            XCTAssertFalse(model.busy)
+            XCTAssertNil(model.error)
+        }
+    }
+
+    func testOwnerAndUnacceptedParticipantCannotPrepareOrConfirmLeave() async throws {
+        let scope = try scope()
+        let command = try leaveCommand(scope: scope)
+        for (access, acceptance) in [(HomeMembershipSnapshot.Access.owner, HomeMember.Acceptance.accepted),
+                                     (.contributor, .pending), (.restricted, .unknown)] {
+            let actions = Actions(value: leaveSnapshot(scope: scope, access: access, acceptance: acceptance))
+            var calls = 0
+            actions.leaveActions = HomeDetailsLeaveActions(prepare: { calls += 1; return command },
+                confirm: { calls += 1; return HomeLeaveStatus(command: $0, submitted: true, completed: true) })
+            let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+            await model.refresh()
+            XCTAssertFalse(model.canLeave)
+            await model.prepareLeave()
+            model.leaveConfirmation = command
+            await model.confirmLeave(command)
+            XCTAssertEqual(calls, 0)
+            XCTAssertNil(model.leaveStatus)
+        }
+    }
+
+    func testCancelledAndReplacedLeaveConfirmationCannotAuthorizeOldCommand() async throws {
+        let scope = try scope()
+        let old = try leaveCommand(scope: scope), replacement = try leaveCommand(scope: scope)
+        var next = old, confirmed: [UUID] = []
+        let actions = Actions(value: leaveSnapshot(scope: scope))
+        actions.leaveActions = HomeDetailsLeaveActions(prepare: { next }, confirm: {
+            confirmed.append($0.id)
+            return HomeLeaveStatus(command: $0, submitted: true, completed: true)
+        })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareLeave()
+        model.leaveConfirmation = nil
+        await model.confirmLeave(old)
+        XCTAssertTrue(confirmed.isEmpty)
+        next = replacement
+        await model.prepareLeave()
+        await model.confirmLeave(old)
+        XCTAssertTrue(confirmed.isEmpty)
+        XCTAssertEqual(model.leaveConfirmation, replacement)
+        await model.confirmLeave(replacement)
+        XCTAssertEqual(confirmed, [replacement.id])
+        XCTAssertEqual(model.leaveStatus?.completed, true)
+    }
+
+    func testLeavePreparationRejectsEveryAccountGraphShareAndParticipantDrift() async throws {
+        let scope = try scope()
+        let valid = try leaveCommand(scope: scope)
+        let base = valid.origin
+        func changed(session: ShopperSession? = nil, store: String? = nil, root: String? = nil,
+            home: UUID? = nil, list: UUID? = nil, share: HomeEffectShare? = nil) throws -> HomeLeaveCommand {
+            let session = try session ?? ShopperSession.authenticated(containerIdentifier: scope.containerIdentifier,
+                environment: scope.environment, accountRecordName: "owner")
+            return try leaveCommand(scope: scope, origin: HomeNativeAccessIdentity(
+                scope: HomeEffectScope(session: session, householdID: home ?? scope.graph.householdID,
+                    listID: list ?? scope.graph.listID), storeIdentifier: store ?? base.storeIdentifier,
+                rootURI: root ?? base.rootURI, share: share ?? base.share))
+        }
+        let account = try ShopperSession.authenticated(containerIdentifier: scope.containerIdentifier,
+            environment: scope.environment, accountRecordName: "other")
+        let container = try ShopperSession.authenticated(containerIdentifier: "iCloud.other",
+            environment: scope.environment, accountRecordName: "owner")
+        let environment = try ShopperSession.authenticated(containerIdentifier: scope.containerIdentifier,
+            environment: "Production", accountRecordName: "owner")
+        let cases: [(String, HomeLeaveCommand)] = try [
+            ("account", changed(session: account)), ("container", changed(session: container)),
+            ("environment", changed(session: environment)), ("store", changed(store: "replacement")),
+            ("root", changed(root: "x-coredata://replacement/Household/root")),
+            ("home UUID", changed(home: UUID())), ("list UUID", changed(list: UUID())),
+            ("share", changed(share: HomeEffectShare(recordName: "other", zoneName: "zone", zoneOwnerName: "owner"))),
+            ("zone", changed(share: HomeEffectShare(recordName: "share", zoneName: "other", zoneOwnerName: "owner"))),
+            ("zone owner", changed(share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "other"))),
+            ("participant", leaveCommand(scope: scope, participantID: "other"))
+        ]
+        for (field, command) in cases {
+            let actions = Actions(value: leaveSnapshot(scope: scope))
+            var confirmations = 0
+            actions.leaveActions = HomeDetailsLeaveActions(prepare: { command }, confirm: {
+                confirmations += 1
+                return HomeLeaveStatus(command: $0, submitted: true, completed: true)
+            })
+            let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+            await model.refresh()
+            await model.prepareLeave()
+            XCTAssertNil(model.leaveConfirmation, field)
+            XCTAssertNotNil(model.error, field)
+            XCTAssertFalse(model.busy, field)
+            await model.confirmLeave(command)
+            XCTAssertEqual(confirmations, 0, field)
+        }
+    }
+
+    func testRetiredLeavePreparationCannotPresentConfirmation() async throws {
+        let scope = try scope()
+        let command = try leaveCommand(scope: scope)
+        let gate = Gate<HomeLeaveCommand>()
+        let actions = Actions(value: leaveSnapshot(scope: scope))
+        actions.leaveActions = HomeDetailsLeaveActions(prepare: { try await gate.wait() },
+            confirm: { HomeLeaveStatus(command: $0, submitted: true, completed: true) })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        try await withGateTask(gate, operation: { await model.prepareLeave() }) { task in
+            model.retire()
+            gate.finish(command)
+            try await task.value
+            XCTAssertNil(model.leaveConfirmation)
+            XCTAssertNil(model.leaveStatus)
+            XCTAssertFalse(model.canLeave)
+            XCTAssertFalse(model.busy)
+        }
+    }
+
+    func testRetiredLeaveConfirmationIgnoresCompletionAndRepeatedTapWhileHeld() async throws {
+        let scope = try scope()
+        let command = try leaveCommand(scope: scope)
+        let gate = Gate<HomeLeaveStatus>()
+        let actions = Actions(value: leaveSnapshot(scope: scope))
+        var confirmations = 0
+        actions.leaveActions = HomeDetailsLeaveActions(prepare: { command }, confirm: { _ in
+            confirmations += 1
+            return try await gate.wait()
+        })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareLeave()
+        try await withGateTask(gate, operation: { await model.confirmLeave(command) }) { task in
+            XCTAssertNil(model.leaveConfirmation)
+            await model.confirmLeave(command)
+            XCTAssertEqual(confirmations, 1)
+            model.retire()
+            gate.finish(HomeLeaveStatus(command: command, submitted: true, completed: true))
+            try await task.value
+            XCTAssertNil(model.leaveStatus)
+            XCTAssertNil(model.leaveConfirmation)
+            XCTAssertFalse(model.isCurrent)
+            XCTAssertFalse(model.busy)
+        }
+    }
+
+    func testRemovalPreparationHasNoEffectUntilMatchingConfirmationAndRetirementFencesResult() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: actions.value.share!,
+            ownerParticipantID: "self", participantIDs: ["friend"], cancelledInvitationID: nil,
+            purpose: .removeMember, confirmedAt: Date())
+        let confirmation = HomeMembershipRemovalConfirmation(removal: removal, homeName: "Our home", memberNames: ["Friend"])
+        let gate = Gate<HomeMembershipSnapshot>()
+        var confirmations: [UUID] = []
+        actions.removalActions = HomeDetailsRemovalActions(prepare: { _, _ in confirmation }, confirm: {
+            confirmations.append($0.id)
+            return try await gate.wait()
+        }, retry: { actions.value })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        XCTAssertEqual(model.removalConfirmation?.id, confirmation.id)
+        XCTAssertTrue(confirmations.isEmpty)
+        model.removalConfirmation = nil
+        await model.confirmRemoval(confirmation)
+        XCTAssertTrue(confirmations.isEmpty, "Dismissing confirmation must not authorize removal")
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        try await withGateTask(gate, operation: { await model.confirmRemoval(confirmation) }) { task in
+            XCTAssertEqual(confirmations, [confirmation.id])
+            XCTAssertNil(model.removalConfirmation)
+            model.retire()
+            gate.finish(actions.value)
+            try await task.value
+            XCTAssertFalse(model.isCurrent)
+            XCTAssertFalse(model.canManageMembers)
+            XCTAssertNil(model.removalConfirmation)
+        }
+    }
+
+    func testRemovalFailureShowsRetainedRetryStateWithoutAutomaticSecondConfirmation() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        let removal = HomeMembershipRemoval(id: UUID(), origin: scope, share: actions.value.share!,
+            ownerParticipantID: "self", participantIDs: ["friend"], cancelledInvitationID: nil,
+            purpose: .removeMember, confirmedAt: Date())
+        let confirmation = HomeMembershipRemovalConfirmation(removal: removal, homeName: "Our home", memberNames: ["Friend"])
+        var confirmations = 0, retries = 0
+        actions.removalActions = HomeDetailsRemovalActions(prepare: { _, _ in confirmation }, confirm: { _ in
+            confirmations += 1
+            actions.value.removals = [HomeMembershipRemovalStatus(removal: removal, requiresRetry: true)]
+            throw HomeMembershipError.outcomeUncertain
+        }, retry: {
+            retries += 1
+            actions.value.removals = [HomeMembershipRemovalStatus(removal: removal, absentObservedAt: Date())]
+            return actions.value
+        })
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.prepareRemoval(.removeMember, participantID: "friend")
+        await model.confirmRemoval(confirmation)
+        XCTAssertEqual(confirmations, 1)
+        XCTAssertEqual(retries, 0)
+        XCTAssertNotNil(model.error)
+        XCTAssertTrue(model.snapshot?.removals.first?.requiresRetry ?? false)
+        await model.retryRemovals()
+        XCTAssertEqual(retries, 1)
+        XCTAssertNotNil(model.snapshot?.removals.first?.absentObservedAt)
+        XCTAssertNil(model.error)
     }
 
     private func snapshot(scope: ActiveHomeScope, access: HomeMembershipSnapshot.Access = .owner,

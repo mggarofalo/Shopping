@@ -402,3 +402,329 @@ uses the real command. It never sends a message, opens a join URL, or grants nat
 membership. These scenarios are in the broader UI suite; the six routine acceptance
 scenarios remain unchanged. Real link acceptance, revocation, cross-account delivery
 and physical accessibility remain SHOPPING-30 evidence.
+
+## Member removal and cancelled invitations (SHOPPING-129)
+
+`HomeMembershipRemovalTests` owns explicit cancellation of a submitted invitation
+whose native outcome is unknown, version-one journal migration, retained archives,
+late participant appearance, suppressed delivery during a held native callback,
+imported owner authorizations, exact captured member sets, and explicit retry after
+an uncertain removal. A later invitation is never implicitly included in an older
+stop-sharing command. Cancelling an attempt does not automatically create its
+replacement.
+
+`HomeMembershipPrivateLedgerTests` owns append-only, account-private retention,
+idempotency, conflicting operation identifiers, preservation of home/People/cart
+records, SQLite reopen, and portable logical-home/share matching across devices.
+It resets contexts and detaches stores before reopening or deleting fixture files.
+These tests do not prove private CloudKit export or another device's import.
+
+`HomeDetailsModelTests` owns confirmation identity, dismissal without authorization,
+retired presentation fencing, and retained retry state after removal failure.
+`HomeDetailsUITests` owns cancelling and confirming contributor removal, continued
+owner access, and independent resend/removal buttons within the same member row.
+Its isolated membership fixture never calls native removal or sends an invitation.
+
+The contract prototype models a departing contributor remaining in the roster as
+pending. It does not prove the native shared-zone purge, invitation reuse, offline
+cache erasure, or private-effect quarantine. Participant leave, access observation,
+rejoin authority, and outbox quarantine need their own implementation and coverage
+before SHOPPING-129 is complete; all real-account behavior remains gated by
+SHOPPING-30.
+
+### Private-effect quarantine core (SHOPPING-129)
+
+`HomeEffectQuarantineTests` owns the account-private access-loss boundary, explicit
+fresh grants, stale checkout captures, private history/cleanup, and scope isolation.
+SQLite replicas deliver private checkout, quantity/removal, and restore records
+before lifecycle dependencies; a restore also arrives before its checkout. These
+orders must not publish household effects or fulfill shared demand. Authority and
+observed loss dependencies are embedded in the immutable effects, so an absent
+separate record is never mistaken for legacy authorization. Genuine older checkout
+payloads remain readable before any observed loss.
+
+The same suite covers rejoin without old outbox replay, newly captured work after a
+fresh grant, conflicting-share grants, and drain/detach/reopen persistence. The
+existing personal-cart tests retain ownership of reducers, native permission-policy
+simulation, private recovery, and normal two-replica ordering. These are local ledger
+proofs; native observation is covered separately below. Exact participant-zone
+leave and explicit rejoin still need integration and real-device verification
+before SHOPPING-129 can be complete.
+
+### Temporary permission restrictions (SHOPPING-129)
+
+`HomePermissionTests` owns observed read-only restrictions and fresh writable
+resolution, separately from permanent leave/revocation quarantine. It checks stale
+checkout captures, private quantity/uncart/history and recovery, resuming temporarily
+paused publication, distinct observations versus idempotent retries, and rejecting
+an older writable result after a newer read-only observation. Writable-before-
+restriction import fails closed. Household save enforcement covers new descendants
+and both original and destination homes of a relationship move; unrelated owned
+homes remain writable. These local persistence checks do not prove native CloudKit
+observation, leave, or real-device sharing.
+
+### Native access observation and runtime publication (SHOPPING-129)
+
+`HomeNativeAccessGateTests` owns initially unverified publication, transient refresh,
+late-response fencing, conservative failed retention, account/store/root/share
+isolation, portable read-only version deduplication, independent native-loss
+identities, narrow known-share error
+classification, and native-loss retention when an earlier grant imports late.
+The production recorder is used directly for causal ordering checks: a later rejoin
+must not authorize effects stamped with the earlier grant. Writable observation
+resolves only its captured restriction boundary and never creates a membership grant.
+The same test owner checks the shared refresh queue: concurrent foreground readers
+coalesce, while an ordinary import invalidating a held check retains a trailing
+check and returns its final result to every waiting caller.
+
+`HomePermissionTests` also owns discovery overlays, presentation-generation changes
+for effective permission changes, unchanged-observation stability, history merging
+without observation-only network feedback loops, and retaining an
+unavailable selected home across relaunch instead of selecting another home.
+`WatchShoppingSessionTests` owns explicit native-refresh dispatch separate from
+local reload/store switching and session busy state. `PersistentWatchShoppingServiceTests`
+checks imported read-only facts retiring a checkout capture while keeping private
+quantity and removal available. It also holds the real shared refresh queue while
+the SQLite service uses the production managed load-recovery policy, requiring
+cached loads, store switching, quantity changes and removal to finish before that
+queue is released. The bounded check drains both tasks on failure; it does not
+exercise native transport or account setup. Its fixture now drains and detaches the original
+store before directory cleanup; existing separately reopened fixture stores retain
+their own teardown obligations.
+
+The native adapter reads exact managed participant shares and verifies account,
+attached store, graph, and share identity around requests. Both apps gate shared
+publication and private-intent demand projection, including replay outside the
+selected home. Background checks do not occupy Watch snapshot loading. These are
+local code and simulator proofs, not evidence of real CloudKit delivery, permission
+propagation, device responsiveness, participant leave, or explicit rejoin. Those
+remain required by SHOPPING-129/30 and the device responsiveness protocol.
+
+The Watch status assertion for completed activity was synchronized with the
+existing shared message adopted in main `838c22e` (SHOPPING-146–152). It now checks
+`Recent iCloud activity completed.` exactly, as the iPhone owner already does,
+instead of expecting the removed disclaimer. The first native-access Watch run
+retains that stale-assertion failure; it is not treated as a passing validation.
+
+### Participant leave durability (SHOPPING-129)
+
+`HomeLeaveLedgerTests` owns atomic private leave authorization and quarantine,
+retention across SQLite reopen, original-store identity checks, at-most-once
+native-submission authorization, completion without a membership grant, and
+retirement of an old destructive authorization by a covering rejoin grant.
+Checkpoint-first imports carry the full command and require their missing block;
+failed saves retain neither half. Captured unpublished checkout/restore IDs and
+cart generations are evidence; the permanent membership boundary also covers old
+effects arriving after confirmation. Unknown legacy restores are retained as
+unresolved evidence, and incomplete earlier private imports do not require a peer
+to synchronize before explicit leave submission. These tests do not invoke CloudKit purge or
+prove participant leave, uncertain native outcome reconciliation, or rejoin UI.
+Submitted operations require reconciliation; they cannot automatically retransmit
+the zone purge. Native adapters, acceptance gates, and live proof remain required.
+
+### Participant join ordering (SHOPPING-129)
+
+`HomeJoinGateTests` owns rejection of pending leaves across every share record
+in the same account/container/environment/owner zone, block-first and
+checkpoint-first import ordering, and cart/checkout/restore effects imported
+before the lifecycle history they reference. Until a referenced block arrives,
+its zone cannot be classified safely and joining waits. Once history is complete,
+another zone remains independent. A completed leave opens this gate without
+granting membership or replaying old effects. An unclassified restore still waits
+for its declared scope or original checkout. Account-private reads stay scoped to
+the captured session; native callers must also verify that account remains active.
+
+The held-callback test proves local zone operations retain their turn through
+caller cancellation and native failure, while another zone proceeds. iPhone
+invitation import/acceptance and Watch acceptance use this gate and revalidate
+their native account/store environment. This is local ordering, not a cross-device
+or server conditional-purge guarantee. Native leave still requires integration. Explicit rejoin activation is covered
+below; both paths still require real two-account proof.
+
+### Explicit rejoin authority (SHOPPING-129)
+
+`HomeRejoinTests` owns SQLite capture/commit against a complete loss boundary,
+rejection of a newer loss, same-entry idempotency across reopen, a distinct grant
+after a later loss, and unchanged historical cart/checkout/restore payloads and
+publication authority. It also owns read-only membership with private cleanup,
+exact graph/account/store validation, pending-leave rejection, and transaction
+rollback if presentation or individual Open authority retires before saving.
+
+`HomeAdoptionBootstrapTests` owns the real bootstrap Open/Not now wiring: only
+explicit Open verifies membership and grants; resolved entries cannot grant
+again; a new loss, retired presentation, or replacement invitation rejects a
+held callback. The held journal scenario checks both an existing Open and a new
+Open after synchronous ingress while the old entry is still published. Both
+completions are bounded before the test releases and drains the journal queue.
+These fixtures use isolated plain SQLite stores and substitute the native
+membership verification boundary. They do not establish CloudKit acceptance,
+server permissions, or cross-device convergence.
+
+`ActiveHomeCoordinatorTests.testExplicitMembershipRenewalRetiresCapturedAuthorityForTheSameGraph`
+owns generation renewal and rejection of an older discovery result even when the
+selected graph is unchanged. Initial bootstrap discovery can overlap the next
+explicit refresh; the integration fixture waits boundedly for the already-running
+discovery to publish its unresolved state rather than assuming its own request won.
+
+The September 29 explicit-rejoin checkpoint passed 42 focused tests, all 484
+`ShoppingFast` tests, and all 47 Watch unit tests on the local iOS/watchOS 26.5
+simulators. The unchanged source was recorded in
+`/tmp/shopping-129-rejoin-corrected-source.json`; result bundles are
+`/tmp/shopping-129-rejoin-{corrected,fast,watch}.xcresult`. All three have zero
+skips and zero xcresult runtime warnings. Existing coordinator fixtures still
+emit Core Data model-ambiguity log warnings; this is not a warning-free log claim.
+The earlier 18-pass/4-fail discovery-timing result remains preserved at
+`/tmp/shopping-129-rejoin-focused.xcresult`. This checkpoint does not prove native
+leave, pre-acceptance loss retention, or live sharing.
+
+### Invitation acceptance retains observed loss (SHOPPING-129)
+
+`HomeInvitationAcceptanceTests` owns the common phone/Watch orchestration: capture
+retained exact-share evidence, freshly observe native access, commit typed loss
+to the private ledger, recheck pending leave history, then invoke acceptance.
+An old unpublished checkout stays quarantined after accepted access and explicit
+Open. Observation or private-save failure leaves acceptance unsubmitted. Stale
+pending invitation metadata alone does not establish lost access when fresh
+membership is accepted. A leave imported during observation rejects acceptance
+at the final gate. First-time acceptance without retained identity skips native
+loss observation but still enforces that final gate. The fixture substitutes
+native lookup and acceptance; private
+retention, publication rules, and join gating use the production SQLite paths.
+
+The native adapter resolves either an attached exact-share root or retained
+portable access/leave evidence, and checks account, store, scope, and graph again
+before saving. No retained identity means this particular observation cannot
+classify an earlier membership loss. This is the documented offline-discovery
+limit, not proof of uninterrupted membership: a separate replica can miss a
+revocation/reinvitation before observing current accepted access. The app does
+not promise immediate discovery of unobserved remote loss or use participant ID
+or a general share change tag as a guaranteed membership incarnation.
+
+The September 29 pre-acceptance checkpoint passed 19 focused tests, then the
+expanded eight acceptance tests (including first join), and all 492 Fast tests.
+The same production source passed all 47 Watch unit tests; only the two phone
+test methods were added afterward. All recorded bundles have zero skips and zero
+xcresult runtime warnings. Bundles use `/tmp/shopping-129-preaccept-` with suffixes
+`focused`, `first-join`, `final-fast`, and `watch`; the corresponding `.log` files
+and `final-source.json` retain evidence. Earlier 490-test Fast evidence is also
+preserved. Existing model-ambiguity log warnings remain separate from xcresult
+runtime warnings. Independent correctness and test-evidence review found no
+remaining issue after the final gate and first-join checks were added.
+
+### Participant leave execution (SHOPPING-129)
+
+`ManagedHomeLeaveTransportTests` owns the production prepare/execute/reconcile
+sequence with unique SQLite stores and a simulated platform backend. It checks
+committed authorization and quarantine before purge, at-most-once submission,
+private cart/history retention after actual fixture graph deletion, read-only
+participant leave, rejection of owner/pending/public or changed participants,
+known same-zone scope collisions, wrong returned zones, and account changes
+during a held callback. Held callbacks have bounded arrival checks and are always
+released and drained before teardown. Stores are detached before fixture removal.
+
+UI authority must remain current through the atomic confirmation save. After that
+durable handoff, the account service owns completion: quarantine may itself
+retire the screen. A covering rejoin grant still retires destructive authority.
+`HomeLeaveLedgerTests` owns the final pre-purge submitted/uncompleted/quarantine
+check and a covering grant arriving after the submission checkpoint. The transport
+suite owns the corresponding refusal to invoke purge and both sides of the UI
+authority handoff.
+
+The relaunch case detaches and reopens the same SQLite store, reconstructs its
+service/backend/transport, and proves that a submitted uncertain command never
+purges again. A readable or failed zone observation stays pending. An absent zone
+requires fresh local absence of both original home and list before completion.
+Quarantine and private history survive that completion. A crash after the submitted
+marker but before the native call remains uncertain; no timeout or generic error
+is converted into permission to resend a destructive operation.
+
+The backend fixture supplies native membership, environment/mapping verification,
+zone observations, and purge completion. Tests do not establish CloudKit mapping,
+permission propagation, server zone deletion, or actual cross-device cleanup. The
+production adapter uses a nonnil captured participant store and exact zone; only
+zone-not-found from an exact zone fetch counts as absence, never a missing share
+or permission failure. Native device proof remains required before release exposure. The confirmation
+and status UI proof is recorded below.
+
+The September 29 native-leave checkpoint passed 21 leave-focused tests, then 26
+including the home-creation concurrency fixture, all 506 Fast tests, and 47 Watch
+unit tests. Result bundles are `/tmp/shopping-129-leave-relaunch-focused.xcresult`,
+`/tmp/shopping-129-leave-discovery-focused.xcresult`,
+`/tmp/shopping-129-leave-validated-fast.xcresult`, and
+`/tmp/shopping-129-leave-watch.xcresult`; logs and
+`/tmp/shopping-129-leave-validated-source.json` retain source evidence. All have
+zero skips and zero xcresult runtime warnings. Existing Core Data model-ambiguity
+log warnings remain. The earlier `leave-final-fast` bundle retains 505 passes and
+one failure: a superseded discovery request returned before the newer request
+published. The fixture now waits boundedly for that publication after each single
+refresh, preserving its no-duplicate-creation and selection assertions.
+
+
+## Leave confirmation and retained status (SHOPPING-129)
+
+`HomeDetailsModelTests` owns accepted-participant eligibility, exact command and
+scope matching, cancellation, repeated confirmation, and stale prepare/confirm
+completion after presentation retirement. The native transport remains the owner
+of durable authorization, quarantine, and at-most-once purge behavior.
+
+`HomeDetailsUITests/testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome`
+owns the visible unsynced-change/private-history disclosure, Cancel returning
+without submission, Leave now producing an honest pending result, and disabling
+a repeated leave. Its isolated DEBUG fixture provides native membership and an
+uncertain callback only; it does not seed a completed leave or prove CloudKit.
+
+`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome`
+performs Leave now through the real transport and private ledger, with a DEBUG
+backend simulating loss of the native callback after exact root/list deletion.
+It opens Choose a home, verifies the removed root is unavailable and retained
+leave status remains reachable, then checks the explicit status action's
+idle → checking → uncertain-result transition. The bounded simulated network
+response makes that interaction distinguishable from an earlier automatic check;
+no completed leave or expected status result is seeded before the user action.
+
+`HomeLeaveBootstrapTests` owns the real bootstrap integration with unique private
+and participant SQLite stores: confirmed leave preserves private cart/history,
+does not select an unrelated home, and retains account-wide status after root
+removal and reopening. A cached offline account can read its retained status but
+cannot resume or query native membership. A late status callback cannot publish
+into a different account. An unsubmitted durable confirmation can resume on its
+original store; submitted uncertainty only reconciles and never purges again.
+
+The initial 24-test model/bootstrap run passed its assertions but emitted
+post-suite missing-SQLite errors (`/tmp/shopping-129-leave-bootstrap-focused`).
+Its account-change fixture had left the replacement account's asynchronous load
+unfinished before deleting its directory. The corrected fixture gives each
+account separate store paths, awaits the replacement runtime, and verifies store
+detachment before cleanup. The focused five-test rerun
+(`/tmp/shopping-129-leave-bootstrap-isolation.xcresult` and `.log`) passed with
+zero skips/runtime warnings and no Core Data errors or missing-path messages.
+Pre-existing model-ambiguity warnings remain separately tracked by SHOPPING-131.
+
+Final integration review caught an access-only import invalidating every native
+access observation without scheduling another verification pass. Phone and Watch
+now share `HomeNativeAccessGate.applyImportedHistory`: durable access facts remain
+enforced by the ledger, while only ordinary imports invalidate native verification.
+`HomeNativeAccessGateTests` proves two verified homes survive an access-only import,
+a held observation can finish without an extra pass, and ordinary imports still
+invalidate verification and request a trailing pass. The focused gate, permission,
+and bootstrap run passed all 24 tests (`/tmp/shopping-129-leave-history-focused`).
+
+The final UI/backend source passed 519 Fast tests and 47 Watch unit tests, with
+zero skips and zero xcresult runtime warnings (`/tmp/shopping-129-leave-ui-fast`
+and `/tmp/shopping-129-leave-ui-watch`). Raw Fast Core Data errors came only from
+the two intentional invalid-store load tests; model-ambiguity warnings remain.
+Source hashes are retained in `/tmp/shopping-129-leave-ui-final-source.json`.
+
+The new Cancel/Leave workflow passed independently. The root-gone workflow first
+proved navigation, then gained a stronger assertion of the status check's actual
+transition. Its first strengthened run failed because the query assumed a
+ProgressIndicator accessibility type; the stable-identifier query now requires
+one matching element without assuming that type. The failure remains in
+`/tmp/shopping-129-leave-ui-validated.xcresult`; the corrected single-test run
+`/tmp/shopping-129-leave-status-interaction-ui.xcresult` passed with no skips or
+runtime warnings. No product behavior or assertion was disabled to pass it.
+
+The unchanged final source also passed all six standard acceptance UI workflows
+(`/tmp/shopping-129-leave-ui-acceptance.xcresult` and `.log`), with zero skips.
+The same four negative/non-finite frame runtime warnings remain tracked by
+SHOPPING-131; this run does not claim those warnings are resolved.

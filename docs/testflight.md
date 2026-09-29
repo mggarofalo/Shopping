@@ -126,6 +126,10 @@ signing, the same team, `manageAppVersionAndBuildNumber=false`, and destination
 - The iPhone and embedded Watch bundles have the same intended marketing
   version and build number.
 - Both signed bundles have Production CloudKit and production push entitlements.
+- For the household-sharing release, the iPhone app's signed entitlements include
+  `com.apple.developer.icloud-extended-share-access = [InProcessOneTimeLinks]`.
+  Verify provisioning accepts it and prove a saved-share link works on the
+  supported physical devices; unsigned simulator tests are insufficient.
 - `BuildCommit.txt` in the iPhone bundle equals the clean `main` SHA.
 
 Use the same export options with destination `upload` to submit through Xcode.
