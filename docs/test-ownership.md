@@ -248,3 +248,28 @@ Hosted run36157514880 recorded the first catalog save/add test sending text whil
 `ShoppingAppearanceUITests/testGroceryAndCatalogShareRowHeightAndFilterControlDimensions` owns matching bare Grocery/Catalog row heights, store/filter geometry, plus dimensions and complete store accessibility. The existing content-sized table test keeps title/notes containment and symmetric padding; a short note may fit the shared Catalog minimum without increasing row height. Quantity-bearing and note-bearing rows no longer imply a height ordering. Existing long-column and large-text screenshots retain their proof.
 
 `CategoryManagementUITests/testPeopleUseStoresSelectionControlsAndKeepAssignedPeopleOnDelete` owns Stores/People control dimensions, Select All/Deselect All, Done clearing selection and the confirmed archive of an assigned person. Existing management tests retain native multiselection and large-text controls. The three people-batch cases in `StoreManagementTests` own foreign-scope exclusion, stale-revision skips, retained assignments, restore, late assignments and preservation of an archive preview when an assignment disappears. No acceptance-plan inventory changes.
+
+## Account-bound homes and retained drafts (SHOPPING-124)
+
+`ActiveHomeCoordinatorTests` owns exact account/container/environment/graph selection,
+multiple-root choices, reordered discovery, incomplete and duplicate identities,
+account suspension/return, access downgrade, stale command rejection before save,
+per-home filters and draft lease isolation. Draft lease cases retain the original
+scope, prevent late completion from deleting a reopened draft, and prevent parent
+completion from resurrecting nested drafts.
+
+`ActiveHomeBootstrapTests` owns actual startup, explicit owned-home creation,
+selection retirement and the committed-creation/discovery race using isolated
+SQLite and an injected account provider/store opener. Its creation checkpoint
+forces another discovery after creation's snapshot but before reconciliation;
+a committed graph must not become a retryable creation failure.
+
+`PersonalCartUITests/testCreateAndSwitchHomesPreservesOriginalGroceriesAfterRelaunch`
+owns rendered creation, positively selected second-home identity before and after
+relaunch, and returning to the original groceries. `testAccountScopedCatalogDraftSurvivesRelaunchAndCancelDiscardsIt`
+owns restoring a catalog draft on same-account relaunch and explicit cancellation.
+Cross-account draft separation belongs to the fast tests, not that UI scenario.
+The DEBUG `SHOPPING_UI_TEST_ACTIVE_HOMES` flag operates only under the existing
+unique UI-test store path. It replaces account lookup and store opening with local
+fixtures while exercising production bootstrap/coordinator code. It cannot prove
+CloudKit membership, account permissions, invitation delivery or two-phone sharing.

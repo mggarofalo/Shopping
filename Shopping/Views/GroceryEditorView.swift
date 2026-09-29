@@ -49,6 +49,7 @@ struct GroceryEditorView: View {
     @Environment(\.homeEditorDraftStore) private var draftStore
     @Environment(\.persistencePresentation) private var presentation
     @State private var draftScope: ActiveHomeScope?
+    @State private var draftLease: HomeEditorDraftStore.Lease?
     @State private var draftLoaded = false
     @State private var draftFinished = false
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
@@ -476,6 +477,7 @@ struct GroceryEditorView: View {
             }
         }
         .interactiveDismissDisabled(isSaving)
+        .environment(\.homeEditorParentKey, draftKey)
     }
 
     private var draftKey: String { "grocery." + (target.needID?.uuidString ?? "new") }
@@ -492,6 +494,7 @@ struct GroceryEditorView: View {
         draftLoaded = true
         draftScope = selection.homeScope
         guard let draftScope, let draftStore else { return }
+        draftLease = draftStore.open(scope: draftScope, editor: draftKey)
         do {
             guard let value = try draftStore.load(GroceryEditorDraft.self, scope: draftScope, editor: draftKey) else { return }
             remembered = value.remembered; name = value.name; catalogNotes = value.catalogNotes
@@ -505,14 +508,14 @@ struct GroceryEditorView: View {
     }
 
     private func retainDraft() {
-        guard draftLoaded, !draftFinished, let draftScope, let draftStore else { return }
-        do { try draftStore.save(draftValues, scope: draftScope, editor: draftKey) }
+        guard draftLoaded, !draftFinished, let draftLease, let draftStore else { return }
+        do { try draftStore.save(draftValues, lease: draftLease) }
         catch { self.error = error }
     }
 
     private func clearDraft() {
         draftFinished = true
-        if let draftScope { draftStore?.remove(scope: draftScope, editor: draftKey) }
+        if let draftLease { draftStore?.finish(draftLease) }
     }
 
     private func finishEditing() {
@@ -763,7 +766,7 @@ struct GroceryEditorView: View {
                 }.value
             }
             clearDraft()
-            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
             onSaved(savedID, savedCategoryID)
             finishEditing()
@@ -821,7 +824,7 @@ struct GroceryEditorView: View {
                 savedCategoryID = itemCategoryID
             }
             clearDraft()
-            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
             onSaved(needID, savedCategoryID)
             finishEditing()
@@ -894,21 +897,28 @@ struct GroceryEditorView: View {
                         categoryID: categoryID, textFilter: textFilter, urgentOnly: urgentOnly,
                         renewCarted: renewLegacyCart, personID: personID)
                 }.value
-                clearDraft()
-            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 switch result {
                 case .added(let needID), .renewed(let needID):
+                    clearDraft()
+                    guard presentation?.isActive != false,
+                          selection.householdID == householdID, selection.listID == listID else { return }
                     onSaved(needID, itemCategoryID)
                     finishEditing()
                 case .focusExisting(let needID):
+                    guard presentation?.isActive != false,
+                          selection.householdID == householdID, selection.listID == listID else { return }
                     if renewCarted, let personalCart,
                        let entry = personalCart.entries.first(where: { $0.needID == needID }) {
                         try await personalCart.uncart(entry)
                         clearDraft()
-            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
+                        guard presentation?.isActive != false,
+                              selection.householdID == householdID, selection.listID == listID else { return }
                         onSaved(needID, itemCategoryID)
                         finishEditing()
-                    } else { onFocusNeed(needID) }
+                    } else {
+                        clearDraft()
+                        onFocusNeed(needID)
+                    }
                 }
             } catch { self.error = error }
         }
@@ -929,7 +939,7 @@ struct GroceryEditorView: View {
                         listID: listID, expectedRevision: revision)
                 }.value
                 clearDraft()
-            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onRemoved(operationID, scope)
                 finishEditing()
             } catch { self.error = error }

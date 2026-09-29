@@ -22,6 +22,7 @@ struct CatalogEditorView: View {
     @Environment(\.homeEditorDraftStore) private var draftStore
     @Environment(\.persistencePresentation) private var presentation
     @State private var draftScope: ActiveHomeScope?
+    @State private var draftLease: HomeEditorDraftStore.Lease?
     @State private var draftLoaded = false
     @State private var draftFinished = false
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
@@ -257,6 +258,7 @@ struct CatalogEditorView: View {
                 }
             }
             .interactiveDismissDisabled(isSaving)
+            .environment(\.homeEditorParentKey, draftKey)
         }
     }
 
@@ -318,6 +320,7 @@ struct CatalogEditorView: View {
         draftLoaded = true
         draftScope = selection.homeScope
         guard let draftScope, let draftStore else { return }
+        draftLease = draftStore.open(scope: draftScope, editor: draftKey)
         do {
             guard let value = try draftStore.load(CatalogEditorDraft.self, scope: draftScope, editor: draftKey) else { return }
             itemID = value.itemID
@@ -327,14 +330,14 @@ struct CatalogEditorView: View {
     }
 
     private func retainDraft() {
-        guard draftLoaded, !draftFinished, let draftScope, let draftStore else { return }
-        do { try draftStore.save(draftValues, scope: draftScope, editor: draftKey) }
+        guard draftLoaded, !draftFinished, let draftLease, let draftStore else { return }
+        do { try draftStore.save(draftValues, lease: draftLease) }
         catch { errorMessage = error.localizedDescription }
     }
 
     private func clearDraft() {
         draftFinished = true
-        if let draftScope { draftStore?.remove(scope: draftScope, editor: draftKey) }
+        if let draftLease { draftStore?.finish(draftLease) }
     }
 
     private func finishEditing() {

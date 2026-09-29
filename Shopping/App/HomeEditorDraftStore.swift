@@ -3,9 +3,36 @@ import SwiftUI
 /// Only editable values are retained; managed objects and command/checkout tokens never are.
 @MainActor
 final class HomeEditorDraftStore {
+    struct Lease {
+        let scope: ActiveHomeScope
+        let editor: String
+        fileprivate let id: UUID
+    }
     private let defaults: UserDefaults
+    private var leases: [String: UUID] = [:]
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    func open(scope: ActiveHomeScope, editor: String) -> Lease {
+        let lease = Lease(scope: scope, editor: editor, id: UUID())
+        leases[key(scope: scope, editor: editor)] = lease.id
+        return lease
+    }
+
+    func currentLease(scope: ActiveHomeScope?, editor: String) -> Lease? {
+        guard let scope, let id = leases[key(scope: scope, editor: editor)] else { return nil }
+        return Lease(scope: scope, editor: editor, id: id)
+    }
+
+    func save<T: Encodable>(_ value: T, lease: Lease) throws {
+        guard leases[key(scope: lease.scope, editor: lease.editor)] == lease.id else { return }
+        try save(value, scope: lease.scope, editor: lease.editor)
+    }
+
+    func finish(_ lease: Lease) {
+        guard leases[key(scope: lease.scope, editor: lease.editor)] == lease.id else { return }
+        remove(scope: lease.scope, editor: lease.editor)
+    }
 
     func load<T: Decodable>(_ type: T.Type, scope: ActiveHomeScope, editor: String) throws -> T? {
         guard let data = defaults.data(forKey: key(scope: scope, editor: editor)) else { return nil }
@@ -17,7 +44,12 @@ final class HomeEditorDraftStore {
     }
 
     func remove(scope: ActiveHomeScope, editor: String) {
-        defaults.removeObject(forKey: key(scope: scope, editor: editor))
+        let root = key(scope: scope, editor: editor)
+        // Nested category/store drafts belong to this editor, never to its next use.
+        for entry in defaults.dictionaryRepresentation().keys where entry == root || entry.hasPrefix(root + ".") {
+            defaults.removeObject(forKey: entry)
+        }
+        leases = leases.filter { $0.key != root && !$0.key.hasPrefix(root + ".") }
     }
 
     private func key(scope: ActiveHomeScope, editor: String) -> String {

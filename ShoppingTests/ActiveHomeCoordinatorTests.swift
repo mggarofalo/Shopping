@@ -297,8 +297,42 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         let authority = UICommandAuthority()
         policy.authority = authority
         XCTAssertThrowsError(try base.scoped(to: authority).createStore(name: "Uncommitted", householdID: selected.householdID))
-        try persistence.writer.performAndWait {
-            XCTAssertTrue(try persistence.writer.fetch(Store.fetchRequest()).isEmpty)
+        let writer = persistence.writer
+        try writer.performAndWait {
+            XCTAssertTrue(try writer.fetch(Store.fetchRequest()).isEmpty)
         }
+    }
+
+    func testCompletedDraftCannotReappearAndOldCompletionCannotEraseReopenedDraft() throws {
+        let (_, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = HomeEditorDraftStore(defaults: defaults)
+        let scope = ActiveHomeScope(session: try session(), graph: home().graph)
+        let first = store.open(scope: scope, editor: "store.new")
+        try store.save("Old name", lease: first)
+        let reopened = store.open(scope: scope, editor: "store.new")
+        try store.save("New name", lease: reopened)
+        store.finish(first)
+        try store.save("Delayed old change", lease: first)
+        XCTAssertEqual(try store.load(String.self, scope: scope, editor: "store.new"), "New name")
+        store.finish(reopened)
+        try store.save("Late change after cancel", lease: reopened)
+        XCTAssertNil(try store.load(String.self, scope: scope, editor: "store.new"))
+    }
+
+    func testParentCompletionInvalidatesChildrenWithoutTouchingAnotherEditor() throws {
+        let (_, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = HomeEditorDraftStore(defaults: defaults)
+        let scope = ActiveHomeScope(session: try session(), graph: home().graph)
+        let parent = store.open(scope: scope, editor: "grocery.new")
+        let child = store.open(scope: scope, editor: "grocery.new.new-store")
+        let other = store.open(scope: scope, editor: "grocery.newer.new-store")
+        try store.save("Child", lease: child)
+        try store.save("Other", lease: other)
+        store.finish(parent)
+        try store.save("Delayed child", lease: child)
+        XCTAssertNil(try store.load(String.self, scope: scope, editor: "grocery.new.new-store"))
+        XCTAssertEqual(try store.load(String.self, scope: scope, editor: "grocery.newer.new-store"), "Other")
     }
 }

@@ -150,12 +150,69 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].waitForExistence(timeout: 3))
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false) -> XCUIApplication {
+    func testCreateAndSwitchHomesPreservesOriginalGroceriesAfterRelaunch() {
+        let app = launch(activeHomes: true)
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Homes"].tap()
+        let name = app.textFields["shopping.home.name"]
+        XCTAssertTrue(name.existsOrAppears(timeout: 3))
+        name.tap()
+        name.typeText("Second home")
+        XCTAssertEqual(name.value as? String, "Second home")
+        app.buttons["shopping.home.create"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertFalse(groceryRow("Granola", app: app).exists)
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Homes"].tap()
+        XCTAssertTrue(app.buttons["shopping.home.choice.Second home"].existsOrAppears(timeout: 3))
+        XCTAssertEqual(app.buttons["shopping.home.choice.Second home"].value as? String, "Owner, Selected")
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertFalse(groceryRow("Granola", app: app).exists)
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Homes"].tap()
+        XCTAssertTrue(app.buttons["shopping.home.choice.Second home"].existsOrAppears(timeout: 3))
+        XCTAssertEqual(app.buttons["shopping.home.choice.Second home"].value as? String, "Owner, Selected")
+        let original = app.buttons["shopping.home.choice.Preview household"]
+        XCTAssertTrue(original.existsOrAppears(timeout: 3))
+        original.tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5))
+    }
+
+    func testAccountScopedCatalogDraftSurvivesRelaunchAndCancelDiscardsIt() {
+        let app = launch(activeHomes: true)
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        app.tabBars.buttons["Catalog"].tap()
+        app.buttons["shopping.catalog.add"].tap()
+        let name = app.textFields["shopping.catalog.name"]
+        XCTAssertTrue(name.existsOrAppears(timeout: 3))
+        name.tap()
+        name.typeText("Unfinished milk")
+        XCTAssertEqual(name.value as? String, "Unfinished milk")
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        app.tabBars.buttons["Catalog"].tap()
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(name.existsOrAppears(timeout: 3))
+        XCTAssertEqual(name.value as? String, "Unfinished milk")
+        app.buttons["Cancel"].tap()
+        app.buttons["shopping.catalog.add"].tap()
+        XCTAssertTrue(name.existsOrAppears(timeout: 3))
+        XCTAssertNotEqual(name.value as? String, "Unfinished milk")
+    }
+
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        if activeHomes { app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1" }
         if personalCart { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1" }
         if unavailableSetup { app.launchEnvironment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] = "1" }
         if purchaseNotice { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] = "1" }

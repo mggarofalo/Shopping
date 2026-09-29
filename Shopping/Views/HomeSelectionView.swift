@@ -27,6 +27,10 @@ struct HomeSelectionView: View {
                         }
                     }
                     .disabled(home.access == .unresolved)
+                    .accessibilityLabel(home.name)
+                    .accessibilityValue(accessDescription(home.access)
+                        + (coordinator.activeScope?.graph == home.graph ? ", Selected" : ""))
+                    .accessibilityIdentifier("shopping.home.choice." + home.name)
                 }
             } header: { Text("Your homes") } footer: { Text("Groceries and personal carts stay with their original home.") }
             if coordinator.activeScope == nil {

@@ -135,6 +135,8 @@ final class PersistenceBootstrap: ObservableObject {
     let homeCoordinator: ActiveHomeCoordinator
     let editorDrafts: HomeEditorDraftStore
     private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
+    private let accountStoreDirectory: () throws -> URL
+    private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
     @Published private(set) var state: State = .loading
     @Published private(set) var pendingShareAssociationCount = 0
     @Published private(set) var isCreatingHome = false
@@ -166,7 +168,9 @@ final class PersistenceBootstrap: ObservableObject {
         configuration: @escaping () throws -> PersistenceConfiguration = { try .applicationLocal() },
         preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil,
         defaults: UserDefaults = .standard,
-        makeAccountProvider: @escaping (URL) throws -> ShopperSessionProvider = PersistenceBootstrap.productionAccountProvider
+        makeAccountProvider: @escaping (URL) throws -> ShopperSessionProvider = PersistenceBootstrap.productionAccountProvider,
+        accountStoreDirectory: @escaping () throws -> URL = PersistenceBootstrap.productionAccountDirectory,
+        activateAccountStore: @escaping @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { try PersistenceBootstrap.productionAccountActivation(source: $0, session: $1, base: $2, importLegacy: $3) }
     ) {
         self.configuration = configuration
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
@@ -174,10 +178,25 @@ final class PersistenceBootstrap: ObservableObject {
         self.homeCoordinator = ActiveHomeCoordinator(defaults: defaults)
         self.editorDrafts = HomeEditorDraftStore(defaults: defaults)
         self.makeAccountProvider = makeAccountProvider
+        self.accountStoreDirectory = accountStoreDirectory
+        self.activateAccountStore = activateAccountStore
         cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
     }
 
-    private static func productionAccountProvider(_ base: URL) throws -> ShopperSessionProvider {
+    nonisolated private static func productionAccountDirectory() throws -> URL {
+        try FileManager.default.url(for: .applicationSupportDirectory,
+            in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("ShoppingAccounts", isDirectory: true)
+    }
+
+    nonisolated private static func productionAccountActivation(
+        source: URL?, session: ShopperSession, base: URL, importLegacy: Bool
+    ) throws -> PersistenceConfiguration {
+        try PersonalCartActivation.activate(sourceURL: source, session: session,
+            baseDirectory: base, importLegacy: importLegacy)
+    }
+
+    nonisolated private static func productionAccountProvider(_ base: URL) throws -> ShopperSessionProvider {
         guard let identifier = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitContainerIdentifier") as? String,
               let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String else {
             throw ShopperSessionError.invalidConfiguration
@@ -268,12 +287,26 @@ final class PersistenceBootstrap: ObservableObject {
                 }
 #if DEBUG
                 let unavailableSetup = processInfo.environment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] == "1"
+                let activeHomesFixture = processInfo.environment["SHOPPING_UI_TEST_ACTIVE_HOMES"] == "1"
 #else
                 let unavailableSetup = false
+                let activeHomesFixture = false
 #endif
                 let providerFactory: (URL) throws -> ShopperSessionProvider = { base in
                     if unavailableSetup { throw ShopperSessionError.temporarilyUnavailable }
+                    if activeHomesFixture {
+                        return try ShopperSessionProvider(containerIdentifier: "iCloud.test.shopping-homes", environment: "Development",
+                            cacheDirectory: base.appendingPathComponent("Bindings"),
+                            lookup: .init(status: { .available }, recordName: { "isolated-home-test-account" }))
+                    }
                     return try productionAccountProvider(base)
+                }
+                let accountDirectory: () throws -> URL = {
+                    activeHomesFixture ? storeURL.deletingLastPathComponent() : try productionAccountDirectory()
+                }
+                let activate: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { source, session, base, approved in
+                    if activeHomesFixture { return .local(storeURL: storeURL) }
+                    return try productionAccountActivation(source: source, session: session, base: base, importLegacy: approved)
                 }
                 if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
@@ -281,20 +314,26 @@ final class PersistenceBootstrap: ObservableObject {
                     let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment,
-                        defaults: fixtureDefaults, makeAccountProvider: providerFactory
+                        defaults: fixtureDefaults, makeAccountProvider: providerFactory,
+                        accountStoreDirectory: accountDirectory, activateAccountStore: activate
                     )
 #if DEBUG
-                    bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
+                    if activeHomesFixture {
+                        bootstrap.personalMode = true
+                        bootstrap.preloadedPreviewEnvironment = nil
+                    }
+                    bootstrap.personalFixture = !activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
                     bootstrap.personalNoticeFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] == "1"
                     bootstrap.personalRevokedFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_REVOKED"] == "1"
 #endif
                     return bootstrap
                 }
                 let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: storeURL) },
-                    defaults: fixtureDefaults, makeAccountProvider: providerFactory)
-                if unavailableSetup { bootstrap.personalMode = fixtureDefaults.bool(forKey: personalModeKey) }
+                    defaults: fixtureDefaults, makeAccountProvider: providerFactory,
+                    accountStoreDirectory: accountDirectory, activateAccountStore: activate)
+                if unavailableSetup || activeHomesFixture { bootstrap.personalMode = activeHomesFixture || fixtureDefaults.bool(forKey: personalModeKey) }
 #if DEBUG
-                bootstrap.personalFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
+                bootstrap.personalFixture = !activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
 #endif
                 return bootstrap
             } catch {
@@ -467,6 +506,10 @@ final class PersistenceBootstrap: ObservableObject {
         resumePendingCart()
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
+        Task {
+            do { try await refreshHomes() }
+            catch { shareAssociationError = error }
+        }
         retryShareAssociations()
     }
 
@@ -487,9 +530,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     private func openPersonalStore(sourceURL: URL?) {
         do {
-            let base = try FileManager.default.url(for: .applicationSupportDirectory,
-                in: .userDomainMask, appropriateFor: nil, create: true)
-                .appendingPathComponent("ShoppingAccounts", isDirectory: true)
+            let base = try accountStoreDirectory()
             if accountProvider == nil {
                 let provider = try makeAccountProvider(base)
                 accountProvider = provider
@@ -503,9 +544,9 @@ final class PersistenceBootstrap: ObservableObject {
                 await provider.refresh()
                 do {
                     let session = try provider.currentSession()
+                    let activate = activateAccountStore
                     let activated = try await Task.detached(priority: .userInitiated) {
-                        try PersonalCartActivation.activate(sourceURL: sourceURL,
-                            session: session, baseDirectory: base, importLegacy: sourceURL != nil)
+                        try activate(sourceURL, session, base, sourceURL != nil)
                     }.value
                     guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
                     personalConfiguration = activated
@@ -755,13 +796,7 @@ final class PersistenceBootstrap: ObservableObject {
             do {
                 _ = try await historyConsumer.consume()
                 guard generation == requestedGeneration else { return }
-                if case .ready(let ready) = state, let request = homeCoordinator.beginDiscovery() {
-                    let discovery = HomeDiscoveryService(persistence: ready.persistence)
-                    let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
-                    guard generation == requestedGeneration,
-                          try accountProvider?.currentSession() == request.sessionForValidation else { return }
-                    if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
-                }
+                try await refreshHomes()
                 resumePendingCart()
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
             } catch {
@@ -769,6 +804,16 @@ final class PersistenceBootstrap: ObservableObject {
                 retireAndFail(error)
             }
         }
+    }
+
+    func refreshHomes() async throws {
+        guard case .ready(let ready) = state, let request = homeCoordinator.beginDiscovery() else { return }
+        let requestedGeneration = generation
+        let discovery = HomeDiscoveryService(persistence: ready.persistence)
+        let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+        guard generation == requestedGeneration, ready.presentation.isActive,
+              try accountProvider?.currentSession() == request.sessionForValidation else { return }
+        if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
     }
 
     func selectHome(_ graph: HomeGraphIdentity) throws {
@@ -784,7 +829,7 @@ final class PersistenceBootstrap: ObservableObject {
         let selected: Bool
     }
 
-    func createHome(name: String) async throws -> CreatedHome {
+    func createHome(name: String, beforeSelectionReconciliation: () async -> Void = {}) async throws -> CreatedHome {
         guard !isCreatingHome, case .ready(let ready) = state,
               let provider = accountProvider else { throw ShopperSessionError.setupRequired }
         let session = try provider.currentSession()
@@ -809,6 +854,7 @@ final class PersistenceBootstrap: ObservableObject {
                   let request = homeCoordinator.beginDiscovery() else { return result() }
             let discovery = HomeDiscoveryService(persistence: ready.persistence)
             let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+            await beforeSelectionReconciliation()
             guard ready.presentation.isActive, try provider.currentSession() == session,
                   homeCoordinator.reconcile(snapshot, request: request),
                   let home = snapshot.homes.first(where: {
