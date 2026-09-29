@@ -382,7 +382,7 @@ per-home serialization through native completion, cancellation, restart at each
 submission checkpoint, uncertain-result reconciliation, and explicit resend. An
 absent participant after an uncertain submission never authorizes another write.
 The submitted-before-native crash window deliberately remains uncertain here;
-SHOPPING-129 must provide explicit durable owner resolution before module release.
+SHOPPING-129 now supplies explicit durable owner resolution, covered below; native outcome verification remains in SHOPPING-30.
 `ManagedHomeMembershipTransportTests` checks the real SDK factory and secure archive
 round trip, including stable participant identity and contributor permission. It
 does not save a share or prove server acceptance.
@@ -427,10 +427,10 @@ Its isolated membership fixture never calls native removal or sends an invitatio
 
 The contract prototype models a departing contributor remaining in the roster as
 pending. It does not prove the native shared-zone purge, invitation reuse, offline
-cache erasure, or private-effect quarantine. Participant leave, access observation,
-rejoin authority, and outbox quarantine need their own implementation and coverage
-before SHOPPING-129 is complete; all real-account behavior remains gated by
-SHOPPING-30.
+cache erasure, or private-effect quarantine. The completed SHOPPING-129 local
+implementation and coverage for participant leave, access observation, rejoin
+authority and outbox quarantine are recorded below. All real-account behavior
+remains gated by SHOPPING-30.
 
 ### Private-effect quarantine core (SHOPPING-129)
 
@@ -447,9 +447,9 @@ The same suite covers rejoin without old outbox replay, newly captured work afte
 fresh grant, conflicting-share grants, and drain/detach/reopen persistence. The
 existing personal-cart tests retain ownership of reducers, native permission-policy
 simulation, private recovery, and normal two-replica ordering. These are local ledger
-proofs; native observation is covered separately below. Exact participant-zone
-leave and explicit rejoin still need integration and real-device verification
-before SHOPPING-129 can be complete.
+proofs; native observation, exact participant-zone leave and explicit rejoin
+integration are covered separately below. Real-device verification remains in
+SHOPPING-30.
 
 ### Temporary permission restrictions (SHOPPING-129)
 
@@ -498,7 +498,7 @@ publication and private-intent demand projection, including replay outside the
 selected home. Background checks do not occupy Watch snapshot loading. These are
 local code and simulator proofs, not evidence of real CloudKit delivery, permission
 propagation, device responsiveness, participant leave, or explicit rejoin. Those
-remain required by SHOPPING-129/30 and the device responsiveness protocol.
+live checks remain required by SHOPPING-30 and the device responsiveness protocol.
 
 The Watch status assertion for completed activity was synchronized with the
 existing shared message adopted in main `838c22e` (SHOPPING-146–152). It now checks
@@ -520,7 +520,8 @@ unresolved evidence, and incomplete earlier private imports do not require a pee
 to synchronize before explicit leave submission. These tests do not invoke CloudKit purge or
 prove participant leave, uncertain native outcome reconciliation, or rejoin UI.
 Submitted operations require reconciliation; they cannot automatically retransmit
-the zone purge. Native adapters, acceptance gates, and live proof remain required.
+the zone purge. Native adapters and acceptance gates are covered below; live proof
+remains required by SHOPPING-30.
 
 ### Participant join ordering (SHOPPING-129)
 
@@ -538,8 +539,8 @@ The held-callback test proves local zone operations retain their turn through
 caller cancellation and native failure, while another zone proceeds. iPhone
 invitation import/acceptance and Watch acceptance use this gate and revalidate
 their native account/store environment. This is local ordering, not a cross-device
-or server conditional-purge guarantee. Native leave still requires integration. Explicit rejoin activation is covered
-below; both paths still require real two-account proof.
+or server conditional-purge guarantee. Native leave integration and explicit rejoin
+activation are covered below; both paths still require real two-account proof.
 
 ### Explicit rejoin authority (SHOPPING-129)
 
@@ -880,3 +881,98 @@ HomeCreationTests/PersonalCartServiceTests fixture unlink diagnostics; their
 required SHOPPING-131 cleanup and original logs remain intact. The two deliberate
 invalid-store tests also emit their expected Core Data errors. No warning-free
 log or live-sharing claim is made.
+
+
+## Cross-feature lifecycle validation (SHOPPING-131)
+
+The [requirement matrix](home-sharing-validation.md) maps local behavior to its
+existing proof owners and records the separate, unresolved native checks for
+SHOPPING-30. These additions exercise integration boundaries without replacing
+cart reducers or expanding the quick acceptance selection.
+
+- `HomeAdoptionBootstrapTests.testTwoInvitationsImportAndOpenInArrivalOrderWithoutReplacingSelection`
+  and `testTwoInvitationsImportAndOpenInReverseOrderWithoutReplacingSelection`
+  own independent invitation decisions, explicit selection, late-import stability,
+  and return to the original groceries/private cart. Two SQLite stores substitute
+  CloudKit attachment; marking import ready is the substituted journal boundary.
+- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityRestoresHomeCartAndDraftButRejectsLateDiscovery`
+  owns A → temporarily unavailable → A through the real account provider,
+  presentation retirement, store detach/reopen, held stale discovery completion,
+  original cart/draft retention and rejection of captured checkout authority.
+  Its held read finishes before detach; only delivery of the value is delayed.
+- `ActiveHomeBootstrapTests.testTwoHomesRequireChoiceAndSwitchRetiresCapturedCommands`
+  now also owns checkout capture and editor lease retirement across a home switch,
+  absence of unintended history, and restoration of the original cart/draft.
+- `HomeMembershipPrivateLedgerTests.testStopSharingReopensDurableTargetsAndRequiresExplicitRetryAfterFailedSubmission`
+  owns the durable private removal capture before membership-journal submission,
+  SQLite/coordinator reconstruction, failure without passive retry, explicit retry,
+  exact accepted/pending targets and retention of later members and original data.
+- `HomeDetailsUITests.testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers`
+  owns the real confirmation binding: cancel preserves membership, then confirm
+  removes the captured accepted and pending members while owner/home/groceries
+  remain usable. The existing isolated membership fixture supplies native results;
+  the UI never sends an actual invitation or removes a CloudKit participant.
+- `PersistenceContainerTests.testPostShareChildrenStayWithEachRootAndOnlyOwnerGraphEntersAssociationJournal`
+  owns real child creation in two SQLite stores and owner-only association staging.
+  The internal role-lookup overload substitutes store classification only; production
+  forwards the controller's actual bindings. Private cart/lifecycle objects are
+  excluded. This does not prove actual CloudKit zone association or server ACLs.
+
+### SQLite fixture lifetime repair
+
+`SQLiteTestFixtureLifetime` retains every registered controller and extra context,
+resets writer/extra/view contexts, verifies empty context state, then detaches all
+persistent stores before removing any registered directory. A detach failure
+preserves directories and fails teardown. These synchronous fixtures have no owned
+background worker to drain; bootstrap fixtures separately drain their invitation
+journal before directory cleanup.
+
+`HomeCreationTests` retains all seven methods and assertions; `PersonalCartServiceTests`
+retains all 33, including separately opened stores and replica ordering. Seventeen
+extra contexts are registered. No logs or errors are suppressed. The baseline
+unlink/openDirectory diagnostics recorded under SHOPPING-128/130 remain evidence.
+
+An isolated run of these unchanged 40 methods passed with zero failures, skips or
+xcresult runtime warnings. The raw log contains no vnode, openDirectory or Core
+Data error diagnostics. Evidence: `/tmp/shopping-131-fixture-focused.xcresult`,
+`/tmp/shopping-131-fixture-focused.log` and the four-file hash manifest
+`/tmp/shopping-131-fixture-source.json`. Both validation copies and the active issue
+worktree matched that manifest during independent review. Other compiler warnings
+remain; this is not a warning-free build or suite runtime improvement claim.
+
+The final full-suite attestation and pinned CI must validate the complete committed
+candidate; this isolated selection does not validate the later matrix additions.
+Native keyboard-accessory layout diagnostics observed in earlier UI runs remain
+an investigation, not a resolved application defect or waived live acceptance.
+
+The combined affected Fast selection passed all 92 methods across six suites,
+with zero skips or xcresult runtime warnings (`/tmp/shopping-131-matrix-focused`).
+All source hashes still matched `/tmp/shopping-131-matrix-source.json`; only docs
+changed afterward. There were no vnode/openDirectory diagnostics. The 502 raw
+Core Data error lines were confined to the intentional
+`PersistenceContainerTests.testLoadFailurePreservesOriginalBytes` invalid-store
+case. A trailing unbalanced appearance-transition message is retained in the raw
+log; zero structured runtime warnings is not a clean-console claim.
+
+The first Stop sharing UI run passed (`/tmp/shopping-131-stop-ui`), but independent
+review found its initial navigation-title wait did not establish that the async
+grocery projection was ready. The corrected workflow waits for the known complete
+fixture rows before capture and the preserved set on return. The initial pass is
+intermediate evidence, not validation of that later readiness correction.
+
+The complete Fast plan passed all 569 tests (the 564-test baseline plus five new
+integration methods), with zero failures, skips or xcresult runtime warnings.
+No vnode/openDirectory diagnostics recurred. Evidence is
+`/tmp/shopping-131-complete-fast.xcresult` and `.log`; the source manifest is
+`/tmp/shopping-131-complete-source.json`. Two independent functional reviews found
+no remaining defect after the UI readiness correction. Live CloudKit assertions
+remain outside this local result.
+
+The corrected Stop sharing workflow passed with zero failures, skips or xcresult
+runtime warnings (`/tmp/shopping-131-stop-corrected-ui.xcresult` and `.log`).
+Its 44.686-second test duration is validation evidence, not a runtime improvement
+claim. The full candidate's non-documentation source still matched the frozen
+manifest after both final runs. The independent reviewer confirmed the Fast
+inventory is exactly the baseline plus five additions, with no omitted or duplicate
+methods. Remaining Fast Core Data errors belong to the two deliberate invalid-store
+tests; one raw appearance-transition message remains visible.

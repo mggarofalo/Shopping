@@ -128,6 +128,68 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(invite.isEnabled)
     }
 
+    /// Service tests own durable removal and server-result reconciliation. This
+    /// workflow proves the native Stop sharing control binds both confirmation
+    /// choices and preserves the currently displayed owner home and groceries.
+    func testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers() {
+        let app = launch(role: "owner")
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
+        // Populated has seven active needs; Party ice is archived, and the legacy
+        // Strawberries cart flag does not grant this authenticated shopper a cart.
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in rows.count == 7 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 8), .completed)
+        let savedGroceries = Set(rows.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertEqual(savedGroceries.count, 7)
+        openHomeDetails(app)
+        let homeName = app.staticTexts["shopping.home.name"].label
+        let invite = app.buttons["shopping.home.invite"]
+        reveal(invite, in: app)
+        invite.tap()
+        let confirmInvite = app.buttons["shopping.home.confirmInvite"]
+        reveal(confirmInvite, in: app)
+        confirmInvite.tap()
+        dismissSystemShareSheet(app)
+        let counts = app.staticTexts["shopping.home.memberCounts"]
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+
+        let stop = app.buttons["shopping.home.stopSharing"]
+        reveal(stop, in: app)
+        stop.tap()
+        let confirm = app.buttons["shopping.home.confirmRemoval"]
+        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Remove the 2 members and pending invitations captured below? Anyone added after this confirmation was prepared is not included."].exists)
+        app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
+        reveal(resend, in: app)
+        XCTAssertTrue(resend.isEnabled, "Cancelling must retain the pending invitation")
+
+        reveal(stop, in: app)
+        stop.tap()
+        reveal(confirm, in: app)
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "0 other accepted members · 0 pending invitations")
+        XCTAssertEqual(app.staticTexts["shopping.home.name"].label, homeName)
+        XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
+        XCTAssertFalse(resend.exists)
+        reveal(invite, in: app)
+        XCTAssertTrue(invite.isEnabled)
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        let preserved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            Set(rows.allElementsBoundByIndex.map(\.identifier)) == savedGroceries
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [preserved], timeout: 8), .completed)
+        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)), savedGroceries)
+    }
+
     func testOwnerDisclosureCancelAndShareCancellationKeepPendingInvitationAvailableToResend() {
         let app = launch(role: "owner")
         openHomeDetails(app)

@@ -3,16 +3,22 @@ import XCTest
 @testable import Shopping
 
 final class HomeCreationTests: XCTestCase {
+    private let fixtureLifetime = SQLiteTestFixtureLifetime()
+
+    override func setUp() {
+        super.setUp()
+        let lifetime = fixtureLifetime
+        addTeardownBlock { try lifetime.cleanup() }
+    }
+
     private struct Provider: ShopperSessionProviding {
         let session: ShopperSession
         func currentSession() throws -> ShopperSession { session }
     }
 
     private func fixture(policy: PersistencePermissionPolicy? = nil) throws -> (PersistenceController, HomeCreationJournal, URL, ShopperSession) {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let persistence = try PersistenceController(configuration: .local(storeURL: directory.appendingPathComponent("home.sqlite")), permissionPolicy: policy)
+        let directory = try fixtureLifetime.makeDirectory()
+        let persistence = try fixtureLifetime.own(PersistenceController(configuration: .local(storeURL: directory.appendingPathComponent("home.sqlite")), permissionPolicy: policy))
         let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.creation", environment: "Development", accountRecordName: "owner")
         persistence.personalCartSessionProvider = Provider(session: session)
         persistence.personalCartInitialBinding = session.accountBinding
@@ -40,18 +46,18 @@ final class HomeCreationTests: XCTestCase {
         let store = try XCTUnwrap(persistence.primaryStore)
         let command = try journal.begin(name: "Our home", session: session, storeIdentifier: store.identifier)
         _ = try NeedService(persistence: persistence).createHousehold(command: command)
-        let context = persistence.container.newBackgroundContext()
+        let context = fixtureLifetime.own(persistence.container.newBackgroundContext())
         try context.performAndWait {
             let root = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
             root.name = "Renamed after creation"
             try context.save()
         }
-        let reopened = try PersistenceController(configuration: persistence.configuration)
+        let reopened = try fixtureLifetime.own(PersistenceController(configuration: persistence.configuration))
         reopened.personalCartSessionProvider = Provider(session: session)
         reopened.personalCartInitialBinding = session.accountBinding
         let restored = try XCTUnwrap(HomeCreationJournal(url: url).pending(session: session, storeIdentifier: XCTUnwrap(reopened.primaryStore).identifier))
         _ = try NeedService(persistence: reopened).createHousehold(command: restored)
-        let reader = reopened.container.newBackgroundContext()
+        let reader = fixtureLifetime.own(reopened.container.newBackgroundContext())
         try reader.performAndWait {
             XCTAssertEqual(try reader.fetch(Household.fetchRequest()).map(\.name), ["Renamed after creation"])
             XCTAssertEqual(try reader.fetch(GroceryList.fetchRequest()).map(\.id), [command.listID])

@@ -45,11 +45,17 @@ discovery clears that entry's import error. Errors give precise reasons only whe
 CloudKit supplies them. Dismissing an outstanding join does not cancel its server
 operation, erase its graph, or release its automatic-selection hold.
 
-The ready graph and durable activation hold are the handoff to SHOPPING-127's safe
-adoption flow. No inbox callback changes the selected home, copies groceries, merges
-catalogs, or moves personal carts. Explicit selection currently uses the existing
-home chooser; SHOPPING-127 owns the fuller adoption/recovery choices and resolving
-the invitation hold after successful adoption.
+The ready graph and durable activation hold feed the implemented [adoption and
+choice flow](home-adoption.md). No inbox callback changes the selected home, copies
+groceries, merges catalogs, or moves personal carts. **Open [home]** validates the
+exact account, entry, imported graph and presentation, obtains fresh native access,
+and commits any required explicit rejoin grant before selection. The final local
+discovery/selection phase cannot be superseded by ordinary background discovery;
+a fresh observation follows it. **Not now** resolves only that invitation's choice
+and preserves the current home, or a durable selection hold if no home is active.
+The general picker cannot bypass a pending invitation's own decision. Original
+homes and private carts remain separately reachable; older membership effects
+remain quarantined after rejoin. See the [active-home lifecycle](active-home-lifecycle.md).
 
 ## Validation boundary
 
