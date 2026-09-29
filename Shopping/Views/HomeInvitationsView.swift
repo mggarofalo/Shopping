@@ -68,4 +68,3 @@ struct HomeInvitationsView: View {
             bootstrap: PersistenceBootstrap(preloadedPreviewEnvironment: try! ShoppingPreviewFixtures.make(.populated)))
     }
 }
-
