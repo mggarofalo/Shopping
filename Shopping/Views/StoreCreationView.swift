@@ -5,6 +5,9 @@ struct StoreCreationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorParentKey) private var parentDraftKey
+    @Environment(\.homeEditorDraftStore) private var draftStore
+    @Environment(\.persistencePresentation) private var presentation
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
@@ -79,10 +82,12 @@ struct StoreCreationView: View {
             }
             .interactiveDismissDisabled(isSaving)
         }
+        .retainedHomeNameDraft($name, editor: parentDraftKey.map { $0 + ".new-store" })
     }
 
     private func select(_ store: Store) {
         guard scopeAvailable, matches.contains(store), let service, let capturedScope else { return }
+        let draftLease = parentDraftKey.flatMap { draftStore?.currentLease(scope: selection.homeScope, editor: $0 + ".new-store") }
         isSaving = true
         let storeID = store.id, archived = store.isArchived
         let householdID = capturedScope.householdID, listID = capturedScope.listID
@@ -95,7 +100,8 @@ struct StoreCreationView: View {
                             householdID: householdID, listID: listID)
                     }.value
                 }
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if let draftLease { draftStore?.finish(draftLease) }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onSelected(storeID)
                 dismiss()
             } catch { self.error = error }
@@ -104,6 +110,7 @@ struct StoreCreationView: View {
 
     private func save() {
         guard scopeAvailable, let service, let capturedScope else { return }
+        let draftLease = parentDraftKey.flatMap { draftStore?.currentLease(scope: selection.homeScope, editor: $0 + ".new-store") }
         isSaving = true
         let name = self.name
         let householdID = capturedScope.householdID, listID = capturedScope.listID
@@ -113,7 +120,8 @@ struct StoreCreationView: View {
                 let id = try await Task.detached(priority: .userInitiated) {
                     try service.createStore(name: name, householdID: householdID, listID: listID)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if let draftLease { draftStore?.finish(draftLease) }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onSelected(id)
                 dismiss()
             } catch { self.error = error }

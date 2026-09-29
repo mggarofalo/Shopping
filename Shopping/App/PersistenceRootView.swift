@@ -22,6 +22,9 @@ struct PersistenceRootView: View {
                                 Text(bootstrap.sharingStatusDescription)
                                 Text("Your existing groceries will appear after import. An empty cache does not create another household.")
                             } actions: {
+                                NavigationLink("Choose a home") {
+                                    HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
+                                }
                                 Button("Check again") { bootstrap.applicationDidEnterForeground() }
                                 if let service = ready.personalCartService {
                                     NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
@@ -40,13 +43,15 @@ struct PersistenceRootView: View {
                     .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
                     .environment(\.persistenceSelection, PersistenceSelection(
                         householdID: ready.householdID,
-                        listID: ready.listID
+                        listID: ready.listID,
+                        homeScope: ready.homeScope
                     ))
             case .failed(let error):
                 PersistenceRecoveryView(error: error, retry: bootstrap.retry)
             }
         }
         .environmentObject(bootstrap)
+        .environment(\.homeEditorDraftStore, bootstrap.editorDrafts)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
         .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
         .onChange(of: scenePhase) { _, phase in

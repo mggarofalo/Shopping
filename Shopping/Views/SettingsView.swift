@@ -2,6 +2,8 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var bootstrap: PersistenceBootstrap
+    @Environment(\.persistenceSelection) private var selection
     @Environment(\.sharingStatusPresentation) private var sharingStatus
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -25,6 +27,11 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
+                    if selection.homeScope != nil {
+                        NavigationLink("Homes") {
+                            HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
+                        }
+                    }
                     NavigationLink {
                         List {
                             Section("Status") {

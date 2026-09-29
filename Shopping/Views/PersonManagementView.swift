@@ -5,6 +5,7 @@ struct PersonManagementView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorDraftStore) private var draftStore
     @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
@@ -113,7 +114,8 @@ struct PersonManagementView: View {
                 available: session.scope.matches(canonicalList: canonicalList)
                     && (session.person.map(householdPeople.contains) ?? true),
                 busy: isSaving,
-                onSave: { save(session) }, onCancel: { editor = nil }
+                onSave: { save(session) }, onCancel: { editor = nil },
+                draftIdentity: "person." + (session.person?.id.uuidString ?? "new")
             )
         }
         .alert("Couldn’t update people", isPresented: Binding(
@@ -286,6 +288,8 @@ struct PersonManagementView: View {
 
     private func save(_ session: PersonEditorSession) {
         guard !isSaving, session.scope.matches(canonicalList: canonicalList), let service else { return }
+        let draftLease = draftStore?.currentLease(scope: selection.homeScope,
+            editor: "person." + (session.person?.id.uuidString ?? "new"))
         isSaving = true
         let name = editorName, personID = session.person?.id
         let householdID = session.scope.householdID, listID = session.scope.listID
@@ -300,6 +304,7 @@ struct PersonManagementView: View {
                         _ = try service.createPerson(name: name, householdID: householdID, listID: listID)
                     }
                 }.value
+                if let draftLease { draftStore?.finish(draftLease) }
                 guard selection.householdID == householdID, selection.listID == listID else { return }
                 hapticFeedback.play(.success)
                 editor = nil

@@ -19,6 +19,7 @@ struct ManagementNameEditor: View {
     let busy: Bool
     let onSave: () -> Void
     let onCancel: () -> Void
+    var draftIdentity: String? = nil
 
     private var canSave: Bool {
         available && !busy && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -55,5 +56,6 @@ struct ManagementNameEditor: View {
             }
             .interactiveDismissDisabled(busy)
         }
+        .retainedHomeNameDraft($name, editor: draftIdentity)
     }
 }

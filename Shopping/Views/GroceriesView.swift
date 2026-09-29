@@ -573,7 +573,8 @@ struct GroceriesView: View {
         navigation.configure(
             householdID: selection.householdID,
             activeStoreIDs: Set(activeStores.map(\.id)),
-            activeCategoryIDs: Set(activeCategories.map(\.id))
+            activeCategoryIDs: Set(activeCategories.map(\.id)),
+            scopeNamespace: selection.homeScope?.preferenceNamespace
         )
         refreshProjection()
     }

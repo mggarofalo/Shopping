@@ -4,6 +4,9 @@ struct CategoryCreationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorParentKey) private var parentDraftKey
+    @Environment(\.homeEditorDraftStore) private var draftStore
+    @Environment(\.persistencePresentation) private var presentation
     @State private var name = ""
     @State private var error: Error?
     @State private var isSaving = false
@@ -45,10 +48,12 @@ struct CategoryCreationView: View {
             .interactiveDismissDisabled(isSaving)
             .onAppear { DispatchQueue.main.async { nameIsFocused = true } }
         }
+        .retainedHomeNameDraft($name, editor: parentDraftKey.map { $0 + ".new-category" })
     }
 
     private func save() {
         guard canSave, let service, let householdID, let listID else { return }
+        let draftLease = parentDraftKey.flatMap { draftStore?.currentLease(scope: selection.homeScope, editor: $0 + ".new-category") }
         isSaving = true
         let name = self.name
         Task {
@@ -57,7 +62,8 @@ struct CategoryCreationView: View {
                 let id = try await Task.detached(priority: .userInitiated) {
                     try service.createCategory(name: name, householdID: householdID, listID: listID)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                if let draftLease { draftStore?.finish(draftLease) }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onSelected(id)
                 dismiss()
             } catch { self.error = error }
