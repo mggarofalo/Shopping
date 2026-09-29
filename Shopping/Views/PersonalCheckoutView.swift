@@ -6,6 +6,7 @@ struct PersonalCheckoutView: View {
     var storeName: String? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.shoppingToastCenter) private var toastCenter
+    @Environment(\.persistencePresentation) private var presentation
     @State private var acknowledged: Set<UUID> = []
     @State private var error: String?
     @State private var isConfirming = false
@@ -54,7 +55,7 @@ struct PersonalCheckoutView: View {
     }
 
     private func confirm() {
-        guard !isConfirming else { return }
+        guard !isConfirming, presentation?.isActive != false else { return }
         isConfirming = true
         let service = cart.service
         let capture = token
@@ -65,6 +66,7 @@ struct PersonalCheckoutView: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     try service.checkout(capture, buyAnywayReceiptIDs: acknowledged, operationID: capture.id)
                 }.value
+                guard presentation?.isActive != false else { return }
                 cart.refresh()
                 var message = "Checked out \(result.purchasedCount) items."
                 if result.skippedCount > 0 { message += " Kept \(result.skippedCount) changed items." }

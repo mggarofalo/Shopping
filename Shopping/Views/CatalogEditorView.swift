@@ -19,6 +19,11 @@ struct CatalogEditorView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorDraftStore) private var draftStore
+    @Environment(\.persistencePresentation) private var presentation
+    @State private var draftScope: ActiveHomeScope?
+    @State private var draftLoaded = false
+    @State private var draftFinished = false
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
@@ -163,12 +168,15 @@ struct CatalogEditorView: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(itemID == nil ? "New catalog item" : "Edit catalog item")
             .onAppear {
+                restoreDraft()
                 guard session.itemID == nil else { return }
                 DispatchQueue.main.async { focusedField = .name }
             }
+            .onChange(of: draftValues) { _, _ in retainDraft() }
+            .onDisappear { retainDraft() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(isSaving)
+                    Button("Cancel") { finishEditing() }.disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     HStack {
@@ -184,7 +192,7 @@ struct CatalogEditorView: View {
                                 ?? "Add item to list?",
                             isPresented: Binding(
                                 get: { pendingAddConfirmation != nil },
-                                set: { if !$0 { pendingAddConfirmation = nil; dismiss() } }
+                                set: { if !$0 { pendingAddConfirmation = nil; finishEditing() } }
                             ),
                             titleVisibility: .visible
                         ) {
@@ -195,7 +203,7 @@ struct CatalogEditorView: View {
                                     Task {
                                         let added = await onConfirmAdd(confirmation.preview.token)
                                         isSaving = false
-                                        if added { dismiss() }
+                                        if added { finishEditing() }
                                         else {
                                             errorMessage = "Saved to Catalog, but couldn’t add to the list. Review the item and try again."
                                             hapticFeedback.play(.warning)
@@ -205,7 +213,7 @@ struct CatalogEditorView: View {
                             }
                             Button("Cancel", role: .cancel) {
                                 pendingAddConfirmation = nil
-                                dismiss()
+                                finishEditing()
                             }
                         } message: {
                             if let confirmation = pendingAddConfirmation {
@@ -270,7 +278,10 @@ struct CatalogEditorView: View {
                     return try service.createCatalogItem(values: values, householdID: householdID,
                         listID: listID, allowingNameCollision: allowingNameCollision)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                self.itemID = savedItemID
+                retainDraft()
+                if !addToList { clearDraft() }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 let result = CatalogSaveResult(itemID: savedItemID,
                     itemName: values.name.trimmingCharacters(in: .whitespacesAndNewlines),
                     wasCreated: itemID == nil)
@@ -290,9 +301,45 @@ struct CatalogEditorView: View {
                     }
                 }
                 hapticFeedback.play(.success)
-                dismiss()
+                finishEditing()
             } catch { errorMessage = CatalogErrorCopy.message(error) }
         }
+    }
+
+    private var draftKey: String { "catalog." + (session.itemID?.uuidString ?? "new") }
+
+    private var draftValues: CatalogEditorDraft {
+        CatalogEditorDraft(itemID: itemID, name: values.name, notes: values.notes,
+            categoryID: values.categoryID, anyStore: values.anyStore, storeIDs: values.storeIDs)
+    }
+
+    private func restoreDraft() {
+        guard !draftLoaded else { return }
+        draftLoaded = true
+        draftScope = selection.homeScope
+        guard let draftScope, let draftStore else { return }
+        do {
+            guard let value = try draftStore.load(CatalogEditorDraft.self, scope: draftScope, editor: draftKey) else { return }
+            itemID = value.itemID
+            values = CatalogItemValues(name: value.name, notes: value.notes, categoryID: value.categoryID,
+                anyStore: value.anyStore, storeIDs: value.storeIDs)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func retainDraft() {
+        guard draftLoaded, !draftFinished, let draftScope, let draftStore else { return }
+        do { try draftStore.save(draftValues, scope: draftScope, editor: draftKey) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func clearDraft() {
+        draftFinished = true
+        if let draftScope { draftStore?.remove(scope: draftScope, editor: draftKey) }
+    }
+
+    private func finishEditing() {
+        clearDraft()
+        dismiss()
     }
 
     private func archive(_ archived: Bool) {
@@ -307,9 +354,9 @@ struct CatalogEditorView: View {
                     try service.setCatalogItemArchived(itemID: itemID, householdID: householdID,
                         listID: listID, archived: archived)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onSaved(CatalogSaveResult(itemID: itemID, itemName: name, wasCreated: false))
-                dismiss()
+                finishEditing()
             } catch { errorMessage = CatalogErrorCopy.message(error) }
         }
     }

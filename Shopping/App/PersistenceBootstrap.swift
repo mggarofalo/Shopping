@@ -6,6 +6,7 @@ import SwiftUI
 struct PersistenceSelection: Equatable, Sendable {
     let householdID: UUID?
     let listID: UUID?
+    var homeScope: ActiveHomeScope? = nil
 }
 
 struct SharingStatusPresentation: Equatable {
@@ -70,6 +71,7 @@ final class PersistenceBootstrap: ObservableObject {
         let selection: (householdID: UUID, listID: UUID)?
         let personalCartService: PersonalCartService?
         let resumeError: String?
+        let homeDiscovery: HomeDiscovery
     }
     private struct RetiringStore: @unchecked Sendable {
         let persistence: PersistenceController
@@ -80,18 +82,36 @@ final class PersistenceBootstrap: ObservableObject {
 
     final class Presentation {
         let id = UUID()
-        private(set) var isActive = true
-        func retire() { isActive = false }
+        let commandAuthority = UICommandAuthority()
+        var isActive: Bool { commandAuthority.isActive }
+        func retire() { commandAuthority.retire() }
     }
 
-    struct ReadyState {
+    @MainActor struct ReadyState {
         let presentation = Presentation()
         let persistence: PersistenceController
         let service: NeedService
         let householdID: UUID?
         let listID: UUID?
+        var homeScope: ActiveHomeScope? = nil
+        var homeGeneration: UInt64 = 0
         var personalCart: PersonalCartPresentation? = nil
         var personalCartService: PersonalCartService? = nil
+
+        init(persistence: PersistenceController, service: NeedService, householdID: UUID?, listID: UUID?,
+             homeScope: ActiveHomeScope? = nil, homeGeneration: UInt64 = 0,
+             personalCartService: PersonalCartService? = nil) {
+            self.persistence = persistence
+            self.service = service.scoped(to: presentation.commandAuthority)
+            self.householdID = householdID
+            self.listID = listID
+            self.homeScope = homeScope
+            self.homeGeneration = homeGeneration
+            self.personalCartService = personalCartService?.scoped(to: presentation.commandAuthority)
+            if let service = self.personalCartService, let householdID, let listID {
+                personalCart = PersonalCartPresentation(service: service, householdID: householdID, listID: listID)
+            }
+        }
     }
 
     enum State {
@@ -112,9 +132,12 @@ final class PersistenceBootstrap: ObservableObject {
     private var transition: Transition?
     private var mountedPresentations: Set<UUID> = []
     private let defaults: UserDefaults
+    let homeCoordinator: ActiveHomeCoordinator
+    let editorDrafts: HomeEditorDraftStore
     private let makeAccountProvider: (URL) throws -> ShopperSessionProvider
     @Published private(set) var state: State = .loading
     @Published private(set) var pendingShareAssociationCount = 0
+    @Published private(set) var isCreatingHome = false
     @Published private(set) var shareAssociationError: Error?
     private let configuration: () throws -> PersistenceConfiguration
     private var preloadedPreviewEnvironment: ShoppingPreviewEnvironment?
@@ -148,6 +171,8 @@ final class PersistenceBootstrap: ObservableObject {
         self.configuration = configuration
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
         self.defaults = defaults
+        self.homeCoordinator = ActiveHomeCoordinator(defaults: defaults)
+        self.editorDrafts = HomeEditorDraftStore(defaults: defaults)
         self.makeAccountProvider = makeAccountProvider
         cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
     }
@@ -424,6 +449,7 @@ final class PersistenceBootstrap: ObservableObject {
         if case .ready(let ready) = state { previous = ready } else { previous = pendingRetirement }
         pendingRetirement = previous
         previous?.presentation.retire()
+        homeCoordinator.bind(nil)
         generation += 1
         let next = Transition(previous: previous, action: action)
         transition = next
@@ -530,11 +556,6 @@ final class PersistenceBootstrap: ObservableObject {
         activeAccountBinding = nil
     }
 
-    private func makePersonalPresentation(selection: (householdID: UUID, listID: UUID)?) -> PersonalCartPresentation? {
-        guard let personalService, let selection else { return nil }
-        return PersonalCartPresentation(service: personalService, householdID: selection.householdID, listID: selection.listID)
-    }
-
     private var allowsLocalHouseholdCreation: Bool {
 #if DEBUG
         return !personalMode && !personalFixture
@@ -551,17 +572,23 @@ final class PersistenceBootstrap: ObservableObject {
         let allowsLocalHouseholdCreation = self.allowsLocalHouseholdCreation
         let accountProvider = self.accountProvider
         let personalMode = self.personalMode
+        let session = try? accountProvider?.currentSession()
+        homeCoordinator.bind(session)
+        let discoveryRequest = homeCoordinator.beginDiscovery()
         Task {
             do {
                 let prepared = try await Task.detached(priority: .userInitiated) {
                     let resolved = try personalConfiguration ?? configuration()
                     let persistence = try PersistenceController(configuration: resolved)
                     let service = NeedService(persistence: persistence)
-                    var selection = try service.firstHouseholdSelection()
+                    var discovery = try HomeDiscoveryService(persistence: persistence).discover()
+                    var selection = discovery.homes.count == 1 && !discovery.hasIncompleteRoots
+                        ? discovery.homes.first.map { (householdID: $0.graph.householdID, listID: $0.graph.listID) } : nil
                     if selection == nil, allowsLocalHouseholdCreation, !resolved.isManaged,
                        try service.isPersistentStoreEmpty() {
                         let created = try service.createHousehold()
                         selection = (created.householdID, created.listID)
+                        discovery = try HomeDiscoveryService(persistence: persistence).discover()
                     }
                     var cartService: PersonalCartService?
                     var resumeError: String?
@@ -574,9 +601,15 @@ final class PersistenceBootstrap: ObservableObject {
                     }
                     return PreparedStore(configuration: resolved, persistence: persistence,
                         service: service, selection: selection, personalCartService: cartService,
-                        resumeError: resumeError)
+                        resumeError: resumeError, homeDiscovery: discovery)
                 }.value
                 guard generation == requestedGeneration else { return }
+                if personalMode, try accountProvider?.currentSession() != session {
+                    throw ShopperSessionError.accountChanged
+                }
+                if let discoveryRequest {
+                    guard homeCoordinator.reconcile(prepared.homeDiscovery, request: discoveryRequest) else { return }
+                }
                 finishLoad(prepared: prepared)
             } catch {
                 guard generation == requestedGeneration else { return }
@@ -602,7 +635,9 @@ final class PersistenceBootstrap: ObservableObject {
                 resolvedConfiguration = prepared.configuration
                 persistence = prepared.persistence
                 service = prepared.service
-                selection = prepared.selection
+                if personalMode {
+                    selection = homeCoordinator.activeScope.map { ($0.graph.householdID, $0.graph.listID) }
+                } else { selection = prepared.selection }
                 personalService = prepared.personalCartService
                 if let resumeError = prepared.resumeError {
                     shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
@@ -676,7 +711,8 @@ final class PersistenceBootstrap: ObservableObject {
                 service: service,
                 householdID: selection?.householdID,
                 listID: selection?.listID,
-                personalCart: makePersonalPresentation(selection: selection),
+                homeScope: homeCoordinator.activeScope,
+                homeGeneration: homeCoordinator.generation,
                 personalCartService: personalService
             ))
             consumeHistory()
@@ -719,22 +755,12 @@ final class PersistenceBootstrap: ObservableObject {
             do {
                 _ = try await historyConsumer.consume()
                 guard generation == requestedGeneration else { return }
-                if case .ready(let ready) = state, ready.householdID == nil {
-                    let service = ready.service
-                    let selection = try await Task.detached(priority: .utility) {
-                        try service.firstHouseholdSelection()
-                    }.value
-                    guard generation == requestedGeneration else { return }
-                    if let selection {
-                        state = .ready(ReadyState(
-                            persistence: ready.persistence,
-                            service: ready.service,
-                            householdID: selection.householdID,
-                            listID: selection.listID,
-                            personalCart: makePersonalPresentation(selection: selection),
-                            personalCartService: personalService
-                        ))
-                    }
+                if case .ready(let ready) = state, let request = homeCoordinator.beginDiscovery() {
+                    let discovery = HomeDiscoveryService(persistence: ready.persistence)
+                    let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+                    guard generation == requestedGeneration,
+                          try accountProvider?.currentSession() == request.sessionForValidation else { return }
+                    if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
                 }
                 resumePendingCart()
                 if case .ready(let ready) = state { ready.personalCart?.refresh() }
@@ -743,6 +769,68 @@ final class PersistenceBootstrap: ObservableObject {
                 retireAndFail(error)
             }
         }
+    }
+
+    func selectHome(_ graph: HomeGraphIdentity) throws {
+        guard case .ready(let ready) = state,
+              try accountProvider?.currentSession() != nil else { throw ShopperSessionError.setupRequired }
+        try homeCoordinator.select(graph)
+        applyHomeSelection(to: ready)
+    }
+
+    struct CreatedHome {
+        let householdID: UUID
+        let listID: UUID
+        let selected: Bool
+    }
+
+    func createHome(name: String) async throws -> CreatedHome {
+        guard !isCreatingHome, case .ready(let ready) = state,
+              let provider = accountProvider else { throw ShopperSessionError.setupRequired }
+        let session = try provider.currentSession()
+        let capturedGeneration = homeCoordinator.generation
+        isCreatingHome = true
+        defer { isCreatingHome = false }
+        let service = ready.service
+        let created = try await Task.detached(priority: .userInitiated) {
+            try service.createHousehold(name: name)
+        }.value
+        // Creation has committed. A refresh, account transition or metadata read failure
+        // cannot turn that durable success into a retryable creation error.
+        func result() -> CreatedHome {
+            CreatedHome(householdID: created.householdID, listID: created.listID,
+                selected: homeCoordinator.activeScope?.accountBinding == session.accountBinding
+                    && homeCoordinator.activeScope?.graph.householdID == created.householdID
+                    && homeCoordinator.activeScope?.graph.listID == created.listID)
+        }
+        do {
+            guard ready.presentation.isActive, homeCoordinator.generation == capturedGeneration,
+                  try provider.currentSession() == session,
+                  let request = homeCoordinator.beginDiscovery() else { return result() }
+            let discovery = HomeDiscoveryService(persistence: ready.persistence)
+            let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+            guard ready.presentation.isActive, try provider.currentSession() == session,
+                  homeCoordinator.reconcile(snapshot, request: request),
+                  let home = snapshot.homes.first(where: {
+                      $0.graph.householdID == created.householdID && $0.graph.listID == created.listID && $0.access == .owner
+                  }) else { return result() }
+            try homeCoordinator.select(home.graph)
+            applyHomeSelection(to: ready)
+        } catch {
+            // Keep the committed graph available to normal discovery and explicit selection.
+        }
+        return result()
+    }
+
+    private func applyHomeSelection(to ready: ReadyState) {
+        let scope = homeCoordinator.activeScope
+        guard ready.homeScope != scope || ready.homeGeneration != homeCoordinator.generation else { return }
+        ready.presentation.retire()
+        let selection = scope.map { (householdID: $0.graph.householdID, listID: $0.graph.listID) }
+        state = .ready(ReadyState(persistence: ready.persistence, service: ready.service,
+            householdID: selection?.householdID, listID: selection?.listID,
+            homeScope: scope, homeGeneration: homeCoordinator.generation,
+            personalCartService: personalService))
     }
 
     private func resumePendingCart() {

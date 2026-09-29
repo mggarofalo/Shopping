@@ -46,6 +46,11 @@ struct GroceryEditorView: View {
     @Environment(\.personalCart) private var personalCart
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorDraftStore) private var draftStore
+    @Environment(\.persistencePresentation) private var presentation
+    @State private var draftScope: ActiveHomeScope?
+    @State private var draftLoaded = false
+    @State private var draftFinished = false
     @FetchRequest(fetchRequest: NavigationFetchRequests.items()) private var items: FetchedResults<Item>
     @FetchRequest(fetchRequest: NavigationFetchRequests.needs()) private var needs: FetchedResults<Need>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
@@ -137,7 +142,7 @@ struct GroceryEditorView: View {
         GroceryRowScope.validPeople(Array(people), canonicalList: canonicalList)
     }
     private var scopeValid: Bool {
-        guard service != nil, let householdID = target.scope.householdID,
+        guard presentation?.isActive != false, service != nil, let householdID = target.scope.householdID,
             let listID = target.scope.listID, let canonicalList,
             selection.householdID == householdID, selection.listID == listID,
             canonicalList.id == listID, canonicalList.household?.id == householdID
@@ -417,7 +422,7 @@ struct GroceryEditorView: View {
             .navigationTitle(isEditing ? "Edit item" : "Add item")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { finishEditing() }
                         .disabled(isSaving)
                         .accessibilityIdentifier("shopping.grocery.cancel")
                 }
@@ -456,11 +461,14 @@ struct GroceryEditorView: View {
                 }
             }
             .onAppear {
+                restoreDraft()
                 guard !isEditing, !didRequestInitialFocus else { return }
                 didRequestInitialFocus = true
                 DispatchQueue.main.async { focusedField = .name }
             }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
+            .onChange(of: draftValues) { _, _ in retainDraft() }
+            .onDisappear { retainDraft() }
             .onChange(of: promotionChoice) { _, _ in
                 allowDuplicate = false
                 conflictingNeedID = nil
@@ -468,6 +476,48 @@ struct GroceryEditorView: View {
             }
         }
         .interactiveDismissDisabled(isSaving)
+    }
+
+    private var draftKey: String { "grocery." + (target.needID?.uuidString ?? "new") }
+
+    private var draftValues: GroceryEditorDraft {
+        GroceryEditorDraft(remembered: remembered, name: name, catalogNotes: catalogNotes,
+            purchaseNotes: purchaseNotes, quantity: quantity, urgency: urgency.rawValue, categoryID: categoryID,
+            storeIDs: storeIDs, anyStore: anyStore, personID: personID, isPromotingOneTime: isPromotingOneTime,
+            promotionChoice: promotionChoice.rawValue, catalogSearch: catalogSearch, selectedCatalogItemID: selectedCatalogItemID)
+    }
+
+    private func restoreDraft() {
+        guard !draftLoaded else { return }
+        draftLoaded = true
+        draftScope = selection.homeScope
+        guard let draftScope, let draftStore else { return }
+        do {
+            guard let value = try draftStore.load(GroceryEditorDraft.self, scope: draftScope, editor: draftKey) else { return }
+            remembered = value.remembered; name = value.name; catalogNotes = value.catalogNotes
+            purchaseNotes = value.purchaseNotes; quantity = value.quantity
+            urgency = NeedUrgency(rawValue: value.urgency) ?? .normal
+            categoryID = value.categoryID; storeIDs = value.storeIDs; anyStore = value.anyStore; personID = value.personID
+            isPromotingOneTime = value.isPromotingOneTime
+            promotionChoice = OneTimePromotionChoice(rawValue: value.promotionChoice) ?? .create
+            catalogSearch = value.catalogSearch; selectedCatalogItemID = value.selectedCatalogItemID
+        } catch { self.error = error }
+    }
+
+    private func retainDraft() {
+        guard draftLoaded, !draftFinished, let draftScope, let draftStore else { return }
+        do { try draftStore.save(draftValues, scope: draftScope, editor: draftKey) }
+        catch { self.error = error }
+    }
+
+    private func clearDraft() {
+        draftFinished = true
+        if let draftScope { draftStore?.remove(scope: draftScope, editor: draftKey) }
+    }
+
+    private func finishEditing() {
+        clearDraft()
+        dismiss()
     }
 
     @ViewBuilder
@@ -712,10 +762,11 @@ struct GroceryEditorView: View {
                         personID: personID, householdID: householdID, listID: listID)
                 }.value
             }
-            guard selection.householdID == householdID, selection.listID == listID else { return }
+            clearDraft()
+            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
             onSaved(savedID, savedCategoryID)
-            dismiss()
+            finishEditing()
         } catch { self.error = error }
     }
 
@@ -769,10 +820,11 @@ struct GroceryEditorView: View {
                 }.value
                 savedCategoryID = itemCategoryID
             }
-            guard selection.householdID == householdID, selection.listID == listID else { return }
+            clearDraft()
+            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
             hapticFeedback.play(.success)
             onSaved(needID, savedCategoryID)
-            dismiss()
+            finishEditing()
         } catch {
             self.error = error
             if case NeedServiceError.activeRememberedNeedConflict(let needID) = error {
@@ -842,18 +894,20 @@ struct GroceryEditorView: View {
                         categoryID: categoryID, textFilter: textFilter, urgentOnly: urgentOnly,
                         renewCarted: renewLegacyCart, personID: personID)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                clearDraft()
+            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 switch result {
                 case .added(let needID), .renewed(let needID):
                     onSaved(needID, itemCategoryID)
-                    dismiss()
+                    finishEditing()
                 case .focusExisting(let needID):
                     if renewCarted, let personalCart,
                        let entry = personalCart.entries.first(where: { $0.needID == needID }) {
                         try await personalCart.uncart(entry)
-                        guard selection.householdID == householdID, selection.listID == listID else { return }
+                        clearDraft()
+            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                         onSaved(needID, itemCategoryID)
-                        dismiss()
+                        finishEditing()
                     } else { onFocusNeed(needID) }
                 }
             } catch { self.error = error }
@@ -874,9 +928,10 @@ struct GroceryEditorView: View {
                     try service.removeNeed(needID: needID, householdID: householdID,
                         listID: listID, expectedRevision: revision)
                 }.value
-                guard selection.householdID == householdID, selection.listID == listID else { return }
+                clearDraft()
+            guard presentation?.isActive != false, selection.householdID == householdID, selection.listID == listID else { return }
                 onRemoved(operationID, scope)
-                dismiss()
+                finishEditing()
             } catch { self.error = error }
         }
     }

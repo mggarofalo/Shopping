@@ -279,11 +279,17 @@ private struct ValidatedCatalogItemValues {
 final class NeedService: @unchecked Sendable {
     private static let unsetImportedID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     private let persistence: PersistenceController
+    private let commandAuthority: UICommandAuthority?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(persistence: PersistenceController) {
+    init(persistence: PersistenceController, commandAuthority: UICommandAuthority? = nil) {
         self.persistence = persistence
+        self.commandAuthority = commandAuthority
+    }
+
+    func scoped(to authority: UICommandAuthority) -> NeedService {
+        NeedService(persistence: persistence, commandAuthority: authority)
     }
 
     func captureManagementBatch(
@@ -3591,6 +3597,7 @@ final class NeedService: @unchecked Sendable {
     }
 
     private func performWrite<T>(_ body: (NSManagedObjectContext) throws -> T) throws -> T {
+        try commandAuthority?.validate()
         let accountSession = try persistence.personalCartSessionProvider?.currentSession()
         guard accountSession?.accountBinding == persistence.personalCartInitialBinding else {
             throw PersonalCartError.accountChanged
@@ -3606,6 +3613,7 @@ final class NeedService: @unchecked Sendable {
                     throw PersonalCartError.accountChanged
                 }
                 try persistence.prepareForSave(persistence.writer)
+                try commandAuthority?.validate()
                 try persistence.writer.save()
                 if persistence.shareAssociationJournal != nil {
                     NotificationCenter.default.post(
