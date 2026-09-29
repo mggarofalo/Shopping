@@ -84,31 +84,16 @@ struct CategoryManagementView: View {
         .environment(\.editMode, $editMode)
         .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Categories")
         .toolbar {
-            if editMode.isEditing {
-                ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(selectedIDs == Set(householdCategories.map(\.id)) ? "Deselect All" : "Select All") {
-                        let visible = Set(householdCategories.map(\.id))
-                        selectedIDs = selectedIDs == visible ? [] : visible
-                    }
-                    .accessibilityIdentifier("shopping.categories.selectAll")
+            ShoppingCollectionToolbar(
+                isSelecting: editMode.isEditing, allSelected: selectedIDs == Set(householdCategories.map(\.id)),
+                selectAvailable: selectionAvailable && !householdCategories.isEmpty, addAvailable: selectionAvailable,
+                addTitle: "Add category", identifierPrefix: "shopping.categories",
+                select: { editMode = .active }, add: beginCreate, done: clearSelection,
+                toggleAll: {
+                    let visible = Set(householdCategories.map(\.id))
+                    selectedIDs = selectedIDs == visible ? [] : visible
                 }
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 8) {
-                        Button { editMode = .active } label: {
-                            Label("Select", systemImage: "checkmark.circle").labelStyle(.iconOnly)
-                        }
-                            .disabled(!selectionAvailable || householdCategories.isEmpty)
-                            .accessibilityIdentifier("shopping.categories.select")
-                        Button { beginCreate() } label: {
-                            Label("Add category", systemImage: "plus").labelStyle(.iconOnly)
-                        }
-                            .disabled(!selectionAvailable)
-                            .accessibilityIdentifier("shopping.categories.add")
-                    }
-                }
-            }
+            )
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if editMode.isEditing {

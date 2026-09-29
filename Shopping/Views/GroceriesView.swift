@@ -117,8 +117,7 @@ struct GroceriesView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { presentAdd() } label: { Label("Add item", systemImage: "plus") }
-                        .accessibilityIdentifier("shopping.addGrocery")
+                    ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
                         .disabled(canonicalList == nil)
                 }
             }

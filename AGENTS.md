@@ -48,6 +48,8 @@ Repository testing guidance is available as the [shopping-testing skill](.agents
 
 Use the [shopping-release skill](.agents/skills/shopping-release/SKILL.md) when choosing a patch or minor version and preparing a TestFlight build.
 
+For list rows, store/filter controls, and Select/Add interactions, follow the [shared UI reference](docs/ui-layout.md).
+
 For any screen, Core Data, CloudKit, or Watch change, follow the [UI responsiveness contract](docs/ui-responsiveness.md). It defines the main-actor rules, measurable targets, and device trace procedure.
 
 ## Code conventions

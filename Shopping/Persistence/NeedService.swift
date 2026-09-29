@@ -129,6 +129,7 @@ struct CatalogRemovalPreview: Equatable, Sendable {
 }
 
 enum ManagementEntityKind: String, Codable, Equatable, Sendable {
+    case person
     case store
     case category
     case catalogItem
@@ -154,6 +155,7 @@ struct ManagementBatchEntry: Codable, Equatable, Hashable, Sendable {
 
 struct ManagementBatchReference: Codable, Equatable, Hashable, Sendable {
     enum Kind: String, Codable, Sendable {
+        case assignedNeed
         case catalogItem
         case oneTimeNeed
     }
@@ -318,11 +320,32 @@ final class NeedService: @unchecked Sendable {
             let categoriesByID = entity == .category ? try self.fetchBatch(
                 ids: ids, request: categoryRequest, id: \.id, in: context
             ) : [:]
+            let personRequest = Person.fetchRequest()
+            personRequest.relationshipKeyPathsForPrefetching = ["needs"]
+            let peopleByID = entity == .person ? try self.fetchBatch(
+                ids: ids, request: personRequest, id: \.id, in: context
+            ) : [:]
             let itemsByID = entity == .catalogItem ? try self.fetchBatch(
                 ids: ids, request: itemRequest, id: \.id, in: context, identityError: .invalidCatalogIdentity
             ) : [:]
             for id in sortedIDs {
                 switch entity {
+                case .person:
+                    guard let person = peopleByID[id], self.belongs(person, to: household) else { continue }
+                    entries.append(ManagementBatchEntry(id: id, revision: person.revision,
+                        references: action == .delete ? (person.needs ?? []).map {
+                            ManagementBatchReference(kind: .assignedNeed, id: $0.id, revision: $0.revision)
+                        } : []))
+                    switch action {
+                    case .archive:
+                        if person.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                    case .restore:
+                        if person.isArchived { restoreCount += 1 } else { retainedCount += 1 }
+                    case .delete:
+                        if person.needs?.isEmpty == false {
+                            if person.isArchived { retainedCount += 1 } else { archiveCount += 1 }
+                        } else { deleteCount += 1 }
+                    }
                 case .store:
                     guard let store = storesByID[id],
                           self.belongs(store, to: household) else { continue }
@@ -408,11 +431,46 @@ final class NeedService: @unchecked Sendable {
             let categoriesByID = token.entity == .category ? try self.fetchBatch(
                 ids: ids, request: categoryRequest, id: \.id, in: context
             ) : [:]
+            let personRequest = Person.fetchRequest()
+            personRequest.relationshipKeyPathsForPrefetching = ["needs"]
+            let peopleByID = token.entity == .person ? try self.fetchBatch(
+                ids: ids, request: personRequest, id: \.id, in: context
+            ) : [:]
             let itemsByID = token.entity == .catalogItem ? try self.fetchBatch(
                 ids: ids, request: itemRequest, id: \.id, in: context, identityError: .invalidCatalogIdentity
             ) : [:]
             for entry in token.entries {
                 switch token.entity {
+                case .person:
+                    guard let person = peopleByID[entry.id] else { missing += 1; continue }
+                    guard self.belongs(person, to: household), person.revision == entry.revision else {
+                        changed += 1; continue
+                    }
+                    switch token.action {
+                    case .archive:
+                        if person.isArchived { retained += 1 } else {
+                            person.isArchived = true
+                            try self.advanceRevision(of: person)
+                            archived += 1
+                        }
+                    case .restore:
+                        if !person.isArchived { retained += 1 } else {
+                            person.isArchived = false
+                            person.displayOrder = self.nextActivePersonOrder(in: household, excluding: person)
+                            try self.advanceRevision(of: person)
+                            restored += 1
+                        }
+                    case .delete:
+                        // Never escalate an archive preview to deletion if an assignment disappears.
+                        // New assignments also retain the person instead of losing the reference.
+                        if !entry.references.isEmpty || person.needs?.isEmpty == false {
+                            if person.isArchived { retained += 1 } else {
+                                person.isArchived = true
+                                try self.advanceRevision(of: person)
+                                archived += 1
+                            }
+                        } else { context.delete(person); deleted += 1 }
+                    }
                 case .store:
                     guard let store = storesByID[entry.id] else {
                         missing += 1; continue

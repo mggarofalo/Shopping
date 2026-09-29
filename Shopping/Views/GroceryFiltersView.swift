@@ -121,12 +121,7 @@ struct GroceryScopeControls: View {
                     }
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "storefront").accessibilityHidden(true)
-                    Text(selectedStoreName).fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
-                .contentShape(Rectangle())
+                ShoppingScopeLabel(title: selectedStoreName, systemImage: "storefront")
             }
             .menuStyle(.button)
             .accessibilityLabel(selectedStoreName)
@@ -147,12 +142,7 @@ struct GroceryScopeControls: View {
 
     private var filtersButton: some View {
         Button(action: showFilters) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "line.3.horizontal.decrease.circle").accessibilityHidden(true)
-                Text(filterLabel).fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
-            .contentShape(Rectangle())
+            ShoppingScopeLabel(title: filterLabel, systemImage: "line.3.horizontal.decrease.circle")
         }
         .accessibilityLabel(filterLabel)
         .accessibilityIdentifier("shopping.filters")

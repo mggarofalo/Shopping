@@ -145,26 +145,16 @@ struct CatalogView: View {
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
-                if editMode.isEditing {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done", action: clearSelection) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(selectedIDs == visibleItemIDs ? "Deselect All" : "Select All") {
-                            selectedIDs = selectedIDs == visibleItemIDs ? [] : visibleItemIDs
-                        }
-                        .accessibilityIdentifier("shopping.catalog.selectAll")
+                ShoppingCollectionToolbar(
+                    isSelecting: editMode.isEditing, allSelected: selectedIDs == visibleItemIDs,
+                    selectAvailable: household != nil && service != nil && !visibleItems.isEmpty, addAvailable: household != nil && service != nil,
+                    addTitle: "New catalog item", identifierPrefix: "shopping.catalog",
+                    select: { editMode = .active }, add: create, done: clearSelection,
+                    toggleAll: {
+                        let visible = visibleItemIDs
+                        selectedIDs = selectedIDs == visible ? [] : visible
                     }
-                } else {
-                    ToolbarItem(placement: .primaryAction) {
-                        HStack(spacing: 8) {
-                            Button("Select") { editMode = .active }
-                                .disabled(household == nil || service == nil || visibleItems.isEmpty)
-                                .accessibilityIdentifier("shopping.catalog.select")
-                            Button("New catalog item", systemImage: "plus", action: create)
-                                .accessibilityIdentifier("shopping.catalog.add")
-                                .disabled(household == nil || service == nil)
-                        }
-                    }
-                }
+                )
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -354,8 +344,7 @@ struct CatalogView: View {
                             }
                         }
                     } label: {
-                        Label(selectedStoreName, systemImage: "storefront")
-                            .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                        ShoppingScopeLabel(title: selectedStoreName, systemImage: "storefront")
                     }
                     .menuStyle(.button)
                     .accessibilityIdentifier("shopping.catalog.store.menu")
@@ -375,9 +364,8 @@ struct CatalogView: View {
                 Button {
                     showingFilters = true
                 } label: {
-                    Label("Filters\(filters.count == 0 ? "" : " \(filters.count)")",
-                          systemImage: "line.3.horizontal.decrease.circle")
-                        .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                    ShoppingScopeLabel(title: "Filters\(filters.count == 0 ? "" : " \(filters.count)")",
+                        systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .accessibilityIdentifier("shopping.catalog.filters")
                 .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,

@@ -4,6 +4,75 @@ import XCTest
 @testable import Shopping
 
 final class StoreManagementTests: XCTestCase {
+    func testPeopleBatchDeletionRetainsAssignmentsAndSkipsChangedOrForeignPeople() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let other = try service.createHousehold(name: "Other")
+        let assigned = try service.createPerson(name: "Assigned", householdID: local.householdID)
+        let unused = try service.createPerson(name: "Unused", householdID: local.householdID)
+        let changed = try service.createPerson(name: "Changed", householdID: local.householdID)
+        let foreign = try service.createPerson(name: "Foreign", householdID: other.householdID)
+        let need = try service.addOneTimeNeed(title: "Milk", personID: assigned, listID: local.listID)
+        let preview = try service.captureManagementBatch(entity: .person, action: .delete,
+            ids: [assigned, unused, changed, foreign], householdID: local.householdID, listID: local.listID)
+        XCTAssertEqual(preview.archiveCount, 1)
+        XCTAssertEqual(preview.deleteCount, 2)
+        XCTAssertEqual(Set(preview.token.entries.map(\.id)), [assigned, unused, changed])
+        try service.renamePerson(name: "Newer name", personID: changed,
+            householdID: local.householdID, listID: local.listID)
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.archivedCount, 1)
+        XCTAssertEqual(result.deletedCount, 1)
+        XCTAssertEqual(result.changedCount, 1)
+        let context = persistence.container.newBackgroundContext()
+        try context.performAndWait {
+            let people = try context.fetch(Person.fetchRequest())
+            XCTAssertTrue(people.first { $0.id == assigned }!.isArchived)
+            XCTAssertFalse(people.contains { $0.id == unused })
+            XCTAssertEqual(people.first { $0.id == changed }?.name, "Newer name")
+            XCTAssertFalse(people.first { $0.id == foreign }!.isArchived)
+            XCTAssertEqual(try context.fetch(Need.fetchRequest()).first { $0.id == need }?.person?.id, assigned)
+        }
+        let restore = try service.captureManagementBatch(entity: .person, action: .restore,
+            ids: [assigned], householdID: local.householdID, listID: local.listID)
+        XCTAssertEqual(try service.applyManagementBatch(restore.token).restoredCount, 1)
+    }
+
+    func testPeopleBatchDeletionRechecksAssignmentsAddedAfterPreview() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let person = try service.createPerson(name: "Shopper", householdID: local.householdID)
+        let preview = try service.captureManagementBatch(entity: .person, action: .delete,
+            ids: [person], householdID: local.householdID, listID: local.listID)
+        XCTAssertEqual(preview.deleteCount, 1)
+        _ = try service.addOneTimeNeed(title: "Bread", personID: person, listID: local.listID)
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.deletedCount, 0)
+        XCTAssertEqual(result.archivedCount, 1)
+    }
+
+    func testPeopleBatchCannotEscalateArchivePreviewAfterAssignmentDisappears() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let local = try service.createHousehold(name: "Local")
+        let person = try service.createPerson(name: "Shopper", householdID: local.householdID)
+        let need = try service.addOneTimeNeed(title: "Bread", personID: person, listID: local.listID)
+        let preview = try service.captureManagementBatch(entity: .person, action: .delete,
+            ids: [person], householdID: local.householdID, listID: local.listID)
+        XCTAssertEqual(preview.archiveCount, 1)
+        let context = persistence.container.newBackgroundContext()
+        try context.performAndWait {
+            let occurrence = try XCTUnwrap(context.fetch(Need.fetchRequest()).first { $0.id == need })
+            occurrence.person = nil
+            try context.save()
+        }
+        let result = try service.applyManagementBatch(preview.token)
+        XCTAssertEqual(result.deletedCount, 0)
+        XCTAssertEqual(result.archivedCount, 1)
+    }
+
     func testSettingsScopeRequiresGloballyCanonicalHouseholdListAndStoreIdentities() throws {
         let persistence = try PersistenceController(
             storeURL: temporaryStoreURL(), additionalStoreURLs: [temporaryStoreURL()]

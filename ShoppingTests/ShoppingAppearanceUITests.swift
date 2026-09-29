@@ -1,6 +1,44 @@
 import XCTest
 
 final class ShoppingAppearanceUITests: XCTestCase {
+    func testGroceryAndCatalogShareRowHeightAndFilterControlDimensions() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SharedRows-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch()
+        let grocery = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.grocery.row.", "Edit Chipotles in adobo")).firstMatch
+        for _ in 0..<6 where !grocery.isHittable { app.swipeUp() }
+        XCTAssertTrue(grocery.existsOrAppears(timeout: 3))
+        let groceryCell = app.collectionViews.cells.containing(.button, identifier: grocery.identifier).firstMatch
+        let groceryHeight = groceryCell.frame.height
+        XCTAssertGreaterThanOrEqual(grocery.frame.height, 44,
+                                    "The item edit target must include the blank space beside short titles")
+        XCTAssertTrue((grocery.value as? String ?? "").contains("Publix"))
+        attach("Normalized grocery rows", app)
+        for _ in 0..<6 where !app.buttons["shopping.filters"].isHittable { app.swipeDown() }
+        let filtersSize = app.buttons["shopping.filters"].frame.size
+        let storeSize = app.buttons["shopping.store.menu"].frame.size
+        let addSize = app.buttons["shopping.addGrocery"].frame.size
+        app.tabBars.buttons["Catalog"].tap()
+        let catalog = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.catalog.item.", "Chipotles in adobo")).firstMatch
+        for _ in 0..<6 where !catalog.isHittable { app.swipeUp() }
+        XCTAssertTrue(catalog.existsOrAppears(timeout: 3))
+        let catalogCell = app.collectionViews.cells.containing(.button, identifier: catalog.identifier).firstMatch
+        XCTAssertEqual(catalogCell.frame.height, groceryHeight, accuracy: 1)
+        attach("Normalized catalog rows", app)
+        for _ in 0..<6 where !app.buttons["shopping.catalog.filters"].isHittable { app.swipeDown() }
+        XCTAssertEqual(app.buttons["shopping.catalog.filters"].frame.height, filtersSize.height, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.catalog.filters"].frame.width, filtersSize.width, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.catalog.store.menu"].frame.height, storeSize.height, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.catalog.store.menu"].frame.width, storeSize.width, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.catalog.add"].frame.height, addSize.height, accuracy: 1)
+        XCTAssertEqual(app.buttons["shopping.catalog.add"].frame.width, addSize.width, accuracy: 1)
+    }
+
     func testPrimaryScreensEditorsAndFiltersInBothAppearances() {
         for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
             for appearance in ["light", "dark"] {
@@ -127,8 +165,9 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(richRow.existsOrAppears(timeout: 3))
             XCTAssertTrue(richRow.isHittable)
             let richCell = app.collectionViews.cells.containing(.button, identifier: richRow.identifier).firstMatch
-            XCTAssertGreaterThan(richCell.frame.height, bareRowHeight,
-                                 "Notes and assignment must expand the row rather than clip to the bare row height")
+            XCTAssertGreaterThanOrEqual(richCell.frame.height, 44)
+            XCTAssertLessThanOrEqual(richRow.staticTexts["Low sugar"].frame.maxY, richCell.frame.maxY,
+                                     "Supporting notes must remain inside the content-sized row")
             let titleText = richRow.staticTexts["Granola"]
             let notesText = richRow.staticTexts["Low sugar"]
             XCTAssertTrue(titleText.exists)
@@ -137,8 +176,10 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(notesText.exists)
             let topPadding = titleText.frame.minY - richCell.frame.minY
             let bottomPadding = richCell.frame.maxY - notesText.frame.maxY
-            XCTAssertGreaterThanOrEqual(topPadding, 10)
-            XCTAssertGreaterThanOrEqual(bottomPadding, 10)
+            // Shared Catalog geometry guarantees 4 points of content padding plus 2 of list inset.
+            // The minimum-height frame can add more for short content; large text grows naturally.
+            XCTAssertGreaterThanOrEqual(topPadding, 6)
+            XCTAssertGreaterThanOrEqual(bottomPadding, 6)
             XCTAssertEqual(topPadding, bottomPadding, accuracy: 3,
                            "Multiline content needs consistent top and bottom padding")
             if size == "UICTContentSizeCategoryL" {

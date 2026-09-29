@@ -34,6 +34,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 19: UI Consistency and Responsiveness | `35ec90c5-145f-432f-b477-893ee98b98e8` | SHOPPING-146/147/148/149/150/151/152: catalog and grocery layout consistency, iPhone and Watch responsiveness, sync presentation, linked performance guidance, CI timeout correction, review fixes, and automatic Watch refresh after local imports. |
 | Phase 20: Service Performance Audit | `db962891-9c59-4de1-a6d7-054a5262afd7` | SHOPPING-153/154: move costly iPhone and Watch work behind background workers, then finish the remaining management and recovery commands with authority checks and timing evidence. |
 | Phase 21: TestFlight Release Operations | `bbc17b87-4640-4442-9713-22830ae7d12a` | SHOPPING-155/156: publish the UI and performance changes as 1.2.1, document patch/minor decisions, and preserve the dual-target signing fallback until SHOPPING-132 repairs hosted uploads. |
+| Phase 22: UI Normalization | `6af6dc13-3c8d-4305-aa7e-e57a6b874e63` | SHOPPING-157: shared Catalog row geometry, store/filter controls, and Stores selection interactions including People. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 

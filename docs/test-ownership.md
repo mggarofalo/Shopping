@@ -241,3 +241,10 @@ Hosted run36157514880 recorded the first catalog save/add test sending text whil
 ## Catalog column layout and inline assignment (SHOPPING-144)
 
 `ShoppingAppearanceUITests/testCatalogColumnsPreserveLongTextAndCompleteStoreAccessibility` owns the 2:1 catalog presentation at standard/light and accessibility/dark sizes, multiline supporting content, full purchase-rule accessibility and full title in the editor. Its isolated `catalogColumns` fixture adds a long title, three stores including a long store name, and three supporting lines. Existing compact-table appearance coverage retains assigned/unassigned groceries, symmetric padding, independent quantities and cart actions; the extra-height assertion follows supporting notes rather than requiring assignment to occupy a separate line. Existing catalog membership tests retain native swipe ownership, and catalog grouping/contrast tests retain archived rules and accessible metadata.
+
+
+## Shared rows and Stores-style controls (SHOPPING-157)
+
+`ShoppingAppearanceUITests/testGroceryAndCatalogShareRowHeightAndFilterControlDimensions` owns matching bare Grocery/Catalog row heights, store/filter geometry, plus dimensions and complete store accessibility. The existing content-sized table test keeps title/notes containment and symmetric padding; a short note may fit the shared Catalog minimum without increasing row height. Quantity-bearing and note-bearing rows no longer imply a height ordering. Existing long-column and large-text screenshots retain their proof.
+
+`CategoryManagementUITests/testPeopleUseStoresSelectionControlsAndKeepAssignedPeopleOnDelete` owns Stores/People control dimensions, Select All/Deselect All, Done clearing selection and the confirmed archive of an assigned person. Existing management tests retain native multiselection and large-text controls. The three people-batch cases in `StoreManagementTests` own foreign-scope exclusion, stale-revision skips, retained assignments, restore, late assignments and preservation of an archive preview when an assignment disappears. No acceptance-plan inventory changes.
