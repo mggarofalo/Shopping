@@ -73,6 +73,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertTrue(bootstrap.homeCoordinator.homes.isEmpty)
         let first = try await bootstrap.createHome(name: "Our home")
         XCTAssertTrue(first.selected)
+        try await bootstrap.acknowledgeHomeCreation(first)
         let previous = try ready(bootstrap)
         let second = try await bootstrap.createHome(name: "Other home")
         XCTAssertTrue(second.selected)

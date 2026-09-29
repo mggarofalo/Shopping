@@ -5,6 +5,8 @@ struct HomeSelectionView: View {
     @ObservedObject var coordinator: ActiveHomeCoordinator
     @State private var error: String?
     @State private var newHomeName = ""
+    @State private var isSubmittingHome = false
+    @State private var pendingCreation: HomeCreationCommand?
     @State private var createdHome: PersistenceBootstrap.CreatedHome?
 
     var body: some View {
@@ -45,20 +47,38 @@ struct HomeSelectionView: View {
                 Text("An invitation is waiting. Your current home stays selected until you choose to join.")
             }
             Section {
+                if let pendingCreation {
+                    Text("Finish creating \(pendingCreation.name). Retrying keeps the same home.")
+                }
                 TextField("Home name", text: $newHomeName)
+                    .disabled(pendingCreation != nil)
                     .accessibilityIdentifier("shopping.home.name")
-                Button("Create home") {
-                    let name = newHomeName
+                Button(pendingCreation == nil ? "Create home" : "Resume creating home") {
+                    guard !isSubmittingHome else { return }
+                    isSubmittingHome = true
+                    let resumedCommand = pendingCreation
+                    let name = resumedCommand?.name ?? newHomeName
                     Task {
+                        defer { isSubmittingHome = false }
                         do {
-                            createdHome = try await bootstrap.createHome(name: name)
+                            let result = try await bootstrap.createHome(name: name, resuming: resumedCommand)
+                            createdHome = result
+                            try await bootstrap.acknowledgeHomeCreation(result)
+                            pendingCreation = nil
                             newHomeName = ""
                             error = nil
                         }
-                        catch { self.error = error.localizedDescription }
+                        catch {
+                            self.error = error.localizedDescription
+                            if error is HomeCreationJournal.Failure {
+                                pendingCreation = nil
+                                newHomeName = ""
+                            }
+                        }
                     }
                 }
-                .disabled(bootstrap.isCreatingHome || newHomeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isSubmittingHome || bootstrap.isCreatingHome || (pendingCreation == nil
+                    && newHomeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 .accessibilityIdentifier("shopping.home.create")
                 if bootstrap.isCreatingHome { ProgressView("Creating home…") }
             } header: { Text("New home") } footer: {
@@ -70,6 +90,10 @@ struct HomeSelectionView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .navigationTitle("Homes")
+        .task {
+            do { pendingCreation = try await bootstrap.pendingHomeCreation() }
+            catch { self.error = error.localizedDescription }
+        }
     }
 
     private func accessDescription(_ access: HomeCandidate.Access) -> String {

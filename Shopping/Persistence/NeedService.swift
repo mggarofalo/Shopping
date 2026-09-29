@@ -850,6 +850,41 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    /// Retries only the identities from a durable, explicitly initiated creation command.
+    /// A partial or ambiguous match is retained for recovery, never replaced with new IDs.
+    func createHousehold(command: HomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {
+        let name = try validatedName(command.name)
+        return try write { context in
+            guard let store = self.persistence.primaryStore,
+                  store.identifier == command.storeIdentifier,
+                  self.persistence.role(of: store) == .ownerPrivate || self.persistence.role(of: store) == .local,
+                  try self.persistence.personalCartSessionProvider?.currentSession() == command.session else {
+                throw ShopperSessionError.accountChanged
+            }
+            let rootsRequest = Household.fetchRequest()
+            rootsRequest.predicate = NSPredicate(format: "id == %@", command.householdID as CVarArg)
+            let listsRequest = GroceryList.fetchRequest()
+            listsRequest.predicate = NSPredicate(format: "id == %@", command.listID as CVarArg)
+            let roots = try context.fetch(rootsRequest), lists = try context.fetch(listsRequest)
+            if !roots.isEmpty || !lists.isEmpty {
+                guard roots.count == 1, lists.count == 1,
+                      let root = roots.first, let list = lists.first,
+                      root.objectID.persistentStore == store, list.objectID.persistentStore == store,
+                      root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+                return (root.id, list.id)
+            }
+            let household: Household = self.insert("Household", in: context)
+            household.id = command.householdID
+            household.name = name
+            context.assign(household, to: store)
+            let list: GroceryList = self.insert("GroceryList", in: context)
+            list.id = command.listID
+            self.route(list, with: household, in: context)
+            list.household = household
+            return (household.id, list.id)
+        }
+    }
+
     @discardableResult
     func createStore(
         name: String,
