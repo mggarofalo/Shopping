@@ -152,7 +152,8 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var homeLeaveResumingID: UUID?
     private var homeLeaveRefreshID: UUID?
     private let makeHomeRejoinVerifier: @Sendable (PersonalCartService) -> any HomeRejoinVerifying
-    private var invitationActivations: [UUID: (entry: HomeInvitationInbox.Entry, authority: UICommandAuthority)] = [:]
+    private var invitationActivations: [UUID: (entry: HomeInvitationInbox.Entry, authority: UICommandAuthority, presentationID: UUID)] = [:]
+    private var invitationDiscoveryReservations: [UUID: UUID] = [:]
     private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
     @Published private(set) var state: State = .loading
     @Published private(set) var pendingShareAssociationCount = 0
@@ -1374,19 +1375,23 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func refreshHomes() async throws {
-        guard case .ready(let ready) = state, let request = homeCoordinator.beginDiscovery() else { return }
+        guard case .ready(let ready) = state,
+              invitationDiscoveryReservations[ready.presentation.id] == nil,
+              let request = homeCoordinator.beginDiscovery() else { return }
         let requestedGeneration = generation
         let discovery = HomeDiscoveryService(persistence: ready.persistence)
         let snapshot: HomeDiscovery
         do { snapshot = try await discoverHomes(discovery) }
         catch {
             guard generation == requestedGeneration, ready.presentation.isActive,
+                  invitationDiscoveryReservations[ready.presentation.id] == nil,
                   homeCoordinator.isCurrent(request),
                   (try? accountProvider?.currentSession()) == request.sessionForValidation else { return }
             homeDiscoveryError = error
             throw error
         }
         guard generation == requestedGeneration, ready.presentation.isActive,
+              invitationDiscoveryReservations[ready.presentation.id] == nil,
               homeCoordinator.isCurrent(request),
               try accountProvider?.currentSession() == request.sessionForValidation else { return }
         homeDiscoveryError = nil
@@ -1444,12 +1449,18 @@ final class PersistenceBootstrap: ObservableObject {
 
     func activateInvitedHome(entryID: UUID, graph: HomeGraphIdentity) async throws {
         let (ready, invitationController) = try validateInvitationChoice(entryID, graph: graph)
-        guard invitationActivations[entryID] == nil, let cart = ready.personalCartService,
+        guard !invitationActivations.values.contains(where: { $0.presentationID == ready.presentation.id }),
+              let cart = ready.personalCartService,
               let entry = invitationController.allEntries.first(where: { $0.id == entryID }),
               let session = entry.session else { throw HomeInvitationInbox.Error.busy }
         let choiceAuthority = UICommandAuthority()
-        invitationActivations[entryID] = (entry, choiceAuthority)
-        defer { invitationActivations.removeValue(forKey: entryID); choiceAuthority.retire() }
+        invitationActivations[entryID] = (entry, choiceAuthority, ready.presentation.id)
+        defer {
+            if invitationActivations[entryID]?.presentationID == ready.presentation.id {
+                invitationActivations.removeValue(forKey: entryID)
+            }
+            choiceAuthority.retire()
+        }
         let capturedGeneration = generation
         let share = HomeEffectShare(recordName: entry.identity.share.recordName, zoneName: entry.identity.share.zoneName,
             zoneOwnerName: entry.identity.share.zoneOwnerName)
@@ -1457,36 +1468,54 @@ final class PersistenceBootstrap: ObservableObject {
             householdID: graph.householdID, listID: graph.listID), storeIdentifier: graph.storeIdentifier,
             rootURI: graph.rootURI, share: share)
         let verifier = makeHomeRejoinVerifier(cart)
-        try await ready.persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) { @MainActor in
-            @MainActor func validateChoice() throws {
-                try choiceAuthority.validate()
-                let (current, _) = try self.validateInvitationChoice(entryID, graph: graph)
-                guard self.generation == capturedGeneration, current.presentation.id == ready.presentation.id,
-                      invitationController.allEntries.first(where: { $0.id == entryID }) == entry else {
-                    throw HomeInvitationInbox.Error.invalidState
-                }
-            }
-            try validateChoice()
-            let command = try await Task.detached(priority: .utility) {
-                try cart.captureHomeRejoin(entryID: entryID, identity: identity, verifier: verifier)
-            }.value
-            try validateChoice()
-            try await verifier.refresh(identity)
-            try validateChoice()
-            try await Task.detached(priority: .userInitiated) {
-                try cart.commitHomeRejoin(command, verifier: verifier, choiceAuthority: choiceAuthority)
-            }.value
-            try validateChoice()
-            guard let request = self.homeCoordinator.beginDiscovery() else { throw HomeInvitationInbox.Error.invalidState }
-            let discovery = try await Task.detached(priority: .utility) {
-                try HomeDiscoveryService(persistence: ready.persistence).discover()
-            }.value
-            try validateChoice()
-            guard self.homeCoordinator.reconcile(discovery, request: request) else { throw HomeInvitationInbox.Error.invalidState }
-            try self.homeCoordinator.select(graph, renewingAuthority: true)
-            self.applyHomeSelection(to: ready)
-            try await invitationController.resolveActivation(entryID)
+        let reservationID = UUID()
+        var reservedDiscovery = false
+        func releaseDiscovery() async {
+            guard reservedDiscovery, invitationDiscoveryReservations[ready.presentation.id] == reservationID else { return }
+            invitationDiscoveryReservations.removeValue(forKey: ready.presentation.id)
+            guard generation == capturedGeneration, (try? accountProvider?.currentSession()) == session else { return }
+            // Replay observations suppressed during selection. A failed observation belongs
+            // to homeDiscoveryError; it must not replace the explicit Open result.
+            do { try await refreshHomes() } catch { }
         }
+        do {
+            try await ready.persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) { @MainActor in
+                @MainActor func validateChoice() throws {
+                    try choiceAuthority.validate()
+                    let (current, _) = try self.validateInvitationChoice(entryID, graph: graph)
+                    guard self.generation == capturedGeneration, current.presentation.id == ready.presentation.id,
+                          invitationController.allEntries.first(where: { $0.id == entryID }) == entry else {
+                        throw HomeInvitationInbox.Error.invalidState
+                    }
+                }
+                try validateChoice()
+                let command = try await Task.detached(priority: .utility) {
+                    try cart.captureHomeRejoin(entryID: entryID, identity: identity, verifier: verifier)
+                }.value
+                try validateChoice()
+                try await verifier.refresh(identity)
+                try validateChoice()
+                try await Task.detached(priority: .userInitiated) {
+                    try cart.commitHomeRejoin(command, verifier: verifier, choiceAuthority: choiceAuthority)
+                }.value
+                try validateChoice()
+                // Native verification remains observable. Reserve only the final committed
+                // discovery and selection so ordinary refresh cannot supersede its request.
+                self.invitationDiscoveryReservations[ready.presentation.id] = reservationID
+                reservedDiscovery = true
+                guard let request = self.homeCoordinator.beginDiscovery() else { throw HomeInvitationInbox.Error.invalidState }
+                let discovery = try await self.discoverHomes(HomeDiscoveryService(persistence: ready.persistence))
+                try validateChoice()
+                guard self.homeCoordinator.reconcile(discovery, request: request) else { throw HomeInvitationInbox.Error.invalidState }
+                try self.homeCoordinator.select(graph, renewingAuthority: true)
+                self.applyHomeSelection(to: ready)
+                try await invitationController.resolveActivation(entryID)
+            }
+        } catch {
+            await releaseDiscovery()
+            throw error
+        }
+        await releaseDiscovery()
     }
 
     func keepCurrentHome(entryID: UUID) async throws {

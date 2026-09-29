@@ -834,3 +834,49 @@ remote-Full attestation requirement changed. The shared event foundation's 55
 Watch unit tests passed before this phone UI wiring; the phone Fast build also
 compiles the Watch target. Real device announcements and live sharing remain
 part of the physical acceptance work.
+
+### Hosted Open/rejoin failure retained
+
+Hosted Xcode 16.4/iOS 18.5 run `36641844287` passed 560 of 561 Fast tests;
+`HomeAdoptionBootstrapTests.testExplicitOpenRejoinsBlockedHomeButResolvedEntryCannotGrantAgain`
+caught `invalidState`. Release SDK Build and the unchanged coverage gate passed,
+but acceptance UI did not run. The raw result remains under
+`/tmp/shopping-130-ci-failure/fast-failure-36641844287-1/FastResults.xcresult`,
+with summaries in `/tmp/shopping-130-ci-artifacts/`. This failed candidate was not integrated.
+
+The source exposes a concrete race after durable rejoin: an ordinary home
+discovery can supersede explicit Open's discovery request while its local read
+is suspended. The existing newest-request fence then rejects Open's selection.
+The hosted failure has no precise throw location. A controlled held-discovery
+regression reproduced both an unexpected ordinary read and the same uncaught
+`invalidState` locally before the repair (`/tmp/shopping-130-open-reservation-red`
+result bundle and log). Removing request-order or account/access checks is not
+a valid repair.
+
+The repair reserves only the final committed discovery/selection phase for the
+captured presentation. Ordinary discovery cannot begin or publish while that
+phase owns the request; native verification and account/access checks remain
+active. Releasing the reservation awaits a fresh ordinary observation on both
+success and failure. That observation owns its own error and cannot replace
+Open's original result. A second Open from the same presentation is rejected
+before competing work; older presentation cleanup cannot remove a replacement.
+
+`HomeAdoptionBootstrapTests` owns the three added interleaving regressions:
+
+- `testOpenSelectionSurvivesRefreshWhileCommittedDiscoveryIsHeld` proves exact
+  selection, resolved invitation, one durable grant, duplicate Open rejection,
+  and a fresh trailing observation.
+- `testEarlierRefreshFailureCannotPublishDuringReservedOpenSelection` proves
+  stale ordinary failure cannot replace the valid selection.
+- `testFailedOpenDiscoveryReleasesReservationAndPreservesOriginalFailure` proves
+  release after failure, separately owned trailing error and idempotent retry.
+
+Sticky gates release and drain their held operations before teardown. All 28 adoption/status-bootstrap tests and all 564
+Fast tests passed, with zero skips or xcresult runtime warnings. Evidence uses
+`/tmp/shopping-130-open-reservation-{focused,fast}`; the source manifest is
+`/tmp/shopping-130-open-reservation-source.json`. The focused log has no Core Data
+errors or unlink diagnostics. Fast still emits the previously tracked
+HomeCreationTests/PersonalCartServiceTests fixture unlink diagnostics; their
+required SHOPPING-131 cleanup and original logs remain intact. The two deliberate
+invalid-store tests also emit their expected Core Data errors. No warning-free
+log or live-sharing claim is made.
