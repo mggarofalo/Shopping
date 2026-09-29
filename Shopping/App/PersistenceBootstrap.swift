@@ -1169,7 +1169,7 @@ final class PersistenceBootstrap: ObservableObject {
            ready.persistence.personalCartInitialBinding == session.accountBinding,
            let store = ready.persistence.store(for: .participantShared) {
             invitations.configure(session: session, sharedStoreIdentifier: store.identifier,
-                transport: ManagedHomeInvitationTransport(persistence: ready.persistence, session: session))
+                transport: ManagedHomeInvitationTransport(persistence: ready.persistence, session: session, cart: personalService))
         } else { invitations.configure(session: verifiedSession) }
         homeCoordinator.setInvitationPending(invitations.hasPendingActivation)
     }

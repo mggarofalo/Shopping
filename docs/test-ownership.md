@@ -576,3 +576,37 @@ emit Core Data model-ambiguity log warnings; this is not a warning-free log clai
 The earlier 18-pass/4-fail discovery-timing result remains preserved at
 `/tmp/shopping-129-rejoin-focused.xcresult`. This checkpoint does not prove native
 leave, pre-acceptance loss retention, or live sharing.
+
+### Invitation acceptance retains observed loss (SHOPPING-129)
+
+`HomeInvitationAcceptanceTests` owns the common phone/Watch orchestration: capture
+retained exact-share evidence, freshly observe native access, commit typed loss
+to the private ledger, recheck pending leave history, then invoke acceptance.
+An old unpublished checkout stays quarantined after accepted access and explicit
+Open. Observation or private-save failure leaves acceptance unsubmitted. Stale
+pending invitation metadata alone does not establish lost access when fresh
+membership is accepted. A leave imported during observation rejects acceptance
+at the final gate. First-time acceptance without retained identity skips native
+loss observation but still enforces that final gate. The fixture substitutes
+native lookup and acceptance; private
+retention, publication rules, and join gating use the production SQLite paths.
+
+The native adapter resolves either an attached exact-share root or retained
+portable access/leave evidence, and checks account, store, scope, and graph again
+before saving. No retained identity means this particular observation cannot
+classify an earlier membership loss. This is the documented offline-discovery
+limit, not proof of uninterrupted membership: a separate replica can miss a
+revocation/reinvitation before observing current accepted access. The app does
+not promise immediate discovery of unobserved remote loss or use participant ID
+or a general share change tag as a guaranteed membership incarnation.
+
+The September 29 pre-acceptance checkpoint passed 19 focused tests, then the
+expanded eight acceptance tests (including first join), and all 492 Fast tests.
+The same production source passed all 47 Watch unit tests; only the two phone
+test methods were added afterward. All recorded bundles have zero skips and zero
+xcresult runtime warnings. Bundles use `/tmp/shopping-129-preaccept-` with suffixes
+`focused`, `first-join`, `final-fast`, and `watch`; the corresponding `.log` files
+and `final-source.json` retain evidence. Earlier 490-test Fast evidence is also
+preserved. Existing model-ambiguity log warnings remain separate from xcresult
+runtime warnings. Independent correctness and test-evidence review found no
+remaining issue after the final gate and first-join checks were added.

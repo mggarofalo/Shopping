@@ -4,7 +4,7 @@ import Foundation
 
 /// Refreshes account-wide participant access, independently of the selected screen.
 /// Only known managed CKShare records are read; domain data stays in Core Data.
-final class ManagedHomeAccessObserver: @unchecked Sendable {
+final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchecked Sendable {
     struct Observation: Sendable {
         let id = UUID()
         let access: HomeNativeAccessGate.Access
@@ -13,6 +13,15 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
     private struct Pending: Sendable {
         let request: HomeNativeAccessGate.Request
         let restrictionIDs: Set<UUID>
+    }
+    struct ObservedShare {
+        let observation: Observation
+        let share: CKShare?
+    }
+    private struct RetainedHome {
+        let scope: HomeEffectScope
+        let storeIdentifier: String
+        let identity: HomeNativeAccessIdentity?
     }
     private let cart: PersonalCartService
     private let persistence: PersistenceController
@@ -45,6 +54,13 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
 
     /// The members screen uses the same observation path as background replay.
     func verifiedShare(_ identity: HomeNativeAccessIdentity) async throws -> CKShare {
+        let result = try await observeShare(identity)
+        guard result.observation.access != .lost, let share = result.share else { throw PersonalCartError.unavailable }
+        return share
+    }
+
+    /// A typed loss is a successful durable observation, not a transport failure.
+    func observeShare(_ identity: HomeNativeAccessIdentity) async throws -> ObservedShare {
         let pending = try await Task.detached(priority: .utility) {
             try self.cart.transact(save: false) { repository in
                 try self.validateEnvironment(identity)
@@ -56,8 +72,114 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
         }.value
         let (observation, share) = try await fetch(identity)
         try await Task.detached(priority: .utility) { try self.apply(observation, to: pending) }.value
-        guard observation.access != .lost, let share else { throw PersonalCartError.unavailable }
-        return share
+        return ObservedShare(observation: observation, share: share)
+    }
+
+    func validateJoin(share: HomeEffectShare, session: ShopperSession) async throws {
+        try validateSession(session)
+        try await HomeJoinGate.validate(persistence: persistence, session: session, share: share)
+        try validateSession(session)
+    }
+
+    func captureAcceptance(share: HomeEffectShare, session: ShopperSession) async throws -> HomeInvitationAcceptance.Capture? {
+        guard cart.persistence === persistence, cart.initialAccountBinding == session.accountBinding else {
+            throw PersonalCartError.accountChanged
+        }
+        return try await Task.detached(priority: .utility) {
+            try self.cart.transact(save: false) { repository in
+                guard repository.session == session else { throw PersonalCartError.accountChanged }
+                guard let retained = try self.retainedHome(share: share, repository: repository) else { return nil }
+                let access = try repository.homeEffectAccess(householdID: retained.scope.householdID,
+                    listID: retained.scope.listID)
+                return HomeInvitationAcceptance.Capture(scope: retained.scope, share: share,
+                    storeIdentifier: retained.storeIdentifier,
+                    nativeRequest: retained.identity.map { self.persistence.homeNativeAccess.begin($0) },
+                    restrictionIDs: access.restrictionIDs)
+            }
+        }.value
+    }
+
+    func observeAcceptance(_ capture: HomeInvitationAcceptance.Capture) async throws -> Observation {
+        try validateAcceptanceEnvironment(capture)
+        let (observation, _) = try await fetch(scope: capture.scope, share: capture.share)
+        try validateAcceptanceEnvironment(capture)
+        return observation
+    }
+
+    func persistAcceptance(_ observation: Observation, capture: HomeInvitationAcceptance.Capture) async throws {
+        try await Task.detached(priority: .utility) {
+            try self.cart.transact { repository in
+                try self.validateAcceptanceEnvironment(capture)
+                guard let retained = try self.retainedHome(share: capture.share, repository: repository),
+                      retained.scope == capture.scope, retained.storeIdentifier == capture.storeIdentifier,
+                      retained.identity == capture.nativeRequest?.identity else { throw PersonalCartError.scopeChanged }
+                if let request = capture.nativeRequest {
+                    guard self.persistence.homeNativeAccess.isCurrent(request) else { throw PersonalCartError.scopeChanged }
+                    if observation.access != .writable { try self.persistence.homeNativeAccess.restrict(request, to: observation.access) }
+                }
+                let access = try repository.homeEffectAccess(householdID: capture.scope.householdID, listID: capture.scope.listID)
+                if let record = try Self.record(observation, scope: capture.scope, share: capture.share,
+                    access: access, capturedRestrictionIDs: capture.restrictionIDs) {
+                    try repository.insert(id: record.id, kind: "homeAccess", command: record, value: record)
+                }
+            }
+            try self.validateAcceptanceEnvironment(capture)
+            if let request = capture.nativeRequest,
+               !self.persistence.homeNativeAccess.finish(request, access: observation.access) {
+                throw PersonalCartError.scopeChanged
+            }
+        }.value
+    }
+
+    private func retainedHome(share identity: HomeEffectShare, repository: PersonalCartRepository) throws -> RetainedHome? {
+        try validateSession(repository.session)
+        let store = try participantStore(session: repository.session)
+        guard let storeID = store.identifier,
+              let cloud = persistence.container as? NSPersistentCloudKitContainer else { throw PersonalCartError.unavailable }
+        let records = try repository.values(HomeAccessRecord.self, kind: "homeAccess")
+        for (id, record) in records {
+            try record.validate()
+            guard record.id == id, record.scope == repository.homeEffectScope(
+                householdID: record.scope.householdID, listID: record.scope.listID) else { throw PersonalCartError.corruptRecord }
+        }
+        var scopes = Set(records.values.filter { $0.share == identity }.map(\.scope))
+        scopes.formUnion(try repository.homeLeaves().filter { $0.command.origin.share == identity }.map { $0.command.origin.scope })
+        let request = Household.fetchRequest()
+        request.affectedStores = [store]
+        let homes = try repository.context.fetch(request)
+        let shares = try cloud.fetchShares(matching: homes.map(\.objectID))
+        let matches = homes.filter { home in
+            guard let share = shares[home.objectID] else { return false }
+            return HomeEffectShare(recordName: share.recordID.recordName, zoneName: share.recordID.zoneID.zoneName,
+                zoneOwnerName: share.recordID.zoneID.ownerName) == identity
+        }
+        guard matches.count <= 1 else { throw PersonalCartError.scopeChanged }
+        let native: HomeNativeAccessIdentity?
+        if let home = matches.first {
+            guard try repository.household(home.id).objectID == home.objectID,
+                  let found = try repository.nativeAccessIdentity(for: home), found.share == identity else {
+                throw PersonalCartError.scopeChanged
+            }
+            scopes.insert(found.scope)
+            native = found
+        } else { native = nil }
+        guard scopes.count <= 1 else { throw PersonalCartError.scopeChanged }
+        guard let scope = scopes.first else { return nil }
+        // A known portable scope may have no imported root yet. A present but
+        // incomplete or differently shared root is ambiguity, not a new home.
+        for home in homes where home.id == scope.householdID {
+            guard home.objectID.uriRepresentation().absoluteString == native?.rootURI else { throw PersonalCartError.scopeChanged }
+        }
+        return RetainedHome(scope: scope, storeIdentifier: storeID, identity: native)
+    }
+
+    private func validateAcceptanceEnvironment(_ capture: HomeInvitationAcceptance.Capture) throws {
+        let session = try cart.sessionProvider.currentSession()
+        try validateSession(session)
+        guard cart.persistence === persistence, cart.initialAccountBinding == session.accountBinding,
+              capture.scope == HomeEffectScope(session: session, householdID: capture.scope.householdID, listID: capture.scope.listID),
+              try participantStore(session: session).identifier == capture.storeIdentifier else { throw PersonalCartError.scopeChanged }
+        if let identity = capture.nativeRequest?.identity { try validateEnvironment(identity) }
     }
 
     private func capture() throws -> [Pending] {
@@ -84,19 +206,33 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
 
     private func fetch(_ identity: HomeNativeAccessIdentity) async throws -> (Observation, CKShare?) {
         try validateEnvironment(identity)
-        let database = CKContainer(identifier: identity.scope.containerIdentifier).sharedCloudDatabase
-        let id = CKRecord.ID(recordName: identity.share.recordName,
-            zoneID: CKRecordZone.ID(zoneName: identity.share.zoneName, ownerName: identity.share.zoneOwnerName))
+        let result = try await fetch(scope: identity.scope, share: identity.share)
+        try validateEnvironment(identity)
+        return result
+    }
+
+    private func fetch(scope: HomeEffectScope, share identity: HomeEffectShare) async throws -> (Observation, CKShare?) {
+        func validateScope() throws {
+            let session = try cart.sessionProvider.currentSession()
+            guard scope == HomeEffectScope(session: session, householdID: scope.householdID, listID: scope.listID) else {
+                throw PersonalCartError.accountChanged
+            }
+            _ = try participantStore(session: session)
+        }
+        try validateScope()
+        let database = CKContainer(identifier: scope.containerIdentifier).sharedCloudDatabase
+        let id = CKRecord.ID(recordName: identity.recordName,
+            zoneID: CKRecordZone.ID(zoneName: identity.zoneName, ownerName: identity.zoneOwnerName))
         let record: CKRecord
         do { record = try await database.record(for: id) }
         catch {
-            try validateEnvironment(identity)
+            try validateScope()
             // This classification is restricted to an exact, previously known
             // participant share in the verified account's shared database.
             if Self.isKnownShareLoss(error) { return (Observation(access: .lost, changeTag: nil), nil) }
             throw error
         }
-        try validateEnvironment(identity)
+        try validateScope()
         guard let share = record as? CKShare, share.recordID == id, share.publicPermission == .none else {
             throw PersonalCartError.unavailable
         }
@@ -139,6 +275,12 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
 
     static func record(_ observation: Observation, identity: HomeNativeAccessIdentity,
                        access: HomeEffectAccess, capturedRestrictionIDs: Set<UUID>) throws -> HomeAccessRecord? {
+        try record(observation, scope: identity.scope, share: identity.share, access: access,
+            capturedRestrictionIDs: capturedRestrictionIDs)
+    }
+
+    static func record(_ observation: Observation, scope: HomeEffectScope, share: HomeEffectShare,
+                       access: HomeEffectAccess, capturedRestrictionIDs: Set<UUID>) throws -> HomeAccessRecord? {
         let action: HomeAccessRecord.Action
         let boundary: Set<UUID>
         switch observation.access {
@@ -158,20 +300,25 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
             boundary = capturedRestrictionIDs
             action = .writable(observedRestrictionIDs: capturedRestrictionIDs)
         }
-        let id = operationID(identity: identity, observation: observation, boundary: boundary)
-        let record = HomeAccessRecord(id: id, scope: identity.scope, share: identity.share, action: action)
+        let id = operationID(scope: scope, share: share, observation: observation, boundary: boundary)
+        let record = HomeAccessRecord(id: id, scope: scope, share: share, action: action)
         try record.validate()
         return record
     }
 
     static func operationID(identity: HomeNativeAccessIdentity, observation: Observation, boundary: Set<UUID>) -> UUID {
+        operationID(scope: identity.scope, share: identity.share, observation: observation, boundary: boundary)
+    }
+
+    private static func operationID(scope: HomeEffectScope, share: HomeEffectShare,
+        observation: Observation, boundary: Set<UUID>) -> UUID {
         // Native tags change whenever the server saves the record. Re-reading the
         // same version must not create an import/refresh/private-write feedback loop.
         let access: String
         switch observation.access { case .writable: access = "writable"; case .readOnly: access = "readOnly"; case .lost: access = "lost" }
-        let components = [identity.scope.accountBinding, identity.scope.containerIdentifier, identity.scope.environment,
-            identity.scope.householdID.uuidString, identity.scope.listID.uuidString, identity.share.recordName,
-            identity.share.zoneName, identity.share.zoneOwnerName, access, observation.changeTag ?? "no-version",
+        let components = [scope.accountBinding, scope.containerIdentifier, scope.environment,
+            scope.householdID.uuidString, scope.listID.uuidString, share.recordName,
+            share.zoneName, share.zoneOwnerName, access, observation.changeTag ?? "no-version",
             observation.access == .readOnly ? "" : boundary.map(\.uuidString).sorted().joined(separator: ","),
             observation.access == .lost ? observation.id.uuidString : ""]
         let encoded = try! JSONEncoder().encode(components) // Strings are always encodable.
@@ -190,14 +337,21 @@ final class ManagedHomeAccessObserver: @unchecked Sendable {
         let session = try provider.currentSession()
         try validateSession(session)
         guard HomeEffectScope(session: session, householdID: identity.scope.householdID, listID: identity.scope.listID) == identity.scope,
-              case .managed(_, let sharedURL, let containerID) = persistence.configuration,
-              containerID == identity.scope.containerIdentifier,
-              let store = persistence.store(for: .participantShared), store.identifier == identity.storeIdentifier,
+              try participantStore(session: session).identifier == identity.storeIdentifier else { throw PersonalCartError.scopeChanged }
+    }
+
+    private func participantStore(session: ShopperSession) throws -> NSPersistentStore {
+        try validateSession(session)
+        guard case .managed(let privateURL, let sharedURL, let containerID) = persistence.configuration,
+              containerID == session.containerIdentifier,
+              privateURL.deletingLastPathComponent().lastPathComponent == session.accountBinding,
+              let store = persistence.store(for: .participantShared),
               store.url == sharedURL, sharedURL.deletingLastPathComponent().lastPathComponent == session.accountBinding,
               persistence.container.persistentStoreCoordinator.persistentStores.contains(where: { $0 === store }),
               let description = persistence.container.persistentStoreDescriptions.first(where: { $0.url == sharedURL }),
               description.cloudKitContainerOptions?.databaseScope == .shared,
               description.cloudKitContainerOptions?.containerIdentifier == containerID else { throw PersonalCartError.scopeChanged }
+        return store
     }
 }
 

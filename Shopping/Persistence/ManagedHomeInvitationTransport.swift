@@ -29,10 +29,12 @@ enum ManagedHomeInvitationError: Error, LocalizedError {
 final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked Sendable {
     private let persistence: PersistenceController
     private let session: ShopperSession
+    private let cart: PersonalCartService?
 
-    init(persistence: PersistenceController, session: ShopperSession) {
+    init(persistence: PersistenceController, session: ShopperSession, cart: PersonalCartService? = nil) {
         self.persistence = persistence
         self.session = session
+        self.cart = cart
     }
 
     static func archive(_ metadata: CKShare.Metadata) throws -> Data {
@@ -77,31 +79,40 @@ final class ManagedHomeInvitationTransport: HomeInvitationTransport, @unchecked 
         guard Self.identity(of: metadata.share) == identity else {
             throw ManagedHomeInvitationError.invalidMetadata
         }
-        let (cloud, store) = try environment()
-        // Keep the continuation alive until the native callback. Cancellation is not
-        // evidence that CloudKit cancelled an in-flight acceptance.
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            do {
-                _ = try environment()
-                cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
-                    do {
-                        _ = try self.environment()
-                        if let error { throw error }
-                        guard let accepted, accepted.count == 1, let result = accepted.first else {
-                            throw ManagedHomeInvitationError.missingAcceptanceResult
-                        }
-                        try Self.validate(result, session: self.session)
-                        guard Self.identity(of: result.share) == identity else {
-                            throw ManagedHomeInvitationError.missingAcceptanceResult
-                        }
-                        // The callback confirms the operation, not fresh participant
-                        // metadata or graph import. Imported share metadata must establish
-                        // accepted membership before importedHome returns a usable home.
-                        _ = try self.environment()
-                        continuation.resume(returning: ())
-                    } catch { continuation.resume(throwing: error) }
-                }
-            } catch { continuation.resume(throwing: error) }
+        guard let cart, cart.persistence === persistence,
+              cart.initialAccountBinding == session.accountBinding else {
+            throw ManagedHomeInvitationError.accountUnavailable
+        }
+        let share = HomeEffectShare(recordName: identity.recordName,
+            zoneName: identity.zoneName, zoneOwnerName: identity.zoneOwnerName)
+        try await HomeInvitationAcceptance.perform(
+            preflight: ManagedHomeAccessObserver(cart: cart, persistence: persistence), share: share, session: session) {
+            let (cloud, store) = try environment()
+            // Keep the continuation alive until the native callback. Cancellation is not
+            // evidence that CloudKit cancelled an in-flight acceptance.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                do {
+                    _ = try environment()
+                    cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
+                        do {
+                            _ = try self.environment()
+                            if let error { throw error }
+                            guard let accepted, accepted.count == 1, let result = accepted.first else {
+                                throw ManagedHomeInvitationError.missingAcceptanceResult
+                            }
+                            try Self.validate(result, session: self.session)
+                            guard Self.identity(of: result.share) == identity else {
+                                throw ManagedHomeInvitationError.missingAcceptanceResult
+                            }
+                            // The callback confirms the operation, not fresh participant
+                            // metadata or graph import. Imported share metadata must establish
+                            // accepted membership before importedHome returns a usable home.
+                            _ = try self.environment()
+                            continuation.resume(returning: ())
+                        } catch { continuation.resume(throwing: error) }
+                    }
+                } catch { continuation.resume(throwing: error) }
+            }
         }
     }
 

@@ -283,15 +283,19 @@ final class WatchPersistenceBootstrap {
             try await runtime.persistence.homeParticipantOperations.perform(in: HomeParticipantZone(session: session, share: share)) { @MainActor in
                 _ = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
                 try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
-                let (cloud, store) = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
-                        if let error { continuation.resume(throwing: error) }
-                        else if let accepted, accepted.count == 1, let result = accepted.first,
-                                result.containerIdentifier == metadata.containerIdentifier,
-                                result.share.recordID == metadata.share.recordID {
-                            continuation.resume()
-                        } else { continuation.resume(throwing: PersonalCartError.unavailable) }
+                try await HomeInvitationAcceptance.perform(
+                    preflight: ManagedHomeAccessObserver(cart: runtime.cart, persistence: runtime.persistence),
+                    share: share, session: session) { @MainActor in
+                    let (cloud, store) = try self.acceptanceEnvironment(runtime, session: session, metadata: metadata, generation: generation)
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        cloud.acceptShareInvitations(from: [metadata], into: store) { accepted, error in
+                            if let error { continuation.resume(throwing: error) }
+                            else if let accepted, accepted.count == 1, let result = accepted.first,
+                                    result.containerIdentifier == metadata.containerIdentifier,
+                                    result.share.recordID == metadata.share.recordID {
+                                continuation.resume()
+                            } else { continuation.resume(throwing: PersonalCartError.unavailable) }
+                        }
                     }
                 }
                 try await HomeJoinGate.validate(persistence: runtime.persistence, session: session, share: share)
