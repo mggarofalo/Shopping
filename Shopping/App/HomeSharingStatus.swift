@@ -10,7 +10,7 @@ struct HomeSharingStatus: Equatable {
     enum Action: String, Equatable, CaseIterable {
         case checkStatus, openSettings, returnToHome, chooseHome, reviewInvitation
     }
-    enum SectionID: String { case account, home, invitation, ownedStore, sharedStore, savedWork, ownerAssociations, leavingHomes }
+    enum SectionID: String { case account, home, invitation, ownedStore, sharedStore, savedWork, ownerAssociations, leavingHomes, localChecks }
     struct Section: Equatable, Identifiable {
         let id: SectionID
         let presentation: SharingStatusPresentation
@@ -35,6 +35,7 @@ struct HomeSharingStatus: Equatable {
         /// Known owner records awaiting association, not a count of unsent changes.
         var ownerAssociationCount: Int? = nil
         var associationNeedsAttention = false
+        var localCheckNeedsAttention = false
         var leavePendingCount = 0
     }
 
@@ -61,6 +62,11 @@ struct HomeSharingStatus: Equatable {
         if let invitation { sections.append(invitation) }
         sections += [owned, shared].compactMap { $0 }
         sections.append(work)
+        if input.localCheckNeedsAttention {
+            sections.append(Section(id: .localChecks, presentation: .init(symbol: "exclamationmark.arrow.triangle.2.circlepath",
+                title: "Saved data needs another check",
+                details: "Some home or saved-work checks could not complete. Saved data and drafts are retained. Check status to try again; this does not confirm an iCloud delivery failure."), actions: [.checkStatus]))
+        }
         if input.leavePendingCount > 0 {
             sections.append(Section(id: .leavingHomes, presentation: .init(symbol: "house",
                 title: "Leaving homes needs confirmation",
@@ -94,6 +100,8 @@ struct HomeSharingStatus: Equatable {
             summary = Self.engineSummary(owned)
         } else if input.sharedStore?.hasFailure == true, let shared {
             summary = Self.engineSummary(shared)
+        } else if input.localCheckNeedsAttention, let local = sections.first(where: { $0.id == .localChecks }) {
+            summary = local.presentation
         } else if input.leavePendingCount > 0, let leave = sections.first(where: { $0.id == .leavingHomes }) {
             summary = leave.presentation
         } else if input.associationNeedsAttention, let association = sections.first(where: { $0.id == .ownerAssociations }) {

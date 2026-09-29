@@ -1,3 +1,4 @@
+import Combine
 import CoreData
 import CryptoKit
 import Foundation
@@ -157,6 +158,22 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var pendingShareAssociationCount = 0
     @Published private(set) var isCreatingHome = false
     @Published private(set) var shareAssociationError: Error?
+    @Published private(set) var homeSetupError: Error?
+    @Published private(set) var cartResumeError: Error?
+    @Published private(set) var homeDiscoveryError: Error?
+    @Published private(set) var isCheckingSharingStatus = false
+    @Published private(set) var sharingStatusCheckMessage: String?
+    @Published private var sharingWork: HomeSharingWorkSnapshot?
+    @Published private var sharingWorkNeedsAttention = false
+    private var sharingWorkScope: ActiveHomeScope?
+    private var sharingWorkPresentationID: UUID?
+    private var sharingCheckID: UUID?
+    private let sharingCheck: HomeSharingStatusCheck<HomeSharingWorkSnapshot?>
+    private let readSharingWork: @Sendable (PersonalCartService, ActiveHomeScope) async throws -> HomeSharingWorkSnapshot
+    private let discoverHomes: @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery
+    private var homeObservation: AnyCancellable?
+    private var invitationObservation: AnyCancellable?
+    private var associationCountKnown = false
     private let configuration: () throws -> PersistenceConfiguration
     private var preloadedPreviewEnvironment: ShoppingPreviewEnvironment?
     private var remoteObserver: NSObjectProtocol?
@@ -221,8 +238,20 @@ final class PersistenceBootstrap: ObservableObject {
         },
         makeHomeLeaveTransport: @escaping @Sendable (PersonalCartService) -> ManagedHomeLeaveTransport = { ManagedHomeLeaveTransport(cart: $0, persistence: $0.persistence) },
         makeHomeRejoinVerifier: @escaping @Sendable (PersonalCartService) -> any HomeRejoinVerifying = { ManagedHomeRejoinVerifier(cart: $0) },
+        sharingStatusDeadline: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: .seconds(10)) },
+        readSharingWork: @escaping @Sendable (PersonalCartService, ActiveHomeScope) async throws -> HomeSharingWorkSnapshot = { service, scope in
+            try await Task.detached(priority: .utility) {
+                try service.sharingWorkSnapshot(householdID: scope.graph.householdID, listID: scope.graph.listID)
+            }.value
+        },
+        discoverHomes: @escaping @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery = { discovery in
+            try await Task.detached(priority: .utility) { try discovery.discover() }.value
+        },
         activateAccountStore: @escaping @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { try PersistenceBootstrap.productionAccountActivation(source: $0, session: $1, base: $2, importLegacy: $3) }
     ) {
+        self.sharingCheck = HomeSharingStatusCheck(waitForDeadline: sharingStatusDeadline)
+        self.readSharingWork = readSharingWork
+        self.discoverHomes = discoverHomes
         self.configuration = configuration
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
         self.defaults = defaults
@@ -236,6 +265,8 @@ final class PersistenceBootstrap: ObservableObject {
         self.makeHomeLeaveTransport = makeHomeLeaveTransport
         self.makeHomeRejoinVerifier = makeHomeRejoinVerifier
         self.activateAccountStore = activateAccountStore
+        homeObservation = homeCoordinator.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        invitationObservation = invitations?.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         cloudMonitor.onChange = { [weak self] in self?.cloudStatus = $0 }
         invitations?.onChoiceInvalidated = { [weak self] identity in
             guard let self else { return }
@@ -249,6 +280,7 @@ final class PersistenceBootstrap: ObservableObject {
                 if self.invitations?.allEntries.contains(activation.entry) != true { activation.authority.retire() }
             }
             self.homeCoordinator.setInvitationPending(self.invitations?.hasPendingActivation == true)
+            self.objectWillChange.send()
         }
     }
 
@@ -278,31 +310,176 @@ final class PersistenceBootstrap: ObservableObject {
         sharingStatusPresentation.details
     }
 
-    var sharingStatusPresentation: SharingStatusPresentation {
-        guard personalMode else {
-            return SharingStatusPresentation(symbol: "internaldrive", title: "Saved on this device",
-                details: "Saved on this device. iCloud setup has not been completed.")
+    var sharingStatusPresentation: SharingStatusPresentation { homeSharingStatus.summary }
+
+    var homeSharingStatus: HomeSharingStatus {
+        let account: HomeSharingStatus.Account
+        let currentSession = try? accountProvider?.currentSession()
+        let matchesAttachedAccount = activeAccountBinding != nil && currentSession?.accountBinding == activeAccountBinding
+        if !personalMode { account = .localOnly }
+        else {
+            switch accountProvider?.state {
+            case .ready:
+                account = activeAccountBinding != nil && !matchesAttachedAccount ? .changed : .verified
+            case .cached:
+                account = activeAccountBinding != nil && !matchesAttachedAccount ? .changed : .cached
+            case .accountChanged: account = .changed
+            default: account = .unavailable
+            }
         }
-        guard let accountProvider, (try? accountProvider.currentSession()) != nil else {
-            return SharingStatusPresentation(symbol: "exclamationmark.icloud", title: "iCloud account needs attention",
-                details: "Your iCloud account is not ready. Saved groceries are retained on this device.")
+        // Provider invalidation is synchronous; its UI notification is queued.
+        // Never label the previous account's observations as the new account's
+        // during that gap, even though the retained store has not detached yet.
+        let canShowAttachedObservations = personalMode && matchesAttachedAccount
+        let home: HomeSharingStatus.Home
+        if personalMode && !canShowAttachedObservations { home = .unresolved }
+        else {
+            switch homeCoordinator.readiness {
+            case .accountUnavailable: home = .unresolved
+            case .waitingForImport: home = .waitingForImport
+            case .choiceRequired: home = .choiceRequired
+            case .selectedHomeUnavailable: home = .unavailable
+            case .ready(let scope):
+                switch homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.access {
+                case .owner: home = .availableOwner
+                case .contributor: home = .availableContributor
+                case .restricted: home = .readOnly
+                default: home = .unresolved
+                }
+            }
         }
-        let symbol: String
-        let title: String
-        if cloudStatus.hasFailure {
-            symbol = "exclamationmark.icloud"
-            title = "Sync needs attention"
-        } else if cloudStatus.isWorking {
-            symbol = "arrow.triangle.2.circlepath.icloud"
-            title = "iCloud working"
-        } else if cloudStatus.lastUpload != nil || cloudStatus.lastDownload != nil {
-            symbol = "checkmark.icloud"
-            title = "Recent iCloud activity"
-        } else {
-            symbol = "icloud"
-            title = "Waiting for iCloud"
+        var input = HomeSharingStatus.Input(account: account, home: home,
+            invitation: canShowAttachedObservations ? sharingInvitationStatus : .none)
+        if canShowAttachedObservations, case .ready(let ready) = state {
+            if let store = ready.persistence.store(for: .ownerPrivate) {
+                input.ownedStore = cloudStatus.snapshot(forStores: [store.identifier])
+            }
+            if let store = ready.persistence.store(for: .participantShared) {
+                input.sharedStore = cloudStatus.snapshot(forStores: [store.identifier])
+            }
+            if sharingWorkScope == ready.homeScope, sharingWorkPresentationID == ready.presentation.id,
+               let work = sharingWork, work.scope.accountBinding == currentSession?.accountBinding {
+                input.work = .init(pendingCheckout: work.pendingCheckoutCount, pendingUndo: work.pendingUndoCount,
+                    retained: work.heldCount, isIncomplete: work.isIncomplete)
+            }
+            input.ownerAssociationCount = associationCountKnown ? pendingShareAssociationCount : nil
+            input.associationNeedsAttention = shareAssociationError != nil
+            input.localCheckNeedsAttention = cartResumeError != nil || homeDiscoveryError != nil || sharingWorkNeedsAttention
+            input.leavePendingCount = homeLeaveStatuses.filter(\.requiresResolution).count
         }
-        return SharingStatusPresentation(symbol: symbol, title: title, details: cloudStatus.message)
+        return HomeSharingStatus(input: input)
+    }
+
+    private var sharingInvitationStatus: HomeSharingStatus.Invitation {
+        guard let invitations else { return .none }
+        if invitations.problem != nil || !invitations.importProblems.isEmpty { return .attention }
+        let entries = invitations.entries
+        if entries.contains(where: { if case .failed = $0.state { return true }; return false }) { return .attention }
+        if entries.contains(where: { if case .joining = $0.state { return true }; return false }) { return .joining }
+        if entries.contains(where: { if case .loading = $0.state { return true }; return false }) { return .loading }
+        if entries.contains(where: { if case .ready = $0.state { return true }; return false }) { return .ready }
+        return entries.isEmpty ? .none : .joining
+    }
+
+    /// A timed-out or cancelled callback can still be draining after its UI wait ends.
+    var hasOutstandingSharingStatusCheck: Bool { sharingCheck.isRunning }
+
+    /// Screen appearance reads only the existing local graph. It does not retry
+    /// native commands or reload grocery projections.
+    func refreshSharingStatus() async { await performSharingStatusCheck(retry: false) }
+
+    /// A user-requested check uses the normal account/access/recovery services.
+    /// It never schedules a CloudKit export, resets a store, or waits for a peer.
+    func checkSharingStatus() async { await performSharingStatusCheck(retry: true) }
+
+    private func performSharingStatusCheck(retry: Bool) async {
+        guard !isCheckingSharingStatus else { return }
+        guard !sharingCheck.isRunning else {
+            sharingStatusCheckMessage = "The previous check is still finishing. Saved data is retained; you can return to your home and try again later."
+            return
+        }
+        let id = UUID(), requestedGeneration = generation
+        let capturedService = personalService
+        let capturedProvider = accountProvider
+        let capturedSession = try? capturedProvider?.currentSession()
+        let ready: ReadyState?
+        if case .ready(let value) = state { ready = value } else { ready = nil }
+        let scope = ready?.homeScope
+        sharingCheckID = id
+        isCheckingSharingStatus = true
+        sharingStatusCheckMessage = nil
+        let outcome = await sharingCheck.run { [weak self] in
+            guard let self else { throw CancellationError() }
+            if retry {
+                if let capturedProvider { await capturedProvider.refresh() }
+                try Task.checkCancellation()
+                guard self.sharingCheckID == id, self.generation == requestedGeneration,
+                      self.accountProvider === capturedProvider else { throw CancellationError() }
+                self.configureInvitations()
+                self.invitations?.checkAgain()
+                if let capturedService, self.personalService === capturedService {
+                    await self.refreshHomeAccessAndReplay()
+                    try Task.checkCancellation()
+                }
+                await self.refreshShareAssociations()
+                try Task.checkCancellation()
+            }
+            guard self.sharingCheckID == id, self.generation == requestedGeneration,
+                  self.personalService === capturedService,
+                  self.accountProvider === capturedProvider,
+                  (try? capturedProvider?.currentSession()) == capturedSession else { throw CancellationError() }
+            guard let capturedService, let scope, let ready else { return nil }
+            guard self.isCurrentSharingScope(ready, scope: scope) else { throw CancellationError() }
+            return try await self.readSharingWork(capturedService, scope)
+        }
+        guard sharingCheckID == id, generation == requestedGeneration else { return }
+        isCheckingSharingStatus = false
+        sharingCheckID = nil
+        guard personalService === capturedService, accountProvider === capturedProvider,
+              (try? capturedProvider?.currentSession()) == capturedSession,
+              ready.map({ $0.presentation.isActive }) ?? true else { return }
+        switch outcome {
+        case .value(let work):
+            if let ready, let scope {
+                guard isCurrentSharingScope(ready, scope: scope),
+                      work?.scope == capturedSession.map({ HomeEffectScope(session: $0,
+                        householdID: scope.graph.householdID, listID: scope.graph.listID) }) else { return }
+                sharingWork = work
+                sharingWorkScope = scope
+                sharingWorkPresentationID = ready.presentation.id
+            }
+            sharingWorkNeedsAttention = false
+            sharingStatusCheckMessage = retry
+                ? "Available observations were checked. This does not confirm delivery to another device."
+                : "Saved work was checked on this device. iCloud activity is shown from existing observations."
+        case .failed:
+            sharingWork = nil
+            sharingWorkNeedsAttention = true
+            sharingStatusCheckMessage = "Some status information could not be checked. Saved data is retained. Try again later."
+        case .timedOut:
+            sharingWork = nil
+            sharingStatusCheckMessage = "The check is taking longer than expected. Saved data is retained; you can return to your home and check again later."
+        case .cancelled: break
+        case .alreadyRunning:
+            sharingStatusCheckMessage = "A previous check is still finishing. Try again later."
+        }
+    }
+
+    private func isCurrentSharingScope(_ ready: ReadyState, scope: ActiveHomeScope) -> Bool {
+        guard ready.presentation.isActive, case .ready(let current) = state else { return false }
+        return current.presentation.id == ready.presentation.id && current.homeScope == scope
+            && homeCoordinator.isCurrent(scope: scope, generation: ready.homeGeneration)
+    }
+
+    private func clearSharingStatusPresentation() {
+        sharingCheck.invalidate()
+        sharingCheckID = nil
+        isCheckingSharingStatus = false
+        sharingStatusCheckMessage = nil
+        sharingWork = nil
+        sharingWorkScope = nil
+        sharingWorkPresentationID = nil
+        sharingWorkNeedsAttention = false
     }
 
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
@@ -665,6 +842,7 @@ final class PersistenceBootstrap: ObservableObject {
         pendingRetirement = previous
         previous?.presentation.retire()
         clearHomeLeavePresentation()
+        clearSharingStatusPresentation()
         invitations?.configure(session: nil)
         homeCoordinator.bind(nil)
         generation += 1
@@ -691,22 +869,20 @@ final class PersistenceBootstrap: ObservableObject {
         invitations?.checkAgain()
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
         consumeHistory()
-        Task {
-            do { try await refreshHomes() }
-            catch { shareAssociationError = error }
-        }
+        Task { try? await refreshHomes() }
         retryShareAssociations()
     }
 
     /// Existing personal-cart entry point uses the same durable, account-bound approval.
     func activatePersonalCarts(importLegacy: Bool) {
         guard !accountLoadInProgress, transition == nil else { return }
+        homeSetupError = nil
         if !personalMode, case .ready = state, !isShowingRetainedLocalHome {
             Task {
                 do {
                     let choice = try await prepareInvitationSetup()
                     try await confirmInvitationSetup(choice, copyLocal: importLegacy)
-                } catch { shareAssociationError = error }
+                } catch { homeSetupError = error }
             }
             return
         }
@@ -914,6 +1090,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func accountStateChanged() {
+        objectWillChange.send()
         guard personalMode, let accountProvider, !accountLoadInProgress else { return }
         do {
             let session = try accountProvider.currentSession()
@@ -933,6 +1110,13 @@ final class PersistenceBootstrap: ObservableObject {
         associationWorker = nil
         homeAccessRefreshID = nil
         personalService = nil
+        pendingShareAssociationCount = 0
+        associationCountKnown = false
+        shareAssociationError = nil
+        cartResumeError = nil
+        homeDiscoveryError = nil
+        homeSetupError = nil
+        clearSharingStatusPresentation()
         clearHomeLeavePresentation()
         cloudMonitor.reset()
         if let ready = previous {
@@ -1060,7 +1244,7 @@ final class PersistenceBootstrap: ObservableObject {
                 }?.name
                 personalService = prepared.personalCartService
                 if let resumeError = prepared.resumeError {
-                    shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
+                    cartResumeError = NSError(domain: "ShoppingCartResume", code: 1,
                         userInfo: [NSLocalizedDescriptionKey: resumeError])
                 }
             } else {
@@ -1193,9 +1377,19 @@ final class PersistenceBootstrap: ObservableObject {
         guard case .ready(let ready) = state, let request = homeCoordinator.beginDiscovery() else { return }
         let requestedGeneration = generation
         let discovery = HomeDiscoveryService(persistence: ready.persistence)
-        let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+        let snapshot: HomeDiscovery
+        do { snapshot = try await discoverHomes(discovery) }
+        catch {
+            guard generation == requestedGeneration, ready.presentation.isActive,
+                  homeCoordinator.isCurrent(request),
+                  (try? accountProvider?.currentSession()) == request.sessionForValidation else { return }
+            homeDiscoveryError = error
+            throw error
+        }
         guard generation == requestedGeneration, ready.presentation.isActive,
+              homeCoordinator.isCurrent(request),
               try accountProvider?.currentSession() == request.sessionForValidation else { return }
+        homeDiscoveryError = nil
         if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
         configureInvitations()
     }
@@ -1661,6 +1855,7 @@ final class PersistenceBootstrap: ObservableObject {
         let scope = homeCoordinator.activeScope
         guard ready.homeScope != scope || ready.homeGeneration != homeCoordinator.generation else { return }
         ready.presentation.retire()
+        clearSharingStatusPresentation()
         let selection = scope.map { (householdID: $0.graph.householdID, listID: $0.graph.listID) }
         state = .ready(ReadyState(persistence: ready.persistence, service: ready.service,
             householdID: selection?.householdID, listID: selection?.listID,
@@ -1682,29 +1877,32 @@ final class PersistenceBootstrap: ObservableObject {
               homeAccessRefreshID == requestID else { return }
         homeAccessRefreshID = nil
         if let failure {
-            shareAssociationError = NSError(domain: "ShoppingCartResume", code: 1,
+            cartResumeError = NSError(domain: "ShoppingCartResume", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: failure])
-        } else if (shareAssociationError as NSError?)?.domain == "ShoppingCartResume" {
-            shareAssociationError = nil
+        } else {
+            cartResumeError = nil
         }
-        do { try await refreshHomes() }
-        catch { shareAssociationError = error }
+        try? await refreshHomes()
+        guard generation == requestedGeneration, self.personalService === personalService else { return }
         if case .ready(let ready) = state { ready.personalCart?.refresh() }
     }
 
     private func retryShareAssociations() {
+        Task { await refreshShareAssociations() }
+    }
+
+    private func refreshShareAssociations() async {
         guard let associationWorker else { return }
         let requestedGeneration = generation
-        Task {
-            do {
-                let count = try await associationWorker.retryPending()
-                guard generation == requestedGeneration else { return }
-                pendingShareAssociationCount = count
-                shareAssociationError = nil
-            } catch {
-                guard generation == requestedGeneration else { return }
-                shareAssociationError = error
-            }
+        do {
+            let count = try await associationWorker.retryPending()
+            guard generation == requestedGeneration else { return }
+            associationCountKnown = true
+            pendingShareAssociationCount = count
+            shareAssociationError = nil
+        } catch {
+            guard generation == requestedGeneration else { return }
+            shareAssociationError = error
         }
     }
 }

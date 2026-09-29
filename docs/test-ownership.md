@@ -766,3 +766,71 @@ and a real UI workflow remain required to complete SHOPPING-130.
 The same foundation source passed all 55 Watch unit tests with zero skips or
 runtime warnings (`/tmp/shopping-130-foundation-watch.xcresult` and `.log`),
 including the shared CloudSyncStatus tests and existing Watch status behavior.
+
+### Sharing status screen and bounded checks
+
+`HomeSharingStatusCheckTests` owns bounded waiting, cancellation, and one in-flight
+reservation until an uncooperative operation actually drains. A timeout releases
+UI busy state without claiming the underlying native or writer operation stopped.
+`HomeSharingStatusBootstrapTests` owns local-only screen reads, forwarding home
+observations, full account/service/local-graph/presentation fences, same-graph
+presentation renewal, late callbacks, and independent local-check error state.
+Its account-boundary regression deliberately keeps the old presentation mounted
+while the provider changes accounts; old observations must disappear before the
+queued UI transition. Fixtures detach their SQLite stores before deletion and
+wait for held workers to drain before asserting late results were discarded.
+
+`HomeSharingStatusTests` also owns local-check failures remaining independent of
+CloudKit/association success, and announcement deduplication. Event timestamps,
+counts and duplicate observations do not repeatedly interrupt VoiceOver.
+
+`HomeSharingStatusUITests.testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize`
+owns opening the native status screen, its explicit Check status interaction,
+readable saved-work meaning at accessibility XXXL, and Return to home preserving
+existing grocery identities. The initial UI run failed because a generic query
+matched both the native Label image and text; it now selects the unique static
+text rather than taking the first match. The failure is retained in
+`/tmp/shopping-130-status-ui.xcresult`. The existing largest-text empty/recovery
+workflow passed in that same run, with zero runtime warnings or skips.
+
+Before the final discovery-order fix, focused wiring validation passed 37 tests
+and the expanded Fast run passed 559, with no skips or xcresult runtime warnings
+(`/tmp/shopping-130-status-wiring-focused` and `/tmp/shopping-130-status-final-fast`).
+The focused run also had no raw Core Data errors. Review then found overlapping
+home discovery could let an older failure replace a newer success, or an older
+success clear a newer failure. The current request must own both error publication
+and clearing; stale graph reconciliation was already protected independently.
+
+Status remains functional without telemetry. There is no available Phase 15
+lifecycle diagnostic implementation on this milestone, so this change does not
+introduce a Sentry dependency or log account identities, invitation URLs or grocery
+content. Simulator observations do not prove another household member's receipt;
+SHOPPING-30 retains that live two-account/two-phone gate.
+
+The final request-order guard passed all 561 Fast tests. A separate test-evidence
+review found that the first Check status UI assertion could pass on the preceding
+automatic-read result. Appearance now reports its local-read scope, while an
+explicit completed check reports the broader observation check. The workflow
+requires the initial local-read message and then the distinct explicit-check
+result after the tap, alongside an enabled button and no remaining progress.
+The final unchanged candidate passed all 561 Fast tests and that strengthened UI
+workflow, with zero skips or xcresult runtime warnings
+(`/tmp/shopping-130-status-complete-fast` and `-complete-ui`). Source hashes are in
+`/tmp/shopping-130-status-complete-source.json`. Raw Fast Core Data errors remain
+confined to the two intentional invalid-store tests; no missing-path errors were
+observed in the preceding final request-order run.
+
+A passing intermediate UI run captured a blank screenshot immediately after the
+native Dynamic Type audit. It is retained in `-ui-corrected` and is not visual
+proof. Captures before the audit in `-ui-visual` show the actual wrapped, scrollable
+status and saved-work content at accessibility XXXL. The final workflow keeps
+those pre-audit captures and the audit assertion. The extra visual run is not a
+runtime optimization comparison.
+
+Independent functional reviews cleared the final request-order/account guards;
+the test-evidence review checked fixture teardown, late-worker draining, target
+membership and preserved plan selection. No coverage baseline, CI policy, or
+remote-Full attestation requirement changed. The shared event foundation's 55
+Watch unit tests passed before this phone UI wiring; the phone Fast build also
+compiles the Watch target. Real device announcements and live sharing remain
+part of the physical acceptance work.

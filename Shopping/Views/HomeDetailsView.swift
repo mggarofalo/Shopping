@@ -142,6 +142,8 @@ struct HomeDetailsView: View {
                 }
                 Label(syncStatus.title, systemImage: syncStatus.symbol)
                 Text(syncStatus.details).foregroundStyle(.secondary)
+                NavigationLink("Sharing status") { HomeSharingStatusView() }
+                    .accessibilityIdentifier("shopping.home.sharingStatus")
                 if let error = model.error {
                     Text(error).foregroundStyle(.red).accessibilityIdentifier("shopping.home.error")
                 }

@@ -37,16 +37,9 @@ struct SettingsView: View {
                         }
                     }
                     NavigationLink {
-                        List {
-                            Section("Status") {
-                                Label(sharingStatus.title, systemImage: sharingStatus.symbol)
-                                Text(sharingStatus.details)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .navigationTitle("Sync status")
+                        HomeSharingStatusView()
                     } label: {
-                        LabeledContent("Sync status") {
+                        LabeledContent("Sharing status") {
                             Image(systemName: sharingStatus.symbol)
                                 .accessibilityLabel(sharingStatus.title)
                         }

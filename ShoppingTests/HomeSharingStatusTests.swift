@@ -2,6 +2,29 @@ import XCTest
 @testable import Shopping
 
 final class HomeSharingStatusTests: XCTestCase {
+    func testLocalChecksRemainDistinctFromCloudFailureAndAssociationSuccess() throws {
+        var engine = CloudSyncStatus()
+        engine.record(event(.upload))
+        let result = HomeSharingStatus(input: .init(account: .verified, home: .availableOwner,
+            ownedStore: engine.snapshot(forStores: ["private"]), ownerAssociationCount: 0,
+            localCheckNeedsAttention: true))
+        XCTAssertEqual(result.summary.title, "Saved data needs another check")
+        XCTAssertTrue(try section(result, .localChecks).presentation.details.contains("drafts are retained"))
+        XCTAssertFalse(try section(result, .ownerAssociations).presentation.details.contains("could not be checked"))
+        XCTAssertTrue(try section(result, .ownedStore).presentation.details.contains("Successful activity"))
+        XCTAssertTrue(result.actions.contains(.checkStatus))
+    }
+
+    func testAnnouncementsDeduplicateObservationsButAnnounceRecoveryAndRecurrence() {
+        var announcements = HomeSharingStatusAnnouncements()
+        XCTAssertNil(announcements.observe(title: "Using saved data"), "Initial screen content is read normally")
+        XCTAssertNil(announcements.observe(title: "Using saved data"), "Repeated activity does not interrupt VoiceOver")
+        XCTAssertEqual(announcements.observe(title: "Home access unavailable"), "Home access unavailable")
+        XCTAssertNil(announcements.observe(title: "Home access unavailable"))
+        XCTAssertEqual(announcements.observe(title: "Recent iCloud activity"), "Recent iCloud activity")
+        XCTAssertEqual(announcements.observe(title: "Home access unavailable"), "Home access unavailable")
+    }
+
     private func status(account: HomeSharingStatus.Account = .verified,
                         home: HomeSharingStatus.Home = .availableOwner,
                         invitation: HomeSharingStatus.Invitation = .none,

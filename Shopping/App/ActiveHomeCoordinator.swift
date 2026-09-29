@@ -112,10 +112,14 @@ final class ActiveHomeCoordinator: ObservableObject {
         return Request(session: session, generation: generation, sequence: requestSequence)
     }
 
+    /// Discovery results and their errors share the same request-order fence.
+    func isCurrent(_ request: Request) -> Bool {
+        request.session == session && request.generation == generation && request.sequence == requestSequence
+    }
+
     @discardableResult
     func reconcile(_ discovery: HomeDiscovery, request: Request) -> Bool {
-        guard request.session == session, request.generation == generation,
-              request.sequence == requestSequence else { return false }
+        guard isCurrent(request) else { return false }
         let previous = activeScope
         let previousAccess = homes.first { $0.graph == previous?.graph }?.access
         // Duplicate identities are incomplete data, never a reason to choose the first row.
