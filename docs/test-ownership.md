@@ -293,3 +293,10 @@ Its held callback and observed active request count force overlap deterministica
 The production adapter is compiled against actual managed APIs; these mock cases
 cannot prove native crash atomicity, cross-device serialization or exported privacy.
 See `docs/architecture/home-share-provisioning.md` for that boundary and live gates.
+
+`PersonalCartUITests/testResumeUnacknowledgedHomeCreationRetainsOriginalHomeAfterRelaunch`
+owns the rendered pending-creation resume control, disabled name editing, retention
+of the only original home/groceries and durable acknowledgment after another relaunch.
+Its DEBUG fixture seeds an unacknowledged command for the existing populated home
+only under the fresh UI-test store and active-home fixture flags. The fixture flag is
+removed before relaunch so the test exercises the journal, not repeated seeding.

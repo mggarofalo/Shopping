@@ -23,6 +23,11 @@ final class HomeCreationJournal: @unchecked Sendable {
 
     init(url: URL) { self.url = url }
 
+    static func location(storeURL: URL, session: ShopperSession) -> URL {
+        storeURL.deletingLastPathComponent().appendingPathComponent(
+            "home-creation-" + ActiveHomeScope.accountNamespace(session) + ".json")
+    }
+
     func pending(session: ShopperSession, storeIdentifier: String) throws -> HomeCreationCommand? {
         Self.lock.lock(); defer { Self.lock.unlock() }
         return try load(session: session, storeIdentifier: storeIdentifier)

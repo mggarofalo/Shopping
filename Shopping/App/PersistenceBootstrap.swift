@@ -322,6 +322,15 @@ final class PersistenceBootstrap: ObservableObject {
                     if activeHomesFixture {
                         bootstrap.personalMode = true
                         bootstrap.preloadedPreviewEnvironment = nil
+                        if processInfo.environment["SHOPPING_UI_TEST_PENDING_HOME_CREATION"] == "1",
+                           let store = environment.persistence.primaryStore {
+                            let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.shopping-homes",
+                                environment: "Development", accountRecordName: "isolated-home-test-account")
+                            let pending = HomeCreationCommand(id: UUID(), session: session, storeIdentifier: store.identifier,
+                                householdID: environment.ids.householdID, listID: environment.ids.listID, name: "Preview household")
+                            try JSONEncoder().encode(pending).write(
+                                to: HomeCreationJournal.location(storeURL: storeURL, session: session), options: .atomic)
+                        }
                     }
                     bootstrap.personalFixture = !activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_PERSONAL_CART"] == "1"
                     bootstrap.personalNoticeFixture = processInfo.environment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] == "1"
@@ -919,8 +928,7 @@ final class PersistenceBootstrap: ObservableObject {
         guard let store = ready.persistence.primaryStore, let url = store.url else {
             throw PersistenceSetupError.missingPrimaryStoreURL
         }
-        return (url.deletingLastPathComponent().appendingPathComponent(
-            "home-creation-" + ActiveHomeScope.accountNamespace(session) + ".json"), store.identifier)
+        return (HomeCreationJournal.location(storeURL: url, session: session), store.identifier)
     }
 
     private func applyHomeSelection(to ready: ReadyState) {
