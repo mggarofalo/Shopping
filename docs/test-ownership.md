@@ -728,3 +728,155 @@ The unchanged final source also passed all six standard acceptance UI workflows
 (`/tmp/shopping-129-leave-ui-acceptance.xcresult` and `.log`), with zero skips.
 The same four negative/non-finite frame runtime warnings remain tracked by
 SHOPPING-131; this run does not claim those warnings are resolved.
+
+
+## Scoped sharing status foundation (SHOPPING-130)
+
+`CloudSyncStatusTests` now owns native event identity, duplicate/out-of-order
+hydration, overlapping same-operation activity, equal-start failure cohorts,
+private/shared failure isolation, and historical unfinished events. An unfinished
+historical event remains an unknown observation, not current busy state. The
+native monitor passes Apple's event UUID and history/live origin. Existing Watch
+presentation and the 200-event/750 ms coalescing test remain separate owners.
+
+`HomeSharingStatusTests` owns pure composition of account, home access,
+invitation/import, store observations, known saved checkout/undo work, owner
+sharing preparation, and account-wide leave status. Unavailable access dominates
+an engine success; one store's success cannot hide another's failure. Known
+pending operations remain visible after an observed upload. No status claims
+other-device delivery or offers force sync.
+
+`HomeSharingWorkSnapshotTests` owns account/home-qualified, read-only private
+operation counts, checkpoint-value exclusion, held work as a subset, and partial
+restore imports with known versus unassigned homes. The read uses existing ledger
+validation in one writer transaction, makes a fixed number of ledger queries,
+and calls no native permission or publication API. Foreground publication still
+needs a matching account, service, local graph, and presentation.
+
+The foundation passed 33 focused tests and all 545 Fast tests, with zero skips or
+xcresult runtime warnings. Evidence: `/tmp/shopping-130-status-foundation-focused`
+and `/tmp/shopping-130-foundation-fast` result bundles/logs, plus
+`/tmp/shopping-130-status-foundation-source.json`. The initial compile failure in
+`/tmp/shopping-130-status-foundation` is preserved: the new work snapshot source
+was registered in the Watch build phase instead of the phone phase; target
+membership was corrected before the successful runs. Two independent reviews
+found no surviving defect. Bootstrap/UI wiring, bounded actions, announcements,
+and a real UI workflow remain required to complete SHOPPING-130.
+
+The same foundation source passed all 55 Watch unit tests with zero skips or
+runtime warnings (`/tmp/shopping-130-foundation-watch.xcresult` and `.log`),
+including the shared CloudSyncStatus tests and existing Watch status behavior.
+
+### Sharing status screen and bounded checks
+
+`HomeSharingStatusCheckTests` owns bounded waiting, cancellation, and one in-flight
+reservation until an uncooperative operation actually drains. A timeout releases
+UI busy state without claiming the underlying native or writer operation stopped.
+`HomeSharingStatusBootstrapTests` owns local-only screen reads, forwarding home
+observations, full account/service/local-graph/presentation fences, same-graph
+presentation renewal, late callbacks, and independent local-check error state.
+Its account-boundary regression deliberately keeps the old presentation mounted
+while the provider changes accounts; old observations must disappear before the
+queued UI transition. Fixtures detach their SQLite stores before deletion and
+wait for held workers to drain before asserting late results were discarded.
+
+`HomeSharingStatusTests` also owns local-check failures remaining independent of
+CloudKit/association success, and announcement deduplication. Event timestamps,
+counts and duplicate observations do not repeatedly interrupt VoiceOver.
+
+`HomeSharingStatusUITests.testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize`
+owns opening the native status screen, its explicit Check status interaction,
+readable saved-work meaning at accessibility XXXL, and Return to home preserving
+existing grocery identities. The initial UI run failed because a generic query
+matched both the native Label image and text; it now selects the unique static
+text rather than taking the first match. The failure is retained in
+`/tmp/shopping-130-status-ui.xcresult`. The existing largest-text empty/recovery
+workflow passed in that same run, with zero runtime warnings or skips.
+
+Before the final discovery-order fix, focused wiring validation passed 37 tests
+and the expanded Fast run passed 559, with no skips or xcresult runtime warnings
+(`/tmp/shopping-130-status-wiring-focused` and `/tmp/shopping-130-status-final-fast`).
+The focused run also had no raw Core Data errors. Review then found overlapping
+home discovery could let an older failure replace a newer success, or an older
+success clear a newer failure. The current request must own both error publication
+and clearing; stale graph reconciliation was already protected independently.
+
+Status remains functional without telemetry. There is no available Phase 15
+lifecycle diagnostic implementation on this milestone, so this change does not
+introduce a Sentry dependency or log account identities, invitation URLs or grocery
+content. Simulator observations do not prove another household member's receipt;
+SHOPPING-30 retains that live two-account/two-phone gate.
+
+The final request-order guard passed all 561 Fast tests. A separate test-evidence
+review found that the first Check status UI assertion could pass on the preceding
+automatic-read result. Appearance now reports its local-read scope, while an
+explicit completed check reports the broader observation check. The workflow
+requires the initial local-read message and then the distinct explicit-check
+result after the tap, alongside an enabled button and no remaining progress.
+The final unchanged candidate passed all 561 Fast tests and that strengthened UI
+workflow, with zero skips or xcresult runtime warnings
+(`/tmp/shopping-130-status-complete-fast` and `-complete-ui`). Source hashes are in
+`/tmp/shopping-130-status-complete-source.json`. Raw Fast Core Data errors remain
+confined to the two intentional invalid-store tests; no missing-path errors were
+observed in the preceding final request-order run.
+
+A passing intermediate UI run captured a blank screenshot immediately after the
+native Dynamic Type audit. It is retained in `-ui-corrected` and is not visual
+proof. Captures before the audit in `-ui-visual` show the actual wrapped, scrollable
+status and saved-work content at accessibility XXXL. The final workflow keeps
+those pre-audit captures and the audit assertion. The extra visual run is not a
+runtime optimization comparison.
+
+Independent functional reviews cleared the final request-order/account guards;
+the test-evidence review checked fixture teardown, late-worker draining, target
+membership and preserved plan selection. No coverage baseline, CI policy, or
+remote-Full attestation requirement changed. The shared event foundation's 55
+Watch unit tests passed before this phone UI wiring; the phone Fast build also
+compiles the Watch target. Real device announcements and live sharing remain
+part of the physical acceptance work.
+
+### Hosted Open/rejoin failure retained
+
+Hosted Xcode 16.4/iOS 18.5 run `36641844287` passed 560 of 561 Fast tests;
+`HomeAdoptionBootstrapTests.testExplicitOpenRejoinsBlockedHomeButResolvedEntryCannotGrantAgain`
+caught `invalidState`. Release SDK Build and the unchanged coverage gate passed,
+but acceptance UI did not run. The raw result remains under
+`/tmp/shopping-130-ci-failure/fast-failure-36641844287-1/FastResults.xcresult`,
+with summaries in `/tmp/shopping-130-ci-artifacts/`. This failed candidate was not integrated.
+
+The source exposes a concrete race after durable rejoin: an ordinary home
+discovery can supersede explicit Open's discovery request while its local read
+is suspended. The existing newest-request fence then rejects Open's selection.
+The hosted failure has no precise throw location. A controlled held-discovery
+regression reproduced both an unexpected ordinary read and the same uncaught
+`invalidState` locally before the repair (`/tmp/shopping-130-open-reservation-red`
+result bundle and log). Removing request-order or account/access checks is not
+a valid repair.
+
+The repair reserves only the final committed discovery/selection phase for the
+captured presentation. Ordinary discovery cannot begin or publish while that
+phase owns the request; native verification and account/access checks remain
+active. Releasing the reservation awaits a fresh ordinary observation on both
+success and failure. That observation owns its own error and cannot replace
+Open's original result. A second Open from the same presentation is rejected
+before competing work; older presentation cleanup cannot remove a replacement.
+
+`HomeAdoptionBootstrapTests` owns the three added interleaving regressions:
+
+- `testOpenSelectionSurvivesRefreshWhileCommittedDiscoveryIsHeld` proves exact
+  selection, resolved invitation, one durable grant, duplicate Open rejection,
+  and a fresh trailing observation.
+- `testEarlierRefreshFailureCannotPublishDuringReservedOpenSelection` proves
+  stale ordinary failure cannot replace the valid selection.
+- `testFailedOpenDiscoveryReleasesReservationAndPreservesOriginalFailure` proves
+  release after failure, separately owned trailing error and idempotent retry.
+
+Sticky gates release and drain their held operations before teardown. All 28 adoption/status-bootstrap tests and all 564
+Fast tests passed, with zero skips or xcresult runtime warnings. Evidence uses
+`/tmp/shopping-130-open-reservation-{focused,fast}`; the source manifest is
+`/tmp/shopping-130-open-reservation-source.json`. The focused log has no Core Data
+errors or unlink diagnostics. Fast still emits the previously tracked
+HomeCreationTests/PersonalCartServiceTests fixture unlink diagnostics; their
+required SHOPPING-131 cleanup and original logs remain intact. The two deliberate
+invalid-store tests also emit their expected Core Data errors. No warning-free
+log or live-sharing claim is made.

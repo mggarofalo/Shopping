@@ -32,6 +32,8 @@ struct PersistenceRootView: View {
                                     HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
                                 }
                                 Button("Check again") { bootstrap.applicationDidEnterForeground() }
+                                NavigationLink("Sharing status") { HomeSharingStatusView() }
+                                    .accessibilityIdentifier("shopping.waiting.sharingStatus")
                                 if let service = ready.personalCartService {
                                     NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
                                 }
@@ -53,7 +55,14 @@ struct PersistenceRootView: View {
                         homeScope: ready.homeScope
                     ))
             case .failed(let error):
-                PersistenceRecoveryView(error: error, retry: bootstrap.retry)
+                NavigationStack {
+                    PersistenceRecoveryView(error: error, retry: bootstrap.retry)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                NavigationLink("Sharing status") { HomeSharingStatusView() }
+                            }
+                        }
+                }
             }
         }
         .safeAreaInset(edge: .top) {

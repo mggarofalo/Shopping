@@ -271,7 +271,10 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
                                      accountProvider: ShopperSessionProvider? = nil,
                                      detectedShare: HomeShareIdentity = HomeShareIdentity(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
                                      verifyMembership: @escaping @Sendable (HomeNativeAccessIdentity) async throws -> Void = { _ in },
-                                     observeInvitationWorker: (HomeInvitationWorker) -> Void = { _ in }) async throws -> PersistenceBootstrap {
+                                     observeInvitationWorker: (HomeInvitationWorker) -> Void = { _ in },
+                                     discoverHomes: @escaping @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery = { discovery in
+                                         try await Task.detached(priority: .utility) { try discovery.discover() }.value
+                                     }) async throws -> PersistenceBootstrap {
         let inbox = try HomeInvitationInbox(url: fixture.inboxURL,
             containerIdentifier: "iCloud.test.imported-choice", environment: "Development")
         let worker = HomeInvitationWorker(inbox: inbox)
@@ -286,6 +289,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
                 persistence.container.persistentStoreCoordinator.persistentStores.first { $0.url == participantURL }
             }, invitationShareIdentity: { _, _, _ in detectedShare },
             makeHomeRejoinVerifier: { _ in LocalRejoinVerifier(refreshMembership: verifyMembership) },
+            discoverHomes: discoverHomes,
             activateAccountStore: { source, _, _, importing in
                 XCTAssertNil(source)
                 XCTAssertFalse(importing)
@@ -355,6 +359,100 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             XCTFail("A resolved entry cannot mint another grant")
         } catch { }
         XCTAssertEqual(try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited).currentGrants.count, 1)
+    }
+
+    func testOpenSelectionSurvivesRefreshWhileCommittedDiscoveryIsHeld() async throws {
+        let fixture = try await importedInvitation()
+        let probe = OpenDiscoveryProbe()
+        let started = expectation(description: "Open discovery held after grant")
+        let bootstrap = try await openImportedFixture(fixture, discoverHomes: { service in
+            try await probe.discover(service, started: { started.fulfill() })
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let open = Task {
+            try await OpenDiscoveryRequest.$mode.withValue(.open) {
+                try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+            }
+        }
+        await fulfillment(of: [started], timeout: 5)
+        let readsBefore = await probe.ordinaryReads
+        do { try await bootstrap.refreshHomes() } catch { XCTFail("Suppressed refresh failed: \(error)") }
+        let readsAfter = await probe.ordinaryReads
+        XCTAssertEqual(readsAfter, readsBefore, "Ordinary refresh must not supersede the committed Open selection")
+        do {
+            try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+            XCTFail("A second Open must not compete with the reserved selection")
+        } catch {
+            switch error {
+            case HomeInvitationInbox.Error.busy: break
+            default: XCTFail("Unexpected duplicate Open error: \(error)")
+            }
+        }
+        await probe.release()
+        try await open.value
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertTrue(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+        XCTAssertEqual(try access(cart, graph: fixture.invited).currentGrants.count, 1)
+        let openReads = await probe.openReads
+        XCTAssertEqual(openReads, 2, "Release must await a trailing ordinary observation")
+    }
+
+    func testEarlierRefreshFailureCannotPublishDuringReservedOpenSelection() async throws {
+        let fixture = try await importedInvitation()
+        let probe = OpenDiscoveryProbe()
+        let openStarted = expectation(description: "Open discovery held")
+        let oldStarted = expectation(description: "Earlier ordinary discovery held")
+        let bootstrap = try await openImportedFixture(fixture, discoverHomes: { service in
+            try await probe.discover(service, started: { openStarted.fulfill() }, oldStarted: { oldStarted.fulfill() })
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let old = Task {
+            try await OpenDiscoveryRequest.$mode.withValue(.oldFailure) { try await bootstrap.refreshHomes() }
+        }
+        await fulfillment(of: [oldStarted], timeout: 5)
+        let open = Task {
+            try await OpenDiscoveryRequest.$mode.withValue(.open) {
+                try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+            }
+        }
+        await fulfillment(of: [openStarted], timeout: 5)
+        await probe.releaseOld()
+        do { try await old.value } catch { XCTFail("Superseded failure escaped: \(error)") }
+        XCTAssertNil(bootstrap.homeDiscoveryError)
+        await probe.release()
+        try await open.value
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertTrue(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+        XCTAssertEqual(try access(cart, graph: fixture.invited).currentGrants.count, 1)
+    }
+
+    func testFailedOpenDiscoveryReleasesReservationAndPreservesOriginalFailure() async throws {
+        let fixture = try await importedInvitation()
+        let probe = OpenDiscoveryProbe(failOpen: true, failTrailing: true)
+        let started = expectation(description: "Failing Open discovery held")
+        let bootstrap = try await openImportedFixture(fixture, discoverHomes: { service in
+            try await probe.discover(service, started: { started.fulfill() })
+        })
+        let cart = try await blockedInvitedHome(fixture, bootstrap: bootstrap)
+        let open = Task {
+            try await OpenDiscoveryRequest.$mode.withValue(.open) {
+                try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+            }
+        }
+        await fulfillment(of: [started], timeout: 5)
+        do { try await bootstrap.refreshHomes() } catch { XCTFail("Suppressed refresh failed: \(error)") }
+        await probe.release()
+        do { try await open.value; XCTFail("Discovery failure must remain the Open result") }
+        catch { XCTAssertEqual(error as? OpenDiscoveryProbe.Failure, .expected) }
+        let openReads = await probe.openReads
+        XCTAssertEqual(openReads, 2, "Failure must release and replay the suppressed ordinary refresh")
+        XCTAssertEqual(bootstrap.homeDiscoveryError as? OpenDiscoveryProbe.Failure, .trailing)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.original)
+        XCTAssertFalse(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+        XCTAssertEqual(try access(cart, graph: fixture.invited).currentGrants.count, 1)
+        try await bootstrap.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertEqual(try access(cart, graph: fixture.invited).currentGrants.count, 1, "Retry uses the durable same-entry grant")
     }
 
     func testNotNowLeavesBlockedMembershipQuarantinedAndDoesNotVerifyOrGrant() async throws {
@@ -646,4 +744,45 @@ private actor RejoinVerificationProbe {
         await withCheckedContinuation { continuation = $0; started() }
     }
     func release() { released = true; continuation?.resume(); continuation = nil }
+}
+
+private enum OpenDiscoveryRequest {
+    enum Mode: Sendable { case normal, open, oldFailure }
+    @TaskLocal static var mode: Mode = .normal
+}
+
+private actor OpenDiscoveryProbe {
+    enum Failure: Error { case expected, trailing }
+    private let failOpen: Bool
+    private let failTrailing: Bool
+    private(set) var openReads = 0
+    private(set) var ordinaryReads = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var oldContinuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    private var oldReleased = false
+    init(failOpen: Bool = false, failTrailing: Bool = false) {
+        self.failOpen = failOpen
+        self.failTrailing = failTrailing
+    }
+    func discover(_ service: HomeDiscoveryService, started: @Sendable () -> Void,
+                  oldStarted: @Sendable () -> Void = {}) async throws -> HomeDiscovery {
+        switch OpenDiscoveryRequest.mode {
+        case .open:
+            openReads += 1
+            if openReads == 1 {
+                if !released { await withCheckedContinuation { continuation = $0; started() } }
+                else { started() }
+                if failOpen { throw Failure.expected }
+            } else if failTrailing { throw Failure.trailing }
+        case .oldFailure:
+            if !oldReleased { await withCheckedContinuation { oldContinuation = $0; oldStarted() } }
+            else { oldStarted() }
+            throw Failure.expected
+        case .normal: ordinaryReads += 1
+        }
+        return try await Task.detached(priority: .utility) { try service.discover() }.value
+    }
+    func release() { released = true; continuation?.resume(); continuation = nil }
+    func releaseOld() { oldReleased = true; oldContinuation?.resume(); oldContinuation = nil }
 }

@@ -35,7 +35,8 @@ struct HomeInvitationsView: View {
             if let problem = invitations.problem {
                 Section {
                     Text(problem)
-                    Button("Check again") { bootstrap.applicationDidEnterForeground(); invitations.checkAgain() }
+                    Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
+                        .disabled(bootstrap.isCheckingSharingStatus)
                 }
             }
             ForEach(invitations.entries) { entry in
@@ -45,12 +46,14 @@ struct HomeInvitationsView: View {
                         Label("Invitation waiting", systemImage: "envelope")
                         Text("Joining will start when your iCloud account and saved groceries are ready.")
                     case .joining:
-                        ProgressView("Joining home…")
+                        Label("Joining home", systemImage: "person.crop.circle.badge.plus")
+                        Text("The invitation is being checked. You can leave this screen and return later.")
                     case .loading:
-                        ProgressView("Loading groceries…")
+                        Label("Loading groceries", systemImage: "tray.and.arrow.down")
                         if let problem = invitations.importProblems[entry.id] { Text(problem) }
-                        Text("The invitation was accepted. Your current home stays selected while the shared home loads.")
-                        Button("Check again") { bootstrap.applicationDidEnterForeground(); invitations.checkAgain() }
+                        Text("The invitation was accepted. Your current home stays selected while the shared home loads. iCloud decides when groceries arrive; you can return later.")
+                        Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
+                            .disabled(bootstrap.isCheckingSharingStatus)
                     case .ready(let graph):
                         if let home = bootstrap.homeCoordinator.homes.first(where: { $0.graph == graph }) {
                             Label(home.name, systemImage: "house")
@@ -69,7 +72,8 @@ struct HomeInvitationsView: View {
                             .accessibilityIdentifier("shopping.invitation.notNow")
                         } else {
                             Text("Your invited home is ready. Refresh your homes to open it.")
-                            Button("Check again") { perform { try await bootstrap.refreshHomes() } }
+                            Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
+                                .disabled(bootstrap.isCheckingSharingStatus)
                         }
                     case .failed(let failure):
                         Text(failureMessage(failure))

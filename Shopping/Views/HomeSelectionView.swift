@@ -77,6 +77,8 @@ struct HomeSelectionView: View {
             if coordinator.pendingInvitation {
                 Text("An invitation is waiting. Your current home stays selected until you choose to join.")
             }
+            NavigationLink("Sharing status") { HomeSharingStatusView() }
+                .accessibilityIdentifier("shopping.homes.sharingStatus")
             Section {
                 if let pendingCreation {
                     Text("Finish creating \(pendingCreation.name). Retrying keeps the same home.")

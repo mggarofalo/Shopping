@@ -17,7 +17,7 @@ struct PersonalCartSetupView: View {
             } footer: {
                 Text("Copy only from the first device. On your other devices, use the existing iCloud groceries. The original local data is retained.")
             }
-            if let error = bootstrap.shareAssociationError {
+            if let error = bootstrap.homeSetupError {
                 Text(error.localizedDescription)
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("shopping.home.setup.error")
