@@ -17,6 +17,9 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         for index in 0..<homeCount {
             _ = try NeedService(persistence: persistence).createHousehold(name: "Home \(index + 1)")
         }
+        for store in persistence.container.persistentStoreCoordinator.persistentStores {
+            try persistence.container.persistentStoreCoordinator.remove(store)
+        }
         var invitations: HomeInvitationController?
         if pendingInvitation {
             let inbox = try HomeInvitationInbox(url: root.appendingPathComponent("invitations.json"),
@@ -37,6 +40,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             accountStoreDirectory: { root },
             activateAccountStore: { _, _, _, _ in .local(storeURL: accountURL) }
         )
+        retireBeforeCleanup(bootstrap)
         bootstrap.start()
         try await waitForReady(bootstrap)
         let choice = try await bootstrap.prepareInvitationSetup()
@@ -44,6 +48,16 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         await bootstrap.runLoadingTransition()
         try await waitForReady(bootstrap)
         return bootstrap
+    }
+
+    private func retireBeforeCleanup(_ bootstrap: PersistenceBootstrap) {
+        addTeardownBlock { @MainActor in
+            if case .ready(let ready) = bootstrap.state {
+                bootstrap.presentationDidDisappear(ready.presentation.id)
+            }
+            bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+            await bootstrap.runLoadingTransition()
+        }
     }
 
     private func waitForReady(_ bootstrap: PersistenceBootstrap) async throws {
@@ -73,6 +87,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             metadataArchive: Data([1]))
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: root.appendingPathComponent("Local.sqlite")) },
             invitations: HomeInvitationController(inbox: inbox))
+        retireBeforeCleanup(bootstrap)
         bootstrap.start()
         try await waitForReady(bootstrap)
         XCTAssertNil(try ready(bootstrap).householdID)
