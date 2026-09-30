@@ -49,15 +49,24 @@ final class HomeSharingStatusUITests: XCTestCase {
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in check.isEnabled }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 12), .completed)
         let result = app.staticTexts["shopping.sharing.checkResult"]
+        // At XXXL the result follows two tall action rows and may not yet be
+        // materialized by List. Read it, then bring the single action back onscreen.
+        reveal(result, in: app, visibility: .textBeginning)
         XCTAssertEqual(result.label,
             "Saved work was checked on this device. iCloud activity is shown from existing observations.")
+        reveal(check, in: app, towardTop: true)
         check.tap()
+        reveal(result, in: app, visibility: .textBeginning)
         let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            check.isEnabled && result.exists
+            result.exists
                 && result.label == "Available observations were checked. This does not confirm delivery to another device."
                 && !app.descendants(matching: .any).matching(identifier: "shopping.sharing.checking").element.exists
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 15), .completed)
+        XCTAssertEqual(result.label,
+            "Available observations were checked. This does not confirm delivery to another device.")
+        reveal(check, in: app, towardTop: true)
+        XCTAssertTrue(check.isEnabled)
         let savedWork = app.staticTexts["shopping.sharing.section.savedWork"]
         reveal(savedWork, in: app, visibility: .textBeginning)
         XCTAssertTrue(savedWork.label.contains("Completed saves are stored on this device."))

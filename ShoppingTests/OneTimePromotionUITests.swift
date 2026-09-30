@@ -72,6 +72,16 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
+        // Calibration runs only after the original preservation assertions above.
+        app.terminate()
+        runNativeAuditCalibration()
+        // launchApp removed the seed flag. Reopen the original isolated store.
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
         // Temporary diagnostic control: all promotion assertions finish before
         // auditing another screen under the same app root and runtime.
         screenshot("Catalog before Dynamic Type diagnostic", app: app)
@@ -129,6 +139,84 @@ final class OneTimePromotionUITests: XCTestCase {
                     "shopping.grocery.row.", "Granola"
                 )
             ).count, 2)
+    }
+
+    private func runNativeAuditCalibration() {
+        let previousContinueAfterFailure = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = previousContinueAfterFailure }
+
+        func audit(_ app: XCUIApplication, phase: String) {
+            screenshot("Native audit control before \(phase)", app: app)
+            do {
+                try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
+                    let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
+                    let attachment = XCTAttachment(string: details)
+                    attachment.name = "Native audit control \(phase) details"
+                    attachment.lifetime = .keepAlways
+                    self.add(attachment)
+                    return false // All findings remain unhandled failures; no waiver/filter.
+                }
+            } catch {
+                // Keep the error as a test failure and continue to the other calibration phases.
+                XCTFail("Native audit control \(phase) failed: \(error)")
+            }
+            screenshot("Native audit control after \(phase)", app: app)
+        }
+
+        for layout in ["stack", "list"] {
+            let app = XCUIApplication()
+            let nonce = UUID().uuidString
+            app.launchEnvironment["SHOPPING_UI_TEST_NATIVE_AUDIT_CONTROL"] = layout
+            app.launchEnvironment["SHOPPING_UI_TEST_NATIVE_AUDIT_NONCE"] = nonce
+            // An isolated marker only: the calibration entry point does not open a store.
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NativeAudit-\(nonce).sqlite").path
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            let headline = app.staticTexts["native.audit.\(layout).headline"]
+            guard headline.existsOrAppears(timeout: 5), headline.isHittable else {
+                XCTFail("Native \(layout) control did not present its headline")
+                app.terminate()
+                continue
+            }
+            XCTAssertEqual(headline.label, "Headline")
+            let body = app.staticTexts["native.audit.\(layout).body"]
+            let caption = app.staticTexts["native.audit.\(layout).caption"]
+            guard body.existsOrAppears(timeout: 3), body.isHittable,
+                  caption.existsOrAppears(timeout: 3), caption.isHittable else {
+                XCTFail("Native \(layout) control did not show all three short semantic labels")
+                screenshot("Native \(layout) top setup failed", app: app)
+                app.terminate()
+                continue
+            }
+            XCTAssertEqual(body.label, "Body")
+            XCTAssertEqual(caption.label, "Caption")
+            audit(app, phase: "\(layout) top")
+
+            if layout == "list" {
+                let deep = app.staticTexts["native.audit.list.deep"]
+                // Fixed unique target, bounded scroll; never conceal ambiguity with firstMatch.
+                // The paragraph must be wholly inside the central screen, clear of
+                // the status bar and home indicator. No production scroll helper.
+                let viewport = app.frame.insetBy(dx: 0, dy: 80)
+                func targetVisible() -> Bool {
+                    guard deep.exists, deep.isHittable else { return false }
+                    let frame = deep.frame
+                    return frame.width > 0 && frame.height > 0
+                        && frame.minY >= viewport.minY + 8 && frame.maxY <= viewport.maxY - 8
+                }
+                for _ in 0..<20 where !targetVisible() { app.swipeUp() }
+                if targetVisible() {
+                    XCTAssertEqual(deep.label, "Saved work remains on this device.")
+                    audit(app, phase: "list deep")
+                } else {
+                    XCTFail("Native List deep paragraph was not fully visible within the scroll bound")
+                    screenshot("Native List deep setup failed", app: app)
+                }
+            }
+            app.terminate()
+        }
     }
 
     private func launchApp(fixture: String? = nil) -> XCUIApplication {
