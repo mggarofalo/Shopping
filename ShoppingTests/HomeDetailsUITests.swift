@@ -259,6 +259,24 @@ final class HomeDetailsUITests: XCTestCase {
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
         let app = launch(role: "restricted", largestText: true)
         openHomeDetails(app)
+        // Temporary viewport control; preserve the original member audit below.
+        let homeName = app.staticTexts["shopping.home.name"]
+        XCTAssertTrue(homeName.existsOrAppears(timeout: 5))
+        XCTAssertTrue(homeName.isHittable)
+        XCTAssertGreaterThanOrEqual(homeName.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        XCTAssertLessThanOrEqual(homeName.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        let top = XCTAttachment(screenshot: app.screenshot())
+        top.name = "Home details top before Dynamic Type control"
+        top.lifetime = .keepAlways
+        add(top)
+        try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
+            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
+            let attachment = XCTAttachment(string: details)
+            attachment.name = "Home details top Dynamic Type control"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            return false
+        }
         let rename = app.buttons["shopping.home.rename"]
         reveal(rename, in: app)
         XCTAssertFalse(rename.isEnabled)

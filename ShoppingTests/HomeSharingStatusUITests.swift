@@ -34,6 +34,16 @@ final class HomeSharingStatusUITests: XCTestCase {
         overview.name = "Sharing status overview at accessibility XXXL"
         overview.lifetime = .keepAlways
         add(overview)
+        // Temporary viewport control. Record every issue and then continue to
+        // the unchanged workflow and its original saved-work audits.
+        reveal(summary, in: app, towardTop: true)
+        capture("Sharing status top before Dynamic Type control", app: app)
+        do {
+            let previous = continueAfterFailure
+            continueAfterFailure = true
+            defer { continueAfterFailure = previous }
+            try auditDynamicType(in: app, phase: "Sharing status top control")
+        }
         let check = app.buttons["shopping.sharing.check"]
         reveal(check, in: app)
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in check.isEnabled }, object: nil)
