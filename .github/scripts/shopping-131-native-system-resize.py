@@ -131,13 +131,22 @@ def main():
             if now >= next_heartbeat:
                 log(event="child-running", completed=sorted(completed))
                 next_heartbeat = now + 30
-            if channel is None and now - last_container_lookup > 1:
-                last_container_lookup = now
-                try:
-                    container = sim(args.simulator, "get_app_container", runner_id, "data")
-                    channel = Path(container) / "tmp" / ("shopping-native-system-resize-" + nonce)
-                except subprocess.CalledProcessError:
-                    pass  # Runner is not installed until test-without-building starts.
+            if channel is None and not child_finished:
+                if now - begin >= 8 * 60:
+                    raise TimeoutError("Runner container was not ready within the 8-minute startup bound")
+                if now - last_container_lookup > 1:
+                    last_container_lookup = now
+                    try:
+                        container = sim(args.simulator, "get_app_container", runner_id, "data")
+                        channel = Path(container) / "tmp" / ("shopping-native-system-resize-" + nonce)
+                        log(event="runner-container-ready")
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                        # Installation and CoreSimulator readiness precede the test runner.
+                        # Retry only this read-only discovery, while the owned child lives.
+                        log(event="runner-container-not-ready",
+                            reason="timeout" if isinstance(error, subprocess.TimeoutExpired) else "unavailable",
+                            error=str(error))
+                    child_finished = child.poll() is not None
             if channel is not None and channel.exists():
                 for path in sorted(channel.glob("*.request.json")):
                     if child_finished:
