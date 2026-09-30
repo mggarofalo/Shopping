@@ -69,8 +69,9 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertEqual(costco.value as? String, "Selected")
         app.buttons["shopping.grocery.cancel"].tap()
         app.tabBars.buttons["Catalog"].tap()
+        XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
-        XCTAssertTrue(app.staticTexts["Granola"].exists)
     }
 
     func testCollisionAndActiveConflictRequireExplicitDistinctChoice() {

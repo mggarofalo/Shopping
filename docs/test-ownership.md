@@ -1022,3 +1022,75 @@ large-text and shared-dimension appearance workflows ran. Their source hashes
 still matched `/tmp/shopping-131-final-layout-source.json` after execution.
 Independent review found no remaining issue in the correction. This focused pass
 does not replace the new clean-commit full-suite attestation or pinned CI.
+
+### Pinned-runtime failures and diagnosis (SHOPPING-131)
+
+Clean candidate `13527ff7285c296e233151f2436a5946abd0e1b5` passed all 662
+methods locally (569 Fast + 93 UI, no skips). Regular pinned CI passed Fast,
+all six acceptance workflows, the unchanged coverage gate and Release SDK Build.
+That CI checkout was merge commit `b32aaa7e362b79fc7455c85d5e9601622b24752d`;
+its tree exactly equals the candidate tree. Local Full retained 28 frame warnings
+and one appearance-transition message. Subsequent independent stack inspection
+matched all 85 archived frame events in both local Full runs to the same native
+`InputAccessoryBar` signature and per-test distribution. The underlying trigger
+remains unresolved; these passes do not establish warning-free operation.
+
+[Remote Full 36656430900](https://github.com/mggarofalo/Shopping/actions/runs/36656430900)
+tested the exact clean candidate on Xcode 16.4 / iOS 18.5 (22F77). It executed the
+same 662 methods once each: 659 passed, three failed, none skipped. The complete
+failure bundle and logs remain at `/tmp/shopping-131-remote-failure-36656430900`;
+reports are at `/tmp/shopping-131-remote-36656430900`. This failed run is not
+waived by the local or regular-CI passes.
+
+The link-existing promotion workflow passed its occurrence-identity, temporary
+fields and saved purchase-rule checks, then queried Granola immediately after
+switching to Catalog, before its asynchronous projection was ready. It now waits
+boundedly for Catalog and Granola before asserting the old one-time name absent.
+The status workflow captured an empty grocery projection immediately after its
+navigation title appeared; the final snapshot contained two grocery identifiers.
+It now waits for a rendered grocery before capturing and comparing identities.
+Both workflows retain their original data assertions.
+
+The remote result also contains two Home details Dynamic Type audit issues and a
+separate Sharing status audit issue. The summary only lists the first failure
+per test. Default attachments do not identify the offending elements, so both
+audit handlers now retain element descriptions and return `false`, preserving
+audit failures. Neither fonts nor audit scope have been changed without evidence.
+
+The first local three-method correction run passed Home details and promotion,
+but failed status navigation (`/tmp/shopping-131-remote-correction-focused.xcresult`
+and `.log`, two passed, one failed, no skips). The status helper exhausted twelve
+full-screen swipes yet allowed a tap based only on existence and hittability.
+Its retained hierarchy placed the row at y=-45.7...166 with the navigation bar
+at y=62...116; the synthesized tap at y=60.17 was outside the content viewport.
+The replacement uses bounded, measured drags within the visible list and fails
+unless the whole target is visible. The workflow stops at its first failure so
+later navigation assertions cannot obscure the original cause. This failed
+measurement remains separate from validation of the replacement.
+
+The first measured-scroll check reached the status screen and completed the
+explicit check, then failed the full-visibility requirement for the saved-work
+text (`/tmp/shopping-131-status-scroll.xcresult` and `.log`). Its diagnostic bundle
+is retained; the scroll correction is not yet validated. Readable long text and
+fully visible actionable controls need distinct, evidence-backed checks.
+
+The retained screenshot shows the saved-work paragraph reached but continuing
+below the tab bar at XXXL. No exact text frame was retained in the exported
+accessibility snapshots. The failed test itself took 59.37 seconds; Xcode's
+separate simulator-diagnostic collection timed out after 600 seconds, making
+the command take 668.35 seconds. This is not measured application latency.
+The subsequent correction captures the beginning, overlapping scroll-through
+views and ending of the long paragraph, preserves its complete-copy assertions,
+and runs the unfiltered Dynamic Type audit at both endpoints. Buttons still
+require full visibility before tapping. Half-viewport drags remain bounded.
+
+The final status-only selection passed in 62.99 seconds with no failures, skips
+or structured runtime warnings (`/tmp/shopping-131-status-text-edges.xcresult`,
+`-summary.json`, `-timing.json` and `.log`). Captured test-source hashes still
+matched after execution. Beginning, intermediate and ending screenshots show the
+complete paragraph can be read by scrolling; both unfiltered Dynamic Type audits
+and return-to-groceries identity comparison passed. The preceding three-method
+run already passed the unchanged Home details and promotion corrections. These
+local results do not resolve the pinned iOS 18.5 audit failures. The proposed
+temporary three-workflow CI diagnosis remains separately subject to approval;
+no workflow or release-gate policy has changed in this correction.

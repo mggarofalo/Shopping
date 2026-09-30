@@ -268,7 +268,14 @@ final class HomeDetailsUITests: XCTestCase {
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         reveal(longName, in: app)
         XCTAssertGreaterThan(longName.frame.height, 44, "The full member name should wrap at accessibility text sizes.")
-        try app.performAccessibilityAudit(for: [.dynamicType])
+        try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
+            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
+            let attachment = XCTAttachment(string: details)
+            attachment.name = "Home members Dynamic Type audit details"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            return false
+        }
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Home members at accessibility XXXL"
         screenshot.lifetime = .keepAlways
