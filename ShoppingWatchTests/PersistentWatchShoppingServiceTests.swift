@@ -2,6 +2,26 @@ import CoreData
 import XCTest
 @testable import ShoppingWatch
 
+private actor HeldWatchAccessRefresh {
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var released = false
+    var isWaiting: Bool { continuation != nil }
+
+    func wait(started: @Sendable () -> Void) async -> String? {
+        guard !released else { return nil }
+        return await withCheckedContinuation {
+            continuation = $0
+            started()
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume(returning: nil)
+        continuation = nil
+    }
+}
+
 @MainActor
 final class PersistentWatchShoppingServiceTests: XCTestCase {
     struct Provider: ShopperSessionProviding {
@@ -25,6 +45,13 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         let persistence = try PersistenceController(storeURL: directory.appendingPathComponent("store.sqlite"))
+        addTeardownBlock {
+            persistence.writer.performAndWait { persistence.writer.reset() }
+            persistence.container.viewContext.performAndWait { persistence.container.viewContext.reset() }
+            for store in persistence.container.persistentStoreCoordinator.persistentStores {
+                try persistence.container.persistentStoreCoordinator.remove(store)
+            }
+        }
         let provider = Provider(session: try ShopperSession.authenticated(containerIdentifier: "iCloud.shopping.watch-unit",
             environment: "Development", accountRecordName: "alice"))
         let householdID = UUID(), listID = UUID(), storeID = UUID(), otherStoreID = UUID(), needID = UUID()
@@ -50,6 +77,68 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
     private func adapter(_ f: Fixture, writable: (@MainActor (UUID) -> Bool)? = nil) -> PersistentWatchShoppingService {
         PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
+    }
+
+    func testVerifiedBackgroundReplayDoesNotBlockLocalLoadsOrPrivateCleanup() async throws {
+        let f = try fixture()
+        let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
+            cartService: f.cart, loadRecoveryPolicy: .verifiedBackgroundReplay)
+        let initial = try await service.load(storeID: f.storeID)
+        let grocery = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        _ = try await service.execute(.add(token: grocery.commandToken, quantity: 2))
+        let held = HeldWatchAccessRefresh()
+        let started = expectation(description: "Native verification remains in flight")
+        let refresh = Task {
+            await f.persistence.homeAccessRefreshQueue.run(recheckIfRunning: false) {
+                await held.wait { started.fulfill() }
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let localCompleted = expectation(description: "Cached reads and private commands complete before verification")
+        let localWork = Task {
+            do {
+                let loaded = try await service.load(storeID: f.storeID)
+                XCTAssertEqual(loaded.cartCount, 1)
+                let switched = try await service.load(storeID: f.otherStoreID)
+                XCTAssertEqual(switched.selectedStoreID, f.otherStoreID)
+                let saved = try XCTUnwrap(switched.cartSections.first?.items.first)
+                let changed = try await service.execute(.setQuantity(token: saved.commandToken, quantity: 4))
+                XCTAssertEqual(changed.cartSections.first?.items.first?.quantity, 4)
+                let updated = try XCTUnwrap(changed.cartSections.first?.items.first)
+                let removed = try await service.execute(.remove(token: updated.commandToken))
+                XCTAssertEqual(removed.cartCount, 0)
+            } catch { XCTFail("Local work failed while verification was held: \(error)") }
+            localCompleted.fulfill()
+        }
+        await fulfillment(of: [localCompleted], timeout: 5)
+        let stillWaiting = await held.isWaiting
+        XCTAssertTrue(stillWaiting, "Local work must finish before the native response is released")
+        // Release even when the bounded expectation fails, then drain both tasks
+        // before fixture teardown. A regression remains a test failure.
+        await held.release()
+        _ = await refresh.value
+        await localWork.value
+    }
+
+    func testImportedReadOnlyLedgerInvalidatesCheckoutButRetainsPrivateQuantityAndRemoval() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        let grocery = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        _ = try await service.execute(.add(token: grocery.commandToken, quantity: 2))
+        let captured = try await service.captureCheckout(storeID: f.storeID)
+        try f.cart.recordReadOnlyHome(householdID: f.householdID, listID: f.listID,
+            share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"), operationID: UUID())
+        let restricted = try await service.load(storeID: f.storeID)
+        XCTAssertNotEqual(restricted.authorityID, initial.authorityID)
+        XCTAssertFalse(restricted.canCheckout)
+        do { _ = try await service.checkout(token: captured.token); XCTFail("An old permission capture cannot commit") }
+        catch { XCTAssertEqual(error as? PersonalCartError, .scopeChanged) }
+        let saved = try XCTUnwrap(restricted.cartSections.first?.items.first)
+        let changed = try await service.execute(.setQuantity(token: saved.commandToken, quantity: 4))
+        XCTAssertEqual(changed.cartSections.first?.items.first?.quantity, 4)
+        let updated = try XCTUnwrap(changed.cartSections.first?.items.first)
+        let removed = try await service.execute(.remove(token: updated.commandToken))
+        XCTAssertEqual(removed.cartCount, 0)
     }
 
     func testImportedLocalGroceryAppearsOnNextWatchRefresh() async throws {

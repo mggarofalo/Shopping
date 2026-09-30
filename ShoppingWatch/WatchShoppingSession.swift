@@ -41,6 +41,8 @@ final class WatchShoppingSession {
         }
     }
 
+    func refreshHomeAccess() { service.refreshHomeAccess() }
+
     func reload(storeID: UUID? = nil) async {
         guard !isBusy else {
             reloadRequested = true

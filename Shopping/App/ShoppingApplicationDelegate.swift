@@ -1,12 +1,20 @@
 import UIKit
 
 final class ShoppingApplicationDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
+        configuration.delegateClass = ShoppingSceneDelegate.self
+        return configuration
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
+        UITestRuntimeMetadata.install(environment: environment)
         guard environment["SHOPPING_UI_TEST_STORE_PATH"] == nil,
               environment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] == nil,
               environment["XCTestConfigurationFilePath"] == nil else { return true }

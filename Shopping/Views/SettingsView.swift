@@ -2,6 +2,8 @@ import CoreData
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var bootstrap: PersistenceBootstrap
+    @Environment(\.persistenceSelection) private var selection
     @Environment(\.sharingStatusPresentation) private var sharingStatus
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -25,17 +27,19 @@ struct SettingsView: View {
                     }
                 }
                 Section("Household") {
-                    NavigationLink {
-                        List {
-                            Section("Status") {
-                                Label(sharingStatus.title, systemImage: sharingStatus.symbol)
-                                Text(sharingStatus.details)
-                                    .foregroundStyle(.secondary)
-                            }
+                    if let scope = selection.homeScope {
+                        HomeSummaryLink(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator,
+                            scope: scope, status: sharingStatus.title)
+                    }
+                    if selection.homeScope != nil || bootstrap.isShowingRetainedLocalHome || bootstrap.retainedLocalHomeName != nil {
+                        NavigationLink("Homes") {
+                            HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
                         }
-                        .navigationTitle("Sync status")
+                    }
+                    NavigationLink {
+                        HomeSharingStatusView()
                     } label: {
-                        LabeledContent("Sync status") {
+                        LabeledContent("Sharing status") {
                             Image(systemName: sharingStatus.symbol)
                                 .accessibilityLabel(sharingStatus.title)
                         }
@@ -71,6 +75,26 @@ struct SettingsView: View {
         .accessibilityIdentifier("shopping.appearance")
     }
 
+}
+
+private struct HomeSummaryLink: View {
+    @ObservedObject var bootstrap: PersistenceBootstrap
+    @ObservedObject var coordinator: ActiveHomeCoordinator
+    let scope: ActiveHomeScope
+    let status: String
+    private var name: String { coordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home" }
+
+    var body: some View {
+        NavigationLink {
+            HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
+        } label: {
+            VStack(alignment: .leading) {
+                Text(name)
+                Text("Home details · \(status)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("shopping.settings.homeDetails")
+    }
 }
 
 #Preview("Store settings · archived") { ShoppingPreviewHost(.archivedStore) { SettingsView() } }

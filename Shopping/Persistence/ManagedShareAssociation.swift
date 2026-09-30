@@ -37,9 +37,16 @@ final class FileShareAssociationJournal: ShareAssociationJournal {
     init(url: URL) { self.url = url }
 
     func stagePrivateInserts(_ objects: Set<NSManagedObject>, controller: PersistenceController) throws {
+        try stagePrivateInserts(objects, role: controller.role(of:))
+    }
+
+    /// Store roles can be supplied independently of CloudKit networking when
+    /// validating routing; production always uses the controller's bindings.
+    func stagePrivateInserts(_ objects: Set<NSManagedObject>,
+                             role: (NSPersistentStore) -> PersistenceStoreRole?) throws {
         let grouped = Dictionary(grouping: objects.compactMap { object -> (URL, URL)? in
             guard let store = object.objectID.persistentStore,
-                  controller.role(of: store) == .ownerPrivate,
+                  role(store) == .ownerPrivate,
                   let household = ShareAssociationScope.household(for: object) else { return nil }
             return (household.objectID.uriRepresentation(), object.objectID.uriRepresentation())
         }, by: { $0.0 })

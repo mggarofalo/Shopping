@@ -52,6 +52,7 @@ struct StoreManagementView: View {
     @Environment(\.needService) private var service
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.homeEditorDraftStore) private var draftStore
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores:
         FetchedResults<Store>
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists:
@@ -164,7 +165,8 @@ struct StoreManagementView: View {
                     && (session.store.map(householdStores.contains) ?? true),
                 busy: isSaving,
                 onSave: { save(session) },
-                onCancel: { editor = nil }
+                onCancel: { editor = nil },
+                draftIdentity: "store." + (session.store?.id.uuidString ?? "new")
             )
         }
         .alert("Store archived", isPresented: Binding(
@@ -354,6 +356,8 @@ struct StoreManagementView: View {
     private func save(_ session: StoreEditorSession) {
         guard !isSaving, StoreManagementScope.permits(session.scope, canonicalList: canonicalList),
               let service else { return }
+        let draftLease = draftStore?.currentLease(scope: selection.homeScope,
+            editor: "store." + (session.store?.id.uuidString ?? "new"))
         isSaving = true
         let name = editorName, storeID = session.store?.id
         let householdID = session.scope.householdID, listID = session.scope.listID
@@ -369,6 +373,7 @@ struct StoreManagementView: View {
                             householdID: householdID, listID: listID)
                     }
                 }.value
+                if let draftLease { draftStore?.finish(draftLease) }
                 guard selection.householdID == householdID, selection.listID == listID else { return }
                 hapticFeedback.play(.success)
                 editor = nil

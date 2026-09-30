@@ -5,15 +5,28 @@ final class PersonalCartService: @unchecked Sendable {
     let persistence: PersistenceController
     let sessionProvider: any ShopperSessionProviding
     let initialAccountBinding: String?
+    private let commandAuthority: UICommandAuthority?
     var failurePoint: ((String) throws -> Void)?
 
     init(persistence: PersistenceController, sessionProvider: any ShopperSessionProviding) {
         self.persistence = persistence
         self.sessionProvider = sessionProvider
         self.initialAccountBinding = try? sessionProvider.currentSession().accountBinding
+        self.commandAuthority = nil
         persistence.personalCartsEnabled = true
         persistence.personalCartSessionProvider = sessionProvider
         persistence.personalCartInitialBinding = initialAccountBinding
+    }
+
+    private init(service: PersonalCartService, authority: UICommandAuthority) {
+        persistence = service.persistence
+        sessionProvider = service.sessionProvider
+        initialAccountBinding = service.initialAccountBinding
+        commandAuthority = authority
+    }
+
+    func scoped(to authority: UICommandAuthority) -> PersonalCartService {
+        PersonalCartService(service: self, authority: authority)
     }
 
     func entries(householdID: UUID, listID: UUID) throws -> [PersonalCartEntrySnapshot] {
@@ -132,7 +145,8 @@ final class PersonalCartService: @unchecked Sendable {
         return Set(results.values.compactMap(\.edit).filter { $0.snapshot.needID == needID }.map(\.id))
     }
 
-    func transact<T>(save: Bool = true, _ body: (PersonalCartRepository) throws -> T) throws -> T {
+    func transact<T>(save: Bool = true, additionalAuthority: UICommandAuthority? = nil,
+        _ body: (PersonalCartRepository) throws -> T) throws -> T {
         let session = try sessionProvider.currentSession()
         guard session.accountBinding == initialAccountBinding else { throw PersonalCartError.accountChanged }
         if case .managed(let privateURL, _, _) = persistence.configuration {
@@ -148,11 +162,17 @@ final class PersonalCartService: @unchecked Sendable {
             context.userInfo[PersonalCartPersistencePolicy.authorizedAccountKey] = session.accountBinding
             defer { context.userInfo.removeObject(forKey: PersonalCartPersistencePolicy.authorizedAccountKey) }
             do {
+                if save {
+                    try commandAuthority?.validate()
+                    try additionalAuthority?.validate()
+                }
                 let repository = PersonalCartRepository(persistence: persistence, context: context, session: session)
                 let value = try body(repository)
                 guard try sessionProvider.currentSession() == session else { throw PersonalCartError.accountChanged }
                 if save && context.hasChanges {
                     try persistence.prepareForSave(context)
+                    try commandAuthority?.validate()
+                    try additionalAuthority?.validate()
                     try context.save()
                     saved = true
                 }

@@ -30,6 +30,7 @@ struct ContentView: View {
                 .padding(.bottom, 56)
         }
         .environment(\.shoppingToastCenter, toastCenter)
+        .environment(\.returnToHome, { navigation.selectedTab = .groceries })
     }
 }
 

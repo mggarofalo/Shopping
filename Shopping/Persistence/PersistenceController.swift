@@ -28,6 +28,9 @@ final class PersistenceController {
     var personalCartsEnabled = false
     var personalCartInitialBinding: String?
     var personalCartSessionProvider: (any ShopperSessionProviding)?
+    let homeNativeAccess = HomeNativeAccessGate()
+    let homeAccessRefreshQueue = HomeAccessRefreshQueue()
+    let homeParticipantOperations = HomeParticipantOperationCoordinator()
     let writer: NSManagedObjectContext
     let configuration: PersistenceConfiguration
     let permissionPolicy: PersistencePermissionPolicy
@@ -109,6 +112,7 @@ final class PersistenceController {
     }
 
     func prepareForSave(_ context: NSManagedObjectContext) throws {
+        try HomeEffectPersistencePolicy.validate(in: context, controller: self)
         if personalCartsEnabled { try HouseholdDemandJournal.captureChanges(in: context, persistence: self) }
         if !context.insertedObjects.isEmpty {
             try context.obtainPermanentIDs(for: Array(context.insertedObjects))

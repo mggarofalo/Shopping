@@ -14,15 +14,26 @@ struct PersistenceRootView: View {
             case .ready(let ready):
                 Group {
                     if !ready.presentation.isActive { EmptyView() }
-                    else if (ready.persistence.configuration.isManaged || ready.personalCartService != nil) && ready.householdID == nil {
+                    else if ready.householdID == nil {
                         NavigationStack {
                             ContentUnavailableView {
                                 Label("Waiting for your household", systemImage: "icloud")
                             } description: {
-                                Text(bootstrap.sharingStatusDescription)
-                                Text("Your existing groceries will appear after import. An empty cache does not create another household.")
+                                if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) {
+                                    Text("Leaving a home is still being verified. Open Homes to check its status. Your personal cart and history remain saved.")
+                                } else if bootstrap.homeLeaveStatuses.contains(where: \.completed) {
+                                    Text("Your personal cart and history remain saved after leaving. Choose a home when you are ready.")
+                                } else {
+                                    Text(bootstrap.sharingStatusDescription)
+                                    Text("Your existing groceries will appear after import. An empty cache does not create another household.")
+                                }
                             } actions: {
+                                NavigationLink("Choose a home") {
+                                    HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
+                                }
                                 Button("Check again") { bootstrap.applicationDidEnterForeground() }
+                                NavigationLink("Sharing status") { HomeSharingStatusView() }
+                                    .accessibilityIdentifier("shopping.waiting.sharingStatus")
                                 if let service = ready.personalCartService {
                                     NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
                                 }
@@ -40,13 +51,27 @@ struct PersistenceRootView: View {
                     .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
                     .environment(\.persistenceSelection, PersistenceSelection(
                         householdID: ready.householdID,
-                        listID: ready.listID
+                        listID: ready.listID,
+                        homeScope: ready.homeScope
                     ))
             case .failed(let error):
-                PersistenceRecoveryView(error: error, retry: bootstrap.retry)
+                NavigationStack {
+                    PersistenceRecoveryView(error: error, retry: bootstrap.retry)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                NavigationLink("Sharing status") { HomeSharingStatusView() }
+                            }
+                        }
+                }
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if let invitations = bootstrap.invitations {
+                HomeInvitationNotice(invitations: invitations, bootstrap: bootstrap)
             }
         }
         .environmentObject(bootstrap)
+        .environment(\.homeEditorDraftStore, bootstrap.editorDrafts)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
         .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
         .onChange(of: scenePhase) { _, phase in

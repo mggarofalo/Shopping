@@ -22,10 +22,10 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 2))
         let version = app.descendants(matching: .any)["shopping.settings.version"]
         XCTAssertTrue(version.existsOrAppears(timeout: 2))
-        XCTAssertTrue(version.label.contains("1.2.0"))
         XCTAssertNotNil(version.label.range(
-            of: #"\([0-9a-f]{8}(?:-dirty)?\)"#, options: .regularExpression
-        ))
+            of: #"^(?:App Version, )?[0-9]+\.[0-9]+\.[0-9]+ \([0-9a-f]{8}(?:-dirty)?\)$"#,
+            options: .regularExpression
+        ), "Version accessibility label: \(version.label)")
     }
 
     func testCategorySuggestionIsVisibleInCatalogAndGroceryEditors() {

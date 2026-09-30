@@ -24,6 +24,7 @@ final class GroceryNavigationState: ObservableObject {
     private let defaults: UserDefaults
     private let keyPrefix: String
     private var householdID: UUID?
+    private var scopeNamespace: String?
     private var isRestoring = false
 
     init(defaults: UserDefaults = .standard, keyPrefix: String = "shopping.groceryFilter") {
@@ -44,14 +45,17 @@ final class GroceryNavigationState: ObservableObject {
     func configure(
         householdID: UUID?,
         activeStoreIDs: Set<UUID>,
-        activeCategoryIDs: Set<UUID> = []
+        activeCategoryIDs: Set<UUID> = [],
+        scopeNamespace: String? = nil
     ) {
-        guard self.householdID != householdID else {
+        guard self.householdID != householdID || self.scopeNamespace != scopeNamespace else {
             sanitize(activeStoreIDs: activeStoreIDs, activeCategoryIDs: activeCategoryIDs)
             return
         }
         isRestoring = true
         self.householdID = householdID
+        self.scopeNamespace = scopeNamespace
+        pendingNeedFocusID = nil
         searchText = ""
         if let householdID,
            let data = defaults.data(forKey: key(for: householdID)),
@@ -137,7 +141,8 @@ final class GroceryNavigationState: ObservableObject {
     }
 
     private func key(for householdID: UUID) -> String {
-        "\(keyPrefix).\(householdID.uuidString.lowercased())"
+        if let scopeNamespace { return "\(keyPrefix).scope.\(scopeNamespace)" }
+        return "\(keyPrefix).\(householdID.uuidString.lowercased())"
     }
 }
 

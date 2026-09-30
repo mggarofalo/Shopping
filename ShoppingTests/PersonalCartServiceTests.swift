@@ -3,6 +3,14 @@ import XCTest
 @testable import Shopping
 
 final class PersonalCartServiceTests: XCTestCase {
+    private let fixtureLifetime = SQLiteTestFixtureLifetime()
+
+    override func setUp() {
+        super.setUp()
+        let lifetime = fixtureLifetime
+        addTeardownBlock { try lifetime.cleanup() }
+    }
+
     struct FixedSession: ShopperSessionProviding {
         let session: ShopperSession
         func currentSession() throws -> ShopperSession { session }
@@ -25,10 +33,8 @@ final class PersonalCartServiceTests: XCTestCase {
     }
 
     private func makeFixture(permissionPolicy: PersistencePermissionPolicy? = nil) throws -> Fixture {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let persistence = try PersistenceController(configuration: .local(storeURL: directory.appendingPathComponent("store.sqlite")), permissionPolicy: permissionPolicy)
+        let directory = try fixtureLifetime.makeDirectory()
+        let persistence = try fixtureLifetime.own(PersistenceController(configuration: .local(storeURL: directory.appendingPathComponent("store.sqlite")), permissionPolicy: permissionPolicy))
         let service = NeedService(persistence: persistence)
         let selection = try service.createHousehold()
         let itemID = try service.createItem(name: "Milk", householdID: selection.householdID)
@@ -48,7 +54,7 @@ final class PersonalCartServiceTests: XCTestCase {
     func testCatalogMembershipIsolatesDuplicateNeedsAndKeepsUnrelatedItemsAvailable() throws {
         let f = try makeFixture()
         let otherID = try f.service.createItem(name: "Beans", householdID: f.householdID)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let original = try XCTUnwrap(context.fetch(Need.fetchRequest()).first)
             let duplicate = Need(context: context)
@@ -88,7 +94,7 @@ final class PersonalCartServiceTests: XCTestCase {
             expectedRevision: try XCTUnwrap(target.needRevision))
         XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).first?.token,
                        cartEntry.token)
-        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let service = NeedService(persistence: reopened)
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
         let after = try service.captureCatalogAdd(itemIDs: [f.itemID],
@@ -122,7 +128,7 @@ final class PersonalCartServiceTests: XCTestCase {
     func testMalformedSharedPurchaseCannotBlockPrivateQuantityOrRemovalAfterRelaunch() throws {
         let f = try makeFixture()
         let entry = try add(f)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let record = HouseholdCartRecord(context: context)
             record.id = UUID()
@@ -133,7 +139,7 @@ final class PersonalCartServiceTests: XCTestCase {
         }
         XCTAssertThrowsError(try f.cart.prepareCheckout(tokens: [entry.token]))
         try f.cart.setQuantity(9, token: entry.token)
-        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
         let retained = try XCTUnwrap(cart.entries(householdID: f.householdID, listID: f.listID).first)
         XCTAssertEqual(retained.quantity, 9)
@@ -177,10 +183,10 @@ final class PersonalCartServiceTests: XCTestCase {
         XCTAssertTrue(try f.cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
         policy.denied = false
         try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID, initialQuantity: 8)
-        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
         XCTAssertEqual(try cart.entries(householdID: f.householdID, listID: f.listID).first?.quantity, 8)
-        let context = reopened.simulationContext()
+        let context = fixtureLifetime.own(reopened.simulationContext())
         try context.performAndWait { XCTAssertNil(try context.fetch(Need.fetchRequest()).first?.quantity) }
     }
 
@@ -192,7 +198,7 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.cart.setQuantity(7, token: alice.token)
         XCTAssertEqual(try bob.entries(householdID: f.householdID, listID: f.listID), [bobsEntry])
         XCTAssertThrowsError(try bob.uncart(alice.token))
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", f.needID as CVarArg)
@@ -233,7 +239,7 @@ final class PersonalCartServiceTests: XCTestCase {
         let token = try f.cart.prepareCheckout(tokens: [entry.token])
         let operationID = UUID()
         let first = try f.cart.checkout(token, operationID: operationID)
-        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
         XCTAssertEqual(try cart.checkout(token, operationID: operationID), first)
         XCTAssertThrowsError(try cart.checkout(token, buyAnywayReceiptIDs: [UUID()], operationID: operationID))
@@ -253,7 +259,7 @@ final class PersonalCartServiceTests: XCTestCase {
             let id = UUID()
             f.cart.failurePoint = { if $0 == point { throw Injected.crash } }
             XCTAssertThrowsError(try f.cart.checkout(token, operationID: id))
-            let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+            let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
             let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
             try cart.resumePending()
             let history = try cart.history(householdID: f.householdID, listID: f.listID)
@@ -291,7 +297,7 @@ final class PersonalCartServiceTests: XCTestCase {
         let changed = try f.cart.checkout(captured)
         XCTAssertEqual(changed.skippedNeedIDs, [f.needID])
         let second = try f.cart.prepareCheckout(tokens: [entry.token])
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let items = try context.fetch(Item.fetchRequest())
             let item = try XCTUnwrap(items.first { $0.id == f.itemID })
@@ -315,7 +321,7 @@ final class PersonalCartServiceTests: XCTestCase {
                 householdID: f.householdID, quantity: nil)
         }
         try f.service.setNeedCarted(needID: current, householdID: f.householdID, listID: f.listID, carted: true)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         let originalPayloads = try context.performAndWait { () -> [UUID: Data] in
             let operations = try context.fetch(ClearOperation.fetchRequest())
             let payloads = Dictionary(uniqueKeysWithValues: operations.map { ($0.id, $0.snapshot!) })
@@ -348,7 +354,7 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.cart.captureLegacyReview()
         let review = try XCTUnwrap(f.cart.legacyReview().first)
         try f.cart.decideLegacyReview(id: review.id, claim: false)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let request = NSFetchRequest<LegacyCartReview>(entityName: "LegacyCartReview")
             let original = try XCTUnwrap(context.fetch(request).first)
@@ -358,7 +364,7 @@ final class PersonalCartServiceTests: XCTestCase {
             duplicate.decision = "keep"; duplicate.claimedAccount = ""
             try context.save()
         }
-        let reopened = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
         try cart.captureLegacyReview()
         XCTAssertTrue(try cart.pendingLegacyReview(householdID: f.householdID, listID: f.listID).isEmpty)
@@ -375,7 +381,7 @@ final class PersonalCartServiceTests: XCTestCase {
         let f = try makeFixture()
         try f.service.setNeedCarted(needID: f.needID, householdID: f.householdID, listID: f.listID, carted: true)
         try f.cart.captureLegacyReview()
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let record = try XCTUnwrap(context.fetch(NSFetchRequest<LegacyCartReview>(entityName: "LegacyCartReview")).first)
             record.decision = "discarded" // Build 13 wrote only this scalar decision.
@@ -398,7 +404,7 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.service.setNeedCarted(needID: f.needID, householdID: f.householdID, listID: f.listID, carted: true)
         try f.cart.captureLegacyReview()
         let review = try XCTUnwrap(f.cart.legacyReview().first)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let duplicate = LegacyCartReview(context: context)
             duplicate.id = review.id; duplicate.payload = try PersonalCartCoding.encode(review)
@@ -431,7 +437,7 @@ final class PersonalCartServiceTests: XCTestCase {
             metadata[NSStoreUUIDKey] = UUID().uuidString
             try NSPersistentStoreCoordinator.setMetadata(metadata, forPersistentStoreOfType: NSSQLiteStoreType,
                 at: copiedURL, options: nil)
-            let copied = try PersistenceController(storeURL: copiedURL)
+            let copied = try fixtureLifetime.own(PersistenceController(storeURL: copiedURL))
             let cart = PersonalCartService(persistence: copied, sessionProvider: try session())
             let service = NeedService(persistence: copied)
             let recovered = try service.undoClear(operationID: preview.token.id,
@@ -463,7 +469,7 @@ final class PersonalCartServiceTests: XCTestCase {
     func testPrivateRecordsNeverJoinHouseholdGraphAndUnauthorizedContextCannotWriteThem() throws {
         let f = try makeFixture()
         _ = try add(f)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let request = NSFetchRequest<PersonalCartRecord>(entityName: "PersonalCartRecord")
             let record = try XCTUnwrap(context.fetch(request).first)
@@ -489,14 +495,13 @@ final class PersonalCartServiceTests: XCTestCase {
         XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).first?.id, recarted.id)
     }
     private func replica(of f: Fixture) throws -> PersonalCartService {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let directory = try fixtureLifetime.makeDirectory()
         let target = directory.appendingPathComponent("replica.sqlite")
         let coordinator = NSPersistentStoreCoordinator(managedObjectModel: f.persistence.container.managedObjectModel)
         try coordinator.replacePersistentStore(at: target, destinationOptions: nil,
             withPersistentStoreFrom: f.directory.appendingPathComponent("store.sqlite"), sourceOptions: nil, ofType: NSSQLiteStoreType)
-        return PersonalCartService(persistence: try PersistenceController(storeURL: target), sessionProvider: try session())
+        let persistence = try fixtureLifetime.own(PersistenceController(storeURL: target))
+        return PersonalCartService(persistence: persistence, sessionProvider: try session())
     }
 
     private func deliver(_ source: PersonalCartService, to target: PersonalCartService) throws {
@@ -576,11 +581,12 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.cart.transact { repository in
             let receiptID = PersonalCartCoding.stableID("purchase", purchase.operationID.uuidString, f.needID.uuidString)
             let forged = HouseholdRetractionEvent(id: UUID(), receiptIDs: [receiptID])
-            try repository.publish(forged, id: forged.id, kind: "retraction", householdID: f.householdID)
+            try repository.publish(forged, id: forged.id, kind: "retraction", householdID: f.householdID,
+                listID: f.listID, effectKind: .checkout, effectID: purchase.operationID)
         }
         XCTAssertTrue(try f.cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
         _ = try f.cart.restore(checkoutID: purchase.operationID)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let request = NSFetchRequest<HouseholdCartRecord>(entityName: "HouseholdCartRecord")
             request.predicate = NSPredicate(format: "kind == %@", "presence")
@@ -602,7 +608,7 @@ final class PersonalCartServiceTests: XCTestCase {
     func testPrivateCartRetainsSnapshotAfterHouseholdGraphDisappearsAndCanBeRemoved() throws {
         let f = try makeFixture()
         let entry = try add(f)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             for need in try context.fetch(Need.fetchRequest()) { context.delete(need) }
             for item in try context.fetch(Item.fetchRequest()) { context.delete(item) }
@@ -643,7 +649,7 @@ final class PersonalCartServiceTests: XCTestCase {
         f.cart.failurePoint = { if $0 == "afterIntent" { throw Injected.stop } }
         XCTAssertThrowsError(try f.cart.checkout(token))
         f.cart.failurePoint = nil
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             for household in try context.fetch(Household.fetchRequest()) { context.delete(household) }
             try context.save()
@@ -708,7 +714,7 @@ final class PersonalCartServiceTests: XCTestCase {
         let capture = try f.cart.prepareCheckout(tokens: [entry.token])
         _ = try f.cart.checkout(capture)
         func changeRules(_ target: PersonalCartService) throws {
-            let context = target.persistence.simulationContext()
+            let context = fixtureLifetime.own(target.persistence.simulationContext())
             try context.performAndWait {
                 let item = try XCTUnwrap(context.fetch(Item.fetchRequest()).first { $0.id == f.itemID })
                 let store = try XCTUnwrap(context.fetch(Store.fetchRequest()).first { $0.id == storeID })
@@ -824,7 +830,7 @@ final class PersonalCartServiceTests: XCTestCase {
         try f.cart.captureLegacyReview()
         let review = try XCTUnwrap(f.cart.legacyReview().first)
         try f.cart.decideLegacyReview(id: review.id, claim: true)
-        let context = f.persistence.simulationContext()
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
         try context.performAndWait {
             let request = NSFetchRequest<LegacyCartReview>(entityName: "LegacyCartReview")
             let record = try XCTUnwrap(context.fetch(request).first)

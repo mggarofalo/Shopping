@@ -173,6 +173,96 @@ final class PersistenceContainerTests: XCTestCase {
         ])
     }
 
+    func testPostShareChildrenStayWithEachRootAndOnlyOwnerGraphEntersAssociationJournal() throws {
+        let lifetime = SQLiteTestFixtureLifetime()
+        addTeardownBlock { try lifetime.cleanup() }
+        let directory = try lifetime.makeDirectory()
+        let ownerURL = directory.appendingPathComponent("owner.sqlite")
+        let participantURL = directory.appendingPathComponent("participant.sqlite")
+        let journal = RoleMappedAssociationJournal(url: directory.appendingPathComponent("associations.json"),
+            ownerURL: ownerURL, participantURL: participantURL)
+        let persistence = lifetime.own(try PersistenceController(
+            configuration: .local(storeURL: ownerURL, additionalStoreURLs: [participantURL]),
+            shareAssociationJournal: journal))
+        let ownerStore = try XCTUnwrap(persistence.primaryStore)
+        let participantStore = try XCTUnwrap(persistence.storeBindings.first { $0.store.url == participantURL }?.store)
+        let context = lifetime.own(persistence.simulationContext())
+        let roots = try context.performAndWait { () -> [(UUID, UUID)] in
+            try [ownerStore, participantStore].enumerated().map { index, store in
+                let home = Household(context: context)
+                home.id = UUID()
+                home.name = index == 0 ? "Owner home" : "Participant home"
+                context.assign(home, to: store)
+                let list = GroceryList(context: context)
+                list.id = UUID()
+                list.household = home
+                context.assign(list, to: store)
+                try context.save()
+                return (home.id, list.id)
+            }
+        }
+        // The roots stand in for already imported/shared roots. All later child
+        // commands and save-time association staging below are the real services.
+        // Only the store-role lookup is simulated; no native share or ACL is proven.
+        let service = NeedService(persistence: persistence)
+        var childIDs: [Set<UUID>] = []
+        var needIDs: [UUID] = []
+        for (homeID, listID) in roots {
+            let storeID = try service.createStore(name: "Shop", householdID: homeID)
+            let categoryID = try service.createCategory(name: "Pantry", householdID: homeID)
+            let personID = try service.createPerson(name: "Assignee", householdID: homeID, listID: listID)
+            let itemID = try service.createItem(name: "Milk", householdID: homeID)
+            try service.setCategory(itemID: itemID, categoryID: categoryID)
+            let rememberedID = try service.addRememberedNeed(itemID: itemID, listID: listID)
+            let oneTimeID = try service.addOneTimeNeed(title: "Ice", householdID: homeID, listID: listID)
+            childIDs.append([storeID, categoryID, personID, itemID, rememberedID, oneTimeID])
+            needIDs.append(oneTimeID)
+        }
+        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.routing",
+            environment: "Development", accountRecordName: "shopper")
+        let cart = PersonalCartService(persistence: persistence, sessionProvider: RoutingSession(session: session))
+        for (index, root) in roots.enumerated() {
+            try cart.cart(needID: needIDs[index], householdID: root.0, listID: root.1)
+        }
+        let home = try XCTUnwrap(HomeDiscoveryService(persistence: persistence).discover().homes.first {
+            $0.graph.householdID == roots[0].0
+        })
+        let removal = HomeMembershipRemoval(id: UUID(), origin: ActiveHomeScope(session: session, graph: home.graph),
+            share: MembershipTransportDouble.share, ownerParticipantID: "owner", participantIDs: ["friend"],
+            cancelledInvitationID: nil, purpose: .removeMember, confirmedAt: Date())
+        try cart.retainHomeMemberRemoval(removal)
+        try context.performAndWait {
+            context.reset()
+            var allChildren: [NSManagedObject] = try context.fetch(Store.fetchRequest())
+            allChildren.append(contentsOf: try context.fetch(Category.fetchRequest()))
+            allChildren.append(contentsOf: try context.fetch(Person.fetchRequest()))
+            allChildren.append(contentsOf: try context.fetch(Item.fetchRequest()))
+            allChildren.append(contentsOf: try context.fetch(Need.fetchRequest()))
+            for (index, ids) in childIDs.enumerated() {
+                let children = allChildren.filter { object in
+                    (object.value(forKey: "id") as? UUID).map(ids.contains) ?? false
+                }
+                XCTAssertEqual(children.count, ids.count)
+                XCTAssertTrue(children.allSatisfy { $0.objectID.persistentStore == (index == 0 ? ownerStore : participantStore) })
+            }
+            let entries = try journal.pending()
+            XCTAssertEqual(entries.count, 1)
+            let entry = try XCTUnwrap(entries.first)
+            let ownerRoot = try XCTUnwrap(context.fetch(Household.fetchRequest()).first { $0.id == roots[0].0 })
+            XCTAssertEqual(entry.householdURI, ownerRoot.objectID.uriRepresentation())
+            let ownerChildren = allChildren.filter { $0.objectID.persistentStore == ownerStore }
+            XCTAssertTrue(Set(ownerChildren.map { $0.objectID.uriRepresentation() }).isSubset(of: entry.objectURIs))
+            let participantChildren = allChildren.filter { $0.objectID.persistentStore == participantStore }
+            XCTAssertTrue(Set(participantChildren.map { $0.objectID.uriRepresentation() }).isDisjoint(with: entry.objectURIs))
+            let records = try context.fetch(NSFetchRequest<PersonalCartRecord>(entityName: "PersonalCartRecord"))
+            XCTAssertTrue(records.contains { $0.kind == "homeMemberRemoval" })
+            XCTAssertGreaterThan(records.count, 1, "The fixture must include real cart records as well as lifecycle retention")
+            XCTAssertTrue(records.allSatisfy { $0.objectID.persistentStore == ownerStore })
+            XCTAssertTrue(records.allSatisfy { ShareAssociationScope.household(for: $0) == nil })
+            XCTAssertTrue(Set(records.map { $0.objectID.uriRepresentation() }).isDisjoint(with: entry.objectURIs))
+        }
+    }
+
     func testPersonResolvesToHouseholdForManagedShareAssociation() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)
@@ -574,8 +664,12 @@ extension PersistenceContainerTests {
         let accountRequested = expectation(description: "Account opens after outgoing presentation retirement")
         var providerCalled = false
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: sourceURL) },
-            preloadedPreviewEnvironment: fixture, defaults: defaults, makeAccountProvider: { _ in
+            preloadedPreviewEnvironment: fixture, defaults: defaults, makeAccountProvider: { base in
                 providerCalled = true
+                return try ShopperSessionProvider(containerIdentifier: "iCloud.test.retirement", environment: "Development",
+                    cacheDirectory: base.appendingPathComponent("Bindings"), lookup: .init(
+                        status: { .available }, recordName: { "account-A" }))
+            }, accountStoreDirectory: { directory }, activateAccountStore: { _, _, _, _ in
                 accountRequested.fulfill()
                 throw Expected.stopBeforeCloudAccount
             })
@@ -596,9 +690,11 @@ extension PersistenceContainerTests {
         context.processPendingChanges()
 
         // This is the real setup command, with real mounted GroceriesView FRCs and notifications.
-        bootstrap.activatePersonalCarts(importLegacy: true)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        XCTAssertTrue(providerCalled)
+        XCTAssertTrue(ready.presentation.isActive, "Account verification must precede retirement")
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: true)
         XCTAssertFalse(ready.presentation.isActive)
-        XCTAssertFalse(providerCalled)
         XCTAssertEqual(ready.persistence.container.persistentStoreCoordinator.persistentStores.count, 1)
         XCTAssertFalse(stores[0].name.isEmpty)
         // Already queued presentation callbacks must be harmless even before SwiftUI unmounts it.
@@ -607,7 +703,8 @@ extension PersistenceContainerTests {
         XCTAssertFalse(bootstrap.isPresentationMounted(ready.presentation.id))
         XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         guard case .failed = bootstrap.state else { return XCTFail("Expected isolated provider failure") }
-        XCTAssertEqual(defaults.string(forKey: "shopping.personalCart.pendingImport"), sourceURL.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("HomeAdoption.json").path))
+        XCTAssertFalse(defaults.string(forKey: "shopping.personalCart.pendingImport") == sourceURL.path)
         let reopened = try PersistenceController(storeURL: sourceURL)
         defer {
             let coordinator = reopened.container.persistentStoreCoordinator
@@ -686,9 +783,11 @@ extension PersistenceContainerTests {
         guard case .failed = bootstrap.state else { return XCTFail("Expected original retirement to complete") }
         bootstrap.activatePersonalCarts(importLegacy: false)
         await bootstrap.runLoadingTransition()
+        try await waitForReady(bootstrap)
         XCTAssertEqual(providerAttempts, 1)
-        bootstrap.retry()
+        bootstrap.activatePersonalCarts(importLegacy: false)
         await bootstrap.runLoadingTransition()
+        try await waitForReady(bootstrap)
         XCTAssertEqual(providerAttempts, 2, "Rejected activation must not leave account loading latched")
     }
 
@@ -734,4 +833,35 @@ extension PersistenceContainerTests {
         XCTAssertTrue(coordinator.persistentStores.isEmpty)
     }
 
+}
+
+private struct RoutingSession: ShopperSessionProviding {
+    let session: ShopperSession
+    func currentSession() throws -> ShopperSession { session }
+}
+
+/// Local SQLite stores exercise real save-time staging with explicit simulated
+/// managed roles. This does not configure CloudKit or prove server zone routing.
+private final class RoleMappedAssociationJournal: ShareAssociationJournal {
+    let journal: FileShareAssociationJournal
+    let ownerURL: URL
+    let participantURL: URL
+
+    init(url: URL, ownerURL: URL, participantURL: URL) {
+        journal = FileShareAssociationJournal(url: url)
+        self.ownerURL = ownerURL
+        self.participantURL = participantURL
+    }
+
+    func stagePrivateInserts(_ objects: Set<NSManagedObject>, controller: PersistenceController) throws {
+        try journal.stagePrivateInserts(objects) { store in
+            if store.url == self.ownerURL { return .ownerPrivate }
+            if store.url == self.participantURL { return .participantShared }
+            return nil
+        }
+    }
+    func pending() throws -> [PendingShareAssociation] { try journal.pending() }
+    func acknowledge(householdURI: URL, objectURIs: Set<URL>) throws {
+        try journal.acknowledge(householdURI: householdURI, objectURIs: objectURIs)
+    }
 }

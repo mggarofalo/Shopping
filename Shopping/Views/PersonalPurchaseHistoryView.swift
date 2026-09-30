@@ -20,7 +20,7 @@ struct PersonalPurchaseHistoryView: View {
                             }
                         }
                     }
-                    if purchase.pendingPublication { Text("Household sync pending").foregroundStyle(.secondary) }
+                    if purchase.pendingPublication { Text("Saved purchase awaiting home processing").foregroundStyle(.secondary) }
                     if purchase.restored {
                         Text("Purchase undone").foregroundStyle(.secondary)
                     } else {
@@ -49,7 +49,7 @@ struct PersonalPurchaseHistoryView: View {
                     try service.restore(checkoutID: id)
                 }.value
                 resultMessage = "Restored \(result.purchasedCount) items; left \(result.skippedCount) unchanged. Other shoppers’ purchases and newer requests are retained."
-                if result.pendingPublication { resultMessage? += " Household sync pending." }
+                if result.pendingPublication { resultMessage? += " Saved undo awaiting home processing." }
                 cart.refresh()
             } catch { self.error = error.localizedDescription }
         }

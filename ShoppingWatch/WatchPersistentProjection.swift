@@ -27,6 +27,11 @@ struct WatchPersistentProjection: Sendable {
             if let household, let cloud = repository.persistence.container as? NSPersistentCloudKitContainer {
                 mayWrite = cloud.canUpdateRecord(forManagedObjectWith: household.objectID)
             }
+            let retainedAccess = try repository.homeEffectAccess(householdID: scope.householdID, listID: scope.listID)
+            mayWrite = mayWrite && retainedAccess.permitsPublication(retainedAccess.capturedAuthority)
+            if let household, let native = try repository.nativeCommandAccess(for: household) {
+                mayWrite = mayWrite && native != .readOnly && native != .lost
+            }
             if let writable { mayWrite = mayWrite && writable(scope.householdID) }
             return try WatchPersistentProjection(scope: scope, stores: stores,
                 needs: needs.map { try PersonalCartSnapshotBuilder.make(need: $0, session: repository.session,

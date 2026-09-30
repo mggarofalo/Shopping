@@ -279,11 +279,17 @@ private struct ValidatedCatalogItemValues {
 final class NeedService: @unchecked Sendable {
     private static let unsetImportedID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     private let persistence: PersistenceController
+    private let commandAuthority: UICommandAuthority?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(persistence: PersistenceController) {
+    init(persistence: PersistenceController, commandAuthority: UICommandAuthority? = nil) {
         self.persistence = persistence
+        self.commandAuthority = commandAuthority
+    }
+
+    func scoped(to authority: UICommandAuthority) -> NeedService {
+        NeedService(persistence: persistence, commandAuthority: authority)
     }
 
     func captureManagementBatch(
@@ -838,6 +844,73 @@ final class NeedService: @unchecked Sendable {
             }
             let list: GroceryList = self.insert("GroceryList", in: context)
             list.id = UUID()
+            self.route(list, with: household, in: context)
+            list.household = household
+            return (household.id, list.id)
+        }
+    }
+
+    /// Renaming never changes a home's identity or moves its graph between stores.
+    /// Permission is checked by the normal save policy for the exact imported root.
+    func renameHome(name: String, scope: ActiveHomeScope) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard let session = try self.persistence.personalCartSessionProvider?.currentSession(),
+                  session.accountBinding == scope.accountBinding,
+                  session.containerIdentifier == scope.containerIdentifier,
+                  session.environment == scope.environment else { throw ShopperSessionError.accountChanged }
+            let graph = scope.graph
+            guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
+                throw NeedServiceError.scopeChanged
+            }
+            let rootRequest = Household.fetchRequest()
+            rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
+            let listRequest = GroceryList.fetchRequest()
+            listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
+            let roots = try context.fetch(rootRequest)
+            let lists = try context.fetch(listRequest)
+            guard roots.count == 1, lists.count == 1,
+                  let root = roots.first, let list = lists.first,
+                  !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
+                  let store = root.objectID.persistentStore,
+                  self.persistence.role(of: store) != nil,
+                  store.identifier == graph.storeIdentifier,
+                  root.objectID.uriRepresentation().absoluteString == graph.rootURI,
+                  list.objectID.persistentStore == store,
+                  root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+            root.name = name
+        }
+    }
+
+    /// Retries only the identities from a durable, explicitly initiated creation command.
+    /// A partial or ambiguous match is retained for recovery, never replaced with new IDs.
+    func createHousehold(command: HomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {
+        let name = try validatedName(command.name)
+        return try write { context in
+            guard let store = self.persistence.primaryStore,
+                  store.identifier == command.storeIdentifier,
+                  self.persistence.role(of: store) == .ownerPrivate || self.persistence.role(of: store) == .local,
+                  try self.persistence.personalCartSessionProvider?.currentSession() == command.session else {
+                throw ShopperSessionError.accountChanged
+            }
+            let rootsRequest = Household.fetchRequest()
+            rootsRequest.predicate = NSPredicate(format: "id == %@", command.householdID as CVarArg)
+            let listsRequest = GroceryList.fetchRequest()
+            listsRequest.predicate = NSPredicate(format: "id == %@", command.listID as CVarArg)
+            let roots = try context.fetch(rootsRequest), lists = try context.fetch(listsRequest)
+            if !roots.isEmpty || !lists.isEmpty {
+                guard roots.count == 1, lists.count == 1,
+                      let root = roots.first, let list = lists.first,
+                      root.objectID.persistentStore == store, list.objectID.persistentStore == store,
+                      root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+                return (root.id, list.id)
+            }
+            let household: Household = self.insert("Household", in: context)
+            household.id = command.householdID
+            household.name = name
+            context.assign(household, to: store)
+            let list: GroceryList = self.insert("GroceryList", in: context)
+            list.id = command.listID
             self.route(list, with: household, in: context)
             list.household = household
             return (household.id, list.id)
@@ -3591,6 +3664,7 @@ final class NeedService: @unchecked Sendable {
     }
 
     private func performWrite<T>(_ body: (NSManagedObjectContext) throws -> T) throws -> T {
+        try commandAuthority?.validate()
         let accountSession = try persistence.personalCartSessionProvider?.currentSession()
         guard accountSession?.accountBinding == persistence.personalCartInitialBinding else {
             throw PersonalCartError.accountChanged
@@ -3606,6 +3680,7 @@ final class NeedService: @unchecked Sendable {
                     throw PersonalCartError.accountChanged
                 }
                 try persistence.prepareForSave(persistence.writer)
+                try commandAuthority?.validate()
                 try persistence.writer.save()
                 if persistence.shareAssociationJournal != nil {
                     NotificationCenter.default.post(
