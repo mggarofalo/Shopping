@@ -381,17 +381,18 @@ final class OneTimePromotionUITests: XCTestCase {
             return ["x": number(frame.minX), "y": number(frame.minY),
                     "width": number(frame.width), "height": number(frame.height)]
         }
-        func visibleTexts() -> [XCUIElement] {
+        func visibleTexts(in visibleViewport: CGRect) -> [XCUIElement] {
             app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "native.audit.list."))
                 .allElementsBoundByIndex.filter { element in
-                    element.exists && element.isHittable && element.frame.intersects(viewport())
+                    element.exists && element.isHittable && element.frame.intersects(visibleViewport)
                 }
         }
         func capture(_ phase: String) {
-            let visible = visibleTexts()
+            let visibleViewport = viewport()
+            let visible = visibleTexts(in: visibleViewport)
             var sample: [String: Any] = ["phase": phase, "foreground": app.state == .runningForeground,
                 "visibleNativeTexts": visible.map { ["id": $0.identifier, "label": $0.label, "frame": frameJSON($0.frame)] },
-                "deepExists": deep.exists, "deepFullyVisible": deep.exists && deep.isHittable && viewport().contains(deep.frame)]
+                "deepExists": deep.exists, "deepFullyVisible": deep.exists && deep.isHittable && visibleViewport.contains(deep.frame)]
             if deep.exists { sample["deepFrame"] = frameJSON(deep.frame); sample["deepLabel"] = deep.label }
             samples.append(sample)
             let image = XCTAttachment(screenshot: app.screenshot())
@@ -404,14 +405,34 @@ final class OneTimePromotionUITests: XCTestCase {
             self.add(hierarchy)
         }
         func settleVisibleContent() throws {
-            var prior: String?
+            let visibleViewport = viewport()
+            var anchor: XCUIElement?
+            var prior: CGRect?
             try wait("No stable reachable native text after the system size change", timeout: 8) {
-                guard app.state == .runningForeground else { return false }
-                let visible = visibleTexts()
-                guard !visible.isEmpty else { prior = nil; return false }
-                let signature = visible.map { "\($0.identifier):\($0.frame)" }.joined(separator: "|")
-                defer { prior = signature }
-                return signature == prior
+                guard app.state == .runningForeground else { prior = nil; return false }
+                if let current = anchor {
+                    guard current.exists, current.isHittable else { anchor = nil; prior = nil; return false }
+                    let frame = current.frame
+                    guard frame.intersects(visibleViewport) else { anchor = nil; prior = nil; return false }
+                    defer { prior = frame }
+                    return frame == prior
+                }
+                // Select one actually visible native label, then re-query its stable ID.
+                // Full-list evidence remains in capture; repeating it inside this
+                // eight-second waiter exhausted the pinned runner's query budget.
+                let candidates = app.staticTexts.matching(
+                    NSPredicate(format: "identifier BEGINSWITH %@", "native.audit.list.")
+                ).allElementsBoundByIndex
+                for candidate in candidates {
+                    guard candidate.exists, candidate.isHittable else { continue }
+                    let frame = candidate.frame
+                    guard frame.intersects(visibleViewport) else { continue }
+                    anchor = app.staticTexts[candidate.identifier]
+                    prior = frame
+                    return false
+                }
+                prior = nil
+                return false
             }
         }
         func revealDeep() throws {
