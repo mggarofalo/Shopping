@@ -26,9 +26,11 @@ final class SystemTextSizeSettings {
     private let nonce: String
     private let fileURL: URL
     private let original: Metadata
-    private var toggle: XCUIElement { settings.switches["LARGER_DYNAMIC_TYPE_SWITCH"] }
+    private var toggleMatches: XCUIElementQuery { settings.switches.matching(identifier: "LARGER_DYNAMIC_TYPE_SWITCH") }
+    private var sliderCells: XCUIElementQuery { settings.cells.matching(identifier: "DYNAMIC_TYPE_SLIDER") }
+    private var toggle: XCUIElement { toggleMatches.element }
     private var switchControl: XCUIElement { toggle.switches.element(boundBy: 0) }
-    private var slider: XCUIElement { settings.cells["DYNAMIC_TYPE_SLIDER"].sliders.element(boundBy: 0) }
+    private var slider: XCUIElement { sliderCells.element.sliders.element(boundBy: 0) }
 
     static func configure(_ app: XCUIApplication) {
         app.launchEnvironment["SHOPPING_UI_TEST_RUNTIME_METADATA"] = UUID().uuidString
@@ -65,10 +67,23 @@ final class SystemTextSizeSettings {
             try openSettingsRow(identifier: "DISPLAY_AND_TEXT", source: "Accessibility", destination: "Display & Text Size")
             try openSettingsRow(identifier: "LARGER_TEXT", source: "Display & Text Size", destination: "Larger Text")
         }
-        guard settings.navigationBars["Larger Text"].existsOrAppears(timeout: 5),
-              settings.switches.matching(identifier: "LARGER_DYNAMIC_TYPE_SWITCH").count == 1,
-              toggle.switches.count == 1, settings.cells["DYNAMIC_TYPE_SLIDER"].sliders.count == 1,
-              let originalToggle = toggle.value as? String, let originalValue = slider.value as? String
+        // Observe both controls before the verdict: a missing range switch
+        // must not prevent the same run from diagnosing the slider's shape.
+        let navigationReady = settings.navigationBars["Larger Text"].existsOrAppears(timeout: 5)
+        let toggleCount = toggleMatches.count
+        let switchCount = toggleCount == 1 ? toggle.switches.count : nil
+        let sliderCellCount = sliderCells.count
+        let sliderCount = sliderCellCount == 1 ? sliderCells.element.sliders.count : nil
+        let toggleValue = toggleCount == 1 ? toggle.value as? String : nil
+        let sliderValue = sliderCount == 1 ? slider.value as? String : nil
+        attach("Larger Text control inventory", text:
+            "navigationReady=\(navigationReady) toggles=\(toggleCount) nestedSwitches=\(String(describing: switchCount)) " +
+            "sliderCells=\(sliderCellCount) sliders=\(String(describing: sliderCount)) " +
+            "toggleValue=\(String(describing: toggleValue)) sliderValue=\(String(describing: sliderValue))\n" +
+            settings.debugDescription)
+        guard navigationReady, toggleCount == 1, switchCount == 1,
+              sliderCellCount == 1, sliderCount == 1,
+              let originalToggle = toggleValue, let originalValue = sliderValue
         else { XCTFail("Larger Text must expose one switch and slider"); throw Failure.missingControls }
         let originalPosition = slider.normalizedSliderPosition
         attach("Original Settings text size", text: "switch=\(originalToggle) slider=\(originalPosition) value=\(originalValue) category=\(original.category)")
