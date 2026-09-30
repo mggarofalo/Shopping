@@ -7,7 +7,7 @@ final class ShoppingDeviceUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     func testCompactGroceryDensityAndSelectedStoreAlignment() {
-        let app = launch(fixture: "populated")
+        let app = launch(fixture: "populated", contentSize: "UICTContentSizeCategoryL")
         let candles = app.buttons["Edit Birthday candles"]
         let note = app.staticTexts["Number candles: 4 and 0"]
         XCTAssertTrue(candles.waitForExistence(timeout: 3))
@@ -27,13 +27,33 @@ final class ShoppingDeviceUITests: XCTestCase {
         granola.tap()
         app.buttons["shopping.grocery.quantity.add"].tap()
         app.buttons["shopping.grocery.save"].tap()
+        XCTAssertTrue(app.buttons["shopping.grocery.save"].waitForNonExistence(timeout: 3))
         let increase = app.buttons["Increase quantity for Granola"]
-        XCTAssertTrue(increase.waitForExistence(timeout: 3))
+        let decrease = app.buttons["Decrease quantity for Granola"]
+        XCTAssertTrue(increase.existsOrAppears(timeout: 3))
+        XCTAssertTrue(increase.isHittable)
+        XCTAssertTrue(decrease.isHittable)
         assertTouchSize(increase)
-        assertTouchSize(app.buttons["Decrease quantity for Granola"])
-        let title = app.staticTexts["Granola"]
-        XCTAssertLessThanOrEqual(abs(title.frame.midY - increase.frame.midY), 5)
-        screenshot("SHOPPING-107 Costco title aligned controls", app: app)
+        assertTouchSize(decrease)
+        let cells = app.collectionViews.cells.containing(.button, identifier: granola.identifier)
+        XCTAssertEqual(cells.count, 1)
+        let cellFrame = cells.element.frame
+        let titleFrame = granola.staticTexts["Granola"].frame
+        let increaseFrame = increase.frame
+        let decreaseFrame = decrease.frame
+        XCTAssertEqual(increaseFrame.midY, decreaseFrame.midY, accuracy: 1)
+        for frame in [increaseFrame, decreaseFrame] {
+            XCTAssertGreaterThanOrEqual(frame.minX, cellFrame.minX + cellFrame.width * 2 / 3)
+            XCTAssertGreaterThanOrEqual(frame.minY, cellFrame.minY)
+            XCTAssertLessThanOrEqual(frame.maxX, cellFrame.maxX)
+            XCTAssertLessThanOrEqual(frame.maxY, cellFrame.maxY)
+        }
+        XCTAssertLessThanOrEqual(decreaseFrame.maxX, increaseFrame.minX)
+        XCTAssertLessThanOrEqual(titleFrame.maxX, decreaseFrame.minX)
+        XCTAssertGreaterThan(increaseFrame.midY, titleFrame.midY)
+        XCTAssertGreaterThanOrEqual(titleFrame.minY, cellFrame.minY)
+        XCTAssertLessThanOrEqual(titleFrame.maxY, cellFrame.maxY)
+        screenshot("SHOPPING-131 Costco right-column quantity controls", app: app)
     }
 
     func testCompactGroceryMetadataAtAccessibilityTextSize() {

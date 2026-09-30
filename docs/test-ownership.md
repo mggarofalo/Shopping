@@ -976,3 +976,49 @@ manifest after both final runs. The independent reviewer confirmed the Fast
 inventory is exactly the baseline plus five additions, with no omitted or duplicate
 methods. Remaining Fast Core Data errors belong to the two deliberate invalid-store
 tests; one raw appearance-transition message remains visible.
+
+### Full-suite stale UI expectations (SHOPPING-131)
+
+The first clean candidate, `da3ef24667867310a109389200b25d94fe1c621f`, ran
+all 662 selected methods (569 Fast and 93 UI): 660 passed, two failed, none
+skipped. The runner exited 65 and produced no full-suite attestation. Evidence:
+`/tmp/shopping-131-local-full.log` and the repository timing history under
+`.git/shopping-test-timings/da3ef24667867310a109389200b25d94fe1c621f/20260929T234512Z.zAfkKV`.
+The result retained 28 invalid-frame runtime warnings; their individual stacks
+have not been matched to the earlier keyboard-accessory investigation.
+
+Both failures reproduced unchanged on clean `main` at
+`ba09d80de520aed566a4be04560575f9e4cc5f82`
+(`/tmp/shopping-131-main-baseline-ui.xcresult` and `.log`, two failures, no skips).
+`ShoppingDeviceUITests.testCompactGroceryDensityAndSelectedStoreAlignment`
+still expected the title and quantity button to share a vertical center, contrary
+to SHOPPING-157's documented title/store baseline and quantity controls below the
+store summary. The identical 33.17-point difference occurred on both revisions.
+Its replacement assertions retain density, store eligibility, assignment, notes
+and 44-point targets, and prove separate, hittable right-column controls with
+matching vertical centers, no overlap and containment inside the row. Standard
+text size is explicit; editor dismissal is awaited before measuring geometry.
+The existing appearance tests retain large-text, padding and shared-column proof.
+
+`ShoppingLaunchTests.testLaunchShowsEmptyGroceriesAndConnectedTabs` still expected
+release 1.2.0; both revisions correctly display 1.2.2. It now verifies the complete
+visible semantic-version/source-revision format. `AppPresentationTests` retains
+independent known-value formatting and fallback assertions; the release workflow
+owns marketing-version consistency and the exact version/build/source record.
+No production layout, test-plan selection or coverage threshold changed.
+
+The first four-test correction run retained two failures and passed both modern
+appearance tests (`/tmp/shopping-131-corrected-layout-ui.xcresult`). A two-test
+diagnostic run (`/tmp/shopping-131-layout-ax-diagnostics.xcresult` and `.log`)
+confirmed that SwiftUI expands the edit button's accessibility frame across the
+row and combines the native `App Version` label with its value. The final checks
+use the containing cell and title frames for geometry, and allow that specific
+native label prefix. Neither failed run validates the final correction.
+
+The final affected selection passed all four methods with zero failures, skips
+or structured runtime warnings (`/tmp/shopping-131-final-layout-ui.xcresult`,
+`.log` and `-summary.json`). Both corrected methods and the existing standard/
+large-text and shared-dimension appearance workflows ran. Their source hashes
+still matched `/tmp/shopping-131-final-layout-source.json` after execution.
+Independent review found no remaining issue in the correction. This focused pass
+does not replace the new clean-commit full-suite attestation or pinned CI.
