@@ -14,6 +14,7 @@ final class ShoppingApplicationDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
+        UITestRuntimeMetadata.install(environment: environment)
         guard environment["SHOPPING_UI_TEST_STORE_PATH"] == nil,
               environment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] == nil,
               environment["XCTestConfigurationFilePath"] == nil else { return true }

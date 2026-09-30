@@ -2,7 +2,7 @@
 
 - Date: 2026-09-24
 - Issue: SHOPPING-118; implementation: SHOPPING-103; live gate: SHOPPING-30.
-- Status: selected for implementation. The executable contract is local evidence, not deployed synchronization.
+- Status: locally implemented by SHOPPING-103 and integrated with home lifecycle work through SHOPPING-130. Persistent and simulated-replica tests establish local behavior; server authorization, own-device replication and household convergence remain unverified until SHOPPING-30.
 - Supersedes ADR 0001's global cart flag and its provisional scalar lifecycle conflict policy. Other household persistence decisions remain.
 
 ## Decision

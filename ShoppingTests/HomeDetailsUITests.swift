@@ -128,6 +128,68 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(invite.isEnabled)
     }
 
+    /// Service tests own durable removal and server-result reconciliation. This
+    /// workflow proves the native Stop sharing control binds both confirmation
+    /// choices and preserves the currently displayed owner home and groceries.
+    func testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers() {
+        let app = launch(role: "owner")
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
+        // Populated has seven active needs; Party ice is archived, and the legacy
+        // Strawberries cart flag does not grant this authenticated shopper a cart.
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in rows.count == 7 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 8), .completed)
+        let savedGroceries = Set(rows.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertEqual(savedGroceries.count, 7)
+        openHomeDetails(app)
+        let homeName = app.staticTexts["shopping.home.name"].label
+        let invite = app.buttons["shopping.home.invite"]
+        reveal(invite, in: app)
+        invite.tap()
+        let confirmInvite = app.buttons["shopping.home.confirmInvite"]
+        reveal(confirmInvite, in: app)
+        confirmInvite.tap()
+        dismissSystemShareSheet(app)
+        let counts = app.staticTexts["shopping.home.memberCounts"]
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+
+        let stop = app.buttons["shopping.home.stopSharing"]
+        reveal(stop, in: app)
+        stop.tap()
+        let confirm = app.buttons["shopping.home.confirmRemoval"]
+        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Remove the 2 members and pending invitations captured below? Anyone added after this confirmation was prepared is not included."].exists)
+        app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
+        reveal(resend, in: app)
+        XCTAssertTrue(resend.isEnabled, "Cancelling must retain the pending invitation")
+
+        reveal(stop, in: app)
+        stop.tap()
+        reveal(confirm, in: app)
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        reveal(counts, in: app, towardTop: true)
+        XCTAssertEqual(counts.label, "0 other accepted members · 0 pending invitations")
+        XCTAssertEqual(app.staticTexts["shopping.home.name"].label, homeName)
+        XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
+        XCTAssertFalse(resend.exists)
+        reveal(invite, in: app)
+        XCTAssertTrue(invite.isEnabled)
+        app.tabBars.buttons["Groceries"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        let preserved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            Set(rows.allElementsBoundByIndex.map(\.identifier)) == savedGroceries
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [preserved], timeout: 8), .completed)
+        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)), savedGroceries)
+    }
+
     func testOwnerDisclosureCancelAndShareCancellationKeepPendingInvitationAvailableToResend() {
         let app = launch(role: "owner")
         openHomeDetails(app)
@@ -195,31 +257,77 @@ final class HomeDetailsUITests: XCTestCase {
     }
 
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
-        let app = launch(role: "restricted", largestText: true)
+        continueAfterFailure = false
+        let app = launch(role: "restricted", systemTextSize: true)
+        let textSize = try SystemTextSizeSettings(test: self, app: app)
         openHomeDetails(app)
+        let home = app.staticTexts["shopping.home.name"]
+        let homeName = home.label
+        let counts = app.staticTexts["shopping.home.memberCounts"].label
+        let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
+        let witnesses: [(String, XCUIElement)] = [
+            ("headline", home),
+            ("caption", app.staticTexts["Membership checked with iCloud"]),
+            ("subheadline", app.staticTexts["Read-only access · Accepted"]),
+            ("body", longName)
+        ]
+        func measure(_ phase: String) -> [String: CGRect] {
+            var frames: [String: CGRect] = [:]
+            for (role, element) in witnesses {
+                reveal(element, in: app, towardTop: role == "headline")
+                frames[role] = element.frame
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "Home members \(phase) \(role) fully visible"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+            }
+            return frames
+        }
+        func assertRetainedDestination() {
+            // List can virtualize deep members after reflow. First establish the
+            // retained destination/home, without reopening it or scrolling.
+            XCTAssertTrue(app.navigationBars["Home details"].exists)
+            XCTAssertTrue(home.exists)
+            XCTAssertEqual(home.label, homeName)
+            XCTAssertEqual(app.staticTexts["shopping.home.memberCounts"].label, counts)
+            XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        }
+        let baseline = measure("Large")
+        reveal(home, in: app, towardTop: true)
+        try textSize.set(.accessibilityXXXL)
+        assertRetainedDestination()
         let rename = app.buttons["shopping.home.rename"]
         reveal(rename, in: app)
         XCTAssertFalse(rename.isEnabled)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         let current = app.staticTexts["Taylor · You"]
         reveal(current, in: app)
-        let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
-        reveal(longName, in: app)
+        XCTAssertEqual(current.label, "Taylor · You")
+        let enlarged = measure("accessibility XXXL")
+        XCTAssertEqual(longName.label, "Alexandra Penelope Montgomery-Wellington")
         XCTAssertGreaterThan(longName.frame.height, 44, "The full member name should wrap at accessibility text sizes.")
-        try app.performAccessibilityAudit(for: [.dynamicType])
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Home members at accessibility XXXL"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        for (role, frame) in enlarged {
+            XCTAssertGreaterThan(frame.height, baseline[role]!.height + 1, "\(role) must actually grow after the system change")
+        }
         let refresh = app.buttons["Check members again"]
         reveal(refresh, in: app)
         XCTAssertTrue(refresh.isEnabled)
         refresh.tap()
+        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in refresh.isEnabled }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        reveal(home, in: app, towardTop: true)
+        try textSize.set(.large)
+        assertRetainedDestination()
+        let returned = measure("Large restored")
+        for (role, frame) in returned {
+            XCTAssertEqual(frame.height, baseline[role]!.height, accuracy: 2, "\(role) must return to its original rendered size")
+            XCTAssertEqual(frame.width, baseline[role]!.width, accuracy: 2)
+        }
     }
 
-    private func launch(role: String, largestText: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
+    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -229,9 +337,7 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
-        if largestText {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        }
+        if systemTextSize { SystemTextSizeSettings.configure(app) }
         app.launch()
         return app
     }
@@ -267,5 +373,12 @@ final class HomeDetailsUITests: XCTestCase {
         }
         XCTAssertTrue(element.existsOrAppears(timeout: 3), file: file, line: line)
         XCTAssertTrue(element.isHittable, file: file, line: line)
+        let top = app.navigationBars.firstMatch.frame.maxY
+        let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
+        let frame = element.frame
+        XCTAssertGreaterThanOrEqual(frame.minY, top, "The complete control must be below the navigation bar", file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxY, bottom, "The complete control must be above the tab bar", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(frame.minX, app.frame.minX, file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX, file: file, line: line)
     }
 }

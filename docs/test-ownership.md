@@ -382,7 +382,7 @@ per-home serialization through native completion, cancellation, restart at each
 submission checkpoint, uncertain-result reconciliation, and explicit resend. An
 absent participant after an uncertain submission never authorizes another write.
 The submitted-before-native crash window deliberately remains uncertain here;
-SHOPPING-129 must provide explicit durable owner resolution before module release.
+SHOPPING-129 now supplies explicit durable owner resolution, covered below; native outcome verification remains in SHOPPING-30.
 `ManagedHomeMembershipTransportTests` checks the real SDK factory and secure archive
 round trip, including stable participant identity and contributor permission. It
 does not save a share or prove server acceptance.
@@ -427,10 +427,10 @@ Its isolated membership fixture never calls native removal or sends an invitatio
 
 The contract prototype models a departing contributor remaining in the roster as
 pending. It does not prove the native shared-zone purge, invitation reuse, offline
-cache erasure, or private-effect quarantine. Participant leave, access observation,
-rejoin authority, and outbox quarantine need their own implementation and coverage
-before SHOPPING-129 is complete; all real-account behavior remains gated by
-SHOPPING-30.
+cache erasure, or private-effect quarantine. The completed SHOPPING-129 local
+implementation and coverage for participant leave, access observation, rejoin
+authority and outbox quarantine are recorded below. All real-account behavior
+remains gated by SHOPPING-30.
 
 ### Private-effect quarantine core (SHOPPING-129)
 
@@ -447,9 +447,9 @@ The same suite covers rejoin without old outbox replay, newly captured work afte
 fresh grant, conflicting-share grants, and drain/detach/reopen persistence. The
 existing personal-cart tests retain ownership of reducers, native permission-policy
 simulation, private recovery, and normal two-replica ordering. These are local ledger
-proofs; native observation is covered separately below. Exact participant-zone
-leave and explicit rejoin still need integration and real-device verification
-before SHOPPING-129 can be complete.
+proofs; native observation, exact participant-zone leave and explicit rejoin
+integration are covered separately below. Real-device verification remains in
+SHOPPING-30.
 
 ### Temporary permission restrictions (SHOPPING-129)
 
@@ -498,7 +498,7 @@ publication and private-intent demand projection, including replay outside the
 selected home. Background checks do not occupy Watch snapshot loading. These are
 local code and simulator proofs, not evidence of real CloudKit delivery, permission
 propagation, device responsiveness, participant leave, or explicit rejoin. Those
-remain required by SHOPPING-129/30 and the device responsiveness protocol.
+live checks remain required by SHOPPING-30 and the device responsiveness protocol.
 
 The Watch status assertion for completed activity was synchronized with the
 existing shared message adopted in main `838c22e` (SHOPPING-146–152). It now checks
@@ -520,7 +520,8 @@ unresolved evidence, and incomplete earlier private imports do not require a pee
 to synchronize before explicit leave submission. These tests do not invoke CloudKit purge or
 prove participant leave, uncertain native outcome reconciliation, or rejoin UI.
 Submitted operations require reconciliation; they cannot automatically retransmit
-the zone purge. Native adapters, acceptance gates, and live proof remain required.
+the zone purge. Native adapters and acceptance gates are covered below; live proof
+remains required by SHOPPING-30.
 
 ### Participant join ordering (SHOPPING-129)
 
@@ -538,8 +539,8 @@ The held-callback test proves local zone operations retain their turn through
 caller cancellation and native failure, while another zone proceeds. iPhone
 invitation import/acceptance and Watch acceptance use this gate and revalidate
 their native account/store environment. This is local ordering, not a cross-device
-or server conditional-purge guarantee. Native leave still requires integration. Explicit rejoin activation is covered
-below; both paths still require real two-account proof.
+or server conditional-purge guarantee. Native leave integration and explicit rejoin
+activation are covered below; both paths still require real two-account proof.
 
 ### Explicit rejoin authority (SHOPPING-129)
 
@@ -880,3 +881,505 @@ HomeCreationTests/PersonalCartServiceTests fixture unlink diagnostics; their
 required SHOPPING-131 cleanup and original logs remain intact. The two deliberate
 invalid-store tests also emit their expected Core Data errors. No warning-free
 log or live-sharing claim is made.
+
+
+## Cross-feature lifecycle validation (SHOPPING-131)
+
+The [requirement matrix](home-sharing-validation.md) maps local behavior to its
+existing proof owners and records the separate, unresolved native checks for
+SHOPPING-30. These additions exercise integration boundaries without replacing
+cart reducers or expanding the quick acceptance selection.
+
+- `HomeAdoptionBootstrapTests.testTwoInvitationsImportAndOpenInArrivalOrderWithoutReplacingSelection`
+  and `testTwoInvitationsImportAndOpenInReverseOrderWithoutReplacingSelection`
+  own independent invitation decisions, explicit selection, late-import stability,
+  and return to the original groceries/private cart. Two SQLite stores substitute
+  CloudKit attachment; marking import ready is the substituted journal boundary.
+- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityRestoresHomeCartAndDraftButRejectsLateDiscovery`
+  owns A → temporarily unavailable → A through the real account provider,
+  presentation retirement, store detach/reopen, held stale discovery completion,
+  original cart/draft retention and rejection of captured checkout authority.
+  Its held read finishes before detach; only delivery of the value is delayed.
+- `ActiveHomeBootstrapTests.testTwoHomesRequireChoiceAndSwitchRetiresCapturedCommands`
+  now also owns checkout capture and editor lease retirement across a home switch,
+  absence of unintended history, and restoration of the original cart/draft.
+- `HomeMembershipPrivateLedgerTests.testStopSharingReopensDurableTargetsAndRequiresExplicitRetryAfterFailedSubmission`
+  owns the durable private removal capture before membership-journal submission,
+  SQLite/coordinator reconstruction, failure without passive retry, explicit retry,
+  exact accepted/pending targets and retention of later members and original data.
+- `HomeDetailsUITests.testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers`
+  owns the real confirmation binding: cancel preserves membership, then confirm
+  removes the captured accepted and pending members while owner/home/groceries
+  remain usable. The existing isolated membership fixture supplies native results;
+  the UI never sends an actual invitation or removes a CloudKit participant.
+- `PersistenceContainerTests.testPostShareChildrenStayWithEachRootAndOnlyOwnerGraphEntersAssociationJournal`
+  owns real child creation in two SQLite stores and owner-only association staging.
+  The internal role-lookup overload substitutes store classification only; production
+  forwards the controller's actual bindings. Private cart/lifecycle objects are
+  excluded. This does not prove actual CloudKit zone association or server ACLs.
+
+### SQLite fixture lifetime repair
+
+`SQLiteTestFixtureLifetime` retains every registered controller and extra context,
+resets writer/extra/view contexts, verifies empty context state, then detaches all
+persistent stores before removing any registered directory. A detach failure
+preserves directories and fails teardown. These synchronous fixtures have no owned
+background worker to drain; bootstrap fixtures separately drain their invitation
+journal before directory cleanup.
+
+`HomeCreationTests` retains all seven methods and assertions; `PersonalCartServiceTests`
+retains all 33, including separately opened stores and replica ordering. Seventeen
+extra contexts are registered. No logs or errors are suppressed. The baseline
+unlink/openDirectory diagnostics recorded under SHOPPING-128/130 remain evidence.
+
+An isolated run of these unchanged 40 methods passed with zero failures, skips or
+xcresult runtime warnings. The raw log contains no vnode, openDirectory or Core
+Data error diagnostics. Evidence: `/tmp/shopping-131-fixture-focused.xcresult`,
+`/tmp/shopping-131-fixture-focused.log` and the four-file hash manifest
+`/tmp/shopping-131-fixture-source.json`. Both validation copies and the active issue
+worktree matched that manifest during independent review. Other compiler warnings
+remain; this is not a warning-free build or suite runtime improvement claim.
+
+The final full-suite attestation and pinned CI must validate the complete committed
+candidate; this isolated selection does not validate the later matrix additions.
+Native keyboard-accessory layout diagnostics observed in earlier UI runs remain
+an investigation, not a resolved application defect or waived live acceptance.
+
+The combined affected Fast selection passed all 92 methods across six suites,
+with zero skips or xcresult runtime warnings (`/tmp/shopping-131-matrix-focused`).
+All source hashes still matched `/tmp/shopping-131-matrix-source.json`; only docs
+changed afterward. There were no vnode/openDirectory diagnostics. The 502 raw
+Core Data error lines were confined to the intentional
+`PersistenceContainerTests.testLoadFailurePreservesOriginalBytes` invalid-store
+case. A trailing unbalanced appearance-transition message is retained in the raw
+log; zero structured runtime warnings is not a clean-console claim.
+
+The first Stop sharing UI run passed (`/tmp/shopping-131-stop-ui`), but independent
+review found its initial navigation-title wait did not establish that the async
+grocery projection was ready. The corrected workflow waits for the known complete
+fixture rows before capture and the preserved set on return. The initial pass is
+intermediate evidence, not validation of that later readiness correction.
+
+The complete Fast plan passed all 569 tests (the 564-test baseline plus five new
+integration methods), with zero failures, skips or xcresult runtime warnings.
+No vnode/openDirectory diagnostics recurred. Evidence is
+`/tmp/shopping-131-complete-fast.xcresult` and `.log`; the source manifest is
+`/tmp/shopping-131-complete-source.json`. Two independent functional reviews found
+no remaining defect after the UI readiness correction. Live CloudKit assertions
+remain outside this local result.
+
+The corrected Stop sharing workflow passed with zero failures, skips or xcresult
+runtime warnings (`/tmp/shopping-131-stop-corrected-ui.xcresult` and `.log`).
+Its 44.686-second test duration is validation evidence, not a runtime improvement
+claim. The full candidate's non-documentation source still matched the frozen
+manifest after both final runs. The independent reviewer confirmed the Fast
+inventory is exactly the baseline plus five additions, with no omitted or duplicate
+methods. Remaining Fast Core Data errors belong to the two deliberate invalid-store
+tests; one raw appearance-transition message remains visible.
+
+### Full-suite stale UI expectations (SHOPPING-131)
+
+The first clean candidate, `da3ef24667867310a109389200b25d94fe1c621f`, ran
+all 662 selected methods (569 Fast and 93 UI): 660 passed, two failed, none
+skipped. The runner exited 65 and produced no full-suite attestation. Evidence:
+`/tmp/shopping-131-local-full.log` and the repository timing history under
+`.git/shopping-test-timings/da3ef24667867310a109389200b25d94fe1c621f/20260929T234512Z.zAfkKV`.
+The result retained 28 invalid-frame runtime warnings; their individual stacks
+have not been matched to the earlier keyboard-accessory investigation.
+
+Both failures reproduced unchanged on clean `main` at
+`ba09d80de520aed566a4be04560575f9e4cc5f82`
+(`/tmp/shopping-131-main-baseline-ui.xcresult` and `.log`, two failures, no skips).
+`ShoppingDeviceUITests.testCompactGroceryDensityAndSelectedStoreAlignment`
+still expected the title and quantity button to share a vertical center, contrary
+to SHOPPING-157's documented title/store baseline and quantity controls below the
+store summary. The identical 33.17-point difference occurred on both revisions.
+Its replacement assertions retain density, store eligibility, assignment, notes
+and 44-point targets, and prove separate, hittable right-column controls with
+matching vertical centers, no overlap and containment inside the row. Standard
+text size is explicit; editor dismissal is awaited before measuring geometry.
+The existing appearance tests retain large-text, padding and shared-column proof.
+
+`ShoppingLaunchTests.testLaunchShowsEmptyGroceriesAndConnectedTabs` still expected
+release 1.2.0; both revisions correctly display 1.2.2. It now verifies the complete
+visible semantic-version/source-revision format. `AppPresentationTests` retains
+independent known-value formatting and fallback assertions; the release workflow
+owns marketing-version consistency and the exact version/build/source record.
+No production layout, test-plan selection or coverage threshold changed.
+
+The first four-test correction run retained two failures and passed both modern
+appearance tests (`/tmp/shopping-131-corrected-layout-ui.xcresult`). A two-test
+diagnostic run (`/tmp/shopping-131-layout-ax-diagnostics.xcresult` and `.log`)
+confirmed that SwiftUI expands the edit button's accessibility frame across the
+row and combines the native `App Version` label with its value. The final checks
+use the containing cell and title frames for geometry, and allow that specific
+native label prefix. Neither failed run validates the final correction.
+
+The final affected selection passed all four methods with zero failures, skips
+or structured runtime warnings (`/tmp/shopping-131-final-layout-ui.xcresult`,
+`.log` and `-summary.json`). Both corrected methods and the existing standard/
+large-text and shared-dimension appearance workflows ran. Their source hashes
+still matched `/tmp/shopping-131-final-layout-source.json` after execution.
+Independent review found no remaining issue in the correction. This focused pass
+does not replace the new clean-commit full-suite attestation or pinned CI.
+
+### Pinned-runtime failures and diagnosis (SHOPPING-131)
+
+Clean candidate `13527ff7285c296e233151f2436a5946abd0e1b5` passed all 662
+methods locally (569 Fast + 93 UI, no skips). Regular pinned CI passed Fast,
+all six acceptance workflows, the unchanged coverage gate and Release SDK Build.
+That CI checkout was merge commit `b32aaa7e362b79fc7455c85d5e9601622b24752d`;
+its tree exactly equals the candidate tree. Local Full retained 28 frame warnings
+and one appearance-transition message. Subsequent independent stack inspection
+matched all 85 archived frame events in both local Full runs to the same native
+`InputAccessoryBar` signature and per-test distribution. The underlying trigger
+remains unresolved; these passes do not establish warning-free operation.
+
+[Remote Full 36656430900](https://github.com/mggarofalo/Shopping/actions/runs/36656430900)
+tested the exact clean candidate on Xcode 16.4 / iOS 18.5 (22F77). It executed the
+same 662 methods once each: 659 passed, three failed, none skipped. The complete
+failure bundle and logs remain at `/tmp/shopping-131-remote-failure-36656430900`;
+reports are at `/tmp/shopping-131-remote-36656430900`. This failed run is not
+waived by the local or regular-CI passes.
+
+The link-existing promotion workflow passed its occurrence-identity, temporary
+fields and saved purchase-rule checks, then queried Granola immediately after
+switching to Catalog, before its asynchronous projection was ready. It now waits
+boundedly for Catalog and Granola before asserting the old one-time name absent.
+The status workflow captured an empty grocery projection immediately after its
+navigation title appeared; the final snapshot contained two grocery identifiers.
+It now waits for a rendered grocery before capturing and comparing identities.
+Both workflows retain their original data assertions.
+
+The remote result also contains two Home details Dynamic Type audit issues and a
+separate Sharing status audit issue. The summary only lists the first failure
+per test. Default attachments do not identify the offending elements, so both
+audit handlers now retain element descriptions and return `false`, preserving
+audit failures. Neither fonts nor audit scope have been changed without evidence.
+
+The first local three-method correction run passed Home details and promotion,
+but failed status navigation (`/tmp/shopping-131-remote-correction-focused.xcresult`
+and `.log`, two passed, one failed, no skips). The status helper exhausted twelve
+full-screen swipes yet allowed a tap based only on existence and hittability.
+Its retained hierarchy placed the row at y=-45.7...166 with the navigation bar
+at y=62...116; the synthesized tap at y=60.17 was outside the content viewport.
+The replacement uses bounded, measured drags within the visible list and fails
+unless the whole target is visible. The workflow stops at its first failure so
+later navigation assertions cannot obscure the original cause. This failed
+measurement remains separate from validation of the replacement.
+
+The first measured-scroll check reached the status screen and completed the
+explicit check, then failed the full-visibility requirement for the saved-work
+text (`/tmp/shopping-131-status-scroll.xcresult` and `.log`). Its diagnostic bundle
+is retained; the scroll correction is not yet validated. Readable long text and
+fully visible actionable controls need distinct, evidence-backed checks.
+
+The retained screenshot shows the saved-work paragraph reached but continuing
+below the tab bar at XXXL. No exact text frame was retained in the exported
+accessibility snapshots. The failed test itself took 59.37 seconds; Xcode's
+separate simulator-diagnostic collection timed out after 600 seconds, making
+the command take 668.35 seconds. This is not measured application latency.
+The subsequent correction captures the beginning, overlapping scroll-through
+views and ending of the long paragraph, preserves its complete-copy assertions,
+and runs the unfiltered Dynamic Type audit at both endpoints. Buttons still
+require full visibility before tapping. Half-viewport drags remain bounded.
+
+The final status-only selection passed in 62.99 seconds with no failures, skips
+or structured runtime warnings (`/tmp/shopping-131-status-text-edges.xcresult`,
+`-summary.json`, `-timing.json` and `.log`). Captured test-source hashes still
+matched after execution. Beginning, intermediate and ending screenshots show the
+complete paragraph can be read by scrolling; both unfiltered Dynamic Type audits
+and return-to-groceries identity comparison passed. The preceding three-method
+run already passed the unchanged Home details and promotion corrections. These
+local results do not resolve the pinned iOS 18.5 audit failures. The temporary three-workflow CI diagnosis was subsequently authorized and
+executed; see the pinned diagnosis below. Existing release gates remained
+unchanged.
+
+### Creation selection fixture ordering (SHOPPING-131)
+
+[Regular CI 36663291160](https://github.com/mggarofalo/Shopping/actions/runs/36663291160)
+tested clean merge `761c1de485047466e38820adef1ed25a35cfd512`, whose tree equals
+`d74596620170a08366e5199e00b2546c4cf876a7`. All 569 Fast methods ran once:
+568 passed, one failed, none skipped. Coverage and Release SDK Build passed;
+acceptance UI did not run after the Fast failure. These passes do not waive the
+failed gate. Raw evidence remains at `/tmp/shopping-131-ci-failure-36663291160`;
+reports are also retained under `.git/shopping-validation-evidence/shopping-131/ci-36663291160`.
+
+The sole failure was `first.selected` in
+`ActiveHomeBootstrapTests.testExplicitCreationWorksFromEmptyImportWithoutReplacingAnotherHome`.
+Its subsequent graph-preservation and selection checks passed. This test is the
+only direct positive owner of automatic selection after `createHome`, so both
+`selected == true` assertions remain. The fixture now observes completion of the
+real startup discovery fetch through its existing injected loader before starting
+creation. The local-store fixture does not consume persistent history; its
+startup access replay can otherwise issue a competing discovery after ready state
+appears. The failure artifact does not identify the exact guard that won the
+race, so that mechanism is supported by source analysis rather than a trace.
+
+The bounded expectation establishes ordering without a sleep, creation retry,
+manual selection fallback or production change. Exact active household/list IDs
+are now asserted after both creations. The existing forced-overlap test remains
+the negative owner: a superseding discovery must leave one committed graph
+available without reporting creation failure. All six ActiveHomeBootstrap tests
+passed the focused correction with no failures, skips or structured runtime
+warnings (`/tmp/shopping-131-home-creation-order.xcresult` and associated reports).
+
+The subsequent complete local Fast run passed all 569 methods once, with no
+failures, skips or structured runtime warnings. Its identifier set exactly
+matches the failed CI inventory, and captured test-source hashes were unchanged
+during execution (`/tmp/shopping-131-creation-final-fast.xcresult`, `-summary.json`,
+`-timing.json`, `-source.json` and `.log`). This validates the fixture correction locally. Regular pinned CI 36664654855
+subsequently passed all 569 Fast methods and the six canonical acceptance
+workflows once, with no skips, plus coverage and Release SDK checks. Its clean
+merge 4a9a1b1035ec1fed51cc435ee908b47a811ecdd8 had the same tree as candidate
+82a421e. The unresolved iOS 18.5 accessibility diagnosis remained required.
+
+### Pinned Dynamic Type diagnosis (SHOPPING-131)
+
+User separately authorized the temporary three-method CI job. It leaves all
+existing release gates and Full attestation requirements unchanged and must be
+removed before integration.
+
+[Run 36718618360](https://github.com/mggarofalo/Shopping/actions/runs/36718618360)
+executed exact clean `29991722fff20e664e2b0dc3aeee4dcd8f37ca0f` on Xcode 16.4 /
+iOS 18.5 (22F77). Exactly three methods ran once, with one pass (Catalog linking),
+two failures (both sharing Dynamic Type audits), and no skips. Both audit
+attachments report no associated element. Home details remained populated;
+Sharing status was populated before the audit and blank in its failure capture
+about 5.34 seconds later. Status stopped at its first audit, so its ending audit
+and return-to-groceries proof did not execute. This timing does not identify a
+production or framework cause. Raw results and attachments remain under
+`/tmp/shopping-131-focused-36718618360`; lightweight evidence is retained under
+`.git/shopping-validation-evidence/shopping-131/focused-36718618360`.
+
+The controlled [comparison 36720689803](https://github.com/mggarofalo/Shopping/actions/runs/36720689803)
+removed only the two fixed launch-size overrides and relabeled screenshots,
+retaining every assertion and unfiltered audit. Exact clean `f27c0bc20039730f71ba493e1edf43aac85b7dc2`
+again ran the same three methods once: one passed, two failed, none skipped.
+Home details failed its expected largest-text height assertion (42.33 points
+versus greater than 44), then produced three Dynamic Type issues with no
+associated element. Status failed its first audit with the same no-element
+report and again stopped before its ending and return checks. Thus removing the
+override did not resolve either audit. This run is not XXXL coverage. Evidence
+is under `/tmp/shopping-131-focused-36720689803` and the corresponding retained
+`focused-36720689803` directory.
+
+`5ca102a6342457f7c14ef14cc5ce2949bea6c804` restores both sharing test files exactly
+to their pre-comparison source, including XXXL interaction and all audits. Its
+temporary Catalog control adds an unfiltered Dynamic Type audit only after all
+promotion preservation assertions complete. No production code changed.
+
+[Catalog control 36722724521](https://github.com/mggarofalo/Shopping/actions/runs/36722724521)
+ran all three methods once on exact clean `5ca102a`: zero passed, three failed,
+none skipped. Promotion's preservation assertions completed before its added
+audit reported partially unsupported Dynamic Type for the identifiable Costco
+caption. Sharing audits still reported unsupported Dynamic Type without an
+associated element. These differing findings do not establish a common cause
+or a framework defect. The no-override Home details screenshot shows the list
+at its top, so deep scrolling is not necessary for its audit failure. Raw
+results are at `/tmp/shopping-131-focused-36722724521`, with corresponding
+lightweight evidence under the git common-directory validation evidence.
+
+Retained screen recordings materially narrow the diagnosis. Status shows huge
+saved-work text at 28.475 seconds, smaller top-summary text at 30.228 seconds,
+then successively larger text and a blank list at 32.812 seconds. Home details
+shows huge member text at 20.000 seconds, smaller Home/member/footer content at
+21.880 seconds, then huge member text again at 22.992 seconds. Thus both views
+responded to live font-size changes during the audits, even with the launch
+override present. This does not establish every element/category's conformance
+or identify why the audit lost its associated element. Timestamped extraction
+evidence is retained under `video-diagnosis` in the validation evidence directory.
+
+`fca1a4ef5f75e4f0769b69cc157fb63d32792902` adds unfiltered top-of-screen audits at
+XXXL before the original sharing workflows, preserving all existing deep audits
+and assertions. The first audit can itself alter layout, so subsequent workflow
+results are conditioned on that audit and cannot alone establish a viewport
+cause. Status temporarily allows continuation after the added audit's recorded
+failures only; a defer restores its original stop-on-failure behavior.
+
+[Top comparison 36724830739](https://github.com/mggarofalo/Shopping/actions/runs/36724830739)
+ran exact clean `fca1a4e`: all three methods failed, none skipped. Both added
+top audits executed without findings. Home details then failed its retained
+member audit with a partially-unsupported/no-element finding. Status stopped
+before its deep audit: the initial result text was not present in either
+retained hierarchy at any element type; action rows extended below the viewport.
+The automation type-mismatch hint therefore does not establish a type change
+for that absent result. Catalog again reported the identifiable Costco caption.
+
+The next candidate adds a temporary native SwiftUI App with short semantic-font
+stack and List controls, bypassing ShoppingApp, its persistence bootstrap and
+app delegate. Promotion preservation assertions finish before three unfiltered
+calibration audits (stack top, List top and visible deep List text); its original
+isolated store is then reopened without reseeding. Any calibration issue or
+exception remains a test failure. Status now reveals its initial/finished result
+text and brings Check status back onscreen for one tap and its enabled check.
+All original exact-copy, audit and saved-identity assertions remain.
+
+Local Xcode 27 / iOS 26.5 validation of dirty `fca1a4e` plus these changes ran two
+methods once: Status passed completely; promotion failed only the added Catalog
+Costco audit. All three native audits executed and returned without findings.
+Source hashes matched before/after; an invalid-frame runtime warning remains.
+This is not clean-commit Full evidence. Raw evidence is under
+`/tmp/shopping-131-native-calibration-local*`; source manifest and timing reports
+are retained under `native-calibration-local` in the validation evidence directory.
+The independent review found no blocker for the same approved pinned diagnostic.
+
+Clean `1e51139fb34a85ff2d103adc47bf885a3c15fc04` was tested in
+[native calibration 36727897191](https://github.com/mggarofalo/Shopping/actions/runs/36727897191).
+All temporary native controls, entry-point dispatcher, diagnostic call sites,
+and the approved workflow must be removed before integration.
+
+### Catalog action timing found by regular CI (SHOPPING-131)
+
+[Regular CI 36724830475](https://github.com/mggarofalo/Shopping/actions/runs/36724830475)
+tested clean PR merge `affb0b0471cfab3aa711b88e1540a67a89852c86`, whose tree
+`364140df00ff4d63a2faa98f393a3c5f2ab80b86` equals `fca1a4e`. All 569 Fast methods
+passed and the coverage/Release SDK checks passed. Canonical acceptance ran six
+methods once: five passed; Catalog Save and add failed at the separate View
+existence assertion before its tap. This is unrelated to the temporary Catalog
+audit, whose method is not in acceptance.
+
+The recording shows Added 1 and View visible, then gone. The success toast uses
+its production three-second duration; the preceding Added 1 hierarchy query took
+5.477 seconds. This supports a transient-action expiry race, rather than a failed
+save or missing View action. Evidence, timing and two frames are retained under
+`ci-36724830475` in the git common-directory validation evidence.
+
+The focused correction dismisses the editor keyboard through its existing Done
+control and verifies disappearance before checking/enacting Save and add. It
+retains Added 1, directly taps View without a redundant existence query, and
+retains the exact editor name and both no-duplicate assertions. The real toast
+timer and unique store remain unchanged; no test-only lifetime override or retry
+was introduced. Independent review found no proof-loss issue. Local raw logs
+show the complete method passed in 23.574 seconds, with source hash unchanged;
+Finalized xcresult confirms one pass, no failures/skips, and one structured
+invalid-frame runtime warning. xcodebuild exited zero; simulator diagnostic
+collection separately timed out after 600 seconds. Raw logs and phase records
+retain that collection delay and warning. Pinned validation remains required.
+
+### Native calibration result and diagnostic removal (SHOPPING-131)
+
+[Native calibration 36727897191](https://github.com/mggarofalo/Shopping/actions/runs/36727897191)
+ran the exact three methods once, zero skips, on clean `1e51139` and pinned
+Xcode 16.4/iOS 18.5. All three methods failed. Native stack-top and List-top
+audits returned without findings. The native deep audit ran after its exact
+short-text and full-viewport containment checks; the before screenshot shows
+“Saved work remains on this device.” fully visible, the after screenshot is
+blank, and its unsupported-Dynamic-Type finding has no associated element.
+This reproduces the no-element deep-list behavior without Shopping bootstrap,
+Core Data or app delegates. It does not establish every sharing finding as a
+false positive or identify the audit's internal cause.
+
+Home details' top audit passed and its deep member audit recorded three
+no-element findings. Status passed both result-label checks, the single Check
+action and the enabled recheck, then failed the saved-work beginning audit;
+its ending audit and return identity check did not execute. This confirms the
+visibility correction without claiming the complete pinned workflow passed.
+The added Catalog audit identified Pantry in this run (earlier runs identified
+Costco); neither finding is silently treated as the same no-element issue.
+
+Independent evidence review confirmed these limits. Full raw evidence remains
+at `/tmp/shopping-131-focused-36727897191`; reports, log, audit details and native
+before/after screenshots are retained under `focused-36727897191` in the git
+common-directory validation evidence. Commit `1e51139` retains the reproducer.
+
+The temporary workflow, native app/dispatcher/project entries and calibration
+call sites, top comparison audits and Catalog audit were removed after diagnosis.
+All original sharing audits remain unfiltered. The evidence-supported Status
+visibility and Catalog keyboard/interaction corrections remain. The unresolved
+pinned deep-audit failures still block SHOPPING-131 integration; no gate or
+coverage baseline was changed and no speculative remote Full was dispatched.
+
+[Regular CI 36727897239](https://github.com/mggarofalo/Shopping/actions/runs/36727897239)
+subsequently passed all 569 Fast and the exact six acceptance methods once,
+without skips/duplicates, plus coverage, selection checks and Release SDK Build.
+Its clean tested merge `69d379f74c3b326d0f23a1d00ea4b259722ab316` has the same tree
+as diagnostic candidate `1e51139`. App line coverage was 48.37%; deterministic
+scope 96.29% passed the unchanged tolerance. The summary artifacts omit runtime
+warning fields. This validates that diagnostic candidate's regular checks, not
+the later toast fix/cleanup, and does not supersede the failed focused audit run.
+
+The cleaned-up source passed the four affected local UI methods once with zero
+failures/skips: Catalog Save and add, Home details XXXL, Status check/return XXXL,
+and linking an existing catalog item. The result bundle records two invalid-frame
+runtime warnings; xcodebuild exited zero. All six captured app/project/test hashes
+matched after execution. Reports and manifest are retained under `cleanup-local`
+in the git common-directory validation evidence; raw logs and xcresult are at
+`/tmp/shopping-131-cleanup-local*`. This dirty-source focused run is not a new
+clean-commit Full attestation and does not resolve the pinned audit blocker.
+
+### Ordinary system text-size probe (September 30)
+
+The user explicitly approved the ordinary-size diagnostic on a fresh CI simulator. It retains the same three test methods, all their original assertions, coverage baselines and Full attestation gates. A temporary native app entry point bypasses Shopping bootstrap and persistence, and exposes a plain SwiftUI List. A nonce-scoped host controller changes the actual simulator setting Large → accessibility XXXL → Large while the same native process remains alive. The test captures the viewport immediately and after settling before any scroll, then verifies the full deep text can be reached. Readbacks and cleanup verify the original setting is restored. This is additive diagnosis, not replacement production accessibility coverage.
+
+- Local run: Xcode 27.0 / iOS 26.5 (23F77), a fresh task-owned iPhone 16 Pro simulator. The three methods executed once and passed, zero skips. The native List remained populated after both changes; the same complete deep text was reachable at each size. Its frame changed from `(16, 477.667, 370, 52)` to `(16, 355, 370, 217.333)` and back. Same process PID throughout. Actual setting readbacks were Large → accessibility XXXL → Large → original Large. Final and independent cleanup verified restoration.
+- Local timing: build 54.302 seconds; test command 823.564 seconds; summed test duration 211.007 seconds. Xcode's diagnostic collector timed out after 600 seconds, retained in the raw log; xcodebuild still exited zero. One invalid-frame runtime warning remains visible. Captured source was dirty cb38992 plus the probe; all eight source hashes matched committed 3ca3244. Generated Python bytecode files in the capture were separately recorded and removed. This is not a clean Full attestation or pinned iOS 18.5 evidence.
+- First pinned attempt [36733302043](https://github.com/mggarofalo/Shopping/actions/runs/36733302043), exact clean 3ca3244: build passed in 296.509 seconds, but the controller stopped the owned test process during startup when read-only runner-container discovery exceeded its ten-second command timeout. No tests, size requests or native probe executed, and no finalized usable result bundle was produced. Controller restoration readback also timed out; the independent always-step restored and verified the original category. This attempt establishes no ordinary-resize result.
+- Startup repair 4c2bb8a retries only read-only runner-container discovery while the same owned child is alive, within eight minutes plus an in-flight lookup and the existing overall bound. No test is restarted. Four mocked cases passed: timeout then readiness; startup exhaustion; early child exit; child exit during a timed-out discovery. Independent review found no blocker. The existing probe, mutation/readback and restoration bounds are unchanged.
+- [Regular CI 36733302033](https://github.com/mggarofalo/Shopping/actions/runs/36733302033) passed 569 Fast and the exact six acceptance workflows, all once with zero failures, skips or duplicate identifiers; coverage, selection gates and Release SDK Build passed. Its clean tested merge b6bb93166fbd94bf4412ada544bc4ddb4b91c655 had tree 85fe7d180c3117404aed12d53a0da802f195ac21, identical to 3ca3244. App line coverage was 48.38%, deterministic scope 96.29%; baselines unchanged.
+
+Lightweight local evidence is retained under `.git/shopping-validation-evidence/shopping-131/native-system-resize-local/`, `focused-36733302043/`, `controller-startup-regression/` and `ci-36733302033/`. Raw local artifacts use `/tmp/shopping-131-native-system-resize-local*`. The failed pinned attempt remains retained alongside subsequent results.
+
+- Second pinned attempt [36735791055](https://github.com/mggarofalo/Shopping/actions/runs/36735791055), exact clean 4c2bb8a: startup discovery recovered from a ten-second lookup timeout and found the runner at 34.187 seconds. All three methods executed once, all failed, zero skips. Both original sharing audits reported unsupported Dynamic Type. Promotion's original assertions completed before its additive native probe failed during initial readiness. The controller applied/read back Large and restored/read back original Large; no XXXL request occurred. The native List was populated at failure (twelve visible text elements recorded). One full readiness enumeration/signature took about five seconds; the second crossed the eight-second XCTest waiter deadline, so the native probe did not reach its baseline deep-text or resize phases. This is another incomplete resize experiment, not evidence of a blank List after an ordinary size change. Build 378.792 seconds, test command 384.407 seconds (exit 65), summed test duration 274.680 seconds. Controller and independent workflow restoration passed. Raw and lightweight evidence retained under the run-specific paths.
+
+- Readiness-query repair 1a2e115 selects one actually visible native label, re-resolves its stable identifier, and requires matching frames across observations within the unchanged eight-second limit. It resets stability if the anchor disappears or leaves the viewport. Full-list captures cache only the viewport frame; they retain their full content criteria. The later exact-copy, complete visibility, growth and roundtrip checks are unchanged. The capture labeled “settled” now establishes a stable visible anchor, not simultaneous stability of every row. Independent review found no blocker.
+- First affected local one-method check on the reused task simulator failed before this helper: the controller found the previous runner container before Xcode reinstalled the runner. Nonce-matching requests were written in the replacement container, so no host readback arrived. Build 51.118 seconds (exit 0), test 92.044 seconds (exit 65), one failed method with setup/restoration-handshake issues. The actual system category remained/restored Large; raw evidence retained at `/tmp/shopping-131-native-readiness-local*`. This does not validate the helper. A fresh-simulator check uses the same unchanged source and the same disposable-simulator condition as the approved remote workflow; the reused-container limitation is not being hidden by retrying a method within a run.
+
+- Fresh local check on unchanged clean 1a2e115 passed the one affected Promotion method plus its additive native probe: 99.090 seconds, zero failures/skips, test/controller wall 125.792 seconds and exit 0. It reused the exact hashed products from the 51.118-second local build, on a newly created task-owned iPhone 16 Pro/iOS 26.5 simulator with no previous runner installation. All seven samples and all four setting handshakes were recorded. Pre-scroll visible-content counts were four at XXXL and eleven after return to Large; deep text remained fully reachable with exact copy and frame heights 52 → 217.33 → 52. Original Large was restored and independently verified; simulator shut down. This proves local wiring, not iOS 18.5 behavior. Source/product hashes and both failed reused-simulator and successful fresh-simulator runs remain retained separately.
+
+- Completed pinned ordinary-size result: [36738480617](https://github.com/mggarofalo/Shopping/actions/runs/36738480617), exact clean 1a2e115, Xcode 16.4/iOS 18.5. The three methods ran once: Promotion plus native probe passed; both original sharing methods failed their unfiltered Dynamic Type audits. No skips. The native probe completed all seven samples with no failures and all four matching setting readbacks. The pre-scroll viewport remained populated at XXXL (four visible native texts) and after return to Large (twelve). Deep text was fully reachable with exact copy and frame heights 44 → 209.33 → 44; baseline/restored frames matched. Controller and independent workflow cleanup restored original Large. Build 264.757 seconds, test command 342.131 seconds (exit 65 from the retained sharing failures), summed test duration 257.651 seconds. This demonstrates that ordinary system size changes did not reproduce the native List blanking in this pinned probe. It does not prove production home/status behavior or invalidate all app audit findings. Original sharing audit failures remain blocking until an equivalent user-behavior proof is implemented and validated.
+
+All ordinary-size workflow/controller/native-control code was removed after diagnosis. The retained product/test source returned to the cleaned cb38992 baseline; the subsequent production accessibility repair is evaluated separately.
+
+
+### Production Settings text-size coverage (September 30)
+
+The two existing home/status methods now exercise public Settings controls on the same running Shopping process. The original failing deep Dynamic Type audit calls are replaced with explicit user-behavior checks; findings are not filtered or marked expected. The original method inventory, role restrictions, exact member copy, status check, saved-work copy and Return-to-home grocery identities remain. The native calibration above explains why the proof mechanism changed, but is not itself production validation. This coverage verifies selected semantic styles and complete critical text at Large and accessibility XXXL; it does not claim every Apple audit heuristic or intermediate category is covered.
+
+| Original proof | Retained production owner |
+| --- | --- |
+| Largest-text restricted Home details and long member | Same method at actual accessibility XXXL: rename disabled, invite absent, current member and full long name, wrapping height above 44 points, single Check members and no error. |
+| Members Dynamic Type audit | Four witnesses using headline, caption, subheadline and body: full viewport containment and screenshots; each rendered height grows at XXXL and height/width returns at Large. |
+| Sharing summary and explicit Check | Same truthful summary; automatic observation copy differs from the single explicit Check result; progress ends and Check is enabled. |
+| Saved-work beginning/end audits | Exact full paragraph at each size; screenshots cover beginning through end with measured overlap and progress, stable dimensions within each phase, horizontal containment, growth and return. |
+| Return preserves saved groceries at largest text | Single visible Return action at actual XXXL; exact grocery-row ID set captured and compared at that same category. |
+
+After each Settings return, the tests check the original destination and visible top identity before scrolling. Native List may virtualize deeper content after reflow; those exact identities are verified after bounded scrolling without reopening or reseeding. Process continuity alone is not a claim that every view-model object or offscreen row survived.
+
+A DEBUG-only opt-in observer publishes actual UIKit category, a process UUID, nonce, sequence and main-thread monotonic observation time to an atomic JSON file beside the supplied isolated UUID fixture. A private serial queue performs writes; it neither creates a shared container nor remaps paths. Existing key-window, scene-activation and category-change notifications trigger observations. The reader requires the original process, matching nonce, increasing sequence, foreground app and an observation captured after activation began. No SwiftUI state, environment, font, layout or accessibility property is mutated. Missing/unwritable observations fail within eight seconds. Existing fixture-path tests own writable-path retention and unwritable fallback; the UI method additionally demonstrates transport on its runtime.
+
+Settings controls use bounded readiness and a single action. Before any global mutation, teardown captures and registers restoration of the original range switch, exact slider position/displayed value and actual UIKit category. The initial local state was Large despite the accessibility range switch being on, so category-only restoration would be insufficient. The same process/category checks apply on restoration. A host kill can prevent teardown; these methods require exclusive simulator ownership.
+
+Failed transport attempts remain evidence. The first two-method window-identifier attempt failed both methods before Settings mutation (12.568 and 12.061 seconds). A one-method logging probe failed in 12.212 seconds: installation and key/scene events wrote/read the identifier, but later accessibility output was empty. A delayed readback then observed the same key UIWindow identifier cleared during startup; the responsible framework actor was not established. All window mutations and temporary logging were removed. These attempts and their source hashes are retained separately; they are not passing product evidence.
+
+The first fixture-file attempt reached real Settings changes but failed both methods (36.821 and 27.607 seconds) because an immediate hittability guard observed Settings before foreground controls were ready. Restoration passed. The replacement waits within the existing eight-second bound before the single action. Independent review also caught a freshness gap: a queued pre-activation observation could satisfy a sequence-only check. Capturing monotonic time on main before queueing and comparing it with activation start closes that gap. Review also required stable paragraph dimensions and preserving Return at actual XXXL; both are included.
+
+The next two-method local run passed Home details in 98.672 seconds and failed Status in 130.311 seconds. Status measured the Home section below Actions and then tried to reveal Check by scrolling downward; Check was above. The failure occurred before any Check tap. Only that first reveal direction and its missing-element diagnostic were corrected; the successful Home details source and shared runtime/Settings helper were unchanged. Original setting restoration succeeded. This failed run remains retained at `/tmp/shopping-131-settings-ready-local*`.
+
+The corrected Status-only run then failed before opening Status: after a visible seven-tick normal range and midpoint slider adjustment, a fresh same-process UIKit observation reported XL rather than Large. The slider-position assertion passed, exposing why UIKit remains authoritative. Video showed the range change completed before the adjustment; the cause was not established. Teardown restored the original setting. Apple's [slider API](https://developer.apple.com/documentation/xcuiautomation/xcuielement/adjust%28tonormalizedsliderposition%3A%29) documents best-effort adjustment. The helper now keeps the accessibility range on for both test categories (Large at 3/11, XXXL at 1), removing repeated range changes while preserving exact original-control restoration and failing on any category mismatch. It records control and runtime observations for each phase; it never repeats an adjustment to turn a failed category assertion into a pass.
+
+Independent visual review of the passing Home details run inspected all twelve target screenshots: headline wrapping changed 1 → 2 → 1 lines, caption 1 → 3 → 1, role subheadline 1 → 3 → 1, and the full long member name 2 → 4 → 2, without clipping or ellipsis in the target captures. Category attachments shared one process UUID and recorded Large → accessibility XXXL → Large. Original/restored switch, slider position/display value and category matched. Exact numeric frames were test assertions rather than separately retained measurement attachments. This is prior-helper local iOS 26.5 evidence, not Status or pinned validation; review JSON and screenshot paths are retained under `/tmp/shopping-131-settings-details-visual-review/`.
+
+The fixed-range two-method run passed Home details in 94.456 seconds. Status passed actual-category transitions, the explicit Check, and paragraph overlap/growth/return, then failed before tapping Return: the final category transition deliberately positioned the view at the summary, but the inherited Return lookup scrolled upward although the button was below. The correction changes only that reveal direction. The successful Settings/metadata and Home details source remains unchanged for the focused Status follow-up; no failed action is retried within a run.
+
+The bounded follow-up changed only the final Return reveal direction and ran Status once on local iOS 26.5. It passed in 160.476 seconds (170.874 seconds total build/test wall time, exit zero), including the Return action and exact grocery identities at XXXL. Settings restoration completed and independent system readback returned original Large. All six captured source hashes matched after execution. Raw result, timing, metadata and source manifest are retained at `/tmp/shopping-131-bounded-status/`. This is focused local evidence, not a clean Full attestation or pinned-runtime pass. The original approved three-method diagnostic workflow is temporarily restored for one pinned-runtime check and must be removed before integration.
+
+Pinned run [36748933017](https://github.com/mggarofalo/Shopping/actions/runs/36748933017), clean `f5eb63f`, executed each of the three selected methods once: Promotion passed; both sharing methods failed at the `DISPLAY_AND_TEXT` button lookup before product text-size checks. A bounded artifact-only inspection found the identifier on a StaticText inside the visible Display & Text Size cell in both iOS 18.5 hierarchies; retained video frames confirmed that row was fully onscreen. `SystemTextSizeSettings` now retains the unique button route and additionally resolves the unique cell containing that StaticText when no matching button exists. It requires the Accessibility destination, bounded hittability, a single tap and the Display & Text Size destination. The evidence does not establish the pinned Larger Text controls. Runtime/category freshness, exact restoration, test inventory and product assertions remain unchanged.
+
+The locator-only change ran Home details once on local iOS 26.5 and passed in 94.437 seconds (104.035 seconds build/test wall time, exit zero). The exact inventory was one passed method with no failures or skips. Attachments retained Large → accessibility XXXL → Large in one process and matching original/restored switch, slider position/displayed value and category; system readback returned Large. Five captured helper/test/product source hashes remained unchanged. Evidence is at `/tmp/shopping-131-settings-locator-local.09k2Du/`, based on `f5eb63f` with the uncommitted helper change. The initial timing export encountered a transient unavailable-summary error; that report is retained alongside the successful final export. Status was not rerun, and the iOS 18.5 cell route remains unvalidated. No remote run or new Full attestation was created; the temporary diagnostic workflow still requires removal before integration.
+
+Pinned run [36754105550](https://github.com/mggarofalo/Shopping/actions/runs/36754105550), clean `389733d`, confirmed the Display & Text Size cell route and destination on iOS 18.5. Both sharing methods then failed at the `LARGER_TEXT` button lookup before any product text-size checks (Home details 43.485 seconds; Status 37.253 seconds); Promotion passed in 97.612 seconds. All three selected methods ran once, with no skips. Both retained hierarchies place `LARGER_TEXT` on StaticText inside a visible Larger Text cell. The test phase exited 65 after 791.121 seconds. Routine [CI 36754105464](https://github.com/mggarofalo/Shopping/actions/runs/36754105464) passed Build & Test and Release SDK Build on the same candidate. Durable failed-run logs, timing and hierarchies are under `.git/shopping-validation-evidence/shopping-131/focused-36754105550/`; the raw result bundle is at `/tmp/shopping-131-focused-36754105550-inspection/FocusedResults.xcresult`.
+
+The navigation helper was first refactored to accept identifier/source/destination while retaining the existing Display & Text Size behavior, then reused for Larger Text. Both rows now share the unique button-or-containing-cell lookup, bounded hittability, single tap and destination verification. One local iOS 26.5 Home details check passed in 102.703 seconds (118.180 seconds build/test wall time, exit zero), with exactly one passing method and no skips. Attachments confirmed same-process Large → accessibility XXXL → Large and exact original switch/slider/category restoration; system readback returned Large and five captured source hashes remained unchanged. Evidence is at `/tmp/shopping-131-settings-navigation-local.feIrrJ/`, based on `389733d` with the uncommitted helper change. Status and the pinned Larger Text route remain unvalidated on this change. No additional hosted run or Full attestation was created. Temporary-workflow cleanup was deferred after the new pinned failure and remains required before final exact-SHA validation and integration.
+
+Approved pinned follow-up [36758816146](https://github.com/mggarofalo/Shopping/actions/runs/36758816146), clean `4a7c376`, passed both cell navigation steps and reached the Larger Text destination. Both sharing methods failed at the outer `LARGER_DYNAMIC_TYPE_SWITCH` uniqueness check before global Settings mutation or product size checks (Home details 36.803 seconds; Status 17.711 seconds). The short-circuit guard did not evaluate the nested switch or slider. Promotion passed in 59.009 seconds; all three methods ran once with no skips. The test phase exited 65 after 578.024 seconds. Routine [CI 36758816228](https://github.com/mggarofalo/Shopping/actions/runs/36758816228) passed Build & Test and Release SDK Build. This failed result retains recordings and synthesized events, but no Larger Text hierarchy attachment; the exact range/slider element shapes remain unknown. Failed-run logs and timing are retained under `.git/shopping-validation-evidence/shopping-131/focused-36758816146/`; raw results are at `/tmp/shopping-131-focused-36758816146-inspection/FocusedResults.xcresult`.
+
+The paused follow-up first centralizes range and slider queries, then collects both controls' reachable counts and values before the verdict and always attaches the full Settings hierarchy. A missing or ambiguous parent is reported without resolving a child against it; the other control is still observed. The existing unique outer switch, unique nested actuator, unique slider cell, unique slider and original-value requirements remain strict. Capture and verdict precede teardown registration and the first global size mutation. This diagnostic change typechecks against the iOS 17 simulator target but has not run in a UI test or on iOS 18.5. No further hosted run or Full attestation was created. A task-local compiler-backed source audit in `.git/shopping-validation-evidence/shopping-131/` accounts for one Settings owner, two callers, five identifiers and all resolved UI references; it also rejects a helper changed since its reviewed fingerprint. Source completeness does not establish Apple's runtime hierarchy. Temporary-workflow removal and final exact-SHA local/remote Full validation remain pending.
+
+The bounded complete capture on pinned [36763446056](https://github.com/mggarofalo/Shopping/actions/runs/36763446056), clean `d709999`, retained both Larger Text hierarchies before Settings mutation. Both sharing methods failed; Promotion passed; all three ran once without skips. The range identifier is on StaticText inside a Cell containing one Switch, and the single Slider/Cell has no expected identifier. Routine [CI 36763446164](https://github.com/mggarofalo/Shopping/actions/runs/36763446164) passed both required jobs.
+
+The subsequent [offline Settings contract review](shopping-131-settings-contract.md) maps every lookup, value read, size change and restoration operation to retained evidence and explicitly marks runtime gaps. The local repair first separates control resolution, then supports both evidenced shapes with strict uniqueness and one shared mutation/restoration path. It typechecks and has complete task-local source accounting; it has not run in UI automation. No tests, CI, push or new Full attestation were performed for this repair. Work stops at the reviewable patch and evidence table.
+
+The authorized runtime follow-up at clean `927a698` passed both affected methods locally on iOS 26.5 with exact original Settings restoration, then failed pinned [36770676048](https://github.com/mggarofalo/Shopping/actions/runs/36770676048). All repaired locators resolved; Large was established in both retained processes and Status also established XXXL. Subsequent native Slider adjustments stopped at 73% instead of 100% (Home details) and 64% instead of 27% (Status). Home details restoration failed; Status restored the state captured after that failure. Promotion passed; all three methods ran once, no skips. Routine [CI 36770676040](https://github.com/mggarofalo/Shopping/actions/runs/36770676040) passed. The [contract review follow-up](shopping-131-settings-contract.md#authorized-runtime-follow-up) records the action and restoration evidence. These failures block integration; no additional diagnostic run, Full attestation, merge or TestFlight upload followed.
+
+The user subsequently deferred this iOS 18.5 automation regression to SHOPPING-160 and authorized TestFlight validation build SHOPPING-161 from passing iOS 26.5 / Xcode 27 evidence. The temporary diagnosis workflow is removed. This validation-build exception claims no new Full attestation or iOS 27 runtime proof; assertions, plan inventory, coverage baselines and hosted preflight remain intact. SHOPPING-131 and SHOPPING-30 remain open. See the contract review disposition above.

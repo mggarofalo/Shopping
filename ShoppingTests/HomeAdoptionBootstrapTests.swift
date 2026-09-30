@@ -72,6 +72,12 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             }
             bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
             await bootstrap.runLoadingTransition()
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while bootstrap.invitations?.isProcessing == true, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(bootstrap.invitations?.isProcessing == true,
+                "Invitation journal work must drain before its fixture directory is removed")
         }
     }
 
@@ -197,6 +203,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let provider: ShopperSessionProvider
         let original: HomeGraphIdentity?
         let invited: HomeGraphIdentity
+        let secondInvited: HomeGraphIdentity?
         let entryID: UUID
         let unrelatedEntryID: UUID?
         let originalNeedID: UUID?
@@ -205,7 +212,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
     /// These are two plain SQLite stores. The participant-store lookup and native
     /// rejoin verification boundary are substituted; no CloudKit result is proven.
     private func importedInvitation(originalHome: Bool = true, ready: Bool = true,
-                                    unrelatedInvitation: Bool = false) async throws -> ImportedInvitationFixture {
+                                    unrelatedInvitation: Bool = false, secondImportedHome: Bool = false) async throws -> ImportedInvitationFixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let privateURL = directory.appendingPathComponent("Private.sqlite")
@@ -241,6 +248,12 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let invitedStore = try PersistenceController(storeURL: participantURL)
         _ = try NeedService(persistence: invitedStore).createHousehold(name: "Invited home")
         let invited = try XCTUnwrap(HomeDiscoveryService(persistence: invitedStore).discover().homes.first?.graph)
+        var secondInvited: HomeGraphIdentity?
+        if secondImportedHome {
+            let second = try NeedService(persistence: invitedStore).createHousehold(name: "Second invited home")
+            secondInvited = try XCTUnwrap(HomeDiscoveryService(persistence: invitedStore).discover().homes
+                .first { $0.graph.householdID == second.householdID }?.graph)
+        }
         for store in invitedStore.container.persistentStoreCoordinator.persistentStores {
             try invitedStore.container.persistentStoreCoordinator.remove(store)
         }
@@ -256,14 +269,18 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
                 sharedStoreIdentifier: invited.storeIdentifier), graph: invited)
         }
         var unrelatedID: UUID?
-        if unrelatedInvitation {
+        if unrelatedInvitation || secondImportedHome {
             unrelatedID = try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: session.containerIdentifier,
                 environment: session.environment, share: HomeShareIdentity(recordName: "other-share", zoneName: "zone", zoneOwnerName: "owner")),
                 metadataArchive: Data([2])).id
+            if let secondInvited, let unrelatedID {
+                try inbox.finishAcceptance(inbox.beginAcceptance(id: unrelatedID,
+                    sharedStoreIdentifier: secondInvited.storeIdentifier))
+            }
         }
         return ImportedInvitationFixture(directory: directory, privateURL: privateURL,
             participantURL: participantURL, inboxURL: inboxURL, defaults: defaults, provider: provider,
-            original: original, invited: invited, entryID: entry.id,
+            original: original, invited: invited, secondInvited: secondInvited, entryID: entry.id,
             unrelatedEntryID: unrelatedID, originalNeedID: needID)
     }
 
@@ -287,7 +304,12 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             makeAccountProvider: { _ in accountProvider ?? fixture.provider }, accountStoreDirectory: { fixture.directory },
             participantStoreForHomeChoice: { persistence in
                 persistence.container.persistentStoreCoordinator.persistentStores.first { $0.url == participantURL }
-            }, invitationShareIdentity: { _, _, _ in detectedShare },
+            }, invitationShareIdentity: { _, _, graph in
+                if graph == fixture.secondInvited {
+                    return HomeShareIdentity(recordName: "other-share", zoneName: "zone", zoneOwnerName: "owner")
+                }
+                return detectedShare
+            },
             makeHomeRejoinVerifier: { _ in LocalRejoinVerifier(refreshMembership: verifyMembership) },
             discoverHomes: discoverHomes,
             activateAccountStore: { source, _, _, importing in
@@ -589,6 +611,87 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             guard case HomeInvitationInbox.Error.invalidState = error else { return XCTFail("Unexpected error: \(error)") }
         }
         XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
+    }
+
+    func testTwoInvitationsImportAndOpenInArrivalOrderWithoutReplacingSelection() async throws {
+        try await assertTwoInvitationChoices(reversed: false)
+    }
+
+    func testTwoInvitationsImportAndOpenInReverseOrderWithoutReplacingSelection() async throws {
+        try await assertTwoInvitationChoices(reversed: true)
+    }
+
+    private func assertTwoInvitationChoices(reversed: Bool) async throws {
+        // Both accepted entries start loading. Completing import is the substituted
+        // CloudKit boundary; journal publication and every Open use production code.
+        let fixture = try await importedInvitation(ready: false, secondImportedHome: true)
+        var observedWorker: HomeInvitationWorker?
+        let bootstrap = try await openImportedFixture(fixture, observeInvitationWorker: { observedWorker = $0 })
+        let worker = try XCTUnwrap(observedWorker)
+        let controller = try XCTUnwrap(bootstrap.invitations)
+        let original = try XCTUnwrap(fixture.original)
+        let second = (try XCTUnwrap(fixture.unrelatedEntryID), try XCTUnwrap(fixture.secondInvited))
+        let ordered = reversed ? [second, (fixture.entryID, fixture.invited)] : [(fixture.entryID, fixture.invited), second]
+        XCTAssertNil(bootstrap.homeCoordinator.activeScope)
+        XCTAssertEqual(controller.allEntries.filter { $0.state == .loading }.count, 2)
+        try await completeImport(ordered[0], worker: worker, controller: controller)
+        try await bootstrap.refreshHomes()
+        XCTAssertNil(bootstrap.homeCoordinator.activeScope, "Ready import still requires an explicit home decision")
+        XCTAssertFalse(try XCTUnwrap(controller.allEntries.first { $0.id == ordered[0].0 }).activationResolved)
+        try await bootstrap.selectHome(original)
+        let before = try await waitForReady(bootstrap)
+        let originalEntries = try XCTUnwrap(before.personalCartService).entries(
+            householdID: original.householdID, listID: original.listID)
+        XCTAssertEqual(originalEntries.map(\.needID), [try XCTUnwrap(fixture.originalNeedID)])
+
+        try await bootstrap.activateInvitedHome(entryID: ordered[0].0, graph: ordered[0].1)
+        let firstOpen = try await waitForReady(bootstrap)
+        XCTAssertEqual(firstOpen.homeScope?.graph, ordered[0].1)
+        XCTAssertFalse(before.presentation.isActive)
+        XCTAssertTrue(try XCTUnwrap(controller.allEntries.first { $0.id == ordered[0].0 }).activationResolved)
+        XCTAssertFalse(try XCTUnwrap(controller.allEntries.first { $0.id == ordered[1].0 }).activationResolved)
+
+        try await completeImport(ordered[1], worker: worker, controller: controller)
+        try await bootstrap.refreshHomes()
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, ordered[0].1,
+            "The later import must not replace the explicitly opened home")
+        let afterLaterImport = try await waitForReady(bootstrap)
+        XCTAssertEqual(afterLaterImport.presentation.id, firstOpen.presentation.id)
+        XCTAssertFalse(try XCTUnwrap(controller.allEntries.first { $0.id == ordered[1].0 }).activationResolved)
+        try await bootstrap.activateInvitedHome(entryID: ordered[1].0, graph: ordered[1].1)
+        let secondOpen = try await waitForReady(bootstrap)
+        XCTAssertEqual(secondOpen.homeScope?.graph, ordered[1].1)
+        XCTAssertFalse(firstOpen.presentation.isActive)
+        XCTAssertTrue(controller.allEntries.allSatisfy(\.activationResolved))
+        XCTAssertEqual(Set(bootstrap.homeCoordinator.homes.map(\.graph)), [original, fixture.invited, second.1])
+        for graph in [fixture.invited, second.1] {
+            XCTAssertTrue(try XCTUnwrap(secondOpen.personalCartService).entries(
+                householdID: graph.householdID, listID: graph.listID).isEmpty)
+        }
+        try await bootstrap.selectHome(original)
+        let returned = try await waitForReady(bootstrap)
+        let cart = try XCTUnwrap(returned.personalCartService)
+        XCTAssertEqual(returned.homeScope?.graph, original)
+        XCTAssertEqual(try cart.entries(householdID: original.householdID, listID: original.listID), originalEntries)
+        XCTAssertEqual(try cart.outstandingNeedIDs(householdID: original.householdID, listID: original.listID),
+            [try XCTUnwrap(fixture.originalNeedID)])
+    }
+
+    private func completeImport(_ choice: (UUID, HomeGraphIdentity), worker: HomeInvitationWorker,
+                                controller: HomeInvitationController) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            worker.perform({ inbox in
+                try inbox.markReady(inbox.beginImportResolution(id: choice.0,
+                    sharedStoreIdentifier: choice.1.storeIdentifier), graph: choice.1)
+            }, completion: { result in continuation.resume(with: result.map { _ in () }) })
+        }
+        controller.checkAgain()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while controller.allEntries.first(where: { $0.id == choice.0 })?.state != .ready(choice.1),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(controller.allEntries.first { $0.id == choice.0 }?.state, .ready(choice.1))
     }
 
     func testNotNowKeepsOriginalScopeAndPrivateCartAndResolvesOnlyChosenInvitation() async throws {

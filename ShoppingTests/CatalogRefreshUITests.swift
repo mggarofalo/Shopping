@@ -62,14 +62,14 @@ final class CatalogRefreshUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [typedName], timeout: 3), .completed)
         XCTAssertEqual(name.value as? String, "Oat milk")
+        app.buttons["shopping.catalog.keyboardDone"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         let saveAndAdd = app.buttons["shopping.catalog.saveAndAddToList"]
         XCTAssertTrue(saveAndAdd.isEnabled)
         saveAndAdd.tap()
 
         XCTAssertTrue(app.staticTexts["Added 1."].existsOrAppears(timeout: 3))
-        let view = app.buttons["shopping.catalog.viewNeed"]
-        XCTAssertTrue(view.exists)
-        view.tap()
+        app.buttons["shopping.catalog.viewNeed"].tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Oat milk")
         app.buttons["shopping.grocery.cancel"].tap()
