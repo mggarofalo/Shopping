@@ -14,7 +14,8 @@ final class HomeSharingStatusUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
-        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        // Temporary iOS 18.5 diagnosis: retain every assertion and audit,
+        // but leave the initial text size to the system instead of a launch override.
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let groceries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
@@ -31,7 +32,7 @@ final class HomeSharingStatusUITests: XCTestCase {
         XCTAssertTrue(summary.existsOrAppears(timeout: 5))
         XCTAssertFalse(summary.label.contains("up to date"))
         let overview = XCTAttachment(screenshot: app.screenshot())
-        overview.name = "Sharing status overview at accessibility XXXL"
+        overview.name = "Sharing status overview without size override (diagnostic)"
         overview.lifetime = .keepAlways
         add(overview)
         let check = app.buttons["shopping.sharing.check"]
@@ -52,10 +53,10 @@ final class HomeSharingStatusUITests: XCTestCase {
         reveal(savedWork, in: app, visibility: .textBeginning)
         XCTAssertTrue(savedWork.label.contains("Completed saves are stored on this device."))
         XCTAssertTrue(savedWork.label.contains("do not measure CloudKit delivery"))
-        capture("Saved work beginning at accessibility XXXL", app: app)
+        capture("Saved work beginning without size override (diagnostic)", app: app)
         try auditDynamicType(in: app, phase: "Saved work beginning")
         reveal(savedWork, in: app, visibility: .textEnd)
-        capture("Saved work ending at accessibility XXXL", app: app)
+        capture("Saved work ending without size override (diagnostic)", app: app)
         try auditDynamicType(in: app, phase: "Saved work ending")
         let returnHome = app.buttons["shopping.sharing.returnHome"]
         reveal(returnHome, in: app, towardTop: true)
