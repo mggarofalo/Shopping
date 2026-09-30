@@ -45,3 +45,20 @@ The offline hierarchy map independently parses both captured 18.5 trees and acco
 - No tests, simulator launches, CI runs, pushes or integration were performed for this repair.
 - Stop here with the patch and this table reviewable. Any future runtime validation needs a separately agreed bound; a new failure remains blocking and does not automatically authorize a follow-up run.
 - Temporary diagnostic workflow removal and exact-SHA local/remote Full validation remain required before integration. SHOPPING-30 live proof remains open; Beka's installed TestFlight build establishes access only. SHOPPING-159 PR #56 remains open/unmerged.
+
+## Authorized runtime follow-up
+
+Clean `927a698` passed both methods locally on iOS 26.5 (Home details 100.707 seconds, Status 162.273 seconds; build/test wall 286.879 seconds), including retained-process category transitions and exact original-state restoration. Both ran once without skips.
+
+Pinned [36770676048](https://github.com/mggarofalo/Shopping/actions/runs/36770676048) then executed all three selected methods once. Both sharing methods resolved the repaired range/slider queries and established actual Large. Status also established actual accessibility XXXL. Promotion passed. This supplies initial query/value/action evidence missing from the offline table, but does not validate the complete workflows.
+
+Home details requested position 1.0 from 27%; the Slider remained at 73% during the position wait. Its teardown also failed to restore the original normal-range position 0.5 / 50% / Large. Status began with the resulting switch 0 / position 0.6666666865348816 / 67% / XL, then established Large and XXXL. Its following request for Large at 3/11 remained at 64%, causing the position wait to fail. Status restored its own captured original state exactly; this does not repair the preceding method's failed restoration. These are blocked native Slider actions, not missing locators. No assertion was weakened and no action was retried.
+
+Home details failed in 89.425 seconds, Status in 70.256 seconds; Promotion passed in 65.780 seconds. Test phase wall 595.758 seconds, exit 65. Routine [CI 36770676040](https://github.com/mggarofalo/Shopping/actions/runs/36770676040) passed both required jobs. Failed action/restoration evidence is retained under `.git/shopping-validation-evidence/shopping-131/focused-36770676048/`; raw results are at `/tmp/shopping-131-focused-36770676048-inspection/FocusedResults.xcresult`. The pass condition for merge and the authorized Michael/Beka TestFlight validation build was not met. No Full, merge, upload or additional diagnostic run followed.
+
+
+## Validation-build disposition (September 30)
+
+Michael explicitly deferred the iOS 18.5 native Settings action/restoration regression to [SHOPPING-160](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/issues/a787ae1e-6a25-4fa4-acfa-3bc9ddcecc44) and authorized [SHOPPING-161](https://plane.wallingford.me/dev/projects/b25c0cea-908f-4021-948f-434274ce2998/issues/346a658f-1c67-4506-9a19-67529765101d): TestFlight 1.3.0 (20) for Michael and Beka's SHOPPING-30 proof, based on the passing iOS 26.5 / Xcode 27 evidence at `927a698`. iOS 27 itself has not been tested. The temporary diagnosis workflow is removed before integration.
+
+This is a narrow exception for the validation build: no new Full attestation or hosted Full pass is claimed. The failed pinned results remain evidence, and all assertions, test-plan selections, coverage baselines and hosted exact-SHA preflight remain unchanged. SHOPPING-131 remains open for outstanding validation; SHOPPING-30 remains open for actual invitations, server permissions, private-cart isolation and two-phone convergence. This build is not a general sharing release. SHOPPING-159 PR #56 remains open/unmerged.
