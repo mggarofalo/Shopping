@@ -19,6 +19,28 @@ final class SystemTextSizeSettings {
         let process: String
         let category: String
     }
+    private struct Controls {
+        let rangeValueElement: XCUIElement
+        let rangeSwitch: XCUIElement
+        let slider: XCUIElement
+
+        var rangeValue: String? { Self.readRangeValue(from: rangeValueElement) }
+
+        static func readRangeValue(from element: XCUIElement?) -> String? {
+            // XCUIElement.value has a variable raw type. Accept only the two
+            // observed switch states, represented as text or a number.
+            switch element?.value {
+            case let value as String where value == "0" || value == "1": return value
+            case let value as NSNumber where value == 0: return "0"
+            case let value as NSNumber where value == 1: return "1"
+            default: return nil
+            }
+        }
+
+        var description: String {
+            "switch=\(rangeValue ?? "missing") slider=\(slider.normalizedSliderPosition) value=\(slider.value as? String ?? "missing")"
+        }
+    }
     private enum Failure: Error { case missingControls, metadata, timeout, appStopped }
     private unowned let test: XCTestCase
     private let app: XCUIApplication
@@ -26,11 +48,6 @@ final class SystemTextSizeSettings {
     private let nonce: String
     private let fileURL: URL
     private let original: Metadata
-    private var toggleMatches: XCUIElementQuery { settings.switches.matching(identifier: "LARGER_DYNAMIC_TYPE_SWITCH") }
-    private var sliderCells: XCUIElementQuery { settings.cells.matching(identifier: "DYNAMIC_TYPE_SLIDER") }
-    private var toggle: XCUIElement { toggleMatches.element }
-    private var switchControl: XCUIElement { toggle.switches.element(boundBy: 0) }
-    private var slider: XCUIElement { sliderCells.element.sliders.element(boundBy: 0) }
 
     static func configure(_ app: XCUIApplication) {
         app.launchEnvironment["SHOPPING_UI_TEST_RUNTIME_METADATA"] = UUID().uuidString
@@ -67,33 +84,20 @@ final class SystemTextSizeSettings {
             try openSettingsRow(identifier: "DISPLAY_AND_TEXT", source: "Accessibility", destination: "Display & Text Size")
             try openSettingsRow(identifier: "LARGER_TEXT", source: "Display & Text Size", destination: "Larger Text")
         }
-        // Observe both controls before the verdict: a missing range switch
-        // must not prevent the same run from diagnosing the slider's shape.
-        let navigationReady = settings.navigationBars["Larger Text"].existsOrAppears(timeout: 5)
-        let toggleCount = toggleMatches.count
-        let switchCount = toggleCount == 1 ? toggle.switches.count : nil
-        let sliderCellCount = sliderCells.count
-        let sliderCount = sliderCellCount == 1 ? sliderCells.element.sliders.count : nil
-        let toggleValue = toggleCount == 1 ? toggle.value as? String : nil
-        let sliderValue = sliderCount == 1 ? slider.value as? String : nil
-        attach("Larger Text control inventory", text:
-            "navigationReady=\(navigationReady) toggles=\(toggleCount) nestedSwitches=\(String(describing: switchCount)) " +
-            "sliderCells=\(sliderCellCount) sliders=\(String(describing: sliderCount)) " +
-            "toggleValue=\(String(describing: toggleValue)) sliderValue=\(String(describing: sliderValue))\n" +
-            settings.debugDescription)
-        guard navigationReady, toggleCount == 1, switchCount == 1,
-              sliderCellCount == 1, sliderCount == 1,
-              let originalToggle = toggleValue, let originalValue = sliderValue
-        else { XCTFail("Larger Text must expose one switch and slider"); throw Failure.missingControls }
-        let originalPosition = slider.normalizedSliderPosition
-        attach("Original Settings text size", text: "switch=\(originalToggle) slider=\(originalPosition) value=\(originalValue) category=\(original.category)")
+        let controls = try readControls(captureInventory: true)
+        guard let originalToggle = controls.rangeValue, let originalValue = controls.slider.value as? String else {
+            throw Failure.missingControls
+        }
+        let originalPosition = controls.slider.normalizedSliderPosition
+        attach("Original Settings text size", text: controls.description + " category=\(original.category)")
         // Registered before either global Settings control is changed.
         test.addTeardownBlock { [self] in
             do {
                 settings.activate()
                 try setControls(toggleValue: originalToggle, position: originalPosition)
-                try wait("Restore the exact original displayed slider value") { self.slider.value as? String == originalValue }
-                let restoredControls = "switch=\(toggle.value as? String ?? "missing") slider=\(slider.normalizedSliderPosition) value=\(slider.value as? String ?? "missing")"
+                let restored = try readControls()
+                try wait("Restore the exact original displayed slider value") { restored.slider.value as? String == originalValue }
+                let restoredControls = restored.description
                 let observed = try activateRetainedApp(category: original.category)
                 attach("Restored Settings text size", text: restoredControls + "\n" + String(decoding: try JSONEncoder().encode(observed), as: UTF8.self))
             } catch {
@@ -101,6 +105,77 @@ final class SystemTextSizeSettings {
             }
         }
         try set(.large)
+    }
+
+    private func readControls(captureInventory: Bool = false) throws -> Controls {
+        var snapshot = controlSnapshot()
+        do {
+            if snapshot.controls == nil {
+                try wait("Larger Text must expose one range switch and slider with readable values") {
+                    snapshot = self.controlSnapshot()
+                    return snapshot.controls != nil
+                }
+            }
+        } catch {
+            attach("Larger Text control inventory", text: snapshot.details + "\n" + settings.debugDescription)
+            throw error
+        }
+        if captureInventory {
+            attach("Larger Text control inventory", text: snapshot.details + "\n" + settings.debugDescription)
+        }
+        guard let controls = snapshot.controls else { throw Failure.missingControls }
+        return controls
+    }
+
+    private func controlSnapshot() -> (controls: Controls?, details: String) {
+        // Observe both routes and both controls before deciding readiness.
+        // iOS 26.5 identifies the outer Switch; iOS 18.5 identifies StaticText
+        // in the containing Cell. Both expose one nested Switch actuator.
+        let navigationCount = settings.navigationBars.matching(identifier: "Larger Text").count
+        let navigationReady = navigationCount == 1
+        let identifiedRanges = settings.switches.matching(identifier: "LARGER_DYNAMIC_TYPE_SWITCH")
+        let rangeCells = settings.cells.containing(.staticText, identifier: "LARGER_DYNAMIC_TYPE_SWITCH")
+        let identifiedRangeCount = identifiedRanges.count
+        let rangeCellCount = rangeCells.count
+        let rangeContainer: XCUIElement?
+        if identifiedRangeCount == 1 {
+            rangeContainer = identifiedRanges.element
+        } else if identifiedRangeCount == 0 && rangeCellCount == 1 {
+            rangeContainer = rangeCells.element
+        } else {
+            rangeContainer = nil
+        }
+        let rangeSwitchCount = rangeContainer.map { $0.switches.count }
+        let rangeSwitch = rangeSwitchCount == 1 ? rangeContainer?.switches.element : nil
+        // Preserve the proven iOS 26.5 value owner; the iOS 18.5 actuator
+        // itself exposes the 0/1 value in both retained hierarchies.
+        let rangeValueElement = identifiedRangeCount == 1 ? rangeContainer : rangeSwitch
+        let rangeValue = Controls.readRangeValue(from: rangeValueElement)
+
+        let sliderCells = settings.cells.matching(identifier: "DYNAMIC_TYPE_SLIDER")
+        let sliderCellCount = sliderCells.count
+        let identifiedSliderCount = sliderCellCount == 1 ? sliderCells.element.sliders.count : nil
+        let pageSliders = settings.sliders
+        let pageSliderCount = pageSliders.count
+        let slider: XCUIElement?
+        if sliderCellCount == 1 && identifiedSliderCount == 1 {
+            slider = sliderCells.element.sliders.element
+        } else if sliderCellCount == 0 && pageSliderCount == 1 {
+            // The iOS 18.5 slider has no identifier. This route is valid only
+            // on the proven Larger Text page with exactly one slider.
+            slider = pageSliders.element
+        } else {
+            slider = nil
+        }
+        let sliderValue = slider?.value as? String
+        let details = "navigationReady=\(navigationReady) navigationBars=\(navigationCount) identifiedRanges=\(identifiedRangeCount) " +
+            "rangeCells=\(rangeCellCount) rangeSwitches=\(String(describing: rangeSwitchCount)) " +
+            "sliderCells=\(sliderCellCount) identifiedSliders=\(String(describing: identifiedSliderCount)) " +
+            "pageSliders=\(pageSliderCount) rangeValue=\(String(describing: rangeValue)) sliderValue=\(String(describing: sliderValue))"
+        guard navigationReady, let rangeValueElement, let rangeSwitch, let slider,
+              rangeValue == "0" || rangeValue == "1", sliderValue != nil
+        else { return (nil, details) }
+        return (Controls(rangeValueElement: rangeValueElement, rangeSwitch: rangeSwitch, slider: slider), details)
     }
 
     private func openSettingsRow(identifier: String, source: String, destination: String) throws {
@@ -130,20 +205,25 @@ final class SystemTextSizeSettings {
         // twelve system sizes; XXXL is the final accessibility size. The slider
         // API is best effort, so actual UIKit observations remain authoritative.
         try setControls(toggleValue: "1", position: size == .large ? CGFloat(3) / 11 : 1)
-        let controls = "switch=\(toggle.value as? String ?? "missing") slider=\(slider.normalizedSliderPosition) value=\(slider.value as? String ?? "missing")"
-        attach("Settings controls for \(size)", text: controls)
+        let controls = try readControls()
+        attach("Settings controls for \(size)", text: controls.description)
         let observed = try activateRetainedApp(category: size.category)
         attach("System text size \(size)", text: String(decoding: try JSONEncoder().encode(observed), as: UTF8.self))
     }
 
     private func setControls(toggleValue: String, position: CGFloat) throws {
+        let controls = try readControls()
         try wait("Larger Text controls must be reachable after Settings activation") {
-            self.switchControl.exists && self.switchControl.isHittable && self.slider.exists && self.slider.isHittable
+            controls.rangeSwitch.exists && controls.rangeSwitch.isHittable && controls.slider.exists && controls.slider.isHittable
         }
-        if toggle.value as? String != toggleValue { switchControl.tap() }
-        try wait("Settings range switch") { self.toggle.value as? String == toggleValue }
-        slider.adjust(toNormalizedSliderPosition: position)
-        try wait("Settings text size slider") { abs(self.slider.normalizedSliderPosition - position) <= 0.001 }
+        if controls.rangeValue != toggleValue { controls.rangeSwitch.tap() }
+        try wait("Settings range switch") { controls.rangeValue == toggleValue }
+        // Changing the range may rebuild the slider. Re-resolve its unique
+        // query and bounded readiness before the one adjustment.
+        let adjusted = try readControls()
+        try wait("Settings slider must be hittable after the range change") { adjusted.slider.isHittable }
+        adjusted.slider.adjust(toNormalizedSliderPosition: position)
+        try wait("Settings text size slider") { abs(adjusted.slider.normalizedSliderPosition - position) <= 0.001 }
     }
 
     private func activateRetainedApp(category: String) throws -> Metadata {
