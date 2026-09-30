@@ -257,9 +257,7 @@ final class HomeDetailsUITests: XCTestCase {
     }
 
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
-        // Temporary iOS 18.5 diagnosis: isolate the launch-size override.
-        // Keep the large-text assertion and unfiltered audit; this is not XXXL proof.
-        let app = launch(role: "restricted")
+        let app = launch(role: "restricted", largestText: true)
         openHomeDetails(app)
         let rename = app.buttons["shopping.home.rename"]
         reveal(rename, in: app)
@@ -279,7 +277,7 @@ final class HomeDetailsUITests: XCTestCase {
             return false
         }
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Home members without size override (diagnostic)"
+        screenshot.name = "Home members at accessibility XXXL"
         screenshot.lifetime = .keepAlways
         add(screenshot)
         let refresh = app.buttons["Check members again"]

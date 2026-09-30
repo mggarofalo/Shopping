@@ -40,7 +40,7 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Canceled tea"].exists)
     }
 
-    func testLinkExistingUsesSavedRulesWithoutOverwritingCatalog() {
+    func testLinkExistingUsesSavedRulesWithoutOverwritingCatalog() throws {
         let app = launchApp(fixture: "promotionLinkExisting")
         XCTAssertTrue(row("Breakfast cereal", in: app).existsOrAppears(timeout: 3))
         let originalID = row("Breakfast cereal", in: app).identifier
@@ -72,6 +72,17 @@ final class OneTimePromotionUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts["Granola"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.staticTexts["Breakfast cereal"].exists)
+        // Temporary diagnostic control: all promotion assertions finish before
+        // auditing another screen under the same app root and runtime.
+        screenshot("Catalog before Dynamic Type diagnostic", app: app)
+        try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
+            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
+            let attachment = XCTAttachment(string: details)
+            attachment.name = "Catalog Dynamic Type diagnostic details"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            return false
+        }
     }
 
     func testCollisionAndActiveConflictRequireExplicitDistinctChoice() {
