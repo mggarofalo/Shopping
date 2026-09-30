@@ -41,21 +41,7 @@ extension EnvironmentValues {
     }
 }
 
-// Temporary SHOPPING-131 calibration dispatcher; remove before integration.
 @main
-@MainActor
-enum ShoppingDiagnosticEntryPoint {
-    static func main() {
-        #if DEBUG
-        if NativeAuditControlApp.requestedLayout != nil {
-            NativeAuditControlApp.main()
-            return
-        }
-        #endif
-        ShoppingApp.main()
-    }
-}
-
 struct ShoppingApp: App {
     @UIApplicationDelegateAdaptor(ShoppingApplicationDelegate.self) private var applicationDelegate
     @StateObject private var bootstrap: PersistenceBootstrap
