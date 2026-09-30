@@ -14,14 +14,18 @@ final class HomeSharingStatusUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
-        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        SystemTextSizeSettings.configure(app)
         app.launch()
+        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        try textSize.set(.accessibilityXXXL)
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let groceries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
         // Navigation appears before the saved grocery projection finishes loading.
         XCTAssertTrue(groceries.element(boundBy: 0).existsOrAppears(timeout: 8))
         let savedIdentifiers = Set(groceries.allElementsBoundByIndex.map(\.identifier))
         XCTAssertFalse(savedIdentifiers.isEmpty, "The workflow must begin with saved groceries")
+        try textSize.set(.large)
+        XCTAssertTrue(app.navigationBars["Groceries"].exists)
         app.tabBars.buttons["Settings"].tap()
         let status = app.buttons["shopping.settings.sharingStatus"]
         reveal(status, in: app)
@@ -30,12 +34,33 @@ final class HomeSharingStatusUITests: XCTestCase {
         let summary = app.staticTexts["shopping.sharing.summary"]
         XCTAssertTrue(summary.existsOrAppears(timeout: 5))
         XCTAssertFalse(summary.label.contains("up to date"))
-        let overview = XCTAttachment(screenshot: app.screenshot())
-        overview.name = "Sharing status overview at accessibility XXXL"
-        overview.lifetime = .keepAlways
-        add(overview)
+        let summaryCopy = summary.label
+        reveal(summary, in: app, towardTop: true)
+        let baselineSummary = summary.frame
+        let home = app.staticTexts["shopping.sharing.section.home"]
+        reveal(home, in: app, visibility: .textBeginning)
+        let homeCopy = home.label
+        let savedWork = app.staticTexts["shopping.sharing.section.savedWork"]
+        reveal(savedWork, in: app, visibility: .textBeginning)
+        let savedCopy = savedWork.label
+        XCTAssertTrue(savedCopy.contains("Completed saves are stored on this device."))
+        XCTAssertTrue(savedCopy.contains("do not measure CloudKit delivery"))
+        let baselineSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "Large", app: app)
+        reveal(summary, in: app, towardTop: true)
+        try textSize.set(.accessibilityXXXL)
+        // Check the retained destination and visible top content before scrolling.
+        // Deep List rows may be virtualized by the size change.
+        XCTAssertTrue(app.navigationBars["Sharing status"].exists)
+        XCTAssertTrue(summary.exists)
+        XCTAssertEqual(summary.label, summaryCopy)
+        reveal(summary, in: app, towardTop: true)
+        XCTAssertGreaterThan(summary.frame.height, baselineSummary.height + 1)
+        capture("Sharing status overview at accessibility XXXL", app: app)
+        reveal(home, in: app, visibility: .textBeginning)
+        XCTAssertEqual(home.label, homeCopy)
         let check = app.buttons["shopping.sharing.check"]
-        reveal(check, in: app)
+        // The home-identity witness is below Actions, so return upward to Check.
+        reveal(check, in: app, towardTop: true)
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in check.isEnabled }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 12), .completed)
         let result = app.staticTexts["shopping.sharing.checkResult"]
@@ -57,17 +82,30 @@ final class HomeSharingStatusUITests: XCTestCase {
             "Available observations were checked. This does not confirm delivery to another device.")
         reveal(check, in: app, towardTop: true)
         XCTAssertTrue(check.isEnabled)
-        let savedWork = app.staticTexts["shopping.sharing.section.savedWork"]
-        reveal(savedWork, in: app, visibility: .textBeginning)
-        XCTAssertTrue(savedWork.label.contains("Completed saves are stored on this device."))
-        XCTAssertTrue(savedWork.label.contains("do not measure CloudKit delivery"))
-        capture("Saved work beginning at accessibility XXXL", app: app)
-        try auditDynamicType(in: app, phase: "Saved work beginning")
-        reveal(savedWork, in: app, visibility: .textEnd)
-        capture("Saved work ending at accessibility XXXL", app: app)
-        try auditDynamicType(in: app, phase: "Saved work ending")
+        let enlargedSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "accessibility XXXL", app: app)
+        XCTAssertGreaterThan(enlargedSavedWork.height, baselineSavedWork.height + 1)
+        reveal(summary, in: app, towardTop: true)
+        try textSize.set(.large)
+        XCTAssertTrue(app.navigationBars["Sharing status"].exists)
+        XCTAssertTrue(summary.exists)
+        XCTAssertEqual(summary.label, summaryCopy)
+        reveal(summary, in: app, towardTop: true)
+        XCTAssertEqual(summary.frame.height, baselineSummary.height, accuracy: 2)
+        XCTAssertEqual(summary.frame.width, baselineSummary.width, accuracy: 2)
+        reveal(home, in: app, visibility: .textBeginning)
+        XCTAssertEqual(home.label, homeCopy)
+        let returnedSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "Large restored", app: app)
+        XCTAssertEqual(returnedSavedWork.height, baselineSavedWork.height, accuracy: 2)
+        XCTAssertEqual(returnedSavedWork.width, baselineSavedWork.width, accuracy: 2)
+        // Preserve the original largest-text Return interaction and compare
+        // grocery identities at the same system category used at the start.
+        reveal(summary, in: app, towardTop: true)
+        try textSize.set(.accessibilityXXXL)
+        XCTAssertTrue(app.navigationBars["Sharing status"].exists)
+        XCTAssertTrue(summary.exists)
+        XCTAssertEqual(summary.label, summaryCopy)
         let returnHome = app.buttons["shopping.sharing.returnHome"]
-        reveal(returnHome, in: app, towardTop: true)
+        reveal(returnHome, in: app)
         returnHome.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
@@ -84,15 +122,44 @@ final class HomeSharingStatusUITests: XCTestCase {
         add(screenshot)
     }
 
-    private func auditDynamicType(in app: XCUIApplication, phase: String) throws {
-        try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
-            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
-            let attachment = XCTAttachment(string: details)
-            attachment.name = "\(phase): Dynamic Type audit details"
-            attachment.lifetime = .keepAlways
-            self.add(attachment)
-            return false
+    /// Screenshots cover the actual paragraph from its beginning to its end,
+    /// with measured overlap. A full accessibility label or height alone is not
+    /// evidence that the user can read every line.
+    private func captureParagraph(_ element: XCUIElement, expected: String, phase: String,
+                                  app: XCUIApplication) -> CGRect {
+        reveal(element, in: app, visibility: .textBeginning)
+        var covered: CGFloat = 0
+        let initial = element.frame
+        for step in 0..<24 {
+            let top = app.navigationBars.firstMatch.frame.maxY
+            let bottom = app.tabBars.firstMatch.frame.minY
+            let frame = element.frame
+            XCTAssertEqual(frame.height, initial.height, accuracy: 1, "Paragraph height must remain stable while measuring coverage")
+            XCTAssertEqual(frame.width, initial.width, accuracy: 1, "Paragraph width must remain stable while measuring coverage")
+            XCTAssertEqual(element.label, expected)
+            XCTAssertTrue(element.isHittable)
+            XCTAssertGreaterThanOrEqual(frame.minX, app.frame.minX)
+            XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX)
+            let start = max(0, top - frame.minY)
+            let end = min(frame.height, bottom - frame.minY)
+            XCTAssertGreaterThan(end, start)
+            if step == 0 { XCTAssertLessThanOrEqual(start, 1, "The first screenshot must include the paragraph beginning") }
+            else {
+                XCTAssertLessThan(start, covered - 12, "Successive screenshots must overlap readable text")
+                XCTAssertGreaterThan(end, covered + 1, "Scrolling must expose new paragraph content")
+            }
+            capture("Saved work \(phase) segment \(step + 1)", app: app)
+            covered = end
+            if frame.maxY <= bottom {
+                XCTAssertGreaterThanOrEqual(covered, frame.height - 1, "The final screenshot must include the paragraph end")
+                return initial
+            }
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: app.frame.midX, dy: top + (bottom - top) * 0.75))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: app.frame.midX, dy: top + (bottom - top) * 0.35)))
         }
+        XCTFail("Could not read the complete saved-work paragraph in \(phase)")
+        return initial
     }
 
     private enum Visibility { case entireControl, textBeginning, textEnd }
@@ -145,7 +212,7 @@ final class HomeSharingStatusUITests: XCTestCase {
             let end = origin.withOffset(CGVector(dx: app.frame.midX, dy: endY))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
-        capture("Could not reveal \(element.identifier)", app: app)
-        XCTFail("Could not reveal \(visibility) of \(element.identifier) between the navigation and tab bars", file: file, line: line)
+        capture("Could not reveal intended \(visibility)", app: app)
+        XCTFail("Could not reveal the intended \(visibility) between the navigation and tab bars", file: file, line: line)
     }
 }

@@ -257,38 +257,77 @@ final class HomeDetailsUITests: XCTestCase {
     }
 
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
-        let app = launch(role: "restricted", largestText: true)
+        continueAfterFailure = false
+        let app = launch(role: "restricted", systemTextSize: true)
+        let textSize = try SystemTextSizeSettings(test: self, app: app)
         openHomeDetails(app)
+        let home = app.staticTexts["shopping.home.name"]
+        let homeName = home.label
+        let counts = app.staticTexts["shopping.home.memberCounts"].label
+        let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
+        let witnesses: [(String, XCUIElement)] = [
+            ("headline", home),
+            ("caption", app.staticTexts["Membership checked with iCloud"]),
+            ("subheadline", app.staticTexts["Read-only access · Accepted"]),
+            ("body", longName)
+        ]
+        func measure(_ phase: String) -> [String: CGRect] {
+            var frames: [String: CGRect] = [:]
+            for (role, element) in witnesses {
+                reveal(element, in: app, towardTop: role == "headline")
+                frames[role] = element.frame
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "Home members \(phase) \(role) fully visible"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+            }
+            return frames
+        }
+        func assertRetainedDestination() {
+            // List can virtualize deep members after reflow. First establish the
+            // retained destination/home, without reopening it or scrolling.
+            XCTAssertTrue(app.navigationBars["Home details"].exists)
+            XCTAssertTrue(home.exists)
+            XCTAssertEqual(home.label, homeName)
+            XCTAssertEqual(app.staticTexts["shopping.home.memberCounts"].label, counts)
+            XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        }
+        let baseline = measure("Large")
+        reveal(home, in: app, towardTop: true)
+        try textSize.set(.accessibilityXXXL)
+        assertRetainedDestination()
         let rename = app.buttons["shopping.home.rename"]
         reveal(rename, in: app)
         XCTAssertFalse(rename.isEnabled)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         let current = app.staticTexts["Taylor · You"]
         reveal(current, in: app)
-        let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
-        reveal(longName, in: app)
+        XCTAssertEqual(current.label, "Taylor · You")
+        let enlarged = measure("accessibility XXXL")
+        XCTAssertEqual(longName.label, "Alexandra Penelope Montgomery-Wellington")
         XCTAssertGreaterThan(longName.frame.height, 44, "The full member name should wrap at accessibility text sizes.")
-        try app.performAccessibilityAudit(for: [.dynamicType]) { issue in
-            let details = "\(issue.compactDescription)\n\(issue.detailedDescription)\n\(issue.element?.debugDescription ?? "No element")"
-            let attachment = XCTAttachment(string: details)
-            attachment.name = "Home members Dynamic Type audit details"
-            attachment.lifetime = .keepAlways
-            self.add(attachment)
-            return false
+        for (role, frame) in enlarged {
+            XCTAssertGreaterThan(frame.height, baseline[role]!.height + 1, "\(role) must actually grow after the system change")
         }
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Home members at accessibility XXXL"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
         let refresh = app.buttons["Check members again"]
         reveal(refresh, in: app)
         XCTAssertTrue(refresh.isEnabled)
         refresh.tap()
+        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in refresh.isEnabled }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        reveal(home, in: app, towardTop: true)
+        try textSize.set(.large)
+        assertRetainedDestination()
+        let returned = measure("Large restored")
+        for (role, frame) in returned {
+            XCTAssertEqual(frame.height, baseline[role]!.height, accuracy: 2, "\(role) must return to its original rendered size")
+            XCTAssertEqual(frame.width, baseline[role]!.width, accuracy: 2)
+        }
     }
 
-    private func launch(role: String, largestText: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
+    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -298,9 +337,7 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
-        if largestText {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        }
+        if systemTextSize { SystemTextSizeSettings.configure(app) }
         app.launch()
         return app
     }
@@ -336,5 +373,12 @@ final class HomeDetailsUITests: XCTestCase {
         }
         XCTAssertTrue(element.existsOrAppears(timeout: 3), file: file, line: line)
         XCTAssertTrue(element.isHittable, file: file, line: line)
+        let top = app.navigationBars.firstMatch.frame.maxY
+        let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
+        let frame = element.frame
+        XCTAssertGreaterThanOrEqual(frame.minY, top, "The complete control must be below the navigation bar", file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxY, bottom, "The complete control must be above the tab bar", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(frame.minX, app.frame.minX, file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX, file: file, line: line)
     }
 }
