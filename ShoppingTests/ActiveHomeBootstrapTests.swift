@@ -241,15 +241,27 @@ final class ActiveHomeBootstrapTests: XCTestCase {
     }
 
     func testExplicitCreationWorksFromEmptyImportWithoutReplacingAnotherHome() async throws {
-        let bootstrap = try await makeBootstrap(homeCount: 0)
+        let startupDiscovery = expectation(description: "Startup access replay fetched its home discovery")
+        let bootstrap = try await makeBootstrap(homeCount: 0, discoverHomes: { service in
+            let snapshot = try await Task.detached(priority: .utility) { try service.discover() }.value
+            startupDiscovery.fulfill()
+            return snapshot
+        })
+        // Ready state precedes startup access replay. Establish its discovery
+        // request before exercising creation without a competing refresh.
+        await fulfillment(of: [startupDiscovery], timeout: 5)
         XCTAssertNil(try ready(bootstrap).householdID)
         XCTAssertTrue(bootstrap.homeCoordinator.homes.isEmpty)
         let first = try await bootstrap.createHome(name: "Our home")
         XCTAssertTrue(first.selected)
+        XCTAssertEqual(try ready(bootstrap).householdID, first.householdID)
+        XCTAssertEqual(try ready(bootstrap).listID, first.listID)
         try await bootstrap.acknowledgeHomeCreation(first)
         let previous = try ready(bootstrap)
         let second = try await bootstrap.createHome(name: "Other home")
         XCTAssertTrue(second.selected)
+        XCTAssertEqual(try ready(bootstrap).householdID, second.householdID)
+        XCTAssertEqual(try ready(bootstrap).listID, second.listID)
         XCTAssertFalse(previous.presentation.isActive)
         XCTAssertNotEqual(first.householdID, second.householdID)
         XCTAssertEqual(Set(bootstrap.homeCoordinator.homes.map(\.graph.householdID)), [first.householdID, second.householdID])

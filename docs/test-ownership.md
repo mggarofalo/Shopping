@@ -1094,3 +1094,40 @@ run already passed the unchanged Home details and promotion corrections. These
 local results do not resolve the pinned iOS 18.5 audit failures. The proposed
 temporary three-workflow CI diagnosis remains separately subject to approval;
 no workflow or release-gate policy has changed in this correction.
+
+### Creation selection fixture ordering (SHOPPING-131)
+
+[Regular CI 36663291160](https://github.com/mggarofalo/Shopping/actions/runs/36663291160)
+tested clean merge `761c1de485047466e38820adef1ed25a35cfd512`, whose tree equals
+`d74596620170a08366e5199e00b2546c4cf876a7`. All 569 Fast methods ran once:
+568 passed, one failed, none skipped. Coverage and Release SDK Build passed;
+acceptance UI did not run after the Fast failure. These passes do not waive the
+failed gate. Raw evidence remains at `/tmp/shopping-131-ci-failure-36663291160`;
+reports are also retained under `.git/shopping-validation-evidence/shopping-131/ci-36663291160`.
+
+The sole failure was `first.selected` in
+`ActiveHomeBootstrapTests.testExplicitCreationWorksFromEmptyImportWithoutReplacingAnotherHome`.
+Its subsequent graph-preservation and selection checks passed. This test is the
+only direct positive owner of automatic selection after `createHome`, so both
+`selected == true` assertions remain. The fixture now observes completion of the
+real startup discovery fetch through its existing injected loader before starting
+creation. The local-store fixture does not consume persistent history; its
+startup access replay can otherwise issue a competing discovery after ready state
+appears. The failure artifact does not identify the exact guard that won the
+race, so that mechanism is supported by source analysis rather than a trace.
+
+The bounded expectation establishes ordering without a sleep, creation retry,
+manual selection fallback or production change. Exact active household/list IDs
+are now asserted after both creations. The existing forced-overlap test remains
+the negative owner: a superseding discovery must leave one committed graph
+available without reporting creation failure. All six ActiveHomeBootstrap tests
+passed the focused correction with no failures, skips or structured runtime
+warnings (`/tmp/shopping-131-home-creation-order.xcresult` and associated reports).
+
+The subsequent complete local Fast run passed all 569 methods once, with no
+failures, skips or structured runtime warnings. Its identifier set exactly
+matches the failed CI inventory, and captured test-source hashes were unchanged
+during execution (`/tmp/shopping-131-creation-final-fast.xcresult`, `-summary.json`,
+`-timing.json`, `-source.json` and `.log`). This validates the fixture correction
+locally; a new pinned CI result and the unresolved iOS 18.5 accessibility diagnosis
+remain required.
