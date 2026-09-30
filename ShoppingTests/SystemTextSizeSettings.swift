@@ -56,18 +56,14 @@ final class SystemTextSizeSettings {
         original = try Self.readMetadata(fileURL: metadataURL, nonce: nonce)
         settings.launch()
         if !settings.navigationBars["Larger Text"].exists {
-            for identifier in ["com.apple.settings.accessibility", "DISPLAY_AND_TEXT", "LARGER_TEXT"] {
-                if identifier == "DISPLAY_AND_TEXT" {
-                    try openDisplayAndTextSize()
-                    continue
-                }
-                let button = settings.buttons[identifier]
-                guard button.existsOrAppears(timeout: 5), button.isHittable else {
-                    XCTFail("Settings control unavailable: \(identifier)")
-                    throw Failure.missingControls
-                }
-                button.tap()
+            let accessibility = settings.buttons["com.apple.settings.accessibility"]
+            guard accessibility.existsOrAppears(timeout: 5), accessibility.isHittable else {
+                XCTFail("Settings control unavailable: com.apple.settings.accessibility")
+                throw Failure.missingControls
             }
+            accessibility.tap()
+            try openSettingsRow(identifier: "DISPLAY_AND_TEXT", source: "Accessibility", destination: "Display & Text Size")
+            try openSettingsRow(identifier: "LARGER_TEXT", source: "Display & Text Size", destination: "Larger Text")
         }
         guard settings.navigationBars["Larger Text"].existsOrAppears(timeout: 5),
               settings.switches.matching(identifier: "LARGER_DYNAMIC_TYPE_SWITCH").count == 1,
@@ -92,23 +88,23 @@ final class SystemTextSizeSettings {
         try set(.large)
     }
 
-    private func openDisplayAndTextSize() throws {
-        guard settings.navigationBars["Accessibility"].existsOrAppears(timeout: 5) else {
-            XCTFail("Settings must reach Accessibility before opening Display & Text Size")
+    private func openSettingsRow(identifier: String, source: String, destination: String) throws {
+        guard settings.navigationBars[source].existsOrAppears(timeout: 5) else {
+            XCTFail("Settings must reach \(source) before opening \(destination)")
             throw Failure.missingControls
         }
-        let buttons = settings.buttons.matching(identifier: "DISPLAY_AND_TEXT")
-        // iOS 18.5 exposes this identifier on the cell's StaticText, while
-        // iOS 26.5 exposes a button. Resolve the row by identity, not its label.
-        let cells = settings.cells.containing(.staticText, identifier: "DISPLAY_AND_TEXT")
-        try wait("Settings must expose one hittable Display & Text Size control") {
+        let buttons = settings.buttons.matching(identifier: identifier)
+        // These navigation rows expose StaticText in cells on iOS 18.5 and
+        // buttons on iOS 26.5. Resolve each row by identity, not its label.
+        let cells = settings.cells.containing(.staticText, identifier: identifier)
+        try wait("Settings must expose one hittable \(identifier) control") {
             if buttons.count == 1 { return buttons.element.isHittable }
             return buttons.count == 0 && cells.count == 1 && cells.element.isHittable
         }
         let control = buttons.count == 1 ? buttons.element : cells.element
         control.tap()
-        guard settings.navigationBars["Display & Text Size"].existsOrAppears(timeout: 5) else {
-            XCTFail("Settings must reach Display & Text Size after the single navigation tap")
+        guard settings.navigationBars[destination].existsOrAppears(timeout: 5) else {
+            XCTFail("Settings must reach \(destination) after the single navigation tap")
             throw Failure.missingControls
         }
     }
