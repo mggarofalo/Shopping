@@ -1091,9 +1091,9 @@ matched after execution. Beginning, intermediate and ending screenshots show the
 complete paragraph can be read by scrolling; both unfiltered Dynamic Type audits
 and return-to-groceries identity comparison passed. The preceding three-method
 run already passed the unchanged Home details and promotion corrections. These
-local results do not resolve the pinned iOS 18.5 audit failures. The proposed
-temporary three-workflow CI diagnosis remains separately subject to approval;
-no workflow or release-gate policy has changed in this correction.
+local results do not resolve the pinned iOS 18.5 audit failures. The temporary three-workflow CI diagnosis was subsequently authorized and
+executed; see the pinned diagnosis below. Existing release gates remained
+unchanged.
 
 ### Creation selection fixture ordering (SHOPPING-131)
 
@@ -1128,6 +1128,182 @@ The subsequent complete local Fast run passed all 569 methods once, with no
 failures, skips or structured runtime warnings. Its identifier set exactly
 matches the failed CI inventory, and captured test-source hashes were unchanged
 during execution (`/tmp/shopping-131-creation-final-fast.xcresult`, `-summary.json`,
-`-timing.json`, `-source.json` and `.log`). This validates the fixture correction
-locally; a new pinned CI result and the unresolved iOS 18.5 accessibility diagnosis
-remain required.
+`-timing.json`, `-source.json` and `.log`). This validates the fixture correction locally. Regular pinned CI 36664654855
+subsequently passed all 569 Fast methods and the six canonical acceptance
+workflows once, with no skips, plus coverage and Release SDK checks. Its clean
+merge 4a9a1b1035ec1fed51cc435ee908b47a811ecdd8 had the same tree as candidate
+82a421e. The unresolved iOS 18.5 accessibility diagnosis remained required.
+
+### Pinned Dynamic Type diagnosis (SHOPPING-131)
+
+User separately authorized the temporary three-method CI job. It leaves all
+existing release gates and Full attestation requirements unchanged and must be
+removed before integration.
+
+[Run 36718618360](https://github.com/mggarofalo/Shopping/actions/runs/36718618360)
+executed exact clean `29991722fff20e664e2b0dc3aeee4dcd8f37ca0f` on Xcode 16.4 /
+iOS 18.5 (22F77). Exactly three methods ran once, with one pass (Catalog linking),
+two failures (both sharing Dynamic Type audits), and no skips. Both audit
+attachments report no associated element. Home details remained populated;
+Sharing status was populated before the audit and blank in its failure capture
+about 5.34 seconds later. Status stopped at its first audit, so its ending audit
+and return-to-groceries proof did not execute. This timing does not identify a
+production or framework cause. Raw results and attachments remain under
+`/tmp/shopping-131-focused-36718618360`; lightweight evidence is retained under
+`.git/shopping-validation-evidence/shopping-131/focused-36718618360`.
+
+The controlled [comparison 36720689803](https://github.com/mggarofalo/Shopping/actions/runs/36720689803)
+removed only the two fixed launch-size overrides and relabeled screenshots,
+retaining every assertion and unfiltered audit. Exact clean `f27c0bc20039730f71ba493e1edf43aac85b7dc2`
+again ran the same three methods once: one passed, two failed, none skipped.
+Home details failed its expected largest-text height assertion (42.33 points
+versus greater than 44), then produced three Dynamic Type issues with no
+associated element. Status failed its first audit with the same no-element
+report and again stopped before its ending and return checks. Thus removing the
+override did not resolve either audit. This run is not XXXL coverage. Evidence
+is under `/tmp/shopping-131-focused-36720689803` and the corresponding retained
+`focused-36720689803` directory.
+
+`5ca102a6342457f7c14ef14cc5ce2949bea6c804` restores both sharing test files exactly
+to their pre-comparison source, including XXXL interaction and all audits. Its
+temporary Catalog control adds an unfiltered Dynamic Type audit only after all
+promotion preservation assertions complete. No production code changed.
+
+[Catalog control 36722724521](https://github.com/mggarofalo/Shopping/actions/runs/36722724521)
+ran all three methods once on exact clean `5ca102a`: zero passed, three failed,
+none skipped. Promotion's preservation assertions completed before its added
+audit reported partially unsupported Dynamic Type for the identifiable Costco
+caption. Sharing audits still reported unsupported Dynamic Type without an
+associated element. These differing findings do not establish a common cause
+or a framework defect. The no-override Home details screenshot shows the list
+at its top, so deep scrolling is not necessary for its audit failure. Raw
+results are at `/tmp/shopping-131-focused-36722724521`, with corresponding
+lightweight evidence under the git common-directory validation evidence.
+
+Retained screen recordings materially narrow the diagnosis. Status shows huge
+saved-work text at 28.475 seconds, smaller top-summary text at 30.228 seconds,
+then successively larger text and a blank list at 32.812 seconds. Home details
+shows huge member text at 20.000 seconds, smaller Home/member/footer content at
+21.880 seconds, then huge member text again at 22.992 seconds. Thus both views
+responded to live font-size changes during the audits, even with the launch
+override present. This does not establish every element/category's conformance
+or identify why the audit lost its associated element. Timestamped extraction
+evidence is retained under `video-diagnosis` in the validation evidence directory.
+
+`fca1a4ef5f75e4f0769b69cc157fb63d32792902` adds unfiltered top-of-screen audits at
+XXXL before the original sharing workflows, preserving all existing deep audits
+and assertions. The first audit can itself alter layout, so subsequent workflow
+results are conditioned on that audit and cannot alone establish a viewport
+cause. Status temporarily allows continuation after the added audit's recorded
+failures only; a defer restores its original stop-on-failure behavior.
+
+[Top comparison 36724830739](https://github.com/mggarofalo/Shopping/actions/runs/36724830739)
+ran exact clean `fca1a4e`: all three methods failed, none skipped. Both added
+top audits executed without findings. Home details then failed its retained
+member audit with a partially-unsupported/no-element finding. Status stopped
+before its deep audit: the initial result text was not present in either
+retained hierarchy at any element type; action rows extended below the viewport.
+The automation type-mismatch hint therefore does not establish a type change
+for that absent result. Catalog again reported the identifiable Costco caption.
+
+The next candidate adds a temporary native SwiftUI App with short semantic-font
+stack and List controls, bypassing ShoppingApp, its persistence bootstrap and
+app delegate. Promotion preservation assertions finish before three unfiltered
+calibration audits (stack top, List top and visible deep List text); its original
+isolated store is then reopened without reseeding. Any calibration issue or
+exception remains a test failure. Status now reveals its initial/finished result
+text and brings Check status back onscreen for one tap and its enabled check.
+All original exact-copy, audit and saved-identity assertions remain.
+
+Local Xcode 27 / iOS 26.5 validation of dirty `fca1a4e` plus these changes ran two
+methods once: Status passed completely; promotion failed only the added Catalog
+Costco audit. All three native audits executed and returned without findings.
+Source hashes matched before/after; an invalid-frame runtime warning remains.
+This is not clean-commit Full evidence. Raw evidence is under
+`/tmp/shopping-131-native-calibration-local*`; source manifest and timing reports
+are retained under `native-calibration-local` in the validation evidence directory.
+The independent review found no blocker for the same approved pinned diagnostic.
+
+Clean `1e51139fb34a85ff2d103adc47bf885a3c15fc04` was tested in
+[native calibration 36727897191](https://github.com/mggarofalo/Shopping/actions/runs/36727897191).
+All temporary native controls, entry-point dispatcher, diagnostic call sites,
+and the approved workflow must be removed before integration.
+
+### Catalog action timing found by regular CI (SHOPPING-131)
+
+[Regular CI 36724830475](https://github.com/mggarofalo/Shopping/actions/runs/36724830475)
+tested clean PR merge `affb0b0471cfab3aa711b88e1540a67a89852c86`, whose tree
+`364140df00ff4d63a2faa98f393a3c5f2ab80b86` equals `fca1a4e`. All 569 Fast methods
+passed and the coverage/Release SDK checks passed. Canonical acceptance ran six
+methods once: five passed; Catalog Save and add failed at the separate View
+existence assertion before its tap. This is unrelated to the temporary Catalog
+audit, whose method is not in acceptance.
+
+The recording shows Added 1 and View visible, then gone. The success toast uses
+its production three-second duration; the preceding Added 1 hierarchy query took
+5.477 seconds. This supports a transient-action expiry race, rather than a failed
+save or missing View action. Evidence, timing and two frames are retained under
+`ci-36724830475` in the git common-directory validation evidence.
+
+The focused correction dismisses the editor keyboard through its existing Done
+control and verifies disappearance before checking/enacting Save and add. It
+retains Added 1, directly taps View without a redundant existence query, and
+retains the exact editor name and both no-duplicate assertions. The real toast
+timer and unique store remain unchanged; no test-only lifetime override or retry
+was introduced. Independent review found no proof-loss issue. Local raw logs
+show the complete method passed in 23.574 seconds, with source hash unchanged;
+Finalized xcresult confirms one pass, no failures/skips, and one structured
+invalid-frame runtime warning. xcodebuild exited zero; simulator diagnostic
+collection separately timed out after 600 seconds. Raw logs and phase records
+retain that collection delay and warning. Pinned validation remains required.
+
+### Native calibration result and diagnostic removal (SHOPPING-131)
+
+[Native calibration 36727897191](https://github.com/mggarofalo/Shopping/actions/runs/36727897191)
+ran the exact three methods once, zero skips, on clean `1e51139` and pinned
+Xcode 16.4/iOS 18.5. All three methods failed. Native stack-top and List-top
+audits returned without findings. The native deep audit ran after its exact
+short-text and full-viewport containment checks; the before screenshot shows
+“Saved work remains on this device.” fully visible, the after screenshot is
+blank, and its unsupported-Dynamic-Type finding has no associated element.
+This reproduces the no-element deep-list behavior without Shopping bootstrap,
+Core Data or app delegates. It does not establish every sharing finding as a
+false positive or identify the audit's internal cause.
+
+Home details' top audit passed and its deep member audit recorded three
+no-element findings. Status passed both result-label checks, the single Check
+action and the enabled recheck, then failed the saved-work beginning audit;
+its ending audit and return identity check did not execute. This confirms the
+visibility correction without claiming the complete pinned workflow passed.
+The added Catalog audit identified Pantry in this run (earlier runs identified
+Costco); neither finding is silently treated as the same no-element issue.
+
+Independent evidence review confirmed these limits. Full raw evidence remains
+at `/tmp/shopping-131-focused-36727897191`; reports, log, audit details and native
+before/after screenshots are retained under `focused-36727897191` in the git
+common-directory validation evidence. Commit `1e51139` retains the reproducer.
+
+The temporary workflow, native app/dispatcher/project entries and calibration
+call sites, top comparison audits and Catalog audit were removed after diagnosis.
+All original sharing audits remain unfiltered. The evidence-supported Status
+visibility and Catalog keyboard/interaction corrections remain. The unresolved
+pinned deep-audit failures still block SHOPPING-131 integration; no gate or
+coverage baseline was changed and no speculative remote Full was dispatched.
+
+[Regular CI 36727897239](https://github.com/mggarofalo/Shopping/actions/runs/36727897239)
+subsequently passed all 569 Fast and the exact six acceptance methods once,
+without skips/duplicates, plus coverage, selection checks and Release SDK Build.
+Its clean tested merge `69d379f74c3b326d0f23a1d00ea4b259722ab316` has the same tree
+as diagnostic candidate `1e51139`. App line coverage was 48.37%; deterministic
+scope 96.29% passed the unchanged tolerance. The summary artifacts omit runtime
+warning fields. This validates that diagnostic candidate's regular checks, not
+the later toast fix/cleanup, and does not supersede the failed focused audit run.
+
+The cleaned-up source passed the four affected local UI methods once with zero
+failures/skips: Catalog Save and add, Home details XXXL, Status check/return XXXL,
+and linking an existing catalog item. The result bundle records two invalid-frame
+runtime warnings; xcodebuild exited zero. All six captured app/project/test hashes
+matched after execution. Reports and manifest are retained under `cleanup-local`
+in the git common-directory validation evidence; raw logs and xcresult are at
+`/tmp/shopping-131-cleanup-local*`. This dirty-source focused run is not a new
+clean-commit Full attestation and does not resolve the pinned audit blocker.
