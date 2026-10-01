@@ -178,6 +178,8 @@ fi
 export API_PRIVATE_KEYS_DIR="$API_PRIVATE_KEYS_DIRECTORY"
 readonly IPA_PATH="${ipa_paths[0]}"
 
+python3 "$(dirname "${BASH_SOURCE[0]}")/validate-cloudkit-sharing.py" --ipa "$IPA_PATH"
+
 xcrun altool --validate-app \
     --file "$IPA_PATH" \
     --type ios \

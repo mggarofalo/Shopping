@@ -48,6 +48,7 @@ assert_contains "-t agg" "$UPLOAD_SCRIPT_PATH"
 assert_contains 'PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID"' "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --validate-app" "$UPLOAD_SCRIPT_PATH"
 assert_contains "xcrun altool --upload-app" "$UPLOAD_SCRIPT_PATH"
+assert_contains 'validate-cloudkit-sharing.py" --ipa "$IPA_PATH"' "$UPLOAD_SCRIPT_PATH"
 
 if grep -Fq -- "PROFILE_NAME" "$UPLOAD_SCRIPT_PATH"; then
     echo "$UPLOAD_SCRIPT_PATH must use the validated profile UUID, not a command-parsed profile name." >&2
@@ -76,5 +77,6 @@ fi
 assert_contains "BUILD_NUMBER must be a positive integer." <(printf '%s' "$invalid_build_output")
 
 python3 "$REPOSITORY_ROOT/.github/scripts/test-build-identity.py"
+python3 "$REPOSITORY_ROOT/.github/scripts/validate-cloudkit-sharing.py"
 
 echo "TestFlight workflow checks passed."

@@ -138,10 +138,19 @@ signing, the same team, `manageAppVersionAndBuildNumber=false`, and destination
 - The iPhone and embedded Watch bundles have the same intended marketing
   version and build number.
 - Both signed bundles have Production CloudKit and production push entitlements.
-- For the household-sharing release, the iPhone app's signed entitlements include
+- For the household-sharing release, **both** apps' signed entitlements include
   `com.apple.developer.icloud-extended-share-access = [InProcessOneTimeLinks]`.
-  Verify provisioning accepts it and prove a saved-share link works on the
-  supported physical devices; unsigned simulator tests are insufficient.
+  Each app's provisioning profile must grant that access. The Watch needs it
+  for Core Data's automatic share-metadata saves, even though the iPhone creates
+  invitations. SHOPPING-168 captured a locally rejected Watch private export
+  with CloudKit code 12 when the Watch lacked this entitlement.
+  Verify the exported package with
+  `python3 .github/scripts/validate-cloudkit-sharing.py --ipa /path/to/Shopping.ipa`.
+  This checks every application target/configuration in the project, then every
+  exported app and its provisioning profile. The hosted upload runs it before
+  Apple validation; the local signing fallback must run it before upload too.
+  Prove a saved-share link and Watch private-cart delivery work on the supported
+  physical devices; unsigned simulator tests are insufficient.
 - `BuildCommit.txt` in the iPhone bundle equals the clean `main` SHA.
 
 Use the same export options with destination `upload` to submit through Xcode.
