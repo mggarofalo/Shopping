@@ -92,6 +92,14 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
         lock.withLock { storedState }
     }
 
+    func observeSessionChanges(_ handler: @escaping @Sendable () -> Void) -> NSObjectProtocol {
+        notifications.addObserver(forName: .shopperSessionDidChange, object: self, queue: nil) { _ in handler() }
+    }
+
+    func removeSessionObserver(_ observer: NSObjectProtocol) {
+        notifications.removeObserver(observer)
+    }
+
     func currentSession() throws -> ShopperSession {
         try lock.withLock {
             switch storedState {
