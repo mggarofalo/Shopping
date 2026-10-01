@@ -82,10 +82,15 @@ struct PersonalCartRepository {
     }
 
     static func sharedValues<T: Codable & Equatable>(
-        _ type: T.Type, kind: String, householdID: UUID, in context: NSManagedObjectContext
+        _ type: T.Type, kind: String, householdID: UUID, id: UUID? = nil, in context: NSManagedObjectContext
     ) throws -> [UUID: T] {
         let request = NSFetchRequest<HouseholdCartRecord>(entityName: "HouseholdCartRecord")
         request.predicate = NSPredicate(format: "kind == %@ AND household.id == %@", kind, householdID as CVarArg)
+        if let id {
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                request.predicate!, NSPredicate(format: "id == %@", id as CVarArg)
+            ])
+        }
         var values: [UUID: T] = [:]
         for record in try context.fetch(request) {
             guard record.id != PersistenceModel.unsetID else { throw PersonalCartError.incompleteImport }

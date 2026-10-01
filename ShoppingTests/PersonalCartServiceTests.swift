@@ -623,6 +623,154 @@ final class PersonalCartServiceTests: XCTestCase {
         XCTAssertTrue(try f.cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
     }
 
+    private func makePresenceUpgradeFixture(rejoin: Bool = false) throws -> (Fixture, HouseholdPresenceEvent, UUID) {
+        let f = try makeFixture()
+        try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID,
+            operationID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+        let first = try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID).first)
+        if rejoin {
+            let share = HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")
+            try f.cart.blockHomeEffects(householdID: f.householdID, listID: f.listID,
+                share: share, reason: .left, operationID: UUID())
+            try f.cart.grantHomeEffects(householdID: f.householdID, listID: f.listID,
+                share: share, observedBlockIDs: f.cart.homeEffectBoundary(householdID: f.householdID, listID: f.listID),
+                operationID: UUID())
+        }
+        try f.cart.uncart(first.token, operationID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!)
+        try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID,
+            operationID: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!)
+        let current = try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID).first)
+        XCTAssertNotEqual(first.id, current.id)
+        _ = try f.cart.checkout(f.cart.prepareCheckout(tokens: [current.token]))
+        let event = try f.cart.transact(save: false) { repository in
+            try XCTUnwrap(PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                householdID: f.householdID, in: repository.context).values.first {
+                    $0.removed && $0.generation == current.id && $0.evidence.count == 4
+                })
+        }
+        return (f, event, first.id)
+    }
+
+    private func replacePresence(_ event: HouseholdPresenceEvent, in f: Fixture) throws {
+        // Import a historical immutable payload without calling the current producer.
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
+        try context.performAndWait {
+            let request = NSFetchRequest<HouseholdCartRecord>(entityName: "HouseholdCartRecord")
+            request.predicate = NSPredicate(format: "id == %@", event.id as CVarArg)
+            let record = try XCTUnwrap(context.fetch(request).first)
+            record.payload = try PersonalCartCoding.encode(event)
+            try context.save()
+        }
+    }
+
+    private func assertPresenceReplayUnchanged(_ f: Fixture) throws {
+        let before = try f.cart.transact(save: false) { repository in
+            try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                householdID: f.householdID, in: repository.context)
+        }
+        try f.cart.resumePending()
+        try f.cart.resumePending()
+        // Detach before reopening the same SQLite fixture, then observe recovery again.
+        f.persistence.writer.performAndWait { f.persistence.writer.reset() }
+        f.persistence.container.viewContext.performAndWait { f.persistence.container.viewContext.reset() }
+        for store in f.persistence.container.persistentStoreCoordinator.persistentStores {
+            try f.persistence.container.persistentStoreCoordinator.remove(store)
+        }
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
+        let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
+        try cart.resumePending()
+        let after = try cart.transact(save: false) { repository in
+            try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                householdID: f.householdID, in: repository.context)
+        }
+        XCTAssertEqual(before, after)
+        XCTAssertTrue(try cart.entries(householdID: f.householdID, listID: f.listID).isEmpty)
+        XCTAssertFalse(try XCTUnwrap(cart.history(householdID: f.householdID, listID: f.listID).first).pendingPublication)
+    }
+
+    func testLegacyPresenceGenerationSurvivesUpgradeReplayAndRelaunch() throws {
+        let (f, event, legacyGeneration) = try makePresenceUpgradeFixture()
+        let legacy = HouseholdPresenceEvent(id: event.id, shopperID: event.shopperID,
+            householdID: event.householdID, listID: event.listID, needID: event.needID,
+            quantity: event.quantity, generation: legacyGeneration, evidence: event.evidence, removed: event.removed)
+        try replacePresence(legacy, in: f)
+        try assertPresenceReplayUnchanged(f)
+    }
+
+    func testCurrentPresenceGenerationSurvivesReplayAndRelaunch() throws {
+        let (f, _, _) = try makePresenceUpgradeFixture()
+        try assertPresenceReplayUnchanged(f)
+    }
+
+    func testLegacyPresencePayloadUsesCurrentGenerationAuthorityAfterRejoin() throws {
+        let (f, event, legacyGeneration) = try makePresenceUpgradeFixture(rejoin: true)
+        try f.cart.transact(save: false) { repository in
+            XCTAssertFalse(try repository.homeEffectMayPublish(kind: .cartGeneration, subjectID: legacyGeneration,
+                householdID: f.householdID, listID: f.listID))
+            XCTAssertTrue(try repository.homeEffectMayPublish(kind: .cartGeneration, subjectID: event.generation,
+                householdID: f.householdID, listID: f.listID))
+        }
+        let legacy = HouseholdPresenceEvent(id: event.id, shopperID: event.shopperID,
+            householdID: event.householdID, listID: event.listID, needID: event.needID,
+            quantity: event.quantity, generation: legacyGeneration, evidence: event.evidence, removed: event.removed)
+        try replacePresence(legacy, in: f)
+        // republishPresence is called directly: quarantining the old generation must
+        // not masquerade as successful recovery of the currently authorized one.
+        try f.cart.republishPresence()
+        try assertPresenceReplayUnchanged(f)
+    }
+
+    func testPresenceCompatibilityRejectsEveryOtherPayloadDifference() throws {
+        let f = try makeFixture()
+        let reference = try add(f)
+        let publication = PersonalCartPresencePublication(session: try session().session, reference: reference,
+            entry: nil, generation: UUID(), evidence: reference.token.evidence)
+        let original = publication.event
+        XCTAssertEqual(try publication.retaining(nil), original)
+        XCTAssertEqual(try publication.retaining(original), original)
+        var legacyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: PersonalCartCoding.encode(original)) as? [String: Any])
+        legacyJSON["generation"] = reference.id.uuidString
+        let legacy = try PersonalCartCoding.decode(HouseholdPresenceEvent.self, JSONSerialization.data(withJSONObject: legacyJSON))
+        XCTAssertEqual(try publication.retaining(legacy), legacy)
+        XCTAssertNotEqual(publication.authorityGeneration, legacy.generation)
+        let mutations: [(String, Any)] = [
+            ("id", UUID().uuidString), ("shopperID", UUID().uuidString),
+            ("householdID", UUID().uuidString), ("listID", UUID().uuidString),
+            ("needID", UUID().uuidString), ("quantity", 2), ("generation", UUID().uuidString),
+            ("evidence", [UUID().uuidString]), ("removed", false)
+        ]
+        for (key, value) in mutations {
+            var changed = legacyJSON
+            changed[key] = value
+            let conflict = try PersonalCartCoding.decode(HouseholdPresenceEvent.self,
+                JSONSerialization.data(withJSONObject: changed))
+            XCTAssertThrowsError(try publication.retaining(conflict), "Conflicting \(key) must fail") {
+                XCTAssertEqual($0 as? PersonalCartError, .corruptRecord)
+            }
+        }
+    }
+
+    func testPresenceReplayRetainsRealConflictsAndPrivateData() throws {
+        let (f, event, _) = try makePresenceUpgradeFixture()
+        let corrupt = HouseholdPresenceEvent(id: event.id, shopperID: event.shopperID,
+            householdID: event.householdID, listID: event.listID, needID: event.needID,
+            quantity: 9, generation: event.generation, evidence: event.evidence, removed: event.removed)
+        try replacePresence(corrupt, in: f)
+        let privateBefore = try f.cart.transact(save: false) { repository in
+            try repository.privateRecords().map { ($0.id.uuidString, $0.payload) }.sorted { $0.0 < $1.0 }
+        }
+        XCTAssertThrowsError(try f.cart.resumePending()) { XCTAssertEqual($0 as? PersonalCartError, .corruptRecord) }
+        let privateAfter = try f.cart.transact(save: false) { repository in
+            try repository.privateRecords().map { ($0.id.uuidString, $0.payload) }.sorted { $0.0 < $1.0 }
+        }
+        XCTAssertEqual(privateBefore.map { $0.0 }, privateAfter.map { $0.0 })
+        XCTAssertEqual(privateBefore.map { $0.1 }, privateAfter.map { $0.1 })
+        XCTAssertEqual(try f.cart.transact(save: false) { repository in
+            try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                householdID: f.householdID, id: event.id, in: repository.context)[event.id]
+        }, corrupt)
+    }
+
     final class MutableSession: ShopperSessionProviding, @unchecked Sendable {
         var value: ShopperSession
         init(_ value: ShopperSession) { self.value = value }
