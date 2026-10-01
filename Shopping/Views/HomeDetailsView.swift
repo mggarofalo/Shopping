@@ -22,12 +22,14 @@ struct HomeDetailsView: View {
         List {
             Section {
                 Text(homeName).font(.headline).accessibilityIdentifier("shopping.home.name")
-                Button("Rename home") {
-                    name = homeName
-                    showingNameEditor = true
+                if model.snapshot?.canEditName == true {
+                    Button("Rename home") {
+                        name = homeName
+                        showingNameEditor = true
+                    }
+                    .disabled(!model.canRename)
+                    .accessibilityIdentifier("shopping.home.rename")
                 }
-                .disabled(!model.canRename)
-                .accessibilityIdentifier("shopping.home.rename")
             }
 
             if let snapshot = model.snapshot {

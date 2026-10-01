@@ -278,9 +278,8 @@ final class HomeDetailsUITests: XCTestCase {
         reveal(home, in: app, towardTop: true)
         try textSize.set(.accessibilityXXXL)
         assertRetainedDestination()
-        let rename = app.buttons["shopping.home.rename"]
-        reveal(rename, in: app)
-        XCTAssertFalse(rename.isEnabled)
+        XCTAssertFalse(app.buttons["shopping.home.rename"].exists,
+            "Read-only members should not see an action they cannot use")
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         let current = app.staticTexts["Taylor · You"]
         reveal(current, in: app)
@@ -372,7 +371,17 @@ final class HomeDetailsUITests: XCTestCase {
             let top = app.navigationBars.firstMatch.frame.maxY
             let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
             if element.exists, element.isHittable, element.frame.minY >= top, element.frame.maxY <= bottom { break }
-            if element.exists && element.frame.minY < top || (!element.exists && towardTop) { app.swipeDown() }
+            if element.exists {
+                // Page swipes can oscillate past a short witness after layout reflow.
+                // Move by its measured clipping distance, retaining full containment.
+                let frame = element.frame
+                let distance = frame.minY < top ? top - frame.minY + 16 : bottom - frame.maxY - 16
+                let limit = (bottom - top) / 3
+                let offset = max(-limit, min(limit, distance))
+                let start = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: app.frame.midX, dy: (top + bottom) / 2))
+                start.press(forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)))
+            } else if towardTop { app.swipeDown() }
             else { app.swipeUp() }
         }
         XCTAssertTrue(element.existsOrAppears(timeout: 3), file: file, line: line)

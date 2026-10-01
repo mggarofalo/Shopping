@@ -1466,6 +1466,9 @@ pass: no empty activity row, no held-work advice that cannot release publication
 one failed-check notice, and no bulk Stop sharing beside the same single-member
 removal. Interrupted invitations use one set of pending controls; an unavailable
 leave-status read retains its retry. Essential consent stays at the action.
+The visual second pass also removed Rename home for read-only members; the
+restricted text-size workflow asserts its absence while retaining identity and
+role readability. Allowed users retain temporary busy/stale disabling.
 
 This scope uses Fast and the affected simulator workflows plus routine CI, without
 a new ShoppingFull attestation. The deferred iOS 18.5 Settings slider automation
