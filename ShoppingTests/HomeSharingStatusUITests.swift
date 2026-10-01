@@ -37,6 +37,9 @@ final class HomeSharingStatusUITests: XCTestCase {
         let summaryCopy = summary.label
         reveal(summary, in: app, towardTop: true)
         let baselineSummary = summary.frame
+        XCTAssertFalse(app.buttons["shopping.sharing.returnHome"].exists)
+        XCTAssertFalse(app.staticTexts["shopping.sharing.section.account"].exists)
+        openDetails(app)
         let home = app.staticTexts["shopping.sharing.section.home"]
         reveal(home, in: app, visibility: .textBeginning)
         let homeCopy = home.label
@@ -46,6 +49,7 @@ final class HomeSharingStatusUITests: XCTestCase {
         XCTAssertTrue(savedCopy.contains("Completed saves are stored on this device."))
         XCTAssertTrue(savedCopy.contains("do not measure CloudKit delivery"))
         let baselineSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "Large", app: app)
+        closeDetails(app)
         reveal(summary, in: app, towardTop: true)
         try textSize.set(.accessibilityXXXL)
         // Check the retained destination and visible top content before scrolling.
@@ -56,16 +60,14 @@ final class HomeSharingStatusUITests: XCTestCase {
         reveal(summary, in: app, towardTop: true)
         XCTAssertGreaterThan(summary.frame.height, baselineSummary.height + 1)
         capture("Sharing status overview at accessibility XXXL", app: app)
-        reveal(home, in: app, visibility: .textBeginning)
-        XCTAssertEqual(home.label, homeCopy)
         let check = app.buttons["shopping.sharing.check"]
-        // The home-identity witness is below Actions, so return upward to Check.
-        reveal(check, in: app, towardTop: true)
+        // The overview is at its top. At XXXL the summary fills the viewport,
+        // so the action below it may not yet exist in List's accessibility tree.
+        reveal(check, in: app)
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in check.isEnabled }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 12), .completed)
         let result = app.staticTexts["shopping.sharing.checkResult"]
-        // At XXXL the result follows two tall action rows and may not yet be
-        // materialized by List. Read it, then bring the single action back onscreen.
+        // Read the result, then bring the explicit action back onscreen.
         reveal(result, in: app, visibility: .textBeginning)
         XCTAssertEqual(result.label,
             "Saved work was checked on this device. iCloud activity is shown from existing observations.")
@@ -82,37 +84,54 @@ final class HomeSharingStatusUITests: XCTestCase {
             "Available observations were checked. This does not confirm delivery to another device.")
         reveal(check, in: app, towardTop: true)
         XCTAssertTrue(check.isEnabled)
+        openDetails(app)
+        reveal(home, in: app, visibility: .textBeginning)
+        XCTAssertEqual(home.label, homeCopy)
         let enlargedSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "accessibility XXXL", app: app)
         XCTAssertGreaterThan(enlargedSavedWork.height, baselineSavedWork.height + 1)
-        reveal(summary, in: app, towardTop: true)
+        reveal(home, in: app, towardTop: true, visibility: .textBeginning)
         try textSize.set(.large)
-        XCTAssertTrue(app.navigationBars["Sharing status"].exists)
-        XCTAssertTrue(summary.exists)
-        XCTAssertEqual(summary.label, summaryCopy)
-        reveal(summary, in: app, towardTop: true)
-        XCTAssertEqual(summary.frame.height, baselineSummary.height, accuracy: 2)
-        XCTAssertEqual(summary.frame.width, baselineSummary.width, accuracy: 2)
+        XCTAssertTrue(app.navigationBars["Sharing details"].exists)
         reveal(home, in: app, visibility: .textBeginning)
         XCTAssertEqual(home.label, homeCopy)
         let returnedSavedWork = captureParagraph(savedWork, expected: savedCopy, phase: "Large restored", app: app)
         XCTAssertEqual(returnedSavedWork.height, baselineSavedWork.height, accuracy: 2)
         XCTAssertEqual(returnedSavedWork.width, baselineSavedWork.width, accuracy: 2)
-        // Preserve the original largest-text Return interaction and compare
-        // grocery identities at the same system category used at the start.
+        closeDetails(app)
+        reveal(summary, in: app, towardTop: true)
+        XCTAssertEqual(summary.label, summaryCopy)
+        XCTAssertEqual(summary.frame.height, baselineSummary.height, accuracy: 2)
+        XCTAssertEqual(summary.frame.width, baselineSummary.width, accuracy: 2)
+        // Return through the existing tab at the same system category as launch.
         reveal(summary, in: app, towardTop: true)
         try textSize.set(.accessibilityXXXL)
         XCTAssertTrue(app.navigationBars["Sharing status"].exists)
         XCTAssertTrue(summary.exists)
         XCTAssertEqual(summary.label, summaryCopy)
-        let returnHome = app.buttons["shopping.sharing.returnHome"]
-        reveal(returnHome, in: app)
-        returnHome.tap()
+        XCTAssertFalse(app.buttons["shopping.sharing.returnHome"].exists)
+        app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
         XCTAssertTrue(groceries.element(boundBy: 0).existsOrAppears(timeout: 5))
         let after = Set(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
             .allElementsBoundByIndex.map(\.identifier))
         XCTAssertEqual(after, savedIdentifiers)
+    }
+
+    private func openDetails(_ app: XCUIApplication) {
+        let details = app.buttons["shopping.sharing.details"]
+        reveal(details, in: app)
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Sharing details"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(details.waitForNonExistence(timeout: 3))
+    }
+
+    private func closeDetails(_ app: XCUIApplication) {
+        let back = app.navigationBars["Sharing details"].buttons["Sharing status"]
+        XCTAssertTrue(back.isHittable)
+        back.tap()
+        XCTAssertTrue(app.navigationBars["Sharing status"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Sharing details"].waitForNonExistence(timeout: 3))
     }
 
     private func capture(_ name: String, app: XCUIApplication) {

@@ -42,6 +42,7 @@ final class PersonalCartUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["In cart (0)"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
+        openRecovery(app)
         app.buttons["Review old cart entries"].tap()
         XCTAssertTrue(app.navigationBars["Old cart entries"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Strawberries"].exists)
@@ -76,6 +77,7 @@ final class PersonalCartUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
+        openRecovery(app)
         app.buttons["Review old cart entries"].tap()
         XCTAssertTrue(app.staticTexts["Strawberries"].waitForExistence(timeout: 3))
         app.buttons.matching(identifier: "Discard old cart status").firstMatch.tap()
@@ -89,6 +91,7 @@ final class PersonalCartUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
+        openRecovery(app)
         app.buttons["Review old cart entries"].tap()
         XCTAssertTrue(app.navigationBars["Old cart entries"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Strawberries"].exists)
@@ -303,6 +306,22 @@ final class PersonalCartUITests: XCTestCase {
         app.buttons["Homes"].tap()
         XCTAssertTrue(app.buttons["Return to iCloud homes"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts["This home is saved on this device. Your iCloud homes stay separate."].exists)
+    }
+
+    private func openRecovery(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["Review old cart entries"].exists)
+        XCTAssertFalse(app.buttons["Saved personal carts"].exists)
+        let recovery = app.buttons["shopping.settings.recovery"]
+        for _ in 0..<6 {
+            if recovery.exists && recovery.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(recovery.isHittable)
+        recovery.tap()
+        XCTAssertTrue(app.navigationBars["Recovery"].existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.buttons["My purchases"].exists, "The fixture has no personal purchases")
+        XCTAssertTrue(app.buttons["Saved personal carts"].exists)
+        XCTAssertTrue(app.buttons["Review old cart entries"].isHittable)
     }
 
     private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {

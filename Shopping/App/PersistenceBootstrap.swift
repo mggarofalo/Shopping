@@ -127,6 +127,12 @@ final class PersistenceBootstrap: ObservableObject {
         let action: () -> Void
     }
 
+    private enum AccountPresentationChange {
+        case unchanged
+        case reopen
+        case unavailable(Error)
+    }
+
     @Published private(set) var loadingTransitionID: UUID?
     @Published private(set) var cloudStatus = CloudSyncStatus()
     private let cloudMonitor = CloudSyncEventMonitor()
@@ -754,7 +760,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     deinit {
-        if let accountObserver { NotificationCenter.default.removeObserver(accountObserver) }
+        if let accountObserver { accountProvider?.removeSessionObserver(accountObserver) }
         if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
     }
@@ -910,8 +916,7 @@ final class PersistenceBootstrap: ObservableObject {
         // Concurrent read-only preparation may have installed the provider while construction ran.
         if let accountProvider { return accountProvider }
         accountProvider = provider
-        accountObserver = NotificationCenter.default.addObserver(forName: .shopperSessionDidChange,
-            object: provider, queue: nil) { [weak self] _ in
+        accountObserver = provider.observeSessionChanges { [weak self] in
             Task { @MainActor in self?.accountStateChanged() }
         }
         return provider
@@ -1093,13 +1098,25 @@ final class PersistenceBootstrap: ObservableObject {
     private func accountStateChanged() {
         objectWillChange.send()
         guard personalMode, let accountProvider, !accountLoadInProgress else { return }
+        switch accountPresentationChange(using: accountProvider) {
+        case .unchanged: break
+        case .reopen: activatePersonalCarts(importLegacy: false)
+        case .unavailable(let error): retireAndFail(error)
+        }
+    }
+
+    // Account resolution decides authority; the foreground coordinator owns
+    // presentation retirement and asynchronous store opening.
+    private func accountPresentationChange(using provider: ShopperSessionProvider) -> AccountPresentationChange {
+        // CloudKit reports account-status changes before a replacement identity
+        // is known. Retire first, then perform one coalesced verified reopen.
+        // An invalidated cached identity never authorizes that reopen.
+        if case .accountChanged = provider.state { return .reopen }
         do {
-            let session = try accountProvider.currentSession()
-            if session.accountBinding != activeAccountBinding {
-                activatePersonalCarts(importLegacy: false)
-            }
+            let session = try provider.currentSession()
+            return session.accountBinding == activeAccountBinding ? .unchanged : .reopen
         } catch {
-            retireAndFail(error)
+            return .unavailable(error)
         }
     }
 

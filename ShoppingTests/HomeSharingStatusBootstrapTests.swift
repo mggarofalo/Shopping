@@ -32,6 +32,18 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         let account: Account
     }
 
+    private final class HeldSessionNotifications: NotificationCenter, @unchecked Sendable {
+        private let lock = NSLock()
+        private var holdsSessionChanges = false
+
+        func holdSessionChanges() { lock.withLock { holdsSessionChanges = true } }
+
+        override func post(name: Notification.Name, object: Any?, userInfo: [AnyHashable: Any]? = nil) {
+            if name == .shopperSessionDidChange, lock.withLock({ holdsSessionChanges }) { return }
+            super.post(name: name, object: object, userInfo: userInfo)
+        }
+    }
+
     private func open(
         notifications: NotificationCenter = .default,
         discover: @escaping @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery = { discovery in
@@ -234,14 +246,16 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
     }
 
     func testSynchronousAccountBoundaryHidesOldObservationsBeforeQueuedUITransition() async throws {
-        // The provider's isolated notification center deliberately withholds the
-        // ordinary UI notification while preserving its real synchronous state.
-        let f = try await open(notifications: NotificationCenter(), read: { service, scope in
+        // Hold only the UI notification, after ordinary startup has completed,
+        // while preserving the provider's real synchronous authority state.
+        let notifications = HeldSessionNotifications()
+        let f = try await open(notifications: notifications, read: { service, scope in
             try Self.snapshot(service, scope, count: 321)
         })
         let oldReady = try await ready(f.bootstrap)
         await f.bootstrap.refreshSharingStatus()
         XCTAssertTrue(try savedWork(f.bootstrap).contains("321 saved checkout"))
+        notifications.holdSessionChanges()
         await f.account.change()
         await f.provider.refresh()
         let stillMounted = try await ready(f.bootstrap)
