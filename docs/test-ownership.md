@@ -787,8 +787,8 @@ counts and duplicate observations do not repeatedly interrupt VoiceOver.
 
 `HomeSharingStatusUITests.testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize`
 owns opening the native status screen, its explicit Check status interaction,
-readable saved-work meaning at accessibility XXXL, and Return to home preserving
-existing grocery identities. The initial UI run failed because a generic query
+readable saved-work meaning at accessibility XXXL through Details, and the Groceries
+tab preserving existing grocery identities. The initial UI run failed because a generic query
 matched both the native Label image and text; it now selects the unique static
 text rather than taking the first match. The failure is retained in
 `/tmp/shopping-130-status-ui.xcresult`. The existing largest-text empty/recovery
@@ -1409,3 +1409,24 @@ the injected provider fulfills its expectation before throwing. The test now
 waits boundedly for bootstrap's failed state before retaining the original
 retirement, store-detach, and retained-local-data assertions. Provider entry is
 not treated as completion.
+
+### Account-status recovery and Settings simplification (SHOPPING-163/164)
+
+`ActiveHomeBootstrapTests` owns notification-driven, single-request reopening of
+an identical verified account, mounted-presentation retirement before store detach,
+retained SQLite groceries/cart/editor draft, separate-store account switching and
+return, sign-out and network failure without invalidated-cache fallback, and a
+second notification rejecting a suspended identity response. Existing
+`ShopperSessionProviderTests` retains synchronous invalidation and late-response
+fencing. The provider owns its notification subscription boundary so injected
+centers exercise the real bootstrap observer without cross-fixture notifications.
+
+`HomeSharingStatusUITests` keeps the same Large → accessibility XXXL → Large
+geometry and full saved-work paragraph proof through a Details destination.
+Groceries uses the existing tab; the duplicate Return to home action is removed.
+`PersonalCartUITests` reaches migration claim/discard through Recovery, retains
+same-store relaunch and historical restore access, and checks that recovery tools
+are absent from root Settings. The unavailable-home retained-cart route remains
+on the waiting root. No recovery data is hidden based on an unknown count, and
+no persistence query was added to a view body. Live account events and two-phone
+sharing remain device evidence, separate from injected notification proof.
