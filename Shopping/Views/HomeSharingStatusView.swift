@@ -21,13 +21,7 @@ struct HomeSharingStatusView: View {
                         .accessibilityValue(date.formatted(date: .abbreviated, time: .shortened))
                         .accessibilityIdentifier("shopping.sharing.lastActivity")
                 }
-                Button("Check status") { Task { await bootstrap.checkSharingStatus() } }
-                    .disabled(bootstrap.isCheckingSharingStatus)
-                    .accessibilityIdentifier("shopping.sharing.check")
-                if bootstrap.isCheckingSharingStatus {
-                    ProgressView("Checking…")
-                        .accessibilityIdentifier("shopping.sharing.checking")
-                }
+                checkStatusButton
                 if let problem = bootstrap.sharingStatusCheckProblem {
                     Text(problem).foregroundStyle(.secondary)
                         .accessibilityIdentifier("shopping.sharing.checkResult")
@@ -57,9 +51,7 @@ struct HomeSharingStatusView: View {
     private func actionView(_ action: HomeSharingStatus.Action) -> some View {
         switch action {
         case .checkStatus:
-            Button("Check status") { Task { await bootstrap.checkSharingStatus() } }
-                .disabled(bootstrap.isCheckingSharingStatus)
-                .accessibilityIdentifier("shopping.sharing.check")
+            checkStatusButton
         case .openSettings:
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
@@ -78,6 +70,12 @@ struct HomeSharingStatusView: View {
                 }
                 .accessibilityIdentifier("shopping.sharing.invitation")
             }
+        }
+    }
+
+    private var checkStatusButton: some View {
+        HomeSharingCheckButton(isChecking: bootstrap.isCheckingSharingStatus) {
+            Task { await bootstrap.checkSharingStatus() }
         }
     }
 
