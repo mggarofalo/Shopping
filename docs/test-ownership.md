@@ -1383,3 +1383,29 @@ The subsequent [offline Settings contract review](shopping-131-settings-contract
 The authorized runtime follow-up at clean `927a698` passed both affected methods locally on iOS 26.5 with exact original Settings restoration, then failed pinned [36770676048](https://github.com/mggarofalo/Shopping/actions/runs/36770676048). All repaired locators resolved; Large was established in both retained processes and Status also established XXXL. Subsequent native Slider adjustments stopped at 73% instead of 100% (Home details) and 64% instead of 27% (Status). Home details restoration failed; Status restored the state captured after that failure. Promotion passed; all three methods ran once, no skips. Routine [CI 36770676040](https://github.com/mggarofalo/Shopping/actions/runs/36770676040) passed. The [contract review follow-up](shopping-131-settings-contract.md#authorized-runtime-follow-up) records the action and restoration evidence. These failures block integration; no additional diagnostic run, Full attestation, merge or TestFlight upload followed.
 
 The user subsequently deferred this iOS 18.5 automation regression to SHOPPING-160 and authorized TestFlight validation build SHOPPING-161 from passing iOS 26.5 / Xcode 27 evidence. The temporary diagnosis workflow is removed. This validation-build exception claims no new Full attestation or iOS 27 runtime proof; assertions, plan inventory, coverage baselines and hosted preflight remain intact. SHOPPING-131 and SHOPPING-30 remain open. See the contract review disposition above.
+
+
+### Immutable presence upgrade recovery (SHOPPING-162)
+
+`PersonalCartServiceTests` owns deterministic old-producer presence payloads
+across remove/re-add/checkout, unchanged replay and SQLite reopen, both the old
+and current generation rules, current-generation authority after rejoin, and
+retaining genuine conflicts without changing private records. The compatibility
+matrix changes each payload field independently; only the exact historical
+producer generation variant is accepted. Existing quarantine and permission
+suites retain authority-boundary ownership. These checks do not establish
+CloudKit delivery or two-iPhone sharing.
+
+A local-only, disconnected copy of the attached iOS 27 TestFlight device stores
+reproduced one current-rule conflict matching the exact historical variant.
+The corrected production service completed two replay passes and home discovery
+without changing the private record count or advisory presence values. The
+snapshot and temporary diagnostic test remain local evidence, outside committed
+fixtures. Physical build verification remains SHOPPING-162; two-phone proof
+remains SHOPPING-30.
+
+The broader Fast run exposed a separate activation-test completion race:
+the injected provider fulfills its expectation before throwing. The test now
+waits boundedly for bootstrap's failed state before retaining the original
+retirement, store-detach, and retained-local-data assertions. Provider entry is
+not treated as completion.

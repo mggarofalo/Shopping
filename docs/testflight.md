@@ -44,6 +44,18 @@ PersonalCartRecord, and Store record types (with the `CD_` prefix). Confirm both
 fields and indexes on future model changes; matching type names alone is not
 sufficient.
 
+Sharing also requires the built-in `cloudkit.share` record type in Production,
+even when the Core Data model is unchanged. Before a first sharing release or a
+sharing-provisioning change, verify that type separately. Core Data model-schema
+initialization does not prove that a share was created. If it is missing, create
+a private zone share in a fresh disposable Development zone using a correctly
+signed Development tool, review the resulting schema diff, deploy it, and delete
+only that disposable zone. Never initialize against a shopper's stores or reset
+an environment. On September 30, build 20's native export failed because this
+type was absent; its deployment at 8:45 PM EDT cleared that rejection and allowed
+the owner to create a Contributor invitation. The exported Production schema
+and observed device result are recorded under SHOPPING-10.
+
 ## Apple assets
 
 The workflow requires:

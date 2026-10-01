@@ -93,14 +93,18 @@ extension PersonalCartService {
                         householdID: reference.householdID, in: repository.context)
                     let demandIDs = demandEvents.values.filter { $0.needID == needID || $0.replaces.contains(needID) }.map(\.id)
                     let allEvidence = evidence.union(checkoutIDs).union(restoreIDs).union(demandIDs)
-                    let id = PersonalCartCoding.stableID("presence", repository.session.shopperID.uuidString,
-                        needID.uuidString, allEvidence.map(\.uuidString).sorted().joined(separator: ","))
-                    let event = HouseholdPresenceEvent(id: id, shopperID: repository.session.shopperID,
-                        householdID: reference.householdID, listID: reference.listID, needID: needID,
-                        quantity: entry?.quantity, generation: generation,
-                        evidence: allEvidence, removed: entry == nil)
-                    try repository.publish(event, id: id, kind: "presence", householdID: reference.householdID,
-                        listID: reference.listID, effectKind: .cartGeneration, effectID: generation)
+                    let publication = PersonalCartPresencePublication(session: repository.session,
+                        reference: reference, entry: entry, generation: generation, evidence: allEvidence)
+                    guard try repository.homeEffectMayPublish(kind: .cartGeneration,
+                        subjectID: publication.authorityGeneration, householdID: reference.householdID,
+                        listID: reference.listID) else { throw PersonalCartError.quarantined }
+                    let existing = try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self,
+                        kind: "presence", householdID: reference.householdID, id: publication.event.id,
+                        in: repository.context)[publication.event.id]
+                    let event = try publication.retaining(existing)
+                    try repository.publish(event, id: event.id, kind: "presence",
+                        householdID: reference.householdID, listID: reference.listID,
+                        effectKind: .cartGeneration, effectID: publication.authorityGeneration)
                 }
             }
         }

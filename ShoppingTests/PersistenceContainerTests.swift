@@ -700,6 +700,12 @@ extension PersistenceContainerTests {
         // Already queued presentation callbacks must be harmless even before SwiftUI unmounts it.
         NotificationCenter.default.post(name: .NSManagedObjectContextObjectsDidChange, object: context)
         await fulfillment(of: [accountRequested], timeout: 5)
+        // The injected provider fulfills before throwing. Wait for the bootstrap
+        // to consume that failure, rather than treating provider entry as completion.
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if case .failed = bootstrap.state { return true }
+            return false
+        }, object: nil)], timeout: 5)
         XCTAssertFalse(bootstrap.isPresentationMounted(ready.presentation.id))
         XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         guard case .failed = bootstrap.state else { return XCTFail("Expected isolated provider failure") }
