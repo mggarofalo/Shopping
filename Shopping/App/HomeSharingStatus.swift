@@ -8,7 +8,7 @@ struct HomeSharingStatus: Equatable {
     }
     enum Invitation: Equatable { case none, joining, loading, ready, attention }
     enum Action: String, Equatable, CaseIterable {
-        case checkStatus, openSettings, returnToHome, chooseHome, reviewInvitation
+        case checkStatus, openSettings, chooseHome, reviewInvitation
     }
     enum SectionID: String { case account, home, invitation, ownedStore, sharedStore, savedWork, ownerAssociations, leavingHomes, localChecks }
     struct Section: Equatable, Identifiable {
@@ -83,9 +83,7 @@ struct HomeSharingStatus: Equatable {
                 actions: [.checkStatus]))
         }
         self.sections = sections
-        var actions = sections.flatMap(\.actions)
-        let canOpenHome = [.availableOwner, .availableContributor, .readOnly].contains(input.home)
-        if canOpenHome && [.verified, .cached].contains(input.account) { actions.append(.returnToHome) }
+        let actions = sections.flatMap(\.actions)
         self.actions = Action.allCases.filter { actions.contains($0) }
 
         if input.account == .unavailable || input.account == .changed {

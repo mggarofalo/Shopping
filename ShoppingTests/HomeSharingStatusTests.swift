@@ -52,7 +52,7 @@ final class HomeSharingStatusTests: XCTestCase {
         XCTAssertEqual(try section(result, .ownedStore).presentation.symbol, "icloud")
         XCTAssertTrue(try section(result, .sharedStore).presentation.details.contains("Delivery is unknown"))
         XCTAssertTrue(try section(result, .savedWork).presentation.details.contains("not yet known"))
-        XCTAssertTrue(result.actions.contains(.returnToHome))
+        XCTAssertTrue(result.actions.contains(.checkStatus))
         XCTAssertFalse(result.actions.contains(.openSettings))
     }
 
@@ -83,7 +83,6 @@ final class HomeSharingStatusTests: XCTestCase {
                                  (.unresolved, "Home access not verified")] {
             let result = status(home: home, engine: engine)
             XCTAssertEqual(result.summary.title, expected)
-            XCTAssertEqual(result.actions.contains(.returnToHome), home == .readOnly)
             XCTAssertFalse(result.summary.details.contains("revoked"), "Missing or incomplete home data does not prove revocation")
         }
     }
@@ -93,13 +92,12 @@ final class HomeSharingStatusTests: XCTestCase {
         engine.record(event(.upload, failure: .network))
         let result = status(account: .cached, engine: engine)
         XCTAssertEqual(result.summary.title, "Using saved data")
-        XCTAssertTrue(result.actions.contains(.returnToHome))
+        XCTAssertTrue(result.actions.contains(.checkStatus))
         XCTAssertFalse(result.actions.contains(.openSettings))
         XCTAssertTrue(try section(result, .ownedStore).presentation.details.contains("unreachable"))
         for account in [HomeSharingStatus.Account.unavailable, .changed] {
             let unavailable = status(account: account, engine: engine)
             XCTAssertTrue(unavailable.actions.contains(.openSettings))
-            XCTAssertFalse(unavailable.actions.contains(.returnToHome))
         }
     }
 
@@ -110,14 +108,13 @@ final class HomeSharingStatusTests: XCTestCase {
                                     (.attention, "Invitation needs attention")] {
             let result = status(invitation: invitation)
             XCTAssertEqual(result.summary.title, title)
-            XCTAssertTrue(result.actions.contains(.returnToHome))
+            XCTAssertTrue(result.actions.contains(.checkStatus))
             XCTAssertTrue(result.actions.contains(.checkStatus))
             XCTAssertEqual(result.actions.contains(.reviewInvitation), invitation == .ready || invitation == .attention)
             XCTAssertTrue(try section(result, .ownedStore).presentation.details.contains("No upload or download"))
         }
         let importing = status(home: .waitingForImport)
         XCTAssertEqual(importing.summary.title, "Loading home")
-        XCTAssertFalse(importing.actions.contains(.returnToHome))
         XCTAssertTrue(importing.summary.details.contains("leave this screen"))
     }
 
@@ -176,7 +173,7 @@ final class HomeSharingStatusTests: XCTestCase {
         XCTAssertEqual(result.summary.symbol, "icloud")
         XCTAssertTrue(try section(result, .ownedStore).presentation.details.contains("may no longer be running"))
         XCTAssertTrue(result.actions.contains(.checkStatus))
-        XCTAssertTrue(result.actions.contains(.returnToHome))
+        XCTAssertTrue(result.actions.contains(.checkStatus))
     }
 
     func testDuplicateAndOlderEventsCannotChangePresentationAfterSuccess() {
@@ -205,7 +202,7 @@ final class HomeSharingStatusTests: XCTestCase {
     func testAccountWideLeaveAndAssociationFailureDoNotClaimCurrentHomeWasLeft() throws {
         let result = HomeSharingStatus(input: .init(account: .verified, home: .availableOwner,
             associationNeedsAttention: true, leavePendingCount: 2))
-        XCTAssertTrue(result.actions.contains(.returnToHome))
+        XCTAssertTrue(result.actions.contains(.checkStatus))
         XCTAssertTrue(result.actions.contains(.chooseHome))
         XCTAssertTrue(try section(result, .leavingHomes).presentation.details.contains("different home or device"))
         XCTAssertTrue(try section(result, .ownerAssociations).presentation.details.contains("unknown"))
