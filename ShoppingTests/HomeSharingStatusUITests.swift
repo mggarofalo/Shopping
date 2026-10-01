@@ -61,7 +61,9 @@ final class HomeSharingStatusUITests: XCTestCase {
         XCTAssertGreaterThan(summary.frame.height, baselineSummary.height + 1)
         capture("Sharing status overview at accessibility XXXL", app: app)
         let check = app.buttons["shopping.sharing.check"]
-        reveal(check, in: app, towardTop: true)
+        // The overview is at its top. At XXXL the summary fills the viewport,
+        // so the action below it may not yet exist in List's accessibility tree.
+        reveal(check, in: app)
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in check.isEnabled }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 12), .completed)
         let result = app.staticTexts["shopping.sharing.checkResult"]
