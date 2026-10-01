@@ -15,7 +15,12 @@ final class HomeDetailsUITestFixture {
         let fixture = HomeDetailsUITestFixture(scope: scope, name: name, access: access,
             storeURL: URL(fileURLWithPath: path))
         return HomeDetailsActions(
-            refresh: { fixture.snapshot },
+            refresh: {
+                if environment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] == "1" {
+                    try await Task.sleep(for: .seconds(10))
+                }
+                return fixture.snapshot
+            },
             pending: { fixture.pending },
             invite: { _ in try fixture.invite() },
             resend: { try fixture.resend($0) },

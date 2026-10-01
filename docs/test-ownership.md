@@ -1512,3 +1512,54 @@ grocery identities. HomeSharingStatusCheckTests and bootstrap tests still own
 bounded waiting, duplicate suppression, background local reads and stale-result
 isolation. No test selection, coverage baseline or Full attestation changes.
 Simulator checks do not establish physical-device timing or two-phone delivery.
+
+
+### Home title, member menus and fixed activity (SHOPPING-169)
+
+Home details now uses the saved home name as its navigation title. The removed
+home-name card's headline witness is replaced by the Members heading; the
+restricted text-size workflow still measures actual Large → accessibility XXXL
+→ Large in the same process, with full role/name containment, long-name wrapping,
+growth and restoration. Rename remains a native pencil toolbar action and is
+absent for read-only members. Sharing status is a native cloud toolbar link,
+rather than a list navigation row.
+
+HomeDetailsUITests retains owner removal cancellation/confirmation, stop-sharing
+consent, invitation sheet cancellation and resend, contributor rename/relaunch,
+read-only restrictions and preserved grocery identities. Resend and removal are
+now exercised through the member's native Menu. The new suspended-refresh
+workflow proves cloud navigation stays interactive on entry and return, no
+Checking home row is inserted, and the cloud control keeps its size/position
+when the refresh finishes. Its explicit opt-in delay is confined to the isolated
+Home details UI fixture; production reads are unchanged.
+
+HomeMemberPresentationTests owns optional email/name fallback, one Owner role
+for an unnamed current owner, omission of a repeated fallback role, pending-link
+anonymity and read-only labeling. Emails come only from the participant identity
+already returned by CloudKit. There is no recipient lookup or new permission.
+
+Create home and Resume creating home are removed by product direction. The
+former create/switch UI method is replaced by
+testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch, which seeds a
+second existing home in its isolated fixture, chooses the original, carts an
+item, switches away, checks the saved private cart, relaunches and switches back.
+The removed creation/resume UI controls have no UI proof owner.
+HomeCreationTests retains journal identity/replay, acknowledgement and stale
+resume, changed-account denial, failed-save retention and partial-graph safety;
+ActiveHomeBootstrapTests retains explicit creation/discovery and home-selection
+authority. Existing invitation/adoption/retained-local-home UI routes remain.
+This change does not delete saved creation journals or recovery services.
+
+Validation uses Fast and these focused UI owners; no Full attestation is claimed.
+Physical timing for the changed build remains a separate device observation.
+
+Validation on iOS 26.5 for SHOPPING-169: ShoppingFast passed all 597 tests.
+The affected owner invitation/removal/stop-sharing, contributor rename/leave,
+read-only Large → accessibility XXXL → Large, existing-home/cart relaunch,
+retained-local adoption, and invitation-dismissal workflows passed. The final
+cloud-toolbar workflow passed its suspended-read navigation and unchanged
+position/size assertions; the final Sharing status large-text workflow also
+passed. Earlier failures and the bounded corrective reruns remain in the local
+evidence; this is not a claim that every affected owner ran together on the
+final candidate. No Full suite or new Full attestation was run. Physical-device
+before/after timing is recorded separately with the release evidence.

@@ -33,10 +33,15 @@ struct HomeMember: Equatable, Identifiable, Sendable {
     let acceptance: Acceptance
     let isCurrentUser: Bool
     let canResend: Bool
+    var email: String? = nil
 
     var label: String {
         if acceptance == .pending { return "Invitation pending" }
-        if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return name }
+        for identity in [email, name] {
+            if let identity = identity?.trimmingCharacters(in: .whitespacesAndNewlines), !identity.isEmpty {
+                return identity
+            }
+        }
         switch role {
         case .owner: return "Owner"
         case .contributor: return "Contributor"

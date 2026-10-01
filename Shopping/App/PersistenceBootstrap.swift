@@ -631,6 +631,11 @@ final class PersistenceBootstrap: ObservableObject {
                 if let fixtureName = processInfo.environment["SHOPPING_UI_TEST_FIXTURE"],
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
+#if DEBUG
+                    if activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_SECOND_HOME"] == "1" {
+                        _ = try environment.service.createHousehold(name: "Second home")
+                    }
+#endif
                     let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment,

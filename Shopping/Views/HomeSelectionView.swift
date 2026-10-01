@@ -4,11 +4,7 @@ struct HomeSelectionView: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
     @ObservedObject var coordinator: ActiveHomeCoordinator
     @State private var error: String?
-    @State private var newHomeName = ""
-    @State private var isSubmittingHome = false
     @State private var isSelectingHome = false
-    @State private var pendingCreation: HomeCreationCommand?
-    @State private var createdHome: PersistenceBootstrap.CreatedHome?
 
     var body: some View {
         List {
@@ -79,54 +75,12 @@ struct HomeSelectionView: View {
                     HomeInvitationsView(invitations: invitations, bootstrap: bootstrap)
                 }
             }
-            Section {
-                if let pendingCreation {
-                    Text("Finish creating \(pendingCreation.name). Retrying keeps the same home.")
-                }
-                TextField("Home name", text: $newHomeName)
-                    .disabled(pendingCreation != nil)
-                    .accessibilityIdentifier("shopping.home.name")
-                Button(pendingCreation == nil ? "Create home" : "Resume creating home") {
-                    guard !isSubmittingHome else { return }
-                    isSubmittingHome = true
-                    let resumedCommand = pendingCreation
-                    let name = resumedCommand?.name ?? newHomeName
-                    Task {
-                        defer { isSubmittingHome = false }
-                        do {
-                            let result = try await bootstrap.createHome(name: name, resuming: resumedCommand)
-                            createdHome = result
-                            try await bootstrap.acknowledgeHomeCreation(result)
-                            pendingCreation = nil
-                            newHomeName = ""
-                            error = nil
-                        }
-                        catch {
-                            self.error = error.localizedDescription
-                            if error is HomeCreationJournal.Failure {
-                                pendingCreation = nil
-                                newHomeName = ""
-                            }
-                        }
-                    }
-                }
-                .disabled(isSubmittingHome || bootstrap.isCreatingHome || (pendingCreation == nil
-                    && newHomeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-                .accessibilityIdentifier("shopping.home.create")
-                if bootstrap.isCreatingHome { ProgressView("Creating home…") }
-            } header: { Text("New home") } footer: {
-                Text("Your existing groceries stay in their current home.")
-            }
-            if let createdHome, !createdHome.selected {
-                Text("Your home was created. Choose it from Your homes when it appears.")
-            }
             if let error { Text(error).foregroundStyle(.red) }
         }
         .navigationTitle("Manage homes")
         .task {
             do {
                 try await bootstrap.refreshHomes()
-                pendingCreation = try await bootstrap.pendingHomeCreation()
             }
             catch { self.error = error.localizedDescription }
         }

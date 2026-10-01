@@ -314,7 +314,8 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
                     && ShoppingOneTimeInvitationURL(share, participant.__participantID) != nil
             } else { canResend = false }
             return HomeMember(id: participant.__participantID, name: name, role: role,
-                acceptance: status, isCurrentUser: participant.__participantID == current.__participantID, canResend: canResend)
+                acceptance: status, isCurrentUser: participant.__participantID == current.__participantID, canResend: canResend,
+                email: participant.userIdentity.lookupInfo?.emailAddress)
         }.sorted { $0.id < $1.id }
         return HomeMembershipSnapshot(scope: scope, share: Self.identity(share), homeName: graph.name, access: access,
             currentParticipantID: current.__participantID, members: members, changeTag: share.recordChangeTag,

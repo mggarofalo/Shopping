@@ -10,6 +10,7 @@ struct HomeLeaveConfirmationView: View {
         NavigationStack {
             List {
                 Text(homeName).font(.headline)
+                    .accessibilityIdentifier("shopping.home.leaveDisclosureName")
                 Text("Leaving removes this home’s shared working copy from this device. Changes that have not finished syncing may not reach the home.")
                 Text("Your personal cart and purchase history stay saved. Unsent checkout and undo changes won’t be sent automatically if you join again.")
                 Button("Leave now", role: .destructive, action: onConfirm)
