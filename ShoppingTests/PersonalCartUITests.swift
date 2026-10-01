@@ -41,14 +41,13 @@ final class PersonalCartUITests: XCTestCase {
     func testLegacyCartRequiresExplicitClaim() {
         let app = launch()
         XCTAssertTrue(app.buttons["In cart (0)"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Settings"].tap()
-        openRecovery(app)
-        app.buttons["Review old cart entries"].tap()
+        openLegacyReview(app)
         XCTAssertTrue(app.navigationBars["Old cart entries"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Strawberries"].exists)
         app.buttons.matching(identifier: "Claim as mine").firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Claimed as mine"].waitForExistence(timeout: 3))
-        app.tabBars.buttons["Groceries"].tap()
+        app.navigationBars["Old cart entries"].buttons.firstMatch.tap()
+        app.navigationBars["My cart"].buttons.firstMatch.tap()
         app.buttons["In cart (1)"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Strawberries")).firstMatch.waitForExistence(timeout: 3))
@@ -58,12 +57,12 @@ final class PersonalCartUITests: XCTestCase {
         let app = launch(personalCart: false, unavailableSetup: true)
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Set up personal carts"].tap()
-        XCTAssertTrue(app.navigationBars["Personal carts"].waitForExistence(timeout: 3))
+        app.buttons["shopping.settings.homeDetails"].tap()
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 3))
         app.buttons["Copy this device’s groceries to iCloud"].tap()
         app.buttons["Copy groceries"].tap()
         XCTAssertTrue(app.staticTexts["Your iCloud account is temporarily unavailable. Try again later."].existsOrAppears(timeout: 8))
-        XCTAssertTrue(app.navigationBars["Personal carts"].exists)
+        XCTAssertTrue(app.navigationBars["Home"].exists)
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
         app.terminate()
@@ -76,9 +75,7 @@ final class PersonalCartUITests: XCTestCase {
     func testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute() {
         let app = launch()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Settings"].tap()
-        openRecovery(app)
-        app.buttons["Review old cart entries"].tap()
+        openLegacyReview(app)
         XCTAssertTrue(app.staticTexts["Strawberries"].waitForExistence(timeout: 3))
         app.buttons.matching(identifier: "Discard old cart status").firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Old cart status discarded"].waitForExistence(timeout: 3))
@@ -90,12 +87,30 @@ final class PersonalCartUITests: XCTestCase {
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
-        app.tabBars.buttons["Settings"].tap()
-        openRecovery(app)
-        app.buttons["Review old cart entries"].tap()
-        XCTAssertTrue(app.navigationBars["Old cart entries"].waitForExistence(timeout: 3))
-        XCTAssertFalse(app.staticTexts["Strawberries"].exists)
+        app.buttons["In cart (0)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.buttons["shopping.personalCart.legacyReview"].exists)
         XCTAssertFalse(app.buttons["Claim as mine"].exists)
+        app.navigationBars["My cart"].buttons.firstMatch.tap()
+        app.buttons["Recently cleared"].tap()
+        XCTAssertTrue(app.navigationBars["My purchases"].existsOrAppears(timeout: 3))
+        let earlier = app.buttons["shopping.personalCart.earlierHistory"]
+        XCTAssertTrue(earlier.existsOrAppears(timeout: 5))
+        XCTAssertTrue(earlier.isHittable)
+        earlier.tap()
+        XCTAssertTrue(app.navigationBars["Recently cleared"].existsOrAppears(timeout: 3))
+        let restore = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.recovery.restore.")).element
+        XCTAssertTrue(restore.existsOrAppears(timeout: 3))
+        restore.tap()
+        app.navigationBars["Recently cleared"].buttons.firstMatch.tap()
+        app.navigationBars["My purchases"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
+        let search = app.searchFields["Search groceries"]
+        XCTAssertTrue(search.existsOrAppears(timeout: 3))
+        search.tap()
+        search.typeText("Party ice")
+        XCTAssertEqual(search.value as? String, "Party ice")
+        XCTAssertTrue(groceryRow("Party ice", app: app).existsOrAppears(timeout: 5))
     }
 
     func testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway() {
@@ -167,7 +182,7 @@ final class PersonalCartUITests: XCTestCase {
         choose.tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         let original = app.buttons["shopping.home.choice.Preview household"]
         XCTAssertTrue(original.existsOrAppears(timeout: 3))
         XCTAssertEqual(original.value as? String, "Owner, Selected")
@@ -182,8 +197,13 @@ final class PersonalCartUITests: XCTestCase {
     func testCreateAndSwitchHomesPreservesOriginalGroceriesAfterRelaunch() {
         let app = launch(activeHomes: true)
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        groceryRow("Granola", app: app).swipeLeft()
+        let cartAction = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.checklist.cart.")).firstMatch
+        XCTAssertTrue(cartAction.existsOrAppears(timeout: 3))
+        cartAction.tap()
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         let name = app.textFields["shopping.home.name"]
         XCTAssertTrue(name.existsOrAppears(timeout: 3))
         name.tap()
@@ -192,8 +212,20 @@ final class PersonalCartUITests: XCTestCase {
         app.buttons["shopping.home.create"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertFalse(groceryRow("Granola", app: app).exists)
+        app.buttons["In cart (0)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        let saved = app.buttons["shopping.personalCart.otherHomes"]
+        XCTAssertTrue(saved.existsOrAppears(timeout: 5))
+        XCTAssertTrue(saved.isHittable)
+        saved.tap()
+        XCTAssertTrue(app.navigationBars["Saved carts"].existsOrAppears(timeout: 3))
+        let retained = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Saved personal cart")).element
+        XCTAssertTrue(retained.existsOrAppears(timeout: 3))
+        retained.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         XCTAssertTrue(app.buttons["shopping.home.choice.Second home"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.buttons["shopping.home.choice.Second home"].value as? String, "Owner, Selected")
         app.terminate()
@@ -202,13 +234,18 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertFalse(groceryRow("Granola", app: app).exists)
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         XCTAssertTrue(app.buttons["shopping.home.choice.Second home"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.buttons["shopping.home.choice.Second home"].value as? String, "Owner, Selected")
         let original = app.buttons["shopping.home.choice.Preview household"]
         XCTAssertTrue(original.existsOrAppears(timeout: 3))
         original.tap()
-        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.buttons["In cart (1)"].existsOrAppears(timeout: 5))
+        app.buttons["In cart (1)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
     }
 
     func testResumeUnacknowledgedHomeCreationRetainsOriginalHomeAfterRelaunch() {
@@ -220,7 +257,7 @@ final class PersonalCartUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         let resume = app.buttons["Resume creating home"]
         XCTAssertTrue(resume.existsOrAppears(timeout: 3))
         XCTAssertFalse(app.textFields["shopping.home.name"].isEnabled)
@@ -235,7 +272,7 @@ final class PersonalCartUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         XCTAssertTrue(app.buttons["Create home"].existsOrAppears(timeout: 3))
         XCTAssertFalse(resume.exists)
         XCTAssertEqual(choices.count, 1)
@@ -303,25 +340,44 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["Homes"].tap()
+        openManageHomes(app)
         XCTAssertTrue(app.buttons["Return to iCloud homes"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts["This home is saved on this device. Your iCloud homes stay separate."].exists)
     }
 
-    private func openRecovery(_ app: XCUIApplication) {
+    private func openLegacyReview(_ app: XCUIApplication) {
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertFalse(app.buttons["shopping.settings.recovery"].exists)
         XCTAssertFalse(app.buttons["Review old cart entries"].exists)
         XCTAssertFalse(app.buttons["Saved personal carts"].exists)
-        let recovery = app.buttons["shopping.settings.recovery"]
+        app.tabBars.buttons["Groceries"].tap()
+        app.buttons["In cart (0)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        let review = app.buttons["shopping.personalCart.legacyReview"]
+        XCTAssertTrue(review.existsOrAppears(timeout: 5))
+        XCTAssertTrue(review.isHittable)
+        review.tap()
+        XCTAssertTrue(app.navigationBars["Old cart entries"].existsOrAppears(timeout: 3))
+    }
+
+    private func openManageHomes(_ app: XCUIApplication) {
+        let home = app.buttons["shopping.settings.homeDetails"]
         for _ in 0..<6 {
-            if recovery.exists && recovery.isHittable { break }
+            if home.exists && home.isHittable { break }
             app.swipeUp()
         }
-        XCTAssertTrue(recovery.isHittable)
-        recovery.tap()
-        XCTAssertTrue(app.navigationBars["Recovery"].existsOrAppears(timeout: 3))
-        XCTAssertFalse(app.buttons["My purchases"].exists, "The fixture has no personal purchases")
-        XCTAssertTrue(app.buttons["Saved personal carts"].exists)
-        XCTAssertTrue(app.buttons["Review old cart entries"].isHittable)
+        XCTAssertTrue(home.isHittable)
+        home.tap()
+        if !app.navigationBars["Manage homes"].exists {
+            let manage = app.buttons["shopping.home.manageHomes"]
+            for _ in 0..<6 {
+                if manage.exists && manage.isHittable { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(manage.isHittable)
+            manage.tap()
+        }
+        XCTAssertTrue(app.navigationBars["Manage homes"].existsOrAppears(timeout: 3))
     }
 
     private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {

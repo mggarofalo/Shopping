@@ -7,13 +7,11 @@ struct HomeLeaveStatusSection: View {
 
     var body: some View {
         Section {
-            ForEach(bootstrap.homeLeaveStatuses) { status in
+            ForEach(bootstrap.homeLeaveStatuses.filter(\.requiresResolution)) { status in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(status.command.homeName).font(.headline)
-                    Text(status.completed ? "Left this home" : "Leaving this home is not yet confirmed")
+                    Text("Leaving this home is not yet confirmed")
                         .accessibilityIdentifier("shopping.home.leaveStatus." + status.id.uuidString)
-                    Text("Your personal cart and purchase history stay saved. Unsent checkout and undo changes won’t be sent automatically if you join again.")
-                        .font(.caption).foregroundStyle(.secondary)
                     if bootstrap.canResumeHomeLeave(status) {
                         Button("Finish leaving") {
                             Task {
@@ -32,7 +30,7 @@ struct HomeLeaveStatusSection: View {
                 }
                 .accessibilityElement(children: .contain)
             }
-            if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) {
+            if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
                 Button("Check leave status again") {
                     Task { await bootstrap.refreshHomeLeaveStatuses() }
                 }
@@ -46,9 +44,7 @@ struct HomeLeaveStatusSection: View {
             if let message = actionError ?? bootstrap.homeLeaveStatusError {
                 Text(message).foregroundStyle(.red).accessibilityIdentifier("shopping.home.leaveError")
             }
-        } header: { Text("Leaving homes") } footer: {
-            Text("Checking a pending leave only updates its status. You can choose another available home while iCloud is being checked.")
-        }
+        } header: { Text("Leaving homes") }
     }
 }
 

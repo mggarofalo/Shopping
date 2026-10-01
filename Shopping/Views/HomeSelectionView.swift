@@ -62,23 +62,23 @@ struct HomeSelectionView: View {
                         + (coordinator.activeScope?.graph == home.graph ? ", Selected" : ""))
                     .accessibilityIdentifier("shopping.home.choice." + home.name)
                 }
-            } header: { Text("Your homes") } footer: { Text("Groceries and personal carts stay with their original home.") }
+            } header: { Text("Your homes") }
             if coordinator.activeScope == nil {
                 Section {
                     Text(coordinator.readiness == .selectedHomeUnavailable
-                        ? "Your selected home is unavailable. Choose an accessible home or wait for its import to finish."
-                        : "Choose a home. Homes still importing will appear when their grocery list is ready.")
+                        ? "Your selected home is unavailable. Choose another home or check again."
+                        : "Choose a home, or check again while it loads.")
                     Button("Check again") { bootstrap.applicationDidEnterForeground() }
                 }
             }
-            if !bootstrap.homeLeaveStatuses.isEmpty || bootstrap.homeLeaveStatusError != nil {
+            if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
                 HomeLeaveStatusSection(bootstrap: bootstrap)
             }
-            if coordinator.pendingInvitation {
-                Text("An invitation is waiting. Your current home stays selected until you choose to join.")
+            if coordinator.pendingInvitation, let invitations = bootstrap.invitations {
+                NavigationLink("Review invitation") {
+                    HomeInvitationsView(invitations: invitations, bootstrap: bootstrap)
+                }
             }
-            NavigationLink("Sharing status") { HomeSharingStatusView() }
-                .accessibilityIdentifier("shopping.homes.sharingStatus")
             Section {
                 if let pendingCreation {
                     Text("Finish creating \(pendingCreation.name). Retrying keeps the same home.")
@@ -115,14 +115,14 @@ struct HomeSelectionView: View {
                 .accessibilityIdentifier("shopping.home.create")
                 if bootstrap.isCreatingHome { ProgressView("Creating home…") }
             } header: { Text("New home") } footer: {
-                Text("You will own the new home. Your existing groceries stay in their current home.")
+                Text("Your existing groceries stay in their current home.")
             }
             if let createdHome, !createdHome.selected {
                 Text("Your home was created. Choose it from Your homes when it appears.")
             }
             if let error { Text(error).foregroundStyle(.red) }
         }
-        .navigationTitle("Homes")
+        .navigationTitle("Manage homes")
         .task {
             do {
                 try await bootstrap.refreshHomes()

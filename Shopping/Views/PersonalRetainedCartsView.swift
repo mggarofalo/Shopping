@@ -2,14 +2,13 @@ import SwiftUI
 
 struct PersonalRetainedCartsView: View {
     let service: PersonalCartService
+    var includedScopes: [PersonalCartScopeSnapshot]? = nil
     @State private var scopes: [PersonalCartScopeSnapshot] = []
     @State private var summaries: [PersonalCartScopeSnapshot: String] = [:]
     @State private var error: String?
 
     var body: some View {
         List {
-            Text("Saved personal carts and purchases remain yours even when a household is unavailable.")
-                .foregroundStyle(.secondary)
             ForEach(scopes.indices, id: \.self) { index in
                 let scope = scopes[index]
                 NavigationLink {
@@ -27,9 +26,10 @@ struct PersonalRetainedCartsView: View {
         .navigationTitle("Saved carts")
         .task {
             do {
+                let includedScopes = includedScopes
                 let loaded = try await Task.detached(priority: .userInitiated) { () throws ->
                     ([PersonalCartScopeSnapshot], [PersonalCartScopeSnapshot: String]) in
-                    let scopes = try service.retainedScopes()
+                    let scopes = try service.retainedScopes().filter { includedScopes?.contains($0) ?? true }
                     let summaries = Dictionary(uniqueKeysWithValues: try scopes.map { scope in
                         let entries = try service.entries(householdID: scope.householdID, listID: scope.listID)
                         let names = entries.prefix(3).map(\.title)

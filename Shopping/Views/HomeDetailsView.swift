@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeDetailsView: View {
     @StateObject private var model: HomeDetailsModel
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.sharingStatusPresentation) private var syncStatus
     @EnvironmentObject private var bootstrap: PersistenceBootstrap
     @State private var showingInvitationExplanation = false
     @State private var requestedInvitation = false
@@ -23,53 +22,48 @@ struct HomeDetailsView: View {
         List {
             Section {
                 Text(homeName).font(.headline).accessibilityIdentifier("shopping.home.name")
-                if let snapshot = model.snapshot {
-                    LabeledContent("Your access", value: accessLabel(snapshot.access))
-                    if snapshot.source == .localUnshared {
-                        Text("No invitations yet").foregroundStyle(.secondary)
-                    } else {
-                        Text("\(snapshot.acceptedOtherCount) other accepted members · \(snapshot.pendingCount) pending invitations")
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("shopping.home.memberCounts")
-                        Text(model.isCurrent ? "Membership checked with iCloud" : "Last known membership · check again")
-                            .font(.caption).foregroundStyle(.secondary)
+                if model.snapshot?.canEditName == true {
+                    Button("Rename home") {
+                        name = homeName
+                        showingNameEditor = true
                     }
+                    .disabled(!model.canRename)
+                    .accessibilityIdentifier("shopping.home.rename")
                 }
-                Button("Rename home") {
-                    name = homeName
-                    showingNameEditor = true
-                }
-                .disabled(!model.canRename)
-                .accessibilityIdentifier("shopping.home.rename")
-            } header: { Text("Home") }
+            }
 
             if let snapshot = model.snapshot {
-                Section {
-                    if snapshot.source == .localUnshared {
-                        LabeledContent("You", value: "Owner")
-                    }
-                    ForEach(snapshot.members) { member in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(member.isCurrentUser ? "\(member.label) · You" : member.label)
-                            Text(memberDetail(member)).font(.subheadline).foregroundStyle(.secondary)
-                            if snapshot.canResend(member) && supportsLinks {
-                                Button("Share invitation again") { Task { await model.resend(member.id) } }
-                                    .disabled(!model.canInvite)
-                                    .accessibilityIdentifier("shopping.home.resend.\(member.id)")
-                            }
-                            if snapshot.access == .owner && !member.isCurrentUser && member.role != .owner {
-                                Button(member.acceptance == .pending ? "Cancel invitation" : "Remove contributor", role: .destructive) {
-                                    Task { await model.prepareRemoval(.removeMember, participantID: member.id) }
-                                }
-                                .disabled(!model.canManageMembers)
-                                .accessibilityIdentifier("shopping.home.remove.\(member.id)")
-                            }
+                if snapshot.source == .localUnshared || !snapshot.members.isEmpty || !model.isCurrent {
+                    Section {
+                        if snapshot.source == .localUnshared {
+                            LabeledContent("You", value: "Owner")
                         }
-                        .buttonStyle(.borderless)
-                        .accessibilityElement(children: .contain)
-                    }
-                } header: { Text("Members") } footer: {
-                    Text("Members can access this home. People in Settings are grocery assignees and do not grant access.")
+                        ForEach(snapshot.members) { member in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(member.isCurrentUser ? "\(member.label) · You" : member.label)
+                                    .accessibilityIdentifier("shopping.home.member.\(member.id)")
+                                Text(memberDetail(member)).font(.subheadline).foregroundStyle(.secondary)
+                                if snapshot.canResend(member) && supportsLinks && model.pending?.participantID != member.id {
+                                    Button("Share invitation again") { Task { await model.resend(member.id) } }
+                                        .disabled(!model.canInvite)
+                                        .accessibilityIdentifier("shopping.home.resend.\(member.id)")
+                                }
+                                if snapshot.access == .owner && !member.isCurrentUser && member.role != .owner
+                                && model.pending?.participantID != member.id {
+                                    Button(member.acceptance == .pending ? "Cancel invitation" : "Remove contributor", role: .destructive) {
+                                        Task { await model.prepareRemoval(.removeMember, participantID: member.id) }
+                                    }
+                                    .disabled(!model.canManageMembers)
+                                    .accessibilityIdentifier("shopping.home.remove.\(member.id)")
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityElement(children: .contain)
+                        }
+                        if !model.isCurrent && !model.busy && !snapshot.removals.contains(where: { $0.absentObservedAt == nil }) {
+                            Button("Check members again") { Task { await model.refresh() } }
+                        }
+                    } header: { Text("Members") }
                 }
                 if snapshot.canInvite {
                     Section {
@@ -79,48 +73,44 @@ struct HomeDetailsView: View {
                         .disabled(!model.canInvite || !supportsLinks)
                         .accessibilityIdentifier("shopping.home.invite")
                         if model.pending != nil {
-                            Button("Cancel this invitation attempt", role: .destructive) {
+                            Button("Cancel invitation", role: .destructive) {
                                 Task { await model.prepareRemoval(.cancelInvitation) }
                             }
                             .disabled(!model.canManageMembers)
                             .accessibilityIdentifier("shopping.home.cancelInvitation")
                         }
                         if model.needsPreparationRetry {
-                            Button("Retry preparing this home’s sharing") {
+                            Button("Retry invitation") {
                                 Task { await model.invite(retryPreparation: true) }
                             }
                             .disabled(!model.canInvite || !supportsLinks)
                         }
                         if !supportsLinks { Text("Creating invitation links requires iOS 18 or later.") }
-                    } footer: {
-                        Text("Send a private, one-person join link using Messages or another app. You do not need their iCloud email. Sharing the link does not confirm that they joined.")
                     }
                 }
                 if snapshot.access == .owner && snapshot.source == .server {
-                    Section {
-                        if snapshot.members.contains(where: { !$0.isCurrentUser && $0.role != .owner }) {
+                    let pendingRemovals = snapshot.removals.filter { $0.absentObservedAt == nil }
+                    if !pendingRemovals.isEmpty {
+                        Section {
+                            Text("Sharing changes pending")
+                            if pendingRemovals.contains(where: \.requiresRetry) {
+                                Button("Retry recorded removals") { Task { await model.retryRemovals() } }
+                                    .disabled(!model.canManageMembers)
+                                    .accessibilityIdentifier("shopping.home.retryRemovals")
+                            } else {
+                                Button("Check members again") { Task { await model.refresh() } }
+                                    .disabled(model.busy)
+                            }
+                        }
+                    }
+                    if snapshot.members.filter({ !$0.isCurrentUser && $0.role != .owner }).count > 1 {
+                        Section {
                             Button("Stop sharing this home", role: .destructive) {
                                 Task { await model.prepareRemoval(.stopSharing) }
                             }
                             .disabled(!model.canManageMembers)
                             .accessibilityIdentifier("shopping.home.stopSharing")
                         }
-                        ForEach(snapshot.removals) { status in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(status.removal.purpose == .cancelInvitation ? "Invitation cancellation recorded" : "Member removal recorded")
-                                Text(status.absentObservedAt == nil
-                                     ? "iCloud has not confirmed that these members are absent. Check again or retry the recorded removal."
-                                     : "These members were absent at the last iCloud check. Other devices may still have offline copies.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if snapshot.removals.contains(where: { $0.requiresRetry && $0.absentObservedAt == nil }) {
-                            Button("Retry recorded removals") { Task { await model.retryRemovals() } }
-                                .disabled(!model.canManageMembers)
-                                .accessibilityIdentifier("shopping.home.retryRemovals")
-                        }
-                    } header: { Text("Sharing access") } footer: {
-                        Text("Removing members keeps your home and groceries. Cancelled invitations will not be shared again; if a delayed invitation appears, the app will try to remove it when membership is checked.")
                     }
                 }
                 if snapshot.access != .owner && snapshot.source == .server {
@@ -133,25 +123,28 @@ struct HomeDetailsView: View {
                     }
                 }
             }
-            Section {
-                if let status = model.leaveStatus {
-                    Text(status.completed
-                         ? "You have left this home. Your personal cart and history are retained."
-                         : "Leaving this home is still being verified. Your personal cart and history are retained.")
-                        .accessibilityIdentifier("shopping.home.leaveStatus")
+            if let status = model.leaveStatus, !status.completed {
+                Text("Leaving home is still being confirmed.")
+                    .accessibilityIdentifier("shopping.home.leaveStatus")
+            }
+            if let error = model.error {
+                Text(error).foregroundStyle(.red).accessibilityIdentifier("shopping.home.error")
+                if model.snapshot == nil {
+                    Button("Check members again") { Task { await model.refresh() } }.disabled(model.busy)
                 }
-                Label(syncStatus.title, systemImage: syncStatus.symbol)
-                Text(syncStatus.details).foregroundStyle(.secondary)
+            }
+            if model.busy { ProgressView("Checking home…").accessibilityIdentifier("shopping.home.checking") }
+            Section {
                 NavigationLink("Sharing status") { HomeSharingStatusView() }
                     .accessibilityIdentifier("shopping.home.sharingStatus")
-                if let error = model.error {
-                    Text(error).foregroundStyle(.red).accessibilityIdentifier("shopping.home.error")
+                NavigationLink("Manage homes") {
+                    HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
                 }
-                Button("Check members again") { Task { await model.refresh() } }.disabled(model.busy)
-                if model.busy { ProgressView("Checking this home…") }
-            } header: { Text("Status") }
+                .accessibilityIdentifier("shopping.home.manageHomes")
+            }
         }
-        .navigationTitle("Home details")
+        .navigationTitle("Home")
+        .refreshable { await model.refresh() }
         .task { model.activate(); await model.refresh() }
         .onDisappear { model.retire() }
         .onChange(of: scenePhase) { _, phase in
@@ -166,8 +159,8 @@ struct HomeDetailsView: View {
             NavigationStack {
                 List {
                     Text("Invite someone to \(homeName)").font(.headline)
-                    Text("They will be a Contributor and can edit this home’s groceries, catalog, stores, categories, people and home name. Members can see one another and shared shopping activity. Personal cart contents and purchase history stay private.")
-                    Text("Anyone you send or forward this link to can claim its one invitation using iCloud. Send it only to the person you want to join. Create a separate invitation for each person.")
+                    Text("Contributors can edit this home’s groceries, catalog and settings. Members can see one another and shared shopping activity. Personal carts and purchase history stay private.")
+                    Text("This private link admits one person using iCloud. Anyone with the link can claim it. Send a separate link to each person you invite.")
                     Button("Create and share join link") {
                         requestedInvitation = true
                         showingInvitationExplanation = false
@@ -222,24 +215,20 @@ struct HomeDetailsView: View {
     private func removalExplanation(_ confirmation: HomeMembershipRemovalConfirmation) -> String {
         switch confirmation.removal.purpose {
         case .cancelInvitation:
-            "Cancel this invitation attempt? Its link will no longer be offered by this app. If iCloud finishes creating it later, the app will try to remove that invitation when membership is checked. You can create a separate invitation afterward."
+            "Cancel this invitation? If iCloud is still creating it, cancellation will finish when membership is checked."
         case .removeMember:
             "Remove this member or pending invitation from this home? They will lose shared access once iCloud applies the removal."
         case .stopSharing:
-            "Remove the \(confirmation.removal.participantIDs.count) members and pending invitations captured below? Anyone added after this confirmation was prepared is not included."
+            "Remove access for the people below?"
         }
-    }
-
-    private func accessLabel(_ access: HomeMembershipSnapshot.Access) -> String {
-        switch access { case .owner: "Owner"; case .contributor: "Contributor"; case .restricted: "Read-only access" }
     }
 
     private func memberDetail(_ member: HomeMember) -> String {
         let role: String
         switch member.role { case .owner: role = "Owner"; case .contributor: role = "Contributor"; case .restricted: role = "Read-only access" }
         switch member.acceptance {
-        case .accepted: return role + " · Accepted"
-        case .pending: return role + " · Not yet accepted"
+        case .accepted: return role
+        case .pending: return role + " · Invited"
         case .unknown: return role + " · Checking acceptance"
         }
     }

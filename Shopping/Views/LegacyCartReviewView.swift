@@ -10,7 +10,7 @@ struct LegacyCartReviewView: View {
     var body: some View {
         List {
             Section {
-                Text("These old cart entries have no known owner. Claim only your own entries, discard the old cart status, or leave them here for later. The grocery request and catalog are retained.")
+                Text("Claim your old cart entries or discard their cart status.")
             }
             ForEach(entries) { entry in
                 Section {
@@ -23,13 +23,8 @@ struct LegacyCartReviewView: View {
                         .disabled(pendingDecisionIDs.contains(entry.id))
                 }
             }
-            if entries.isEmpty { Text("No old cart entries to review").foregroundStyle(.secondary) }
             if let resultMessage { Text(resultMessage).foregroundStyle(.secondary) }
-            Section("Earlier history") {
-                Text("Earlier cleared groceries are kept separately from your personal purchases. Restoring them returns unchanged requests to the household list without claiming a cart.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                NavigationLink("Earlier cleared groceries") { RecentlyClearedView() }
-            }
+            EarlierClearedGroceriesLink(cart: cart)
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Old cart entries")

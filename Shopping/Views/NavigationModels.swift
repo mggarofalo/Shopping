@@ -149,14 +149,7 @@ enum GroceryRowScope {
         _ operations: [ClearOperation],
         canonicalList: GroceryList?
     ) -> [ClearOperation] {
-        guard let canonicalList, let household = canonicalList.household,
-              let persistentStore = canonicalList.objectID.persistentStore else { return [] }
-        let counts = Dictionary(grouping: operations, by: \.id).mapValues(\.count)
-        return operations.filter {
-            $0.id != PersistenceModel.unsetID && counts[$0.id] == 1 &&
-                $0.list == canonicalList && $0.household == household &&
-                $0.objectID.persistentStore == persistentStore
-        }
+        ClearOperationSelection.valid(operations, list: canonicalList)
     }
 
     static func needsStore(_ need: Need) -> Bool {
