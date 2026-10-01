@@ -182,10 +182,13 @@ final class PersonalCartUITests: XCTestCase {
         choose.tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
-        openManageHomes(app)
-        let original = app.buttons["shopping.home.choice.Preview household"]
-        XCTAssertTrue(original.existsOrAppears(timeout: 3))
-        XCTAssertEqual(original.value as? String, "Owner, Selected")
+        let details = app.buttons["shopping.settings.homeDetails"]
+        XCTAssertTrue(details.existsOrAppears(timeout: 3))
+        XCTAssertTrue(details.isHittable)
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Preview household"].existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.buttons["shopping.home.manageHomes"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.create"].exists)
         app.terminate()
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_PENDING_INVITATION")
@@ -194,8 +197,14 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertFalse(notice.exists)
     }
 
-    func testCreateAndSwitchHomesPreservesOriginalGroceriesAfterRelaunch() {
-        let app = launch(activeHomes: true)
+    func testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch() {
+        let app = launch(activeHomes: true, secondHome: true)
+        let choose = app.buttons["Choose a home"]
+        XCTAssertTrue(choose.existsOrAppears(timeout: 8))
+        choose.tap()
+        let originalChoice = app.buttons["shopping.home.choice.Preview household"]
+        XCTAssertTrue(originalChoice.existsOrAppears(timeout: 5))
+        originalChoice.tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
         groceryRow("Granola", app: app).swipeLeft()
         let cartAction = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.checklist.cart.")).firstMatch
@@ -204,12 +213,11 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
         openManageHomes(app)
-        let name = app.textFields["shopping.home.name"]
-        XCTAssertTrue(name.existsOrAppears(timeout: 3))
-        name.tap()
-        name.typeText("Second home")
-        XCTAssertEqual(name.value as? String, "Second home")
-        app.buttons["shopping.home.create"].tap()
+        XCTAssertFalse(app.buttons["shopping.home.create"].exists)
+        XCTAssertFalse(app.textFields["shopping.home.name"].exists)
+        let second = app.buttons["shopping.home.choice.Second home"]
+        XCTAssertTrue(second.existsOrAppears(timeout: 3))
+        second.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertFalse(groceryRow("Granola", app: app).exists)
         app.buttons["In cart (0)"].tap()
@@ -246,37 +254,6 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
-    }
-
-    func testResumeUnacknowledgedHomeCreationRetainsOriginalHomeAfterRelaunch() {
-        let app = launch(activeHomes: true, pendingHomeCreation: true)
-        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
-        app.terminate()
-        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
-        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_PENDING_HOME_CREATION")
-        app.launch()
-        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
-        app.tabBars.buttons["Settings"].tap()
-        openManageHomes(app)
-        let resume = app.buttons["Resume creating home"]
-        XCTAssertTrue(resume.existsOrAppears(timeout: 3))
-        XCTAssertFalse(app.textFields["shopping.home.name"].isEnabled)
-        let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.home.choice."))
-        XCTAssertEqual(choices.count, 1)
-        XCTAssertEqual(app.buttons["shopping.home.choice.Preview household"].value as? String, "Owner, Selected")
-        resume.tap()
-        XCTAssertTrue(resume.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.textFields["shopping.home.name"].isEnabled)
-        XCTAssertEqual(choices.count, 1)
-        app.terminate()
-        app.launch()
-        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
-        app.tabBars.buttons["Settings"].tap()
-        openManageHomes(app)
-        XCTAssertTrue(app.buttons["Create home"].existsOrAppears(timeout: 3))
-        XCTAssertFalse(resume.exists)
-        XCTAssertEqual(choices.count, 1)
-        XCTAssertEqual(app.buttons["shopping.home.choice.Preview household"].value as? String, "Owner, Selected")
     }
 
     func testAccountScopedCatalogDraftSurvivesRelaunchAndCancelDiscardsIt() {
@@ -380,7 +357,7 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Manage homes"].existsOrAppears(timeout: 3))
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, pendingHomeCreation: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, secondHome: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -389,7 +366,7 @@ final class PersonalCartUITests: XCTestCase {
         if homeAdoption { app.launchEnvironment["SHOPPING_UI_TEST_HOME_ADOPTION"] = "1" }
         if pendingInvitation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_INVITATION"] = "1" }
         if activeHomes { app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1" }
-        if pendingHomeCreation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_HOME_CREATION"] = "1" }
+        if secondHome { app.launchEnvironment["SHOPPING_UI_TEST_SECOND_HOME"] = "1" }
         if personalCart { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1" }
         if unavailableSetup { app.launchEnvironment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] = "1" }
         if purchaseNotice { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] = "1" }

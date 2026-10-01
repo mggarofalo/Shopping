@@ -1,10 +1,44 @@
 import XCTest
 
 final class HomeDetailsUITests: XCTestCase {
+    /// A suspended read proves the cloud navigation stays interactive and that
+    /// refresh activity never inserts a list row, both on entry and return.
+    func testCloudToolbarStaysInteractiveDuringHomeRefreshAndReturn() {
+        let app = launch(role: "owner", delayedRefresh: true)
+        openHomeDetails(app)
+        let cloud = app.buttons["shopping.home.sharingStatus"]
+        XCTAssertTrue(cloud.existsOrAppears(timeout: 3))
+        XCTAssertTrue(cloud.isEnabled)
+        XCTAssertTrue(cloud.isHittable)
+        XCTAssertEqual(cloud.value as? String, "Checking home")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
+        cloud.tap()
+        XCTAssertTrue(app.navigationBars["Sharing status"].existsOrAppears(timeout: 3))
+        let back = app.navigationBars["Sharing status"].buttons.element
+        XCTAssertTrue(back.isHittable)
+        back.tap()
+        XCTAssertTrue(app.navigationBars["Preview household"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(cloud.isHittable)
+        XCTAssertEqual(cloud.value as? String, "Checking home")
+        let checkingFrame = cloud.frame
+        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            cloud.value as? String != "Checking home"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 15), .completed)
+        XCTAssertEqual(cloud.frame.origin.x, checkingFrame.origin.x, accuracy: 1)
+        XCTAssertEqual(cloud.frame.size.width, checkingFrame.size.width, accuracy: 1)
+        XCTAssertEqual(cloud.frame.size.height, checkingFrame.size.height, accuracy: 1)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
+        XCTAssertFalse(app.buttons["shopping.home.manageHomes"].exists, "One healthy home needs no home picker")
+        XCTAssertFalse(app.buttons["shopping.home.create"].exists)
+        XCTAssertTrue(app.buttons["shopping.home.rename"].isHittable)
+        XCTAssertTrue(app.buttons["shopping.home.invite"].isHittable)
+    }
+
     func testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome() {
         let app = launch(role: "contributor", rootGoneLeave: true)
         openHomeDetails(app)
-        let homeName = app.staticTexts["shopping.home.name"].label
+        let homeName = app.navigationBars.element.identifier
         let leave = app.buttons["shopping.home.leave"]
         reveal(leave, in: app)
         leave.tap()
@@ -54,7 +88,7 @@ final class HomeDetailsUITests: XCTestCase {
     func testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome() {
         let app = launch(role: "contributor")
         openHomeDetails(app)
-        let homeName = app.staticTexts["shopping.home.name"].label
+        let homeName = app.navigationBars.element.identifier
         let leave = app.buttons["shopping.home.leave"]
         reveal(leave, in: app)
         XCTAssertTrue(leave.isEnabled)
@@ -62,12 +96,10 @@ final class HomeDetailsUITests: XCTestCase {
         let confirm = app.buttons["shopping.home.confirmLeave"]
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
         XCTAssertTrue(app.navigationBars["Leave home?"].exists)
-        // The underlying details title has its own identifier. Exclude that
-        // background element and require one visible disclosure title.
-        let disclosureNames = app.staticTexts.matching(NSPredicate(format:
-            "label == %@ AND identifier != %@", homeName, "shopping.home.name"))
-        XCTAssertEqual(disclosureNames.count, 1)
-        XCTAssertTrue(disclosureNames.element.isHittable)
+        let disclosureName = app.staticTexts["shopping.home.leaveDisclosureName"]
+        XCTAssertTrue(disclosureName.existsOrAppears(timeout: 3))
+        XCTAssertEqual(disclosureName.label, homeName)
+        XCTAssertTrue(disclosureName.isHittable)
         let unsent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
             "Changes that have not finished syncing may not reach the home.")).element
         reveal(unsent, in: app)
@@ -100,13 +132,15 @@ final class HomeDetailsUITests: XCTestCase {
         let app = launch(role: "owner")
         openHomeDetails(app)
         let remove = app.buttons["shopping.home.remove.fixture-long-name"]
-        reveal(remove, in: app)
+        openMemberMenu("fixture-long-name", app: app)
+        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
         remove.tap()
         let confirm = app.buttons["shopping.home.confirmRemoval"]
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts["Alexandra Penelope Montgomery-Wellington"].exists)
         app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        openMemberMenu("fixture-long-name", app: app)
         XCTAssertTrue(remove.existsOrAppears(timeout: 3))
         remove.tap()
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
@@ -135,7 +169,7 @@ final class HomeDetailsUITests: XCTestCase {
         let savedGroceries = Set(rows.allElementsBoundByIndex.map(\.identifier))
         XCTAssertEqual(savedGroceries.count, 7)
         openHomeDetails(app)
-        let homeName = app.staticTexts["shopping.home.name"].label
+        let homeName = app.navigationBars.element.identifier
         let invite = app.buttons["shopping.home.invite"]
         reveal(invite, in: app)
         invite.tap()
@@ -155,8 +189,11 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
         assertMembership(app, contributor: true, invitation: true)
         let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
-        reveal(resend, in: app)
+        openMemberMenu("fixture-invitation-1", app: app)
+        XCTAssertTrue(resend.existsOrAppears(timeout: 3))
         XCTAssertTrue(resend.isEnabled, "Cancelling must retain the pending invitation")
+        resend.tap()
+        dismissSystemShareSheet(app)
 
         reveal(stop, in: app)
         stop.tap()
@@ -164,7 +201,7 @@ final class HomeDetailsUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         assertMembership(app, contributor: false, invitation: false)
-        XCTAssertEqual(app.staticTexts["shopping.home.name"].label, homeName)
+        XCTAssertEqual(app.navigationBars.element.identifier, homeName)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
         XCTAssertFalse(resend.exists)
@@ -204,8 +241,9 @@ final class HomeDetailsUITests: XCTestCase {
         dismissSystemShareSheet(app)
         assertMembership(app, contributor: true, invitation: true)
         let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
-        reveal(resend, in: app)
         XCTAssertTrue(app.staticTexts["Invitation pending"].existsOrAppears(timeout: 3))
+        openMemberMenu("fixture-invitation-1", app: app)
+        XCTAssertTrue(resend.existsOrAppears(timeout: 3))
         resend.tap()
         dismissSystemShareSheet(app)
         assertMembership(app, contributor: true, invitation: true)
@@ -219,7 +257,8 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["shopping.home.stopSharing"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
         let rename = app.buttons["shopping.home.rename"]
-        reveal(rename, in: app, towardTop: true)
+        XCTAssertTrue(rename.existsOrAppears(timeout: 3))
+        XCTAssertTrue(rename.isHittable)
         XCTAssertTrue(rename.isEnabled)
         rename.tap()
         let name = app.textFields["shopping.home.nameEditor"]
@@ -230,14 +269,14 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertEqual(name.value as? String, "Shared kitchen")
         app.buttons["Save home name"].tap()
         XCTAssertTrue(name.waitForNonExistence(timeout: 5))
-        let saved = app.staticTexts["shopping.home.name"]
+        let saved = app.navigationBars["Shared kitchen"]
         XCTAssertTrue(saved.existsOrAppears(timeout: 5))
-        XCTAssertEqual(saved.label, "Shared kitchen")
+        XCTAssertEqual(saved.identifier, "Shared kitchen")
         app.terminate()
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         app.launch()
-        openHomeDetails(app)
-        XCTAssertEqual(saved.label, "Shared kitchen")
+        openHomeDetails(app, name: "Shared kitchen")
+        XCTAssertEqual(saved.identifier, "Shared kitchen")
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
     }
 
@@ -246,8 +285,8 @@ final class HomeDetailsUITests: XCTestCase {
         let app = launch(role: "restricted", systemTextSize: true)
         let textSize = try SystemTextSizeSettings(test: self, app: app)
         openHomeDetails(app)
-        let home = app.staticTexts["shopping.home.name"]
-        let homeName = home.label
+        let homeName = app.navigationBars.element.identifier
+        let home = app.staticTexts["shopping.home.membersHeading"]
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         let witnesses: [(String, XCUIElement)] = [
             ("headline", home),
@@ -269,9 +308,9 @@ final class HomeDetailsUITests: XCTestCase {
         func assertRetainedDestination() {
             // List can virtualize deep members after reflow. First establish the
             // retained destination/home, without reopening it or scrolling.
-            XCTAssertTrue(app.navigationBars["Home"].exists)
+            XCTAssertTrue(app.navigationBars[homeName].exists)
             XCTAssertTrue(home.exists)
-            XCTAssertEqual(home.label, homeName)
+            XCTAssertEqual(home.label, "Members")
             XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         }
         let baseline = measure("Large")
@@ -294,9 +333,10 @@ final class HomeDetailsUITests: XCTestCase {
         reveal(home, in: app, towardTop: true)
         app.swipeDown()
         let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            !app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists
+            app.buttons["shopping.home.sharingStatus"].value as? String != "Checking home"
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         reveal(home, in: app, towardTop: true)
@@ -307,6 +347,12 @@ final class HomeDetailsUITests: XCTestCase {
             XCTAssertEqual(frame.height, baseline[role]!.height, accuracy: 2, "\(role) must return to its original rendered size")
             XCTAssertEqual(frame.width, baseline[role]!.width, accuracy: 2)
         }
+    }
+
+    private func openMemberMenu(_ id: String, app: XCUIApplication) {
+        let menu = app.buttons["shopping.home.memberActions." + id]
+        reveal(menu, in: app)
+        menu.tap()
     }
 
     private func assertMembership(_ app: XCUIApplication, contributor: Bool, invitation: Bool) {
@@ -330,7 +376,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["shopping.home.memberCounts"].exists)
     }
 
-    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
+    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false, delayedRefresh: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -339,20 +385,21 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
+        if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
         if systemTextSize { SystemTextSizeSettings.configure(app) }
         app.launch()
         return app
     }
 
-    private func openHomeDetails(_ app: XCUIApplication) {
+    private func openHomeDetails(_ app: XCUIApplication, name: String = "Preview household") {
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
         let details = app.buttons["shopping.settings.homeDetails"]
         reveal(details, in: app)
         details.tap()
-        XCTAssertTrue(app.navigationBars["Home"].existsOrAppears(timeout: 5))
-        XCTAssertTrue(app.staticTexts["shopping.home.name"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.navigationBars[name].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.staticTexts["shopping.home.membersHeading"].existsOrAppears(timeout: 5))
     }
 
     private func dismissSystemShareSheet(_ app: XCUIApplication) {

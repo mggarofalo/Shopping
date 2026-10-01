@@ -16,78 +16,57 @@ struct HomeDetailsView: View {
     }
 
     private var homeName: String { model.snapshot?.homeName ?? initialName }
+    private var cloudNeedsAttention: Bool {
+        model.error != nil || bootstrap.homeSharingStatus.activity.notices.contains { $0.id != .invitation }
+    }
+    private var cloudIsWorking: Bool {
+        model.busy || bootstrap.isCheckingSharingStatus || bootstrap.cloudStatus.isWorking
+    }
     private var supportsLinks: Bool { if #available(iOS 18.0, *) { true } else { false } }
 
     var body: some View {
         List {
             Section {
-                Text(homeName).font(.headline).accessibilityIdentifier("shopping.home.name")
-                if model.snapshot?.canEditName == true {
-                    Button("Rename home") {
-                        name = homeName
-                        showingNameEditor = true
+                if let snapshot = model.snapshot {
+                    if snapshot.source == .localUnshared {
+                        HomeMemberRow(member: HomeMember(id: "local-owner", name: nil, role: .owner,
+                            acceptance: .accepted, isCurrentUser: true, canResend: false)) { EmptyView() }
                     }
-                    .disabled(!model.canRename)
-                    .accessibilityIdentifier("shopping.home.rename")
+                    ForEach(snapshot.members) { member in
+                        HomeMemberRow(member: member, hasActions: hasActions(member, in: snapshot)) {
+                            memberActions(member, in: snapshot)
+                        }
+                    }
+                    if let pending = model.pending,
+                       !snapshot.members.contains(where: { $0.id == pending.participantID }) {
+                        pendingInvitationRow(participantID: pending.participantID)
+                    } else if model.needsPreparationRetry && model.pending == nil {
+                        pendingInvitationRow(participantID: "preparing")
+                    }
+                    if !model.isCurrent && !model.busy && !snapshot.removals.contains(where: { $0.absentObservedAt == nil }) {
+                        Button("Check members again") { Task { await model.refresh() } }
+                    }
                 }
-            }
-
-            if let snapshot = model.snapshot {
-                if snapshot.source == .localUnshared || !snapshot.members.isEmpty || !model.isCurrent {
-                    Section {
-                        if snapshot.source == .localUnshared {
-                            LabeledContent("You", value: "Owner")
-                        }
-                        ForEach(snapshot.members) { member in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(member.isCurrentUser ? "\(member.label) · You" : member.label)
-                                    .accessibilityIdentifier("shopping.home.member.\(member.id)")
-                                Text(memberDetail(member)).font(.subheadline).foregroundStyle(.secondary)
-                                if snapshot.canResend(member) && supportsLinks && model.pending?.participantID != member.id {
-                                    Button("Share invitation again") { Task { await model.resend(member.id) } }
-                                        .disabled(!model.canInvite)
-                                        .accessibilityIdentifier("shopping.home.resend.\(member.id)")
-                                }
-                                if snapshot.access == .owner && !member.isCurrentUser && member.role != .owner
-                                && model.pending?.participantID != member.id {
-                                    Button(member.acceptance == .pending ? "Cancel invitation" : "Remove contributor", role: .destructive) {
-                                        Task { await model.prepareRemoval(.removeMember, participantID: member.id) }
-                                    }
-                                    .disabled(!model.canManageMembers)
-                                    .accessibilityIdentifier("shopping.home.remove.\(member.id)")
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityElement(children: .contain)
-                        }
-                        if !model.isCurrent && !model.busy && !snapshot.removals.contains(where: { $0.absentObservedAt == nil }) {
-                            Button("Check members again") { Task { await model.refresh() } }
-                        }
-                    } header: { Text("Members") }
-                }
-                if snapshot.canInvite {
-                    Section {
-                        Button(model.pending == nil ? "Invite contributor" : "Continue invitation") {
+            } header: {
+                HStack {
+                    Text("Members").font(.headline).accessibilityIdentifier("shopping.home.membersHeading")
+                    Spacer()
+                    if model.snapshot?.canInvite == true {
+                        Button {
                             showingInvitationExplanation = true
+                        } label: {
+                            Image(systemName: "plus").frame(minWidth: 44, minHeight: 44)
                         }
-                        .disabled(!model.canInvite || !supportsLinks)
+                        .buttonStyle(.borderless)
+                        .disabled(!model.canInvite || !supportsLinks || model.pending != nil || model.needsPreparationRetry)
+                        .accessibilityLabel("Invite contributor")
                         .accessibilityIdentifier("shopping.home.invite")
-                        if model.pending != nil {
-                            Button("Cancel invitation", role: .destructive) {
-                                Task { await model.prepareRemoval(.cancelInvitation) }
-                            }
-                            .disabled(!model.canManageMembers)
-                            .accessibilityIdentifier("shopping.home.cancelInvitation")
-                        }
-                        if model.needsPreparationRetry {
-                            Button("Retry invitation") {
-                                Task { await model.invite(retryPreparation: true) }
-                            }
-                            .disabled(!model.canInvite || !supportsLinks)
-                        }
-                        if !supportsLinks { Text("Creating invitation links requires iOS 18 or later.") }
                     }
                 }
+                .textCase(nil)
+                .frame(minHeight: 44)
+            }
+            if let snapshot = model.snapshot {
                 if snapshot.access == .owner && snapshot.source == .server {
                     let pendingRemovals = snapshot.removals.filter { $0.absentObservedAt == nil }
                     if !pendingRemovals.isEmpty {
@@ -133,17 +112,43 @@ struct HomeDetailsView: View {
                     Button("Check members again") { Task { await model.refresh() } }.disabled(model.busy)
                 }
             }
-            if model.busy { ProgressView("Checking home…").accessibilityIdentifier("shopping.home.checking") }
-            Section {
-                NavigationLink("Sharing status") { HomeSharingStatusView() }
-                    .accessibilityIdentifier("shopping.home.sharingStatus")
-                NavigationLink("Manage homes") {
-                    HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
+            if bootstrap.homeCoordinator.homes.count > 1 || bootstrap.retainedLocalHomeName != nil
+                || bootstrap.homeCoordinator.pendingInvitation
+                || bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
+                Section {
+                    NavigationLink("Choose home") {
+                        HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
+                    }
+                    .accessibilityIdentifier("shopping.home.manageHomes")
                 }
-                .accessibilityIdentifier("shopping.home.manageHomes")
             }
         }
-        .navigationTitle("Home")
+        .navigationTitle(homeName)
+        .toolbar {
+            if model.snapshot?.canEditName == true {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        name = homeName
+                        showingNameEditor = true
+                    } label: {
+                        Label("Rename home", systemImage: "pencil")
+                    }
+                    .labelStyle(.iconOnly)
+                    .disabled(!model.canRename)
+                    .accessibilityIdentifier("shopping.home.rename")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    HomeSharingStatusView()
+                } label: {
+                    HomeCloudSymbol(isWorking: cloudIsWorking, needsAttention: cloudNeedsAttention)
+                }
+                .accessibilityLabel("Sharing status")
+                .accessibilityValue(cloudNeedsAttention ? "Needs attention" : model.busy ? "Checking home" : cloudIsWorking ? "Syncing" : "")
+                .accessibilityIdentifier("shopping.home.sharingStatus")
+            }
+        }
         .refreshable { await model.refresh() }
         .task { model.activate(); await model.refresh() }
         .onDisappear { model.retire() }
@@ -212,6 +217,63 @@ struct HomeDetailsView: View {
         }
     }
 
+    private func hasActions(_ member: HomeMember, in snapshot: HomeMembershipSnapshot) -> Bool {
+        snapshot.access == .owner && !member.isCurrentUser && member.role != .owner
+    }
+
+    @ViewBuilder
+    private func memberActions(_ member: HomeMember, in snapshot: HomeMembershipSnapshot) -> some View {
+        if model.pending?.participantID == member.id {
+            continueInvitationButton
+            cancelInvitationButton
+        } else {
+            if snapshot.canResend(member) && supportsLinks {
+                Button("Share invitation again") { Task { await model.resend(member.id) } }
+                    .disabled(!model.canInvite)
+                    .accessibilityIdentifier("shopping.home.resend.\(member.id)")
+            }
+            if hasActions(member, in: snapshot) {
+                Button(member.acceptance == .pending ? "Cancel invitation" : "Remove contributor", role: .destructive) {
+                    Task { await model.prepareRemoval(.removeMember, participantID: member.id) }
+                }
+                .disabled(!model.canManageMembers)
+                .accessibilityIdentifier("shopping.home.remove.\(member.id)")
+            }
+        }
+    }
+
+    private func pendingInvitationRow(participantID: String) -> some View {
+        HStack {
+            Text(model.needsPreparationRetry ? "Invitation needs attention" : "Invitation pending")
+                .accessibilityIdentifier("shopping.home.pendingInvitation")
+            Spacer()
+            Menu {
+                continueInvitationButton
+                if model.pending != nil { cancelInvitationButton }
+            } label: {
+                Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Invitation actions")
+            .accessibilityIdentifier("shopping.home.memberActions.\(participantID)")
+        }
+    }
+
+    private var continueInvitationButton: some View {
+        Button(model.needsPreparationRetry ? "Retry invitation" : "Continue invitation") {
+            Task { await model.invite(retryPreparation: model.needsPreparationRetry) }
+        }
+        .disabled(!model.canInvite || !supportsLinks)
+        .accessibilityIdentifier("shopping.home.continueInvitation")
+    }
+
+    private var cancelInvitationButton: some View {
+        Button("Cancel invitation", role: .destructive) {
+            Task { await model.prepareRemoval(.cancelInvitation) }
+        }
+        .disabled(!model.canManageMembers)
+        .accessibilityIdentifier("shopping.home.cancelInvitation")
+    }
+
     private func removalExplanation(_ confirmation: HomeMembershipRemovalConfirmation) -> String {
         switch confirmation.removal.purpose {
         case .cancelInvitation:
@@ -223,15 +285,7 @@ struct HomeDetailsView: View {
         }
     }
 
-    private func memberDetail(_ member: HomeMember) -> String {
-        let role: String
-        switch member.role { case .owner: role = "Owner"; case .contributor: role = "Contributor"; case .restricted: role = "Read-only access" }
-        switch member.acceptance {
-        case .accepted: return role
-        case .pending: return role + " · Invited"
-        case .unknown: return role + " · Checking acceptance"
-        }
-    }
+
 }
 
 #Preview {
