@@ -403,6 +403,30 @@ membership. These scenarios are in the broader UI suite; the six routine accepta
 scenarios remain unchanged. Real link acceptance, revocation, cross-account delivery
 and physical accessibility remain SHOPPING-30 evidence.
 
+
+## Watch commands during refresh (SHOPPING-159)
+
+`WatchShoppingSessionTests` owns a user Add arriving during a deterministically
+held local load: the read does not set command busy, the captured action waits,
+repeated import notifications and the periodic coordinator coalesce, and the
+service executes the exact original command once. Replacement account/home
+rejects that deferred action before service execution. Explicit store selection
+waits for its selected snapshot so the chooser can dismiss after success.
+Same-authority background refresh cannot erase command failure feedback. Existing
+service tests continue to own opaque-token validation, private ownership,
+read-only restrictions, and stale persistence mutations.
+
+`WatchShoppingUITests/testSwipeAddFailureShowsFeedbackAndRetryAddsOnce` owns the
+green swipe Add failure alert and retry. The durable swipe Add scenario owns the
+single private cart row and unchanged quantity across a same-store relaunch. The
+existing durable card Add and failed card Add scenarios retain dismissal after
+success, quantity persistence, failure feedback, and draft-preserving retry.
+These UI tests use the existing explicit DEBUG fixtures; the held-load timing
+case is deterministic session coverage, not a synthetic CloudKit UI claim.
+
+See [SHOPPING-159 evidence](shopping-159-watch-refresh.md) for the reproduced race,
+local validation, and outstanding physical Watch proof coordinated with
+SHOPPING-122. Native access verification work remains owned by SHOPPING-129.
 ## Member removal and cancelled invitations (SHOPPING-129)
 
 `HomeMembershipRemovalTests` owns explicit cancellation of a submitted invitation

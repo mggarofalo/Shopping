@@ -280,6 +280,60 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 2"))
     }
 
+    func testSwipeAddFailureShowsFeedbackAndRetryAddsOnce() {
+        let app = launchFixture("addFailure")
+        let bananas = app.buttons["watch.item.bananas"]
+        reveal(bananas, in: app)
+        bananas.swipeLeft()
+        let add = app.buttons["Add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+        XCTAssertTrue(app.buttons["OK"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.staticTexts.matching(NSPredicate(format: "label == %@",
+            "Preview add failed. Your cart is unchanged. Try again.")).count, 0)
+        screenshot("Watch swipe Add failure feedback", app: app)
+        app.buttons["OK"].tap()
+        reveal(bananas, in: app)
+        bananas.swipeLeft()
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        add.tap()
+        let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: bananas)
+        XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 5), .completed)
+        app.buttons["watch.cart.open"].tap()
+        reveal(bananas, in: app)
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
+    }
+
+    func testDurableSwipeAddPreservesPrivateQuantityAfterRelaunch() {
+        let app = launchDurableFixture("ready")
+        selectMarketIfNeeded(app)
+        let milk = app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).element
+        reveal(milk, in: app)
+        milk.swipeLeft()
+        let add = app.buttons["Add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+        let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: milk)
+        XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 5), .completed)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        let quantity = milk.value as? String
+        XCTAssertNotNil(quantity)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).count, 1)
+        screenshot("Watch durable swipe Add cart", app: app)
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        XCTAssertFalse(milk.exists)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertEqual(milk.value as? String, quantity)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).count, 1)
+    }
+
     func testDurableCardAddDismissesAndQuantitySurvivesRelaunch() {
         let app = launchDurableFixture("ready")
         selectMarketIfNeeded(app)
