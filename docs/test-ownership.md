@@ -1475,3 +1475,16 @@ a new ShoppingFull attestation. The deferred iOS 18.5 Settings slider automation
 regression remains SHOPPING-160; local system-text-size evidence is iOS 26.5.
 Two-phone CloudKit proof remains SHOPPING-30. No physical timing target is claimed
 from these simulator checks.
+
+### Stable phone check indicator (SHOPPING-166)
+
+The conditional Checking progress row is removed. A single native Check status
+button owns its persistent trailing cloud symbol, active pulse and accessible
+Checking value; Reduce Motion suppresses the pulse. It observes the existing busy
+state and does not start persistence work during rendering. No domain or check
+lifecycle behavior changes. HomeSharingStatusUITests retains navigation, one
+explicit check, Large → accessibility XXXL → Large geometry and identical
+grocery identities. HomeSharingStatusCheckTests and bootstrap tests still own
+bounded waiting, duplicate suppression, background local reads and stale-result
+isolation. No test selection, coverage baseline or Full attestation changes.
+Simulator checks do not establish physical-device timing or two-phone delivery.
