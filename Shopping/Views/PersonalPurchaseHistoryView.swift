@@ -8,6 +8,7 @@ struct PersonalPurchaseHistoryView: View {
 
     var body: some View {
         List {
+            EarlierClearedGroceriesLink(cart: cart)
             if cart.history.isEmpty { Text("No purchases yet").foregroundStyle(.secondary) }
             ForEach(cart.history) { purchase in
                 Section {

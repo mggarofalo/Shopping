@@ -24,7 +24,7 @@ struct PersonalCartSetupView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Personal carts")
+        .navigationTitle("Home")
         .confirmationDialog("Copy these groceries to your iCloud account?", isPresented: $confirmingImport, titleVisibility: .visible) {
             Button("Copy groceries") { activate(true) }
             Button("Cancel", role: .cancel) {}

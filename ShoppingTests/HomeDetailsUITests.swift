@@ -18,7 +18,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Waiting for your household"].exists)
         XCTAssertTrue(app.staticTexts["Leaving a home is still being verified. Open Homes to check its status. Your personal cart and history remain saved."].exists)
         chooseHome.tap()
-        XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Manage homes"].existsOrAppears(timeout: 5))
         XCTAssertFalse(app.buttons["shopping.home.choice." + homeName].exists,
             "The deleted shared root must not remain available as a home choice")
         let retainedStatus = app.staticTexts.matching(NSPredicate(format:
@@ -26,10 +26,6 @@ final class HomeDetailsUITests: XCTestCase {
         reveal(retainedStatus, in: app)
         XCTAssertEqual(retainedStatus.label, "Leaving this home is not yet confirmed")
         XCTAssertTrue(app.staticTexts[homeName].exists)
-        let retainedCopy = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
-            "Your personal cart and purchase history stay saved.")).element
-        reveal(retainedCopy, in: app)
-        XCTAssertTrue(retainedCopy.label.contains("Unsent checkout and undo changes won’t be sent automatically if you join again."))
         let check = app.buttons["shopping.home.checkLeaveStatus"]
         reveal(check, in: app)
         let checking = app.descendants(matching: .any)
@@ -94,8 +90,7 @@ final class HomeDetailsUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         reveal(status, in: app)
-        XCTAssertEqual(status.label,
-            "Leaving this home is still being verified. Your personal cart and history are retained.")
+        XCTAssertEqual(status.label, "Leaving home is still being confirmed.")
         XCTAssertTrue(leave.exists)
         XCTAssertFalse(leave.isEnabled, "An unresolved leave cannot be submitted again")
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
@@ -117,9 +112,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
-        let counts = app.staticTexts["shopping.home.memberCounts"]
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "0 other accepted members · 0 pending invitations")
+        assertMembership(app, contributor: false, invitation: false)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-owner"].exists)
         XCTAssertFalse(remove.exists)
@@ -150,20 +143,17 @@ final class HomeDetailsUITests: XCTestCase {
         reveal(confirmInvite, in: app)
         confirmInvite.tap()
         dismissSystemShareSheet(app)
-        let counts = app.staticTexts["shopping.home.memberCounts"]
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        assertMembership(app, contributor: true, invitation: true)
 
         let stop = app.buttons["shopping.home.stopSharing"]
         reveal(stop, in: app)
         stop.tap()
         let confirm = app.buttons["shopping.home.confirmRemoval"]
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Remove the 2 members and pending invitations captured below? Anyone added after this confirmation was prepared is not included."].exists)
+        XCTAssertTrue(app.staticTexts["Remove access for the people below?"].exists)
         app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        assertMembership(app, contributor: true, invitation: true)
         let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
         reveal(resend, in: app)
         XCTAssertTrue(resend.isEnabled, "Cancelling must retain the pending invitation")
@@ -173,8 +163,7 @@ final class HomeDetailsUITests: XCTestCase {
         reveal(confirm, in: app)
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "0 other accepted members · 0 pending invitations")
+        assertMembership(app, contributor: false, invitation: false)
         XCTAssertEqual(app.staticTexts["shopping.home.name"].label, homeName)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
@@ -193,8 +182,8 @@ final class HomeDetailsUITests: XCTestCase {
     func testOwnerDisclosureCancelAndShareCancellationKeepPendingInvitationAvailableToResend() {
         let app = launch(role: "owner")
         openHomeDetails(app)
-        XCTAssertEqual(app.staticTexts["shopping.home.memberCounts"].label,
-            "1 other accepted members · 0 pending invitations")
+        assertMembership(app, contributor: true, invitation: false)
+        XCTAssertFalse(app.buttons["shopping.home.stopSharing"].exists, "One member has one removal action")
         XCTAssertTrue(app.staticTexts["Morgan · You"].existsOrAppears(timeout: 3))
         let invite = app.buttons["shopping.home.invite"]
         reveal(invite, in: app)
@@ -202,28 +191,24 @@ final class HomeDetailsUITests: XCTestCase {
         let confirm = app.buttons["shopping.home.confirmInvite"]
         XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
-            "Personal cart contents and purchase history stay private.")).element.exists)
+            "Personal carts and purchase history stay private.")).element.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
-            "Anyone you send or forward this link to can claim its one invitation")).element.exists)
+            "Anyone with the link can claim it.")).element.exists)
         app.navigationBars["Invite contributor"].buttons["Cancel"].tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
-        let counts = app.staticTexts["shopping.home.memberCounts"]
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "1 other accepted members · 0 pending invitations")
+        assertMembership(app, contributor: true, invitation: false)
         reveal(invite, in: app)
         invite.tap()
         reveal(confirm, in: app)
         confirm.tap()
         dismissSystemShareSheet(app)
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        assertMembership(app, contributor: true, invitation: true)
         let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
         reveal(resend, in: app)
         XCTAssertTrue(app.staticTexts["Invitation pending"].existsOrAppears(timeout: 3))
         resend.tap()
         dismissSystemShareSheet(app)
-        reveal(counts, in: app, towardTop: true)
-        XCTAssertEqual(counts.label, "1 other accepted members · 1 pending invitations")
+        assertMembership(app, contributor: true, invitation: true)
     }
 
     func testContributorCanRenameHomeButCannotInviteAndNameSurvivesRelaunch() {
@@ -263,12 +248,10 @@ final class HomeDetailsUITests: XCTestCase {
         openHomeDetails(app)
         let home = app.staticTexts["shopping.home.name"]
         let homeName = home.label
-        let counts = app.staticTexts["shopping.home.memberCounts"].label
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         let witnesses: [(String, XCUIElement)] = [
             ("headline", home),
-            ("caption", app.staticTexts["Membership checked with iCloud"]),
-            ("subheadline", app.staticTexts["Read-only access · Accepted"]),
+            ("subheadline", app.staticTexts["Read-only access"]),
             ("body", longName)
         ]
         func measure(_ phase: String) -> [String: CGRect] {
@@ -286,10 +269,9 @@ final class HomeDetailsUITests: XCTestCase {
         func assertRetainedDestination() {
             // List can virtualize deep members after reflow. First establish the
             // retained destination/home, without reopening it or scrolling.
-            XCTAssertTrue(app.navigationBars["Home details"].exists)
+            XCTAssertTrue(app.navigationBars["Home"].exists)
             XCTAssertTrue(home.exists)
             XCTAssertEqual(home.label, homeName)
-            XCTAssertEqual(app.staticTexts["shopping.home.memberCounts"].label, counts)
             XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         }
         let baseline = measure("Large")
@@ -309,11 +291,12 @@ final class HomeDetailsUITests: XCTestCase {
         for (role, frame) in enlarged {
             XCTAssertGreaterThan(frame.height, baseline[role]!.height + 1, "\(role) must actually grow after the system change")
         }
-        let refresh = app.buttons["Check members again"]
-        reveal(refresh, in: app)
-        XCTAssertTrue(refresh.isEnabled)
-        refresh.tap()
-        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in refresh.isEnabled }, object: nil)
+        XCTAssertFalse(app.buttons["Check members again"].exists, "Healthy members have native refresh")
+        reveal(home, in: app, towardTop: true)
+        app.swipeDown()
+        let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists
+        }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
@@ -325,6 +308,27 @@ final class HomeDetailsUITests: XCTestCase {
             XCTAssertEqual(frame.height, baseline[role]!.height, accuracy: 2, "\(role) must return to its original rendered size")
             XCTAssertEqual(frame.width, baseline[role]!.width, accuracy: 2)
         }
+    }
+
+    private func assertMembership(_ app: XCUIApplication, contributor: Bool, invitation: Bool) {
+        let owner = app.staticTexts["shopping.home.member.fixture-owner"]
+        reveal(owner, in: app, towardTop: true)
+        XCTAssertEqual(owner.label, "Morgan · You")
+        let member = app.staticTexts["shopping.home.member.fixture-long-name"]
+        if contributor {
+            reveal(member, in: app)
+            XCTAssertEqual(member.label, "Alexandra Penelope Montgomery-Wellington")
+        } else {
+            XCTAssertTrue(member.waitForNonExistence(timeout: 5))
+        }
+        let pending = app.staticTexts["shopping.home.member.fixture-invitation-1"]
+        if invitation {
+            reveal(pending, in: app)
+            XCTAssertEqual(pending.label, "Invitation pending")
+        } else {
+            XCTAssertTrue(pending.waitForNonExistence(timeout: 5))
+        }
+        XCTAssertFalse(app.staticTexts["shopping.home.memberCounts"].exists)
     }
 
     private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false) -> XCUIApplication {
@@ -348,8 +352,8 @@ final class HomeDetailsUITests: XCTestCase {
         let details = app.buttons["shopping.settings.homeDetails"]
         reveal(details, in: app)
         details.tap()
-        XCTAssertTrue(app.navigationBars["Home details"].existsOrAppears(timeout: 5))
-        XCTAssertTrue(app.staticTexts["shopping.home.memberCounts"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Home"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.staticTexts["shopping.home.name"].existsOrAppears(timeout: 5))
     }
 
     private func dismissSystemShareSheet(_ app: XCUIApplication) {

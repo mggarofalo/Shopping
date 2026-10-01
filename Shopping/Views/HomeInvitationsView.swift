@@ -47,20 +47,17 @@ struct HomeInvitationsView: View {
                         Text("Joining will start when your iCloud account and saved groceries are ready.")
                     case .joining:
                         Label("Joining home", systemImage: "person.crop.circle.badge.plus")
-                        Text("The invitation is being checked. You can leave this screen and return later.")
                     case .loading:
                         Label("Loading groceries", systemImage: "tray.and.arrow.down")
                         if let problem = invitations.importProblems[entry.id] { Text(problem) }
-                        Text("The invitation was accepted. Your current home stays selected while the shared home loads. iCloud decides when groceries arrive; you can return later.")
+                        Text("Your current home stays selected.")
                         Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
                             .disabled(bootstrap.isCheckingSharingStatus)
                     case .ready(let graph):
                         if let home = bootstrap.homeCoordinator.homes.first(where: { $0.graph == graph }) {
                             Label(home.name, systemImage: "house")
                             if let current = bootstrap.currentHomeName {
-                                Text("Your current home is \(current). Open \(home.name) and keep \(current) separately. Groceries and personal carts stay with their original home.")
-                            } else {
-                                Text("Open \(home.name). Any other homes and personal carts stay separate.")
+                                Text("Switch from \(current) to \(home.name).")
                             }
                             Button("Open \(home.name)") {
                                 perform { try await bootstrap.activateInvitedHome(entryID: entry.id, graph: graph) }
@@ -84,9 +81,6 @@ struct HomeInvitationsView: View {
                     if case .ready = entry.state { }
                     else if case .failed = entry.state, entry.acceptanceAttempted { }
                     else {
-                        if entry.acceptanceAttempted {
-                            Text("You can hide this progress. The invitation will reappear when it is ready or needs your attention.")
-                        }
                         Button(entry.acceptanceAttempted ? "Hide for now" : "Dismiss invitation", role: .cancel) {
                             invitations.dismiss(entry.id)
                         }

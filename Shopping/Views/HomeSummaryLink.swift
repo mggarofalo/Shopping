@@ -10,10 +10,7 @@ struct HomeSummaryLink: View {
         NavigationLink {
             HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
         } label: {
-            VStack(alignment: .leading) {
-                Text(name)
-                Text("Home details").font(.caption).foregroundStyle(.secondary)
-            }
+            LabeledContent("Home", value: name)
         }
         .accessibilityIdentifier("shopping.settings.homeDetails")
     }

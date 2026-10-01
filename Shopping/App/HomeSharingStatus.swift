@@ -39,11 +39,13 @@ struct HomeSharingStatus: Equatable {
         var leavePendingCount = 0
     }
 
+    let activity: HomeSharingActivity
     let summary: SharingStatusPresentation
     let sections: [Section]
     let actions: [Action]
 
     init(input: Input) {
+        activity = HomeSharingActivity(input: input)
         let account = Self.accountSection(input.account)
         guard input.account != .localOnly else {
             summary = account.presentation

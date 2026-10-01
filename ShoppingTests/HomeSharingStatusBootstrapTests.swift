@@ -146,6 +146,7 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         await f.bootstrap.refreshSharingStatus()
         let currentAccountReads = await f.account.reads
         XCTAssertEqual(currentAccountReads, accountReads)
+        XCTAssertNil(f.bootstrap.sharingStatusCheckProblem)
         XCTAssertFalse(f.bootstrap.isCheckingSharingStatus)
         XCTAssertTrue(try savedWork(f.bootstrap).contains("0 saved checkout operations"))
         XCTAssertEqual(f.bootstrap.sharingStatusCheckMessage,
@@ -209,9 +210,11 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         await check.value
         XCTAssertFalse(f.bootstrap.isCheckingSharingStatus)
         XCTAssertTrue(f.bootstrap.sharingStatusCheckMessage?.contains("longer than expected") == true)
+        XCTAssertEqual(f.bootstrap.sharingStatusCheckProblem, "The check took too long. Try again.")
         await f.bootstrap.checkSharingStatus()
         XCTAssertFalse(f.bootstrap.isCheckingSharingStatus)
         XCTAssertTrue(f.bootstrap.sharingStatusCheckMessage?.contains("still finishing") == true)
+        XCTAssertEqual(f.bootstrap.sharingStatusCheckProblem, "The previous check is still finishing. Try again shortly.")
         await read.open()
         try await drain(f.bootstrap)
         XCTAssertFalse(try savedWork(f.bootstrap).contains("999"))
@@ -333,6 +336,7 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         XCTAssertFalse(f.bootstrap.isCheckingSharingStatus)
         XCTAssertTrue(f.bootstrap.homeSharingStatus.sections.contains { $0.id == .localChecks })
         XCTAssertNil(f.bootstrap.shareAssociationError)
+        XCTAssertEqual(f.bootstrap.sharingStatusCheckProblem, "Couldn’t check status. Try again.")
         XCTAssertTrue(try savedWork(f.bootstrap).contains("not yet known"))
     }
 }

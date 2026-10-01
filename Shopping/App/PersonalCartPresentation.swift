@@ -7,6 +7,7 @@ final class PersonalCartPresentation {
     private struct Snapshot: Sendable {
         let entries: [PersonalCartEntrySnapshot]
         let history: [PersonalCheckoutHistoryEntry]
+        let recovery: PersonalCartRecoverySnapshot?
         let outstandingNeedIDs: Set<UUID>
         let presence: [PersonalCartPresenceSnapshot]
         let householdError: String?
@@ -23,6 +24,8 @@ final class PersonalCartPresentation {
     private(set) var outstandingNeedIDs: Set<UUID> = []
     private(set) var presence: [PersonalCartPresenceSnapshot] = []
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
+    private(set) var recovery: PersonalCartRecoverySnapshot?
+    var pendingLegacyReview: [LegacyCartReviewSnapshot] { recovery?.pendingLegacyReview ?? [] }
     private(set) var error: String?
     private var pendingCartState: [UUID: Bool] = [:]
     private var pendingQuantityIDs: Set<UUID> = []
@@ -62,6 +65,7 @@ final class PersonalCartPresentation {
                 case .success(let snapshot):
                     entries = snapshot.entries
                     history = snapshot.history
+                    recovery = snapshot.recovery
                     outstandingNeedIDs = snapshot.outstandingNeedIDs
                     presence = snapshot.presence
                     error = snapshot.householdError
@@ -82,18 +86,30 @@ final class PersonalCartPresentation {
         do {
             let entries = try service.entries(householdID: householdID, listID: listID)
             let history = try service.history(householdID: householdID, listID: listID)
+            // Discovery failures cannot disable checkout or erase household projections.
+            let recovery: PersonalCartRecoverySnapshot?
+            do { recovery = try service.recoverySnapshot(householdID: householdID, listID: listID) }
+            catch { recovery = nil }
             do {
-                return .success(Snapshot(entries: entries, history: history,
+                return .success(Snapshot(entries: entries, history: history, recovery: recovery,
                     outstandingNeedIDs: try service.outstandingNeedIDs(householdID: householdID, listID: listID),
                     presence: try service.presence(householdID: householdID, listID: listID), householdError: nil))
             } catch {
                 // Incomplete household imports cannot hide private removal or purchase history.
-                return .success(Snapshot(entries: entries, history: history,
+                return .success(Snapshot(entries: entries, history: history, recovery: recovery,
                     outstandingNeedIDs: [], presence: [], householdError: error.localizedDescription))
             }
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+
+    func isSelected(in selection: PersistenceSelection) -> Bool {
+        selection.householdID == householdID && selection.listID == listID
+    }
+
+    func canReviewEarlierCleared(in selection: PersistenceSelection) -> Bool {
+        isSelected(in: selection) && recovery?.hasEarlierClearedGroceries == true
     }
 
     func contains(_ needID: UUID) -> Bool {

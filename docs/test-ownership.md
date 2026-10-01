@@ -1430,3 +1430,45 @@ are absent from root Settings. The unavailable-home retained-cart route remains
 on the waiting root. No recovery data is hidden based on an unknown count, and
 no persistence query was added to a view body. Live account events and two-phone
 sharing remain device evidence, separate from injected notification proof.
+
+### Consumer Home settings cuts (SHOPPING-165)
+
+Michael rejected the diagnostic paragraphs and empty rows introduced by the
+sharing-status screens. The consumer presentation is now distinct from internal
+observation/accounting semantics: HomeSharingActivityTests owns healthy-state
+omission, scoped latest-success time, exclusion of previous-account observations,
+independent cloud failures, and omission of unactionable held-work/preparation
+counts. HomeSharingStatusTests and bootstrap tests retain observation truth,
+account boundaries, scoped work and bounded checks without rendering that ledger.
+
+| Changed UI proof | Current owner |
+| --- | --- |
+| Summary, saved-work paragraph and diagnostic Details geometry | Retired with the removed product UI. HomeSharingStatusUITests retains actual same-process Large → accessibility XXXL → Large, full Check control containment/growth/restoration, one explicit check, absent success/error boilerplate on a healthy fixture, and identical grocery IDs on the existing Groceries tab. |
+| Healthy membership counts and verification caption | Retired with removed text. HomeDetailsUITests asserts actual member identities, roles, pending invitation/resend, cancellation/removal outcomes and preserved groceries. The text-size method retains headline, role and long-name witnesses; it uses native pull-to-refresh instead of an unconditional duplicate Check members button. |
+| Settings Recovery routes | Removed by product direction. PersonalCartUITests reaches explicit legacy claim/discard only through My cart when pending entries exist, asserts the contextual link disappears after a durable decision/relaunch, then restores earlier cleared groceries through My purchases. The create/switch workflow opens the original home's saved private cart from the new home and verifies its contents again after relaunch/switching back. The missing-home private-cart cleanup and Groceries purchase undo routes remain unchanged. |
+| Settings Home/Homes/Sharing links | One Home entry owns Home → Sharing status / Manage homes. Existing create/switch/resume/adoption workflows use that route. ShoppingDeviceUITests retains trailing-edge geometry on the Home row rather than the deleted status row. |
+| Outgoing private invitation | HomeInvitationActivitySourceTests verifies message/mail purpose and exact URL, URL-only Copy/Reading List, and preview metadata retaining the same URL. HomeDetailsUITests keeps native sheet cancellation, pending invitation/resend, private-cart consent and one-person link disclosure. No recipient is contacted by automation. |
+
+PersonalCartPresentationTests owns background pending legacy discovery, omission
+after an explicit decision without deleting its audit record, actual checkout and
+private cleanup remaining available when imported legacy records are incomplete,
+nonempty other-home cart/history discovery, and earlier-clear discovery in a
+second SQLite store. That store fixture proves discovery across stores, not live
+Contributor sharing. A shared EarlierClearedGroceriesLink applies one selected
+home/list policy in both legacy review and My purchases; mismatching/nil selection
+tests prevent a saved cart from opening another home's recovery. Existing blocked
+writer tests retain main-actor responsiveness. No view body queries persistence.
+The new concise check-problem state shares the existing bounded check lifecycle;
+bootstrap tests assert timeout/failure/busy text and no problem on success.
+
+Two independent product passes required further cuts after the first structural
+pass: no empty activity row, no held-work advice that cannot release publications,
+one failed-check notice, and no bulk Stop sharing beside the same single-member
+removal. Interrupted invitations use one set of pending controls; an unavailable
+leave-status read retains its retry. Essential consent stays at the action.
+
+This scope uses Fast and the affected simulator workflows plus routine CI, without
+a new ShoppingFull attestation. The deferred iOS 18.5 Settings slider automation
+regression remains SHOPPING-160; local system-text-size evidence is iOS 26.5.
+Two-phone CloudKit proof remains SHOPPING-30. No physical timing target is claimed
+from these simulator checks.

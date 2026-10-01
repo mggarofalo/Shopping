@@ -1,15 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// Only the one-time URL is handed to the ordinary system share sheet. Passing a
-/// CKShare here would expose collaboration controls outside our lifecycle commands.
+/// The invitation message and one-time URL use the ordinary system share sheet.
+/// Passing a CKShare would expose controls outside our lifecycle commands.
 struct HomeInvitationActivityView: UIViewControllerRepresentable {
     let delivery: HomeInvitationDelivery
     let onPresented: () -> Void
     let onFinished: () -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = PresentedActivityController(activityItems: [delivery.url], applicationActivities: nil)
+        let controller = PresentedActivityController(activityItems: HomeInvitationActivitySource.items(url: delivery.url), applicationActivities: nil)
         controller.didPresent = onPresented
         controller.completionWithItemsHandler = { _, _, _, _ in
             Task { @MainActor in onFinished() }

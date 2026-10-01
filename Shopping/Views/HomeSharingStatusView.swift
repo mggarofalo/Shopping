@@ -7,45 +7,49 @@ struct HomeSharingStatusView: View {
     @Environment(\.openURL) private var openURL
     @State private var announcements = HomeSharingStatusAnnouncements()
 
-    private var status: HomeSharingStatus { bootstrap.homeSharingStatus }
+    private var activity: HomeSharingActivity { bootstrap.homeSharingStatus.activity }
+    private var notices: [HomeSharingActivity.Notice] {
+        activity.notices.filter { $0.id != .localCheck || bootstrap.sharingStatusCheckProblem == nil }
+    }
 
     var body: some View {
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(status.summary.title, systemImage: status.summary.symbol)
-                        .font(.headline)
-                        .accessibilityIdentifier("shopping.sharing.summary")
-                    Text(status.summary.details).foregroundStyle(.secondary)
+            Section("Recent activity") {
+                if let date = activity.lastSuccess {
+                    Text(date, format: .dateTime.month(.abbreviated).day().year().hour().minute())
+                        .accessibilityLabel("Last successful iCloud activity")
+                        .accessibilityValue(date.formatted(date: .abbreviated, time: .shortened))
+                        .accessibilityIdentifier("shopping.sharing.lastActivity")
+                }
+                Button("Check status") { Task { await bootstrap.checkSharingStatus() } }
+                    .disabled(bootstrap.isCheckingSharingStatus)
+                    .accessibilityIdentifier("shopping.sharing.check")
+                if bootstrap.isCheckingSharingStatus {
+                    ProgressView("Checking…")
+                        .accessibilityIdentifier("shopping.sharing.checking")
+                }
+                if let problem = bootstrap.sharingStatusCheckProblem {
+                    Text(problem).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("shopping.sharing.checkResult")
                 }
             }
-            if !status.actions.isEmpty {
-                Section("Actions") {
-                    ForEach(status.actions, id: \.rawValue) { action in
-                        actionView(action)
-                    }
-                    if bootstrap.isCheckingSharingStatus {
-                        ProgressView("Checking status…")
-                            .accessibilityIdentifier("shopping.sharing.checking")
-                    }
-                    if let message = bootstrap.sharingStatusCheckMessage {
-                        Text(message).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("shopping.sharing.checkResult")
-                    }
+            ForEach(notices) { notice in
+                Section {
+                    Text(notice.title).font(.headline)
+                    if !notice.message.isEmpty { Text(notice.message).foregroundStyle(.secondary) }
+                    if let action = notice.action { actionView(action) }
                 }
-            }
-            Section {
-                NavigationLink("Details") { HomeSharingDetailsView() }
-                    .accessibilityIdentifier("shopping.sharing.details")
+                .accessibilityIdentifier("shopping.sharing.notice.\(notice.id.rawValue)")
             }
         }
         .navigationTitle("Sharing status")
         .task { await bootstrap.refreshSharingStatus() }
-        .onChange(of: status.summary.title, initial: true) { _, title in
-            if let message = announcements.observe(title: title) { announce(message) }
+        .onChange(of: notices, initial: true) { _, notices in
+            let titles = notices.map(\.title).joined(separator: ". ")
+            if let message = announcements.observe(title: titles), !message.isEmpty { announce(message) }
         }
         .onChange(of: bootstrap.isCheckingSharingStatus) { wasChecking, checking in
-            if wasChecking && !checking, let message = bootstrap.sharingStatusCheckMessage { announce(message) }
+            if wasChecking && !checking, let problem = bootstrap.sharingStatusCheckProblem { announce(problem) }
         }
     }
 
@@ -63,7 +67,7 @@ struct HomeSharingStatusView: View {
             .accessibilityHint("Opens this app’s settings. Apple Account settings are available from the main Settings screen.")
             .accessibilityIdentifier("shopping.sharing.settings")
         case .chooseHome:
-            NavigationLink("Homes") {
+            NavigationLink("Manage homes") {
                 HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
             }
             .accessibilityIdentifier("shopping.sharing.homes")

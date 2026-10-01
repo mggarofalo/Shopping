@@ -170,6 +170,18 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var homeDiscoveryError: Error?
     @Published private(set) var isCheckingSharingStatus = false
     @Published private(set) var sharingStatusCheckMessage: String?
+    private enum SharingCheckProblem {
+        case failed, timedOut, alreadyRunning
+        var message: String {
+            switch self {
+            case .failed: return "Couldn’t check status. Try again."
+            case .timedOut: return "The check took too long. Try again."
+            case .alreadyRunning: return "The previous check is still finishing. Try again shortly."
+            }
+        }
+    }
+    @Published private var sharingCheckProblem: SharingCheckProblem?
+    var sharingStatusCheckProblem: String? { sharingCheckProblem?.message }
     @Published private var sharingWork: HomeSharingWorkSnapshot?
     @Published private var sharingWorkNeedsAttention = false
     private var sharingWorkScope: ActiveHomeScope?
@@ -402,6 +414,7 @@ final class PersistenceBootstrap: ObservableObject {
     private func performSharingStatusCheck(retry: Bool) async {
         guard !isCheckingSharingStatus else { return }
         guard !sharingCheck.isRunning else {
+            sharingCheckProblem = .alreadyRunning
             sharingStatusCheckMessage = "The previous check is still finishing. Saved data is retained; you can return to your home and try again later."
             return
         }
@@ -415,6 +428,7 @@ final class PersistenceBootstrap: ObservableObject {
         sharingCheckID = id
         isCheckingSharingStatus = true
         sharingStatusCheckMessage = nil
+        sharingCheckProblem = nil
         let outcome = await sharingCheck.run { [weak self] in
             guard let self else { throw CancellationError() }
             if retry {
@@ -460,14 +474,17 @@ final class PersistenceBootstrap: ObservableObject {
                 ? "Available observations were checked. This does not confirm delivery to another device."
                 : "Saved work was checked on this device. iCloud activity is shown from existing observations."
         case .failed:
+            sharingCheckProblem = .failed
             sharingWork = nil
             sharingWorkNeedsAttention = true
             sharingStatusCheckMessage = "Some status information could not be checked. Saved data is retained. Try again later."
         case .timedOut:
+            sharingCheckProblem = .timedOut
             sharingWork = nil
             sharingStatusCheckMessage = "The check is taking longer than expected. Saved data is retained; you can return to your home and check again later."
         case .cancelled: break
         case .alreadyRunning:
+            sharingCheckProblem = .alreadyRunning
             sharingStatusCheckMessage = "A previous check is still finishing. Try again later."
         }
     }
@@ -483,6 +500,7 @@ final class PersistenceBootstrap: ObservableObject {
         sharingCheckID = nil
         isCheckingSharingStatus = false
         sharingStatusCheckMessage = nil
+        sharingCheckProblem = nil
         sharingWork = nil
         sharingWorkScope = nil
         sharingWorkPresentationID = nil

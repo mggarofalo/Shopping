@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PersonalCartView: View {
     let cart: PersonalCartPresentation
+    @Environment(\.persistenceSelection) private var selection
     @ObservedObject var navigation: GroceryNavigationState
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
@@ -41,6 +42,17 @@ struct PersonalCartView: View {
 
     var body: some View {
         List {
+            if cart.isSelected(in: selection), !cart.pendingLegacyReview.isEmpty {
+                NavigationLink("Review old cart entries") { LegacyCartReviewView(cart: cart) }
+                    .accessibilityIdentifier("shopping.personalCart.legacyReview")
+            }
+            if cart.isSelected(in: selection),
+               let scopes = cart.recovery?.otherSavedScopes, !scopes.isEmpty {
+                NavigationLink("Carts from other homes") {
+                    PersonalRetainedCartsView(service: cart.service, includedScopes: scopes)
+                }
+                .accessibilityIdentifier("shopping.personalCart.otherHomes")
+            }
             if let message = cart.error { Text(message).foregroundStyle(.secondary) }
             if visibleEntries.isEmpty { Text("Your cart is empty in this view").foregroundStyle(.secondary) }
             CompactGrocerySections(sections: sections, itemID: \.id) { _, entry in
