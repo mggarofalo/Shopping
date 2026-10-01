@@ -18,6 +18,8 @@ final class WatchShoppingSession {
     }
     private let service: any WatchShoppingService
     private var reloadRequested = false
+    private var isRefreshing = false
+    private var refreshWaiter: CheckedContinuation<Void, Never>?
     private var authorityGeneration = 0
 
     init(service: any WatchShoppingService, initialSnapshot: WatchShoppingSnapshot = WatchShoppingSnapshot()) {
@@ -31,9 +33,9 @@ final class WatchShoppingSession {
                 self.snapshot = WatchShoppingSnapshot()
                 self.sheet = nil
                 self.errorMessage = nil
-                Task { await self.reload() }
+                self.requestReload()
             case .dataChanged:
-                Task { await self.reload() }
+                self.requestReload()
             case .syncChanged(let status):
                 guard self.snapshot.syncStatus != status else { return }
                 self.snapshot.syncStatus = status
@@ -41,14 +43,43 @@ final class WatchShoppingSession {
         }
     }
 
+    private func requestReload() {
+        reloadRequested = true
+        guard !isBusy, !isRefreshing else { return }
+        Task { await reload() }
+    }
+
     func refreshHomeAccess() { service.refreshHomeAccess() }
 
     func reload(storeID: UUID? = nil) async {
-        guard !isBusy else {
+        if let storeID {
+            // Store selection is an explicit action: its caller may dismiss only
+            // after the captured selection has actually finished.
+            await run { .snapshot(try await self.service.load(storeID: storeID)) }
+            return
+        }
+        guard !isBusy, !isRefreshing else {
             reloadRequested = true
             return
         }
-        await run { .snapshot(try await self.service.load(storeID: storeID ?? self.snapshot.selectedStoreID)) }
+        isRefreshing = true
+        reloadRequested = false
+        let selectedStoreID = snapshot.selectedStoreID
+        let generation = authorityGeneration
+        do {
+            let value = try await service.load(storeID: selectedStoreID)
+            if generation == authorityGeneration { applySnapshot(value) }
+        } catch {
+            // A background read must not dismiss feedback from an explicit action.
+            if generation == authorityGeneration, errorMessage == nil {
+                errorMessage = error.localizedDescription
+            }
+        }
+        isRefreshing = false
+        let waiter = refreshWaiter
+        refreshWaiter = nil
+        waiter?.resume()
+        if reloadRequested, !isBusy { await reload() }
     }
 
     @discardableResult
@@ -88,12 +119,24 @@ final class WatchShoppingSession {
 
     @discardableResult
     private func run(_ operation: () async throws -> Update) async -> Bool {
-        guard !isBusy else { return false }
+        guard !isBusy else {
+            errorMessage = "Another cart action is still finishing. Try again when it completes."
+            return false
+        }
+        // Reserve the action before waiting: imports coalesce behind it and a
+        // second tap cannot enqueue another mutation using the same capture.
         isBusy = true
         errorMessage = nil
         let generation = authorityGeneration
+        let authorityID = snapshot.authorityID
+        if isRefreshing {
+            await withCheckedContinuation { refreshWaiter = $0 }
+        }
         var applied = false
         do {
+            guard generation == authorityGeneration else { throw PersonalCartError.scopeChanged }
+            guard snapshot.authorityID == authorityID else { throw PersonalCartError.scopeChanged }
+            try Task.checkCancellation()
             let update = try await operation()
             if generation == authorityGeneration {
                 apply(update)
