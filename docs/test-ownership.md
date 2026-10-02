@@ -1793,3 +1793,34 @@ could mistake a fresh account for the invalidated one. The successor adds the
 cold-start journal barrier, exact outgoing-session event capture, and a bounded
 drain assertion after releasing held native verification. This later production
 source and its fixture changes require exact-tree validation before integration.
+
+
+## Final Phase 24 validation (SHOPPING-174)
+
+The committed combined lifecycle source `2e634c631f68dfcf2f8be0a8c54701f30290d7a3`
+was integrated as `8433077` with exact tracked-tree equality. Final local proof
+was ShoppingFast **642/642**, eight home UI workflows **8/8**, and Watch
+**63/63** (61 unit checks and two UI workflows). Fast retained two QoS runtime
+warnings, home UI one, and Watch none.
+
+SHOPPING-184 source `e6773f6` passed Fast **644/644** with three QoS warnings.
+The destination-readiness test successor `b9a1d00` passed switch/relaunch UI
+**1/1** without runtime warnings. Its integrated tree `6904246` matches issue
+`d1042c2`; the extra change was trailing whitespace cleanup. The first 184 build
+stopped before tests because a project path containing `+` was unquoted; the
+quoted path passed project lint and subsequent builds.
+
+SHOPPING-185 source `423cd8a` ran Fast **651/652**. The first-home test helper
+repeated `start()` through the no-transition loading branch, permitting a late
+local fixture load to publish during account entry. The helper now drives only
+the requested account transition. Review also replaced a default notification
+broadcast with the exact fixture's private center. Existing outcome assertions
+were preserved. Final committed `ac5512b` passed Fast **652/652** and five native
+UI workflows **5/5**; its tracked tree equals integrated `d1feb35`. Fast retained
+three QoS warnings; UI none. A navigation-update warning appeared in the Fast
+log during presentation retirement. No physical responsiveness result is claimed.
+
+The [home-sharing execution record](home-sharing-validation.md) records source,
+local bundles, app-menu counts and remaining physical acceptance. Pinned CI and
+its final pushed SHA belong in the phase PR and SHOPPING-174 comment. These
+focused UI selections are not ShoppingFull attestation.

@@ -91,6 +91,65 @@ and the device Animation Hitches trace defined by the
 [responsiveness contract](ui-responsiveness.md). Michael's reported initial join
 above establishes the installed transport's success, not these rewritten paths.
 
+## Phase 24 execution record (SHOPPING-174)
+
+The integrated implementation is `d1feb35` on `milestone/phase-24`. Its tracked
+tree exactly matches issue candidate `ac5512b`, which produced the final local
+Fast and native UI results below. Later validation documentation does not change
+that implementation. The PR checks and SHOPPING-174 comment record the final
+pushed SHA and pinned CI run; a local simulator pass does not establish that CI
+result.
+
+| Source | Local result | Scope |
+| --- | --- | --- |
+| `2e634c631f68dfcf2f8be0a8c54701f30290d7a3` → integrated `8433077` | Fast **642/642**; home UI **8/8**; Watch **63/63** | Combined entry, switching, deletion, conversion and Watch scope. Watch includes 61 unit checks and two UI workflows. |
+| `e6773f6` | Fast **644/644** | Saved-cart exact home resolution, missing/ambiguous roots, account isolation and deleted-home history. |
+| `b9a1d00` → integrated `6904246` | Strengthened switch/relaunch UI **1/1** | Destination readiness, unique active-home controls, and the saved cart's original home. Integration also removes a trailing blank line. |
+| `ac5512b` → integrated `d1feb35` | Fast **652/652**; focused native UI **5/5** | Account changes, cached verification, cold invalidation, delayed events, invitation intent and copy selection; first home, direct invitation, Not Now, retained copy and switching UI. |
+
+The iPhone runs used Xcode 27.0, an iPhone 17 Pro simulator with iOS 26.5, and
+Core Data concurrency debugging. The Watch run used a Series 11 simulator with
+watchOS 26.5. The final iPhone UI bundle reported no runtime warnings; final Fast
+reported three QoS priority-inversion warnings. A navigation-update warning also
+appeared in the Fast log during presentation-retirement coverage. These results
+do not measure physical launch or scroll responsiveness.
+
+The final local bundles are `/tmp/shopping-phase24-185-final-fast-b.xcresult`
+and `/tmp/shopping-phase24-185-final-ui.xcresult`. Earlier combined proof is in
+`/tmp/shopping-phase24-173-final-{fast,ui,watch}.xcresult`; saved-cart proof is in
+`/tmp/shopping-phase24-184-fast-b.xcresult` and
+`/tmp/shopping-phase24-184-ui-b.xcresult`. Intermediate failures, corrections and
+proof owners are retained in the [test ownership ledger](test-ownership.md).
+The focused UI commands used ShoppingFull with an explicit selection; they are
+not an exhaustive Full run or an exact-SHA Full attestation. No remote Full run
+was dispatched and no coverage baseline was lowered.
+
+### App interactions
+
+| Journey | App menus / taps | Evidence and limit |
+| --- | --- | --- |
+| First home | 0 / 1 | Native Create Home test, including relaunch. |
+| Accepted invitation | 0 / 0 additional Join taps | Exact imported home opens automatically in the native fixture. Real cold/warm system-link routing remains a phone check. |
+| Not Now | 0 / 1 | Deferred intent and original groceries survive relaunch. |
+| Open deferred invitation | 1 / 2 | Home control → Open; imported-ready Bootstrap tests prove exact manual activation after deferral. |
+| Switch | 1 / 2 | Home control → home; native UI verifies contents and scope across tabs and relaunch. |
+
+System share-sheet and iCloud account setup interactions are separate from these
+app-menu counts. Groceries, Catalog, current cart and Settings identify the
+selected home; saved carts identify their own exact home. Watch names its own
+selected home without changing its independent selection policy. Large-text
+screens were inspected in the combined eight-flow run.
+
+### Physical validation remains open
+
+Michael's reported two-phone join/import applies to the previously installed
+build. SHOPPING-174 remains open for this candidate's real cold/warm invitations,
+owner/contributor paths, deletion and propagation, revoked/claimed links, slow
+import, account changes and recovery, physical Watch presentation, and the
+Animation Hitches trace in the [responsiveness contract](ui-responsiveness.md).
+Injected native backends and two-replica fixtures prove policy and recovery;
+they do not prove CloudKit server authorization, peer receipt or zone deletion.
+
 ## Required live assertions
 
 | Live case | Evidence required on the sharing candidate |
