@@ -67,6 +67,7 @@ struct WatchShoppingSnapshot: Equatable {
     // Opaque account/household authorization epoch. Stable across ordinary imports.
     var authorityID: String?
     var availability: Availability = .loading
+    var homeName: String?
     var stores: [WatchStore] = []
     var selectedStoreID: UUID?
     var grocerySections: [WatchItemSection] = []

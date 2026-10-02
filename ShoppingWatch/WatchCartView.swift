@@ -5,6 +5,7 @@ struct WatchCartView: View {
 
     var body: some View {
         List {
+            WatchHomeScopeLabel(name: session.snapshot.homeName, identifier: "watch.home.cart")
             if session.snapshot.cartSections.isEmpty {
                 Text("Your cart is empty").foregroundStyle(.secondary)
             }

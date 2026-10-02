@@ -38,6 +38,8 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 23: UI Normalization Release | `1ecd3b87-16ce-4fec-a433-31cc2baee7ae` | SHOPPING-158: publish the verified Phase 22 UI corrections as patch 1.2.2 with matching iPhone/Watch versions and exact-source TestFlight distribution evidence. |
 | Phase 24: Home Experience Rewrite | `9a1bf46d-f1f4-44f2-94a0-ce8821d68153` | SHOPPING-170/171/172/173/174: Astra design and interactive HTML mockups, home-entry refactor, direct invitation onboarding and home switching, owner deletion, and two-phone acceptance. See [the design proposal](docs/design/home-experience.md). |
 
+| Phase 24: Home Experience Rewrite | `9a1bf46d-f1f4-44f2-94a0-ce8821d68153` | SHOPPING-170/171/172/173/174/183: native home creation, invitations, switching, deletion, retained-local conversion, visible iPhone/Watch scope, and separate physical validation. |
+
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States

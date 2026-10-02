@@ -170,7 +170,7 @@ final class WatchPreviewService: WatchShoppingService {
     }
 
     static var sample: WatchShoppingSnapshot {
-        WatchShoppingSnapshot(authorityID: "preview-shopper", availability: .ready,
+        WatchShoppingSnapshot(authorityID: "preview-shopper", availability: .ready, homeName: "Home",
             stores: [WatchStore(id: firstStoreID, name: "Trader Joe’s", mustBuyCount: 1, canBuyCount: 2), WatchStore(id: secondStoreID, name: "Costco", canBuyCount: 2)],
             selectedStoreID: firstStoreID,
             grocerySections: [

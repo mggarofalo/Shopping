@@ -3,6 +3,7 @@ import Foundation
 
 struct WatchPersistentProjection: Sendable {
     let scope: PersonalCartScopeSnapshot
+    let homeName: String?
     let stores: [WatchStore]
     let needs: [PersonalCartEntrySnapshot]
     let oneTimeIDs: Set<UUID>
@@ -33,7 +34,7 @@ struct WatchPersistentProjection: Sendable {
                 mayWrite = mayWrite && native != .readOnly && native != .lost
             }
             if let writable { mayWrite = mayWrite && writable(scope.householdID) }
-            return try WatchPersistentProjection(scope: scope, stores: stores,
+            return try WatchPersistentProjection(scope: scope, homeName: household?.name, stores: stores,
                 needs: needs.map { try PersonalCartSnapshotBuilder.make(need: $0, session: repository.session,
                     generation: $0.id, evidence: [], quantity: $0.quantity) },
                 oneTimeIDs: Set(needs.filter { $0.kind == NeedKind.oneTime.rawValue }.map(\.id)),

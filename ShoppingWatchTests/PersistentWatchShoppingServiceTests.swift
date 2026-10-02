@@ -79,6 +79,47 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
     }
 
+    func testHomeNameFollowsWatchSelectionAndRefreshesAfterRename() async throws {
+        let f = try fixture()
+        let otherHomeID = UUID()
+        try await Task.detached(priority: .userInitiated) {
+            try f.persistence.writer.performAndWait {
+                let home = Household(context: f.persistence.writer)
+                home.id = otherHomeID
+                home.name = "Lake House"
+                let list = GroceryList(context: f.persistence.writer)
+                list.id = UUID()
+                list.household = home
+                try f.persistence.prepareForSave(f.persistence.writer)
+                try f.persistence.writer.save()
+            }
+        }.value
+        let first = PersistentWatchShoppingService(persistence: f.persistence,
+            sessionProvider: f.provider, preferredHouseholdID: f.householdID, cartService: f.cart)
+        let second = PersistentWatchShoppingService(persistence: f.persistence,
+            sessionProvider: f.provider, preferredHouseholdID: otherHomeID, cartService: f.cart)
+        let initial = try await first.load(storeID: f.storeID)
+        XCTAssertEqual(initial.homeName, "Home")
+        let selected = try await second.load(storeID: nil)
+        XCTAssertEqual(selected.homeName, "Lake House")
+        XCTAssertNotEqual(selected.authorityID, initial.authorityID)
+        try await Task.detached(priority: .userInitiated) {
+            try f.persistence.writer.performAndWait {
+                let request = Household.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@", otherHomeID as NSUUID)
+                let home = try XCTUnwrap(f.persistence.writer.fetch(request).first)
+                home.name = "Family Cabin"
+                try f.persistence.prepareForSave(f.persistence.writer)
+                try f.persistence.writer.save()
+            }
+        }.value
+        let renamed = try await second.load(storeID: nil)
+        XCTAssertEqual(renamed.homeName, "Family Cabin")
+        XCTAssertEqual(renamed.authorityID, selected.authorityID)
+        let unchanged = try await first.load(storeID: f.storeID)
+        XCTAssertEqual(unchanged.homeName, "Home")
+    }
+
     func testVerifiedBackgroundReplayDoesNotBlockLocalLoadsOrPrivateCleanup() async throws {
         let f = try fixture()
         let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,

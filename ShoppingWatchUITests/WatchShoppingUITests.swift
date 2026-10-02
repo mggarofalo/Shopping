@@ -8,6 +8,7 @@ final class WatchShoppingUITests: XCTestCase {
         let switcher = app.buttons["watch.store.switch"]
         let cloud = app.buttons["watch.sync.open"]
         XCTAssertTrue(switcher.waitForExistence(timeout: 5))
+        assertHomeScope(in: app)
         XCTAssertTrue(switcher.isHittable)
         XCTAssertTrue(cloud.isHittable)
         let originalBottom = switcher.frame.maxY
@@ -40,6 +41,7 @@ final class WatchShoppingUITests: XCTestCase {
         switcher.tap()
         let costco = app.buttons["watch.store.10000000-0000-0000-0000-000000000002"]
         XCTAssertTrue(costco.waitForExistence(timeout: 3))
+        assertHomeScope(in: app, identifier: "watch.home.stores")
         costco.tap()
         XCTAssertTrue(switcher.waitForExistence(timeout: 3))
         XCTAssertTrue(switcher.label.contains("Costco"))
@@ -65,10 +67,21 @@ final class WatchShoppingUITests: XCTestCase {
         app.buttons["watch.cart.open"].tap()
         let cartBar = app.navigationBars["In cart"]
         XCTAssertTrue(cartBar.waitForExistence(timeout: 3))
+        assertHomeScope(in: app, identifier: "watch.home.cart")
         let cartIcon = cartBar.children(matching: .button).matching(identifier: "watch.sync.open").element
         XCTAssertTrue(cartIcon.waitForExistence(timeout: 3))
         screenshot("Watch cart sync icon", app: app)
         XCTAssertTrue(cartIcon.isHittable)
+    }
+
+    private func assertHomeScope(in app: XCUIApplication, identifier: String = "watch.home.groceries",
+                                 file: StaticString = #filePath, line: UInt = #line) {
+        let scopes = app.descendants(matching: .any).matching(identifier: identifier)
+        let unique = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 1"), object: scopes)
+        XCTAssertEqual(XCTWaiter.wait(for: [unique], timeout: 3), .completed, file: file, line: line)
+        let scope = scopes.element
+        XCTAssertEqual(scope.label, "Home, Home", file: file, line: line)
+        XCTAssertTrue(scope.isHittable, file: file, line: line)
     }
 
     func testSyncAttentionIconPreservesErrorDetails() {

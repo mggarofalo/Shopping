@@ -1614,3 +1614,14 @@ pending membership, and Resend opens the sheet again. The owner pending-member
 removal and contributor native Leave alert scenarios remain separate UI owners.
 `HomeMembershipRemovalTests` retains Stop Sharing backend recovery proof after
 its ordinary UI entry was removed. SHOPPING-173 owns owner Delete Home UI proof.
+
+## Watch home scope (SHOPPING-183)
+
+`PersistentWatchShoppingServiceTests/testHomeNameFollowsWatchSelectionAndRefreshesAfterRename`
+owns the selected household's displayed name across two separate homes and a
+rename, including stable command authority through a rename. The existing
+`WatchShoppingUITests/testStoreAndSyncScrollAwayAndReturnOnlyAtTop` and
+`testSyncIconShowsDetailsWithoutRoutineBannerAndDismisses` also assert the home
+label on groceries, store selection, and cart, with the complete name available
+to accessibility. Watch selection remains independent of iPhone selection.
+These fixtures do not prove physical presentation or CloudKit delivery.

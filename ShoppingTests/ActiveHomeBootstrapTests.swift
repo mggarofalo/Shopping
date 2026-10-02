@@ -203,7 +203,12 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertTrue(bootstrap.homeEntry.hasPendingInvitation)
         try await bootstrap.dismissJoin(entry.id)
         XCTAssertFalse(bootstrap.homeEntry.invitations.first?.openRequested == true)
-        try await bootstrap.createFirstHome()
+        do { try await bootstrap.createFirstHome() }
+        catch {
+            let entry = bootstrap.homeEntry
+            XCTFail("Deferred first-home creation failed: \(error); root=\(entry.root), local=\(entry.isLocalStore), resolving=\(bootstrap.isResolvingFirstAccount), automaticOpen=\(String(describing: bootstrap.autoOpeningInvitationID)), state=\(bootstrap.state)")
+            throw error
+        }
         XCTAssertEqual(bootstrap.homeEntry.root, .localHome)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
         XCTAssertEqual(bootstrap.homeEntry.invitations.first?.id, entry.id)

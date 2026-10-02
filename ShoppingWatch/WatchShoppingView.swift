@@ -66,6 +66,7 @@ struct WatchShoppingView: View {
 
     private func groceries(store: WatchStore) -> some View {
         List {
+            WatchHomeScopeLabel(name: session.snapshot.homeName, identifier: "watch.home.groceries")
             HStack(spacing: 4) {
                 Button { session.sheet = .stores } label: {
                     HStack(spacing: 4) {
