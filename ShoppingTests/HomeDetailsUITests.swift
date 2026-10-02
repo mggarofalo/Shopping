@@ -1,6 +1,41 @@
 import XCTest
 
 final class HomeDetailsUITests: XCTestCase {
+    func testOwnerDeleteRequiresExactHomeConfirmationAndCanRecreateAfterRelaunch() throws {
+        let app = launch(role: "owner")
+        openHomeDetails(app)
+        let delete = app.buttons["shopping.home.delete"]
+        reveal(delete, in: app)
+        delete.tap()
+        let alert = app.alerts["Delete “Preview household”?"]
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Deletes its list, catalog, and settings for everyone. This can’t be undone."].exists)
+        try alertAction("Cancel", id: "shopping.home.cancelDelete", in: alert).tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["shopping.home.deletionStatus"].exists,
+            "Cancel must leave the home available and submit no deletion")
+        reveal(delete, in: app)
+        XCTAssertTrue(delete.isEnabled)
+        delete.tap()
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        try alertAction("Delete Home", id: "shopping.home.confirmDelete", in: alert).tap()
+        XCTAssertTrue(app.staticTexts["No Homes"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.buttons["shopping.home.createFirst"].exists)
+        XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists,
+            "Private cart recovery must remain reachable after deleting the only home")
+        app.buttons["shopping.home.savedCarts"].tap()
+        XCTAssertTrue(app.navigationBars["Saved carts"].existsOrAppears(timeout: 3))
+        app.navigationBars["Saved carts"].buttons.firstMatch.tap()
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["No Homes"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists)
+        app.buttons["shopping.home.createFirst"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertTrue((app.buttons["shopping.home.scope"].value as? String)?.contains("My Home") == true)
+    }
+
     /// A suspended read proves the cloud navigation stays interactive and that
     /// refresh activity never inserts a list row, both on entry and return.
     func testCloudToolbarStaysInteractiveDuringHomeRefreshAndReturn() {
@@ -206,6 +241,7 @@ final class HomeDetailsUITests: XCTestCase {
         openHomeDetails(app)
         XCTAssertTrue(app.staticTexts["Taylor · You"].existsOrAppears(timeout: 3))
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.delete"].exists)
         XCTAssertFalse(app.buttons["shopping.home.stopSharing"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-long-name"].exists)
         let rename = app.buttons["shopping.home.rename"]
@@ -351,6 +387,7 @@ final class HomeDetailsUITests: XCTestCase {
         if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
         if systemTextSize { SystemTextSizeSettings.configure(app) }
+        addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app
     }

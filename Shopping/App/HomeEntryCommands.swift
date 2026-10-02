@@ -50,5 +50,9 @@ struct HomeEntryCommands {
 
     func connectBackToAccount() async throws { try await bootstrap.connectBackToAccount() }
 
-    func useICloudForLocalHome() { bootstrap.activatePersonalCarts(importLegacy: true) }
+    func useICloudForRetainedLocalHome() async throws {
+        try await bootstrap.useICloudForRetainedLocalHome()
+    }
+
+    func useICloudForLocalHome() async throws { try await bootstrap.useICloudForLocalHome() }
 }

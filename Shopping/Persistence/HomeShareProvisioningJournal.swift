@@ -12,6 +12,14 @@ final class HomeShareProvisioningJournal: @unchecked Sendable {
     private let url: URL
     init(url: URL) { self.url = url }
 
+    static func location(storeURL: URL, scope: ActiveHomeScope) -> URL {
+        storeURL.deletingLastPathComponent().appendingPathComponent("share-provisioning-" + scope.preferenceNamespace + ".json")
+    }
+
+    func existingIntent(scope: ActiveHomeScope) throws -> Intent? {
+        try Self.lock.withLock { try load(scope: scope) }
+    }
+
     func begin(scope: ActiveHomeScope) throws -> Intent {
         Self.lock.lock(); defer { Self.lock.unlock() }
         if let intent = try load(scope: scope) { return intent }

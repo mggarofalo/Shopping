@@ -112,8 +112,10 @@ final class PersistenceController {
     }
 
     func prepareForSave(_ context: NSManagedObjectContext) throws {
-        try HomeEffectPersistencePolicy.validate(in: context, controller: self)
-        if personalCartsEnabled { try HouseholdDemandJournal.captureChanges(in: context, persistence: self) }
+        let deletions = try HomeDeletionPersistencePolicy.authorizedDeletions(in: context, controller: self)
+        try HomeDeletionPersistencePolicy.validateLocalChanges(in: context, controller: self, excluding: deletions)
+        try HomeEffectPersistencePolicy.validate(in: context, controller: self, excluding: deletions)
+        if personalCartsEnabled && deletions.isEmpty { try HouseholdDemandJournal.captureChanges(in: context, persistence: self) }
         if !context.insertedObjects.isEmpty {
             try context.obtainPermanentIDs(for: Array(context.insertedObjects))
         }

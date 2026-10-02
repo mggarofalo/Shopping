@@ -98,10 +98,28 @@ struct HomeDetailsView: View {
                         .accessibilityIdentifier("shopping.home.leave")
                     }
                 }
+                if snapshot.access == .owner && model.hasDeletionAction {
+                    Section {
+                        Button("Delete Home", role: .destructive) {
+                            Task { await model.prepareDeletion() }
+                        }
+                        .disabled(!model.canDelete)
+                        .accessibilityIdentifier("shopping.home.delete")
+                    }
+                }
             }
             if let status = model.leaveStatus, !status.completed {
                 Text("Leaving home is still being confirmed.")
                     .accessibilityIdentifier("shopping.home.leaveStatus")
+            }
+            if let status = model.deletionStatus, !status.completed {
+                Section {
+                    Text(status.submitted ? "Deleting home…" : "Deletion needs attention.")
+                        .accessibilityIdentifier("shopping.home.deletionStatus")
+                    Button("Check Deletion") { Task { await model.retryDeletion() } }
+                        .disabled(model.busy)
+                        .accessibilityIdentifier("shopping.home.checkDeletion")
+                }
             }
             if let error = model.error {
                 Text(error).foregroundStyle(.red).accessibilityIdentifier("shopping.home.error")
@@ -170,6 +188,21 @@ struct HomeDetailsView: View {
                 .accessibilityIdentifier("shopping.home.cancelLeave")
         } message: {
             Text("You’ll need another invite to rejoin.")
+        }
+        .alert("Delete “\(model.deletionConfirmation?.homeName ?? homeName)”?", isPresented: Binding(
+            get: { model.deletionConfirmation != nil },
+            // The prepared command stays captured until confirmation consumes it.
+            set: { _ in }
+        )) {
+            if let command = model.deletionConfirmation {
+                Button("Delete Home", role: .destructive) { Task { await model.confirmDeletion(command) } }
+                    .disabled(!model.canDelete)
+                    .accessibilityIdentifier("shopping.home.confirmDelete")
+            }
+            Button("Cancel", role: .cancel) { model.deletionConfirmation = nil }
+                .accessibilityIdentifier("shopping.home.cancelDelete")
+        } message: {
+            Text("Deletes its list, catalog, and settings for everyone. This can’t be undone.")
         }
         .sheet(isPresented: $showingNameEditor) {
             VStack(spacing: 0) {

@@ -156,12 +156,17 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var homeLeaveStatusError: String?
     @Published private(set) var isCheckingHomeLeaves = false
     @Published private(set) var homeLeaveResumingID: UUID?
+    @Published private(set) var homeDeletionStatuses: [HomeDeletionStatus] = []
+    @Published private(set) var homeDeletionStatusError: String?
+    @Published private(set) var isDeletingHome = false
+    private var homeDeletionRefreshID: UUID?
     private var homeLeaveRefreshID: UUID?
     private let makeHomeRejoinVerifier: @Sendable (PersonalCartService) -> any HomeRejoinVerifying
     private var invitationActivations: [UUID: (entry: HomeInvitationInbox.Entry, authority: UICommandAuthority, presentationID: UUID)] = [:]
     private(set) var autoOpeningInvitationID: UUID?
     private var autoOpenFailures: Set<UUID> = []
     private var autoConnectionAttemptedFor: Set<UUID> = []
+    private var automaticJoinConnectionTasks: [UUID: Task<Void, Never>] = [:]
     private var joiningPresentationID: UUID?
     private struct LocalJoinOrigin: Equatable {
         let invitationID: UUID
@@ -222,7 +227,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var pendingRetirement: ReadyState?
     private var personalService: PersonalCartService?
     private var homeAccessRefreshID: UUID?
-    private var retainedLocalRecord: HomeAdoptionJournal.Record?
+    private var deviceLocalHome: DeviceLocalHome?
     private var retainedLocalConfiguration: PersistenceConfiguration?
     private var localHomeName: String?
     private var localDiscoveryComplete = false
@@ -233,6 +238,10 @@ final class PersistenceBootstrap: ObservableObject {
     private var preferredAdoptedHome: (householdID: UUID, listID: UUID)?
     @Published private(set) var retainedLocalHomeName: String?
     @Published private(set) var isShowingRetainedLocalHome = false
+    @Published private(set) var retainedLocalCopyState: HomeEntrySnapshot.RetainedLocalCopyState = .unavailable
+    private var retainedConversionSelectionIntent: UUID?
+    private var retainedConversionChoiceGeneration: UInt64?
+    private var retainedConversionResumingID: UUID?
 
     struct InvitationSetupChoice {
         fileprivate let proposal: HomeAdoptionJournal.Proposal
@@ -276,10 +285,18 @@ final class PersistenceBootstrap: ObservableObject {
             // every invitation command still validates its original authority.
             visibleInvitations.append(held)
         }
+        // A retained source belongs to this device. Its copy command still belongs
+        // to the account that approved it, so another account can only open it.
+        let presentedCopyState: HomeEntrySnapshot.RetainedLocalCopyState
+        if let deviceLocalHome, case .ready(let current) = accountProvider?.state,
+           current != deviceLocalHome.session {
+            presentedCopyState = .unavailable
+        } else { presentedCopyState = retainedLocalCopyState }
         return HomeEntrySnapshot(store: store, readiness: homeCoordinator.readiness,
             discovery: homeCoordinator.discoveryState, homes: homeCoordinator.homes,
             currentHomeName: currentHomeName, retainedLocalHomeName: retainedLocalHomeName,
             isShowingRetainedLocalHome: isShowingRetainedLocalHome,
+            retainedLocalCopyState: presentedCopyState,
             invitations: visibleInvitations, hasPendingInvitation: invitations?.hasPendingActivation ?? false,
             hasVerifiedInvitationAccount: invitations?.hasVerifiedAccount ?? false,
             invitationProblem: invitations?.problem, importProblems: invitations?.importProblems ?? [:],
@@ -895,9 +912,61 @@ final class PersistenceBootstrap: ObservableObject {
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
     }
 
+    nonisolated private static func readDeviceLocalHome(base: URL) throws -> DeviceLocalHome? {
+        if let selected = try DeviceLocalHomeSelectionJournal(baseDirectory: base).read() {
+            return .selected(selected)
+        }
+        if let adopted = try HomeAdoptionJournal(baseDirectory: base).retainedLocalRecord() {
+            return .adopted(adopted)
+        }
+        return nil
+    }
+
+    nonisolated private static func validateDeviceLocalHome(_ home: DeviceLocalHome, base: URL) throws {
+        switch home {
+        case .adopted(let record):
+            try HomeAdoptionJournal(baseDirectory: base).validateRetainedSource(record)
+        case .selected(let source):
+            guard try DeviceLocalHomeSelectionJournal(baseDirectory: base).read() == source else {
+                throw HomeAdoptionJournal.Failure.sourceChanged
+            }
+        }
+    }
+
+    nonisolated private static func conversion(for home: DeviceLocalHome, base: URL)
+        throws -> RetainedHomeConversion? {
+        let journal = RetainedHomeConversionJournal(baseDirectory: base, session: home.session)
+        switch home {
+        case .adopted(let record): return try journal.read(session: record.session, retainedRecordID: record.id)
+        case .selected(let source):
+            guard let id = source.conversionID else { return nil }
+            return try journal.read(session: source.session, id: id)
+        }
+    }
+
+    nonisolated private static func currentDeviceLocalName(_ home: DeviceLocalHome) throws -> String {
+        guard let sourceURL = home.sourceURL, let storeIdentifier = home.storeIdentifier,
+              let householdID = home.householdID, let listID = home.listID else { return home.homeName }
+        let persistence = try PersistenceController(storeURL: sourceURL)
+        defer {
+            persistence.writer.performAndWait { persistence.writer.reset() }
+            for store in persistence.container.persistentStoreCoordinator.persistentStores {
+                try? persistence.container.persistentStoreCoordinator.remove(store)
+            }
+        }
+        let exactRoot: String?
+        if case .selected(let selection) = home { exactRoot = selection.graph.rootURI }
+        else { exactRoot = nil }
+        return try HomeDiscoveryService(persistence: persistence).discover().homes.first(where: {
+            $0.graph.storeIdentifier == storeIdentifier && $0.graph.householdID == householdID
+                && $0.graph.listID == listID
+                && (exactRoot == nil || $0.graph.rootURI == exactRoot)
+        })?.name ?? home.homeName
+    }
+
     func start() {
         guard case .loading = state, transition == nil, !restoringLocalRoute else { return }
-        if !personalMode, defaults.bool(forKey: Self.retainedLocalKey), retainedLocalRecord == nil {
+        if !personalMode, defaults.bool(forKey: Self.retainedLocalKey), deviceLocalHome == nil {
             restoringLocalRoute = true
             let requestedGeneration = generation
             Task {
@@ -905,16 +974,36 @@ final class PersistenceBootstrap: ObservableObject {
                 do {
                     let base = try await resolvedAccountDirectory()
                     let record = try await Task.detached(priority: .userInitiated) {
-                        let journal = HomeAdoptionJournal(baseDirectory: base)
-                        guard let record = try journal.retainedLocalRecord() else {
-                            throw HomeAdoptionJournal.Failure.invalidJournal
-                        }
-                        try journal.validateRetainedSource(record)
+                        let record = try Self.readDeviceLocalHome(base: base)
+                        if let record { try Self.validateDeviceLocalHome(record, base: base) }
                         return record
                     }.value
                     guard generation == requestedGeneration, transition == nil else { return }
-                    retainedLocalRecord = record
-                    retainedLocalHomeName = record.homeName
+                    guard let record else {
+                        // A completed local deletion removes the retained route,
+                        // while the old adoption journal remains immutable.
+                        defaults.set(false, forKey: Self.retainedLocalKey)
+                        deviceLocalHome = nil
+                        retainedLocalConfiguration = nil
+                        retainedLocalHomeName = nil
+                        retainedLocalCopyState = .unavailable
+                        isShowingRetainedLocalHome = false
+                        if let invitations { await invitations.prepare() }
+                        guard generation == requestedGeneration, transition == nil else { return }
+                        load()
+                        return
+                    }
+                    deviceLocalHome = record
+                    retainedLocalHomeName = try await Task.detached(priority: .userInitiated) {
+                        try Self.currentDeviceLocalName(record)
+                    }.value
+                    let conversion = try await Task.detached(priority: .userInitiated) {
+                        let command = try Self.conversion(for: record, base: base)
+                        let journal = RetainedHomeConversionJournal(baseDirectory: base, session: record.session)
+                        return try command.map { ($0, try journal.wasDestinationDeleted($0)) }
+                    }.value
+                    retainedLocalCopyState = conversion?.0.copied == true && conversion?.1 == false
+                        ? .copied : .available
                     retainedLocalConfiguration = .local(storeURL: record.sourceURL)
                     isShowingRetainedLocalHome = true
                     if let invitations { await invitations.prepare() }
@@ -940,7 +1029,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     func retry() {
         if personalMode { activatePersonalCarts(importLegacy: false) }
-        else if defaults.bool(forKey: Self.retainedLocalKey), retainedLocalRecord == nil {
+        else if defaults.bool(forKey: Self.retainedLocalKey), deviceLocalHome == nil {
             beginTransition { [weak self] in self?.start() }
         } else { beginTransition { [weak self] in self?.load() } }
     }
@@ -998,6 +1087,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     func applicationDidEnterForeground() {
         guard case .ready = state, transition == nil else { return }
+        Task { await refreshHomeDeletionStatuses() }
         if let accountProvider {
             Task {
                 await accountProvider.refresh()
@@ -1145,6 +1235,44 @@ final class PersistenceBootstrap: ObservableObject {
             guard invitations?.allEntries.contains(where: { $0.id == invitationID && $0.openRequested }) == true
                 else { throw HomeAdoptionJournal.Failure.staleProposal }
         }
+        if case .ready(let ready) = state, !personalMode, ready.householdID != nil {
+            let capturedGeneration = generation
+            let base = try await resolvedAccountDirectory()
+            let provider = try await resolvedAccountProvider(base: base)
+            await provider.refresh()
+            let session = try verifiedSession(provider)
+            let selected = try await selectedLocalSource(ready, session: session)
+            let prior = try await Task.detached(priority: .userInitiated) {
+                try HomeAdoptionJournal(baseDirectory: base).verifiedRecord()
+            }.value
+            guard generation == capturedGeneration, transition == nil, ready.presentation.isActive,
+                  try verifiedSession(provider) == session,
+                  invitationID == nil || invitations?.allEntries.contains(where: {
+                      $0.id == invitationID && $0.openRequested && !$0.activationResolved
+                  }) == true else { throw HomeAdoptionJournal.Failure.staleProposal }
+            if let prior, prior.session != session || prior.householdID != selected.graph.householdID
+                || prior.listID != selected.graph.listID
+                || prior.sourceURL?.standardizedFileURL != selected.sourceURL.standardizedFileURL
+                || prior.proposal.sourceStoreIdentifier != selected.graph.storeIdentifier {
+                // Old adoption evidence cannot approve a new selected graph.
+                try await Task.detached(priority: .userInitiated) {
+                    try DeviceLocalHomeSelectionJournal(baseDirectory: base).select(selected)
+                }.value
+                guard generation == capturedGeneration, transition == nil, ready.presentation.isActive,
+                      try verifiedSession(provider) == session,
+                      invitationID == nil || invitations?.allEntries.contains(where: {
+                          $0.id == invitationID && $0.openRequested && !$0.activationResolved
+                              && ($0.session == nil || $0.session == session)
+                      }) == true else { throw HomeAdoptionJournal.Failure.staleProposal }
+                deviceLocalHome = .selected(selected)
+                retainedLocalHomeName = selected.homeName
+                accountLoadInProgress = true
+                personalMode = true
+                defaults.set(true, forKey: Self.personalModeKey)
+                beginTransition { [weak self] in self?.openPersonalStore(expectedSession: session) }
+                return
+            }
+        }
         let choice = try await prepareInvitationSetup()
         try await confirmInvitationSetup(choice, copyLocal: false, joiningInvitationID: invitationID)
     }
@@ -1186,7 +1314,7 @@ final class PersistenceBootstrap: ObservableObject {
                     load()
                     return
                 }
-                let activated = try await Task.detached(priority: .userInitiated) {
+                let (activated, deviceLocalRecord, deviceLocalName) = try await Task.detached(priority: .userInitiated) {
                     let journal = HomeAdoptionJournal(baseDirectory: base)
                     // A legacy path alone is not permission to import into the current account.
                     if let record = try journal.record(session: session), !record.verified {
@@ -1194,12 +1322,27 @@ final class PersistenceBootstrap: ObservableObject {
                             throw ShopperSessionError.setupRequired
                         }
                     }
-                    return try journal.activate(session: session, using: activate)
+                    let activated = try journal.activate(session: session, using: activate)
+                    // Account activation and device-local presentation have
+                    // different authority. A verified kept source stays visible
+                    // after switching accounts without authorizing an account copy.
+                    let local = try Self.readDeviceLocalHome(base: base)
+                    return (activated, local, try local.map(Self.currentDeviceLocalName))
                 }.value
                 guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
                 personalConfiguration = activated.configuration
-                retainedLocalRecord = activated.retainedLocal
-                retainedLocalHomeName = activated.retainedLocal?.homeName
+                deviceLocalHome = deviceLocalRecord
+                retainedLocalHomeName = deviceLocalName
+                if let retained = deviceLocalRecord {
+                    let saved = try await Task.detached(priority: .userInitiated) {
+                        let journal = RetainedHomeConversionJournal(baseDirectory: base, session: retained.session)
+                        let command = try Self.conversion(for: retained, base: base)
+                        return try command.map { ($0, try journal.wasDestinationDeleted($0)) }
+                    }.value
+                    retainedLocalCopyState = saved?.0.copied == true
+                        ? (saved?.1 == true ? .available : .copied)
+                        : saved == nil ? .available : .copying
+                } else { retainedLocalCopyState = .unavailable }
                 retainedLocalConfiguration = nil
                 isShowingRetainedLocalHome = false
                 defaults.set(false, forKey: Self.retainedLocalKey)
@@ -1217,7 +1360,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     func openRetainedLocalHome(expectedSelectionGeneration: UInt64? = nil,
                                expectedPresentationID: UUID? = nil) async throws {
-        guard !accountLoadInProgress, transition == nil, let record = retainedLocalRecord,
+        guard !accountLoadInProgress, transition == nil, let record = deviceLocalHome,
               let source = record.sourceURL else { throw HomeAdoptionJournal.Failure.staleProposal }
         let capturedGeneration = generation
         if let expectedSelectionGeneration {
@@ -1233,7 +1376,12 @@ final class PersistenceBootstrap: ObservableObject {
         }
         let base = try await resolvedAccountDirectory()
         try await Task.detached(priority: .userInitiated) {
-            try HomeAdoptionJournal(baseDirectory: base).validateRetainedSource(record)
+            try Self.validateDeviceLocalHome(record, base: base)
+        }.value
+        let savedConversion = try await Task.detached(priority: .userInitiated) {
+            let journal = RetainedHomeConversionJournal(baseDirectory: base, session: record.session)
+            let command = try Self.conversion(for: record, base: base)
+            return try command.map { ($0, try journal.wasDestinationDeleted($0)) }
         }.value
         guard generation == capturedGeneration, transition == nil,
               expectedSelectionGeneration == nil || homeCoordinator.generation == expectedSelectionGeneration,
@@ -1247,8 +1395,12 @@ final class PersistenceBootstrap: ObservableObject {
         retainedLocalConfiguration = .local(storeURL: source)
         personalConfiguration = nil
         preferredAdoptedHome = nil
+        retainedConversionSelectionIntent = nil
+        retainedConversionChoiceGeneration = nil
         personalMode = false
         isShowingRetainedLocalHome = true
+        retainedLocalCopyState = savedConversion?.0.copied == true && savedConversion?.1 == false
+            ? .copied : .available
         defaults.set(true, forKey: Self.retainedLocalKey)
         defaults.set(false, forKey: Self.personalModeKey)
         beginTransition { [weak self] in self?.load() }
@@ -1256,18 +1408,285 @@ final class PersistenceBootstrap: ObservableObject {
 
     func connectBackToAccount() async throws {
         guard !accountLoadInProgress, transition == nil, isShowingRetainedLocalHome,
-              let record = retainedLocalRecord else { throw HomeAdoptionJournal.Failure.staleProposal }
+              deviceLocalHome != nil else { throw HomeAdoptionJournal.Failure.staleProposal }
         let capturedGeneration = generation
         let base = try await resolvedAccountDirectory()
         let provider = try await resolvedAccountProvider(base: base)
         await provider.refresh()
+        let session = try verifiedSession(provider)
         guard generation == capturedGeneration, transition == nil, !accountLoadInProgress,
-              isShowingRetainedLocalHome,
-              try verifiedSession(provider) == record.session else { throw ShopperSessionError.accountChanged }
+              isShowingRetainedLocalHome else { throw ShopperSessionError.accountChanged }
         accountLoadInProgress = true
         personalMode = true
         defaults.set(true, forKey: Self.personalModeKey)
-        beginTransition { [weak self] in self?.openPersonalStore(expectedSession: record.session) }
+        beginTransition { [weak self] in self?.openPersonalStore(expectedSession: session) }
+    }
+
+    // MARK: Retained local conversion
+
+    /// Replays a pending deletion of the retained source even while another
+    /// account store is mounted. Only the exact journaled source graph is opened.
+    func retainedLocalDeletionStatuses(reconcile: Bool) async throws -> [HomeDeletionStatus] {
+        guard let record = deviceLocalHome,
+              let sourceURL = record.sourceURL,
+              let sourceStoreID = record.storeIdentifier,
+              let householdID = record.householdID, let listID = record.listID else { return [] }
+        if case .ready(let ready) = state,
+           ready.persistence.primaryStore?.url?.standardizedFileURL == sourceURL.standardizedFileURL {
+            return [] // The mounted local deletion service already owns this store.
+        }
+        let capturedGeneration = generation
+        let base = try await resolvedAccountDirectory()
+        let retained = record
+        let statuses = try await Task.detached(priority: .userInitiated) {
+            let journal = LocalHomeDeletionJournal(storeURL: sourceURL)
+            let matches: (HomeDeletionStatus) -> Bool = {
+                $0.command.graph.storeIdentifier == sourceStoreID
+                    && $0.command.graph.householdID == householdID
+                    && $0.command.graph.listID == listID
+            }
+            let initial = try journal.statuses().filter(matches)
+            guard reconcile, initial.contains(where: { !$0.completed }) else { return initial }
+            try Self.validateDeviceLocalHome(retained, base: base)
+            let persistence = try PersistenceController(storeURL: sourceURL)
+            defer {
+                persistence.writer.performAndWait { persistence.writer.reset() }
+                for store in persistence.container.persistentStoreCoordinator.persistentStores {
+                    try? persistence.container.persistentStoreCoordinator.remove(store)
+                }
+            }
+            guard persistence.primaryStore?.identifier == sourceStoreID else {
+                throw HomeAdoptionJournal.Failure.sourceChanged
+            }
+            let service = HomeDeletionService(persistence: persistence)
+            for status in initial where !status.completed {
+                _ = try await service.reconcile(status.command)
+            }
+            return try await service.statuses().filter(matches)
+        }.value
+        guard generation == capturedGeneration, deviceLocalHome == record else { return [] }
+        return statuses
+    }
+
+    /// Deletion supplies proof from the private ledger. Persist only completed
+    /// exact destination tombstones so local Settings may offer a new copy.
+    func recordCompletedRetainedHomeDeletions(_ statuses: [HomeDeletionStatus]) async {
+        guard let retained = deviceLocalHome, let provider = accountProvider,
+              let session = try? verifiedSession(provider), session == retained.session,
+              let base = try? await resolvedAccountDirectory() else { return }
+        let completed = statuses.filter { status in
+            guard status.completed, let scope = status.command.scope else { return false }
+            return scope.accountBinding == session.accountBinding
+                && scope.containerIdentifier == session.containerIdentifier
+                && scope.environment == session.environment
+        }
+        guard !completed.isEmpty else { return }
+        do {
+            let latest = try await Task.detached(priority: .userInitiated) {
+                let journal = RetainedHomeConversionJournal(baseDirectory: base, session: session)
+                for status in completed {
+                    try status.command.validate()
+                    let graph = status.command.graph
+                    try journal.noteCompletedDeletion(session: session,
+                        storeIdentifier: graph.storeIdentifier,
+                        householdID: graph.householdID, listID: graph.listID)
+                }
+                return try Self.conversion(for: retained, base: base)
+            }.value
+            if let latest {
+                let journal = RetainedHomeConversionJournal(baseDirectory: base, session: session)
+                let deleted = try await Task.detached(priority: .userInitiated) {
+                    try journal.wasDestinationDeleted(latest)
+                }.value
+                retainedLocalCopyState = deleted ? .available : latest.copied ? .copied : .copying
+            }
+        } catch { homeSetupError = error }
+    }
+
+    /// An explicit copy of the selected local graph, independent of any old
+    /// account-adoption decision for another graph in the same SQLite store.
+    func useICloudForRetainedLocalHome() async throws {
+        guard isShowingRetainedLocalHome, let home = deviceLocalHome else {
+            throw HomeAdoptionJournal.Failure.staleProposal
+        }
+        if retainedLocalCopyState == .copied {
+            let base = try await resolvedAccountDirectory()
+            let provider = try await resolvedAccountProvider(base: base)
+            await provider.refresh()
+            guard try verifiedSession(provider) == home.session else { throw ShopperSessionError.accountChanged }
+            try await connectBackToAccount()
+            return
+        }
+        try await copySelectedLocalHome(expectedHome: home)
+    }
+
+    func useICloudForLocalHome() async throws {
+        guard !isShowingRetainedLocalHome else { throw HomeAdoptionJournal.Failure.staleProposal }
+        try await copySelectedLocalHome(expectedHome: nil)
+    }
+
+    private func selectedLocalSource(_ ready: ReadyState, session: ShopperSession)
+        async throws -> DeviceLocalHomeSelection {
+        guard let householdID = ready.householdID, let listID = ready.listID,
+              let store = ready.persistence.store(for: .local), let sourceURL = store.url,
+              let storeIdentifier = store.identifier else { throw HomeAdoptionJournal.Failure.staleProposal }
+        let source = RetiringStore(persistence: ready.persistence)
+        let home = try await Task.detached(priority: .userInitiated) {
+            let discovery = try HomeDiscoveryService(persistence: source.persistence).discover()
+            guard let home = discovery.homes.first(where: {
+                $0.graph.storeIdentifier == storeIdentifier && $0.graph.householdID == householdID
+                    && $0.graph.listID == listID
+            }) else { throw RetainedHomeConversionJournal.Failure.sourceChanged }
+            return home
+        }.value
+        return DeviceLocalHomeSelection(sourceURL: sourceURL.standardizedFileURL.resolvingSymlinksInPath(),
+            graph: home.graph,
+            homeName: home.name, session: session, conversionID: nil)
+    }
+
+    private func copySelectedLocalHome(expectedHome: DeviceLocalHome?) async throws {
+        guard !accountLoadInProgress, transition == nil,
+              case .ready(let ready) = state, ready.presentation.isActive,
+              let householdID = ready.householdID, let listID = ready.listID,
+              let storeIdentifier = ready.persistence.store(for: .local)?.identifier,
+              expectedHome == nil || deviceLocalHome == expectedHome,
+              expectedHome == nil || (expectedHome?.householdID == householdID
+                  && expectedHome?.listID == listID && expectedHome?.storeIdentifier == storeIdentifier) else {
+            throw HomeAdoptionJournal.Failure.staleProposal
+        }
+        let capturedGeneration = generation
+        let base = try await resolvedAccountDirectory()
+        let provider = try await resolvedAccountProvider(base: base)
+        await provider.refresh()
+        let session = try verifiedSession(provider)
+        if let expectedHome { guard session == expectedHome.session else { throw ShopperSessionError.accountChanged } }
+        let source = RetiringStore(persistence: ready.persistence)
+        let selectedSource = try await selectedLocalSource(ready, session: session)
+        let graph = selectedSource.graph
+        let proposed = try await Task.detached(priority: .userInitiated) {
+            let service = RetainedHomeConversionService(persistence: source.persistence)
+            if case .adopted(let record) = expectedHome {
+                try HomeAdoptionJournal(baseDirectory: base).validateRetainedSource(record)
+                return try service.capture(record: record, session: session)
+            }
+            return try service.captureLocal(graph: graph, session: session)
+        }.value
+        guard generation == capturedGeneration, transition == nil, ready.presentation.isActive,
+              try verifiedSession(provider) == session else { throw HomeAdoptionJournal.Failure.staleProposal }
+        let command = try await Task.detached(priority: .userInitiated) {
+            try RetainedHomeConversionJournal(baseDirectory: base, session: session).begin(proposed)
+        }.value
+        guard generation == capturedGeneration, transition == nil,
+              ready.presentation.isActive, try verifiedSession(provider) == session else {
+            throw HomeAdoptionJournal.Failure.staleProposal
+        }
+        if case .adopted = expectedHome {
+            // The verified adoption record remains the source of this local route.
+        } else {
+            var selected = selectedSource
+            selected.conversionID = command.id
+            try await Task.detached(priority: .userInitiated) {
+                try DeviceLocalHomeSelectionJournal(baseDirectory: base).select(selected)
+            }.value
+            guard generation == capturedGeneration, transition == nil,
+                  ready.presentation.isActive, try verifiedSession(provider) == session else {
+                throw HomeAdoptionJournal.Failure.staleProposal
+            }
+            deviceLocalHome = .selected(selected)
+            retainedLocalHomeName = selected.homeName
+        }
+        homeSetupError = nil
+        retainedLocalCopyState = command.copied ? .copied : .copying
+        retainedConversionSelectionIntent = command.copied ? nil : command.id
+        retainedConversionChoiceGeneration = nil
+        accountLoadInProgress = true
+        personalMode = true
+        defaults.set(true, forKey: Self.personalModeKey)
+        beginTransition { [weak self] in self?.openPersonalStore(expectedSession: session) }
+    }
+
+    private func resumeRetainedLocalConversion(_ retained: DeviceLocalHome,
+                                               in persistence: PersistenceController) async {
+        guard let provider = accountProvider, let session = try? verifiedSession(provider),
+              session == retained.session else { return }
+        let base: URL
+        do { base = try await resolvedAccountDirectory() }
+        catch { homeSetupError = error; return }
+        let journal = RetainedHomeConversionJournal(baseDirectory: base, session: session)
+        do {
+            let saved = try await Task.detached(priority: .userInitiated) {
+                try Self.conversion(for: retained, base: base)
+            }.value
+            guard let pending = saved else {
+                retainedLocalCopyState = .available
+                return
+            }
+            guard pending.retainedRecordID == retained.adoptionRecordID,
+                  pending.sourceURL == retained.sourceURL,
+                  pending.sourceStoreIdentifier == retained.storeIdentifier,
+                  pending.sourceGraph.householdID == retained.householdID,
+                  pending.sourceGraph.listID == retained.listID else {
+                throw RetainedHomeConversionJournal.Failure.sourceChanged
+            }
+            let destinationDeleted = try await Task.detached(priority: .userInitiated) {
+                try journal.wasDestinationDeleted(pending)
+            }.value
+            if destinationDeleted {
+                retainedLocalCopyState = .available
+                return
+            }
+            if pending.copied {
+                retainedLocalCopyState = .copied
+                return
+            }
+            guard retainedConversionResumingID == nil,
+                  case .ready(let ready) = state, ready.persistence === persistence,
+                  ready.presentation.isActive,
+                  let store = persistence.primaryStore, let storeIdentifier = store.identifier,
+                  persistence.role(of: store) == .ownerPrivate
+                    || (!persistence.configuration.isManaged && persistence.role(of: store) == .local) else { return }
+            retainedConversionResumingID = pending.id
+            defer { retainedConversionResumingID = nil }
+            retainedLocalCopyState = .copying
+            let choiceGeneration = retainedConversionChoiceGeneration
+            let capturedPresentationID = ready.presentation.id
+            let target = RetiringStore(persistence: persistence)
+            let bound = try await Task.detached(priority: .userInitiated) {
+                try Self.validateDeviceLocalHome(retained, base: base)
+                let bound = try journal.bind(pending, to: storeIdentifier)
+                try RetainedHomeConversionService(persistence: target.persistence).apply(bound)
+                try journal.markCopied(bound)
+                return bound
+            }.value
+            retainedLocalCopyState = .copied
+            homeSetupError = nil
+            guard case .ready(let current) = state,
+                  current.presentation.id == capturedPresentationID,
+                  current.presentation.isActive,
+                  try provider.currentSession() == session else { return }
+            do {
+                try await refreshHomes()
+                if retainedConversionSelectionIntent == bound.id,
+                   choiceGeneration != nil,
+                   homeCoordinator.generation == choiceGeneration,
+                   let copied = homeCoordinator.homes.first(where: {
+                       $0.graph.householdID == bound.graph.householdID
+                           && $0.graph.listID == bound.graph.listID && $0.access == .owner
+                           && $0.graph.storeIdentifier == storeIdentifier
+                   }) {
+                    try await selectHome(copied.graph)
+                }
+            } catch {
+                // The atomic copy is complete; normal home discovery can recover its row.
+            }
+            retainedConversionSelectionIntent = nil
+            retainedConversionChoiceGeneration = nil
+        } catch {
+            retainedLocalCopyState = .available
+            retainedConversionSelectionIntent = nil
+            retainedConversionChoiceGeneration = nil
+            homeSetupError = error
+        }
     }
 
     private func accountStateChanged() {
@@ -1332,17 +1751,17 @@ final class PersistenceBootstrap: ObservableObject {
         let personalConfiguration = personalMode ? self.personalConfiguration : retainedLocalConfiguration
         let accountProvider = self.accountProvider
         let personalMode = self.personalMode
-        let retainedLocalRecord = self.retainedLocalRecord
+        let deviceLocalHome = self.deviceLocalHome
         let session = personalMode ? (try? accountProvider?.currentSession()) : nil
         homeCoordinator.bind(session)
         configureInvitations()
         let discoveryRequest = homeCoordinator.beginDiscovery()
         Task {
             do {
-                if !personalMode, let retainedLocalRecord {
+                if !personalMode, let deviceLocalHome {
                     let base = try await resolvedAccountDirectory()
                     try await Task.detached(priority: .userInitiated) {
-                        try HomeAdoptionJournal(baseDirectory: base).validateRetainedSource(retainedLocalRecord)
+                        try Self.validateDeviceLocalHome(deviceLocalHome, base: base)
                     }.value
                     guard generation == requestedGeneration else { return }
                 }
@@ -1353,10 +1772,10 @@ final class PersistenceBootstrap: ObservableObject {
                     var discovery = try HomeDiscoveryService(persistence: persistence).discover()
                     var selection = discovery.homes.count == 1 && !discovery.hasIncompleteRoots
                         ? discovery.homes.first.map { (householdID: $0.graph.householdID, listID: $0.graph.listID) } : nil
-                    if !personalMode, let retainedLocalRecord,
+                    if !personalMode, let deviceLocalHome,
                        let home = discovery.homes.first(where: {
-                           $0.graph.householdID == retainedLocalRecord.householdID
-                               && $0.graph.listID == retainedLocalRecord.listID
+                           $0.graph.householdID == deviceLocalHome.householdID
+                               && $0.graph.listID == deviceLocalHome.listID
                        }) {
                         selection = (home.graph.householdID, home.graph.listID)
                     }
@@ -1499,7 +1918,13 @@ final class PersistenceBootstrap: ObservableObject {
                 homeGeneration: homeCoordinator.generation,
                 personalCartService: personalService
             ))
+            if retainedConversionSelectionIntent != nil {
+                retainedConversionChoiceGeneration = homeCoordinator.generation
+            }
             configureInvitations()
+            if personalMode, let retained = deviceLocalHome {
+                Task { await resumeRetainedLocalConversion(retained, in: persistence) }
+            }
             scheduleAutomaticJoinConnection()
             scheduleLocalReturnAfterDismiss()
             if resolveFirstAccount, case .ready(let ready) = state {
@@ -1633,7 +2058,8 @@ final class PersistenceBootstrap: ObservableObject {
               }) else { return }
         autoConnectionAttemptedFor.insert(entry.id)
         captureLocalJoinOrigin(entry.id, ready: ready)
-        Task {
+        automaticJoinConnectionTasks[entry.id] = Task {
+            defer { automaticJoinConnectionTasks.removeValue(forKey: entry.id) }
             do {
                 try await connectForJoiningKeepingLocalHome(invitationID: entry.id)
                 joinError = nil
@@ -1643,6 +2069,11 @@ final class PersistenceBootstrap: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Lets recovery tests await the actual invitation connection they held.
+    func automaticJoinConnectionTask(for id: UUID) -> Task<Void, Never>? {
+        automaticJoinConnectionTasks[id]
     }
 
     private func captureLocalJoinOrigin(_ id: UUID, ready: ReadyState) {
@@ -1656,8 +2087,8 @@ final class PersistenceBootstrap: ObservableObject {
         guard let origin = localReturnAfterDismiss, personalMode, !accountLoadInProgress,
               transition == nil, case .ready(let ready) = state, ready.presentation.isActive,
               ready.householdID == nil, ready.homeScope == nil, homeCoordinator.activeScope == nil,
-              let record = retainedLocalRecord, record.action == .keepLocal,
-              record.proposal.sourceStoreIdentifier == origin.storeIdentifier,
+              let record = deviceLocalHome,
+              record.storeIdentifier == origin.storeIdentifier,
               record.householdID == origin.householdID, record.listID == origin.listID,
               case .ready(let session) = accountProvider?.state, session == record.session,
               invitations?.allEntries.contains(where: {
@@ -1871,7 +2302,7 @@ final class PersistenceBootstrap: ObservableObject {
         guard invitationActivations[entryID] == nil else { throw HomeInvitationInbox.Error.busy }
         let (ready, invitationController) = try validateInvitationChoice(entryID, graph: nil)
         let capturedGeneration = generation
-        let returnToLocal = homeCoordinator.activeScope == nil && retainedLocalRecord != nil
+        let returnToLocal = homeCoordinator.activeScope == nil && deviceLocalHome != nil
         if homeCoordinator.activeScope == nil { homeCoordinator.deferSelection() }
         try await invitationController.resolveActivation(entryID)
         if returnToLocal {
@@ -1937,6 +2368,8 @@ final class PersistenceBootstrap: ObservableObject {
         let capturedGeneration = generation
         isCreatingHome = true
         defer { isCreatingHome = false }
+        _ = try await HomeDeletionService(persistence: ready.persistence).statuses()
+        guard generation == capturedGeneration, ready.presentation.isActive else { throw NeedServiceError.scopeChanged }
         let journal = LocalHomeCreationJournal(storeURL: storeURL)
         let command = try await Task.detached(priority: .userInitiated) {
             try journal.begin(name: "My Home", storeIdentifier: storeIdentifier)
@@ -1967,6 +2400,47 @@ final class PersistenceBootstrap: ObservableObject {
         } catch { homeSetupError = error }
     }
 
+    /// The local Settings screen passes its original presentation, so saving a
+    /// name after selection or store changes cannot rename the replacement home.
+    func renameLocalHome(name: String, presentedBy presentationID: UUID) async throws {
+        guard !isDeletingHome, case .ready(let ready) = state,
+              ready.presentation.id == presentationID, ready.presentation.isActive,
+              !ready.persistence.personalCartsEnabled,
+              let householdID = ready.householdID, let listID = ready.listID,
+              let store = ready.persistence.primaryStore,
+              let storeIdentifier = store.identifier,
+              ready.persistence.role(of: store) == .local else { throw NeedServiceError.scopeChanged }
+        let capturedGeneration = generation
+        let discovery = HomeDiscoveryService(persistence: ready.persistence)
+        let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+        guard generation == capturedGeneration, ready.presentation.isActive,
+              case .ready(let current) = state, current.presentation.id == presentationID else {
+            throw NeedServiceError.scopeChanged
+        }
+        let matches = snapshot.homes.filter {
+            $0.graph.householdID == householdID && $0.graph.listID == listID
+                && $0.graph.storeIdentifier == storeIdentifier && $0.access == .owner
+        }
+        guard matches.count == 1, let graph = matches.first?.graph else { throw NeedServiceError.scopeChanged }
+        let service = ready.service
+        try await Task.detached(priority: .userInitiated) {
+            try service.renameLocalHome(name: name, graph: graph)
+        }.value
+        // The save is durable. Update only the same mounted local selection.
+        guard generation == capturedGeneration, ready.presentation.isActive,
+              case .ready(let selected) = state, selected.presentation.id == presentationID,
+              selected.householdID == graph.householdID, selected.listID == graph.listID,
+              selected.persistence.primaryStore?.identifier == graph.storeIdentifier else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        localHomeName = trimmed
+        if isShowingRetainedLocalHome,
+           deviceLocalHome?.storeIdentifier == graph.storeIdentifier,
+           deviceLocalHome?.householdID == graph.householdID,
+           deviceLocalHome?.listID == graph.listID {
+            retainedLocalHomeName = trimmed
+        }
+    }
+
     func createHome(name: String, resuming: HomeCreationCommand? = nil, beforeSelectionReconciliation: () async -> Void = {}) async throws -> CreatedHome {
         guard !isCreatingHome, case .ready(let ready) = state,
               let provider = accountProvider else { throw ShopperSessionError.setupRequired }
@@ -1980,6 +2454,10 @@ final class PersistenceBootstrap: ObservableObject {
         defer { isCreatingHome = false }
         let service = ready.service
         let (journalURL, storeIdentifier) = try creationJournalLocation(ready: ready, session: session)
+        guard let cart = personalService, cart.persistence === ready.persistence else { throw ShopperSessionError.setupRequired }
+        _ = try await HomeDeletionService(persistence: ready.persistence, cart: cart).statuses()
+        guard ready.presentation.isActive, homeCoordinator.generation == capturedGeneration,
+              try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
         let command = try await Task.detached(priority: .userInitiated) {
             try HomeCreationJournal(url: journalURL).begin(name: name, session: session, storeIdentifier: storeIdentifier, resuming: resuming)
         }.value
@@ -2018,7 +2496,7 @@ final class PersistenceBootstrap: ObservableObject {
     /// Configured entry point for invitation UI and the development sharing harness.
     /// A prepared share is not evidence that its grocery graph has exported.
     func prepareSelectedHomeShare(retryInterrupted: Bool = false) async throws -> PreparedHomeShare {
-        guard case .ready(let ready) = state, let scope = ready.homeScope,
+        guard !isDeletingHome, case .ready(let ready) = state, let scope = ready.homeScope,
               homeCoordinator.homes.contains(where: { $0.graph == scope.graph && $0.access == .owner }),
               let url = ready.persistence.primaryStore?.url else { throw HomeSharingError.ownerRequired }
         let transport = ManagedHomeShareTransport(persistence: ready.persistence,
@@ -2106,13 +2584,15 @@ final class PersistenceBootstrap: ObservableObject {
                     return result
                 }), leave: HomeDetailsLeaveActions(
                     prepare: { [self] in try await prepareHomeLeave(scope: scope) },
-                    confirm: { [self] command in try await confirmHomeLeave(command, scope: scope) }))
+                    confirm: { [self] command in try await confirmHomeLeave(command, scope: scope) }),
+                deletion: homeDeletionActions(scope: scope))
 #if DEBUG
-        if let fixture = homeDetailsFixtures[scope] { return fixture }
-        if let fixture = HomeDetailsUITestFixture.make(scope: scope,
+        if var fixture = homeDetailsFixtures[scope] { fixture.deletion = actions.deletion; return fixture }
+        if var fixture = HomeDetailsUITestFixture.make(scope: scope,
             name: homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home",
             rename: actions.rename,
             leaveOverride: HomeLeaveRootGoneUITestBackend.isEnabled(ProcessInfo.processInfo.environment) ? actions.leave : nil) {
+            fixture.deletion = actions.deletion
             homeDetailsFixtures[scope] = fixture
             return fixture
         }
@@ -2243,11 +2723,185 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func clearHomeLeavePresentation() {
+        homeDeletionRefreshID = nil
+        homeDeletionStatuses = []
+        homeDeletionStatusError = nil
+        isDeletingHome = false
         homeLeaveRefreshID = nil
         homeLeaveStatuses = []
         homeLeaveStatusError = nil
         isCheckingHomeLeaves = false
         homeLeaveResumingID = nil
+    }
+
+    // MARK: Home deletion
+
+    var hasDeletedHome: Bool { !homeDeletionStatuses.isEmpty }
+
+    private func homeDeletionActions(scope: ActiveHomeScope) -> HomeDetailsDeletionActions? {
+        guard case .ready(let ready) = state, ready.homeScope == scope,
+              homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.access == .owner,
+              let cart = personalService else { return nil }
+        return deletionActions(ready: ready, service: HomeDeletionService(persistence: ready.persistence, cart: cart))
+    }
+
+    func localHomeDeletionActions() -> HomeDetailsDeletionActions? {
+        guard case .ready(let ready) = state, !ready.persistence.personalCartsEnabled,
+              ready.householdID != nil, ready.listID != nil else { return nil }
+        return deletionActions(ready: ready, service: HomeDeletionService(persistence: ready.persistence))
+    }
+
+    private func deletionActions(ready: ReadyState, service: HomeDeletionService) -> HomeDetailsDeletionActions {
+        var confirmed: HomeDeletionCommand?
+        return HomeDetailsDeletionActions(prepare: { [weak self] in
+            guard let self, ready.presentation.isActive, !self.isDeletingHome else { throw HomeDeletionError.scopeChanged }
+            let graph: HomeGraphIdentity
+            if let scope = ready.homeScope { graph = scope.graph }
+            else {
+                let discovery = HomeDiscoveryService(persistence: ready.persistence)
+                let homes = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+                guard let home = homes.homes.first(where: { $0.graph.householdID == ready.householdID && $0.graph.listID == ready.listID }) else {
+                    throw HomeDeletionError.scopeChanged
+                }
+                graph = home.graph
+            }
+            return try await service.prepare(graph: graph, scope: ready.homeScope, authority: ready.presentation.commandAuthority)
+        }, confirm: { [weak self] command in
+            guard let self, ready.presentation.isActive, !self.isDeletingHome,
+                  command.graph.householdID == ready.householdID, command.graph.listID == ready.listID,
+                  command.scope == ready.homeScope else { throw HomeDeletionError.scopeChanged }
+            confirmed = command
+            self.isDeletingHome = true
+            defer { self.isDeletingHome = false }
+            guard await self.homeShareProvisioner.activeRequestCount == 0 else { throw HomeDeletionError.sharingPending }
+            do {
+                let result = try await service.execute(command, authority: ready.presentation.commandAuthority)
+                await self.refreshHomeDeletionStatuses(reconcile: false)
+                self.applyDeletedHomeSelection()
+                return result
+            } catch {
+                await self.refreshHomeDeletionStatuses(reconcile: false)
+                self.applyDeletedHomeSelection()
+                throw error
+            }
+        }, reconcile: { [weak self] command in
+            guard let self else { throw HomeDeletionError.scopeChanged }
+            let retained = try await service.statuses().contains { $0.command == command }
+            let result: HomeDeletionStatus
+            if retained { result = try await service.reconcile(command) }
+            else {
+                guard confirmed == command, ready.presentation.isActive, !self.isDeletingHome,
+                      await self.homeShareProvisioner.activeRequestCount == 0 else { throw HomeDeletionError.scopeChanged }
+                result = try await service.execute(command, authority: ready.presentation.commandAuthority)
+            }
+            await self.refreshHomeDeletionStatuses(reconcile: false)
+            self.applyDeletedHomeSelection()
+            return result
+        })
+    }
+
+    func retryHomeDeletion(_ command: HomeDeletionCommand) async throws {
+        guard !isDeletingHome, case .ready(let ready) = state,
+              homeDeletionStatuses.contains(where: { $0.command == command && !$0.completed }) else { throw HomeDeletionError.scopeChanged }
+        isDeletingHome = true
+        defer { isDeletingHome = false }
+        let service = HomeDeletionService(persistence: ready.persistence, cart: personalService)
+        do {
+            if ready.persistence.primaryStore?.identifier == command.graph.storeIdentifier {
+                _ = try await service.reconcile(command)
+            } else {
+                let retained = try await retainedLocalDeletionStatuses(reconcile: false)
+                guard retained.contains(where: { $0.command == command }) else { throw HomeDeletionError.scopeChanged }
+                _ = try await retainedLocalDeletionStatuses(reconcile: true)
+            }
+            await refreshHomeDeletionStatuses(reconcile: false)
+            applyDeletedHomeSelection()
+        } catch {
+            homeDeletionStatusError = "Couldn’t check deletion. Try again."
+            throw error
+        }
+    }
+
+    func refreshHomeDeletionStatuses(reconcile: Bool = true) async {
+        guard case .ready(let ready) = state else { return }
+        let cart = personalService
+        guard cart == nil || cart?.persistence === ready.persistence else { return }
+        let requestID = UUID(), requestGeneration = generation
+        // A completion refresh supersedes an older read. Dropping it could leave
+        // a deleted home selected after the background read published stale data.
+        homeDeletionRefreshID = requestID
+        defer { if homeDeletionRefreshID == requestID { homeDeletionRefreshID = nil } }
+        let service = HomeDeletionService(persistence: ready.persistence, cart: cart)
+        @MainActor func isCurrent() -> Bool {
+            guard self.generation == requestGeneration, self.homeDeletionRefreshID == requestID,
+                  self.personalService === cart, case .ready(let current) = self.state,
+                  current.persistence === ready.persistence else { return false }
+            return cart == nil || (try? cart?.sessionProvider.currentSession().accountBinding) == cart?.initialAccountBinding
+        }
+        do {
+            var statuses = try await service.statuses()
+            statuses += try await retainedLocalDeletionStatuses(reconcile: false)
+            guard isCurrent() else { return }
+            homeDeletionStatuses = statuses
+            homeDeletionStatusError = nil
+            if reconcile, !isDeletingHome {
+                for status in statuses where !status.completed && status.command.graph.storeIdentifier == ready.persistence.primaryStore?.identifier {
+                    guard isCurrent() else { return }
+                    do { _ = try await service.reconcile(status.command) }
+                    catch { homeDeletionStatusError = "Couldn’t check deletion. Try again." }
+                }
+                do { _ = try await retainedLocalDeletionStatuses(reconcile: true) }
+                catch { homeDeletionStatusError = "Couldn’t check deletion. Try again." }
+                statuses = try await service.statuses()
+                statuses += try await retainedLocalDeletionStatuses(reconcile: false)
+            }
+            guard isCurrent() else { return }
+            homeDeletionStatuses = statuses
+            await recordCompletedRetainedHomeDeletions(statuses)
+            guard isCurrent() else { return }
+            if !isDeletingHome { applyDeletedHomeSelection() }
+        } catch {
+            guard isCurrent() else { return }
+            homeDeletionStatusError = "Couldn’t check deletion. Try again."
+        }
+    }
+
+    private func applyDeletedHomeSelection() {
+        guard case .ready(let ready) = state else { return }
+        if let retained = deviceLocalHome, homeDeletionStatuses.contains(where: {
+            $0.completed && $0.command.isLocal && $0.command.graph.storeIdentifier == retained.storeIdentifier
+                && $0.command.graph.householdID == retained.householdID && $0.command.graph.listID == retained.listID
+        }) {
+            deviceLocalHome = nil
+            retainedLocalHomeName = nil
+            isShowingRetainedLocalHome = false
+            defaults.set(false, forKey: Self.retainedLocalKey)
+        }
+        if ready.persistence.personalCartsEnabled {
+            var changed = false
+            for status in homeDeletionStatuses {
+                if let scope = status.command.scope {
+                    changed = homeCoordinator.forgetSelectedHome(scope, generation: homeCoordinator.generation) || changed
+                }
+            }
+            if changed {
+                applyHomeSelection(to: ready)
+                Task { try? await refreshHomes() }
+            }
+        } else if homeDeletionStatuses.contains(where: {
+            $0.command.graph.householdID == ready.householdID && $0.command.graph.listID == ready.listID
+        }) {
+            if isShowingRetainedLocalHome {
+                deviceLocalHome = nil
+                retainedLocalHomeName = nil
+                isShowingRetainedLocalHome = false
+                defaults.set(false, forKey: Self.retainedLocalKey)
+            }
+            localHomeName = nil
+            localDiscoveryComplete = true
+            ready.presentation.retire()
+            state = .ready(ReadyState(persistence: ready.persistence, service: ready.service, householdID: nil, listID: nil))
+        }
     }
 
     private func membershipContext(_ scope: ActiveHomeScope) throws -> (ReadyState, URL, ManagedHomeMembershipTransport) {
@@ -2306,6 +2960,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func resumePendingCart(recheckIfRunning: Bool = false) {
+        Task { await refreshHomeDeletionStatuses() }
         Task { await refreshHomeLeaveStatuses() }
         Task { await refreshHomeAccessAndReplay(recheckIfRunning: recheckIfRunning) }
     }

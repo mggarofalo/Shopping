@@ -116,6 +116,16 @@ final class HomeAdoptionJournal: @unchecked Sendable {
         try Self.lock.withLock {
             guard let record = try load(), record.verified, record.action == .keepLocal,
                   record.sourceURL != nil else { return nil }
+            if try localSourceWasDeleted(record) { return nil }
+            return record
+        }
+    }
+
+    /// Prior completed setup is evidence of history, never approval for a new
+    /// selected graph or a different account.
+    func verifiedRecord() throws -> Record? {
+        try Self.lock.withLock {
+            guard let record = try load(), record.verified else { return nil }
             return record
         }
     }
@@ -171,8 +181,9 @@ final class HomeAdoptionJournal: @unchecked Sendable {
                 try save(record)
                 try checkpoint(.verified)
             }
+            let deletedLocalSource = try localSourceWasDeleted(record)
             return ActivationResult(configuration: configuration,
-                retainedLocal: record.action == .keepLocal && record.sourceURL != nil ? record : nil,
+                retainedLocal: record.action == .keepLocal && record.sourceURL != nil && !deletedLocalSource ? record : nil,
                 preferredHouseholdID: record.action == .copy ? record.householdID : nil,
                 preferredListID: record.action == .copy ? record.listID : nil)
         }
@@ -188,6 +199,15 @@ final class HomeAdoptionJournal: @unchecked Sendable {
     private func validateSource(_ record: Record) throws {
         guard let source = record.sourceURL,
               try Self.sourceIdentifier(source) == record.proposal.sourceStoreIdentifier else { throw Failure.sourceChanged }
+    }
+
+    private func localSourceWasDeleted(_ record: Record) throws -> Bool {
+        guard let url = record.sourceURL, let storeID = record.proposal.sourceStoreIdentifier,
+              let householdID = record.householdID, let listID = record.listID else { return false }
+        return try LocalHomeDeletionJournal(storeURL: url).statuses().contains {
+            $0.completed && $0.command.graph.storeIdentifier == storeID
+                && $0.command.graph.householdID == householdID && $0.command.graph.listID == listID
+        }
     }
 
     private func load() throws -> Record? {

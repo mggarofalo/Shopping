@@ -76,7 +76,7 @@ struct HomeSelectionView: View {
                 if !visibleInvitations.isEmpty {
                     Section("Invitations") {
                         ForEach(visibleInvitations) { invitation in
-                            Button("Open Invitation", systemImage: "envelope") {
+                            Button(invitation.displayName ?? "Open Invitation", systemImage: "envelope") {
                                 resume(invitation.id)
                             }
                             .disabled(isSelecting)
@@ -120,6 +120,9 @@ struct HomeSelectionView: View {
                 }
                 if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
                     HomeLeaveStatusSection(bootstrap: bootstrap)
+                }
+                if bootstrap.homeDeletionStatuses.contains(where: \.requiresResolution) || bootstrap.homeDeletionStatusError != nil {
+                    HomeDeletionStatusSection(bootstrap: bootstrap)
                 }
                 if let error { Text(error).foregroundStyle(.red) }
             }

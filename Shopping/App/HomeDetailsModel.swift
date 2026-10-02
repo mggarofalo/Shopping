@@ -11,6 +11,7 @@ struct HomeDetailsActions {
     let rename: (String) async throws -> Void
     var removals: HomeDetailsRemovalActions? = nil
     var leave: HomeDetailsLeaveActions? = nil
+    var deletion: HomeDetailsDeletionActions? = nil
 }
 
 @MainActor
@@ -24,6 +25,13 @@ struct HomeDetailsRemovalActions {
 struct HomeDetailsLeaveActions {
     let prepare: () async throws -> HomeLeaveCommand
     let confirm: (HomeLeaveCommand) async throws -> HomeLeaveStatus
+}
+
+@MainActor
+struct HomeDetailsDeletionActions {
+    let prepare: () async throws -> HomeDeletionCommand
+    let confirm: (HomeDeletionCommand) async throws -> HomeDeletionStatus
+    let reconcile: (HomeDeletionCommand) async throws -> HomeDeletionStatus
 }
 
 /// UI state contains values only. Every action revalidates the captured home before
@@ -42,6 +50,8 @@ final class HomeDetailsModel: ObservableObject {
     @Published var removalConfirmation: HomeMembershipRemovalConfirmation?
     @Published var leaveConfirmation: HomeLeaveCommand?
     @Published private(set) var leaveStatus: HomeLeaveStatus?
+    @Published var deletionConfirmation: HomeDeletionCommand?
+    @Published private(set) var deletionStatus: HomeDeletionStatus?
     private var generation = 0
     private var active = true
 
@@ -57,6 +67,11 @@ final class HomeDetailsModel: ObservableObject {
     var canLeave: Bool {
         active && isCurrent && !busy && actions.leave != nil && leaveStatus == nil && acceptedParticipant != nil
     }
+
+    var canDelete: Bool {
+        active && isCurrent && !busy && snapshot?.access == .owner && actions.deletion != nil && deletionStatus == nil
+    }
+    var hasDeletionAction: Bool { actions.deletion != nil }
 
     private var acceptedParticipant: HomeMember? {
         guard let snapshot, snapshot.scope == scope, snapshot.source == .server,
@@ -78,6 +93,7 @@ final class HomeDetailsModel: ObservableObject {
         delivery = nil
         removalConfirmation = nil
         leaveConfirmation = nil
+        deletionConfirmation = nil
     }
 
     func refresh() async {
@@ -125,6 +141,62 @@ final class HomeDetailsModel: ObservableObject {
             try command.validate()
             guard matchesLeave(command) else { throw HomeMembershipError.scopeChanged }
             leaveConfirmation = command
+            error = nil
+        } catch {
+            guard active, generation == request else { return }
+            self.error = Self.message(error)
+        }
+    }
+
+    func prepareDeletion() async {
+        guard canDelete, let deletion = actions.deletion else { return }
+        generation += 1
+        let request = generation
+        busy = true
+        defer { if request == generation { busy = false } }
+        do {
+            let command = try await deletion.prepare()
+            guard active, generation == request else { return }
+            guard command.scope == scope else { throw HomeDeletionError.scopeChanged }
+            deletionConfirmation = command
+            error = nil
+        } catch {
+            guard active, generation == request else { return }
+            self.error = Self.message(error)
+        }
+    }
+
+    func confirmDeletion(_ command: HomeDeletionCommand) async {
+        guard canDelete, deletionConfirmation == command, command.scope == scope, let deletion = actions.deletion else { return }
+        deletionConfirmation = nil
+        generation += 1
+        let request = generation
+        busy = true
+        defer { if request == generation { busy = false } }
+        do {
+            let status = try await deletion.confirm(command)
+            guard active, generation == request else { return }
+            deletionStatus = status
+            error = nil
+        } catch {
+            let operationError = error
+            let status = try? await deletion.reconcile(command)
+            guard active, generation == request else { return }
+            deletionStatus = status ?? HomeDeletionStatus(command: command, submitted: false, completed: false)
+            self.error = Self.message(operationError)
+        }
+    }
+
+    func retryDeletion() async {
+        guard active, !busy, let status = deletionStatus, let deletion = actions.deletion else { return }
+        generation += 1
+        let request = generation
+        busy = true
+        defer { if request == generation { busy = false } }
+        do {
+            let refreshed = try await deletion.reconcile(status.command)
+            guard active, generation == request else { return }
+            deletionStatus = refreshed
             error = nil
         } catch {
             guard active, generation == request else { return }
@@ -305,6 +377,7 @@ final class HomeDetailsModel: ObservableObject {
     private static func message(_ error: Error) -> String {
         if let error = error as? HomeMembershipError { return error.localizedDescription }
         if let error = error as? HomeSharingError { return error.localizedDescription }
+        if let error = error as? HomeDeletionError { return error.localizedDescription }
         if let error = error as? ManagedHomeLeaveTransport.Failure { return error.localizedDescription }
         return "Couldn’t verify this home with iCloud. Your groceries and invitation have been retained. Check again when you’re connected."
     }

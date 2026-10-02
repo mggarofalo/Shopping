@@ -3,11 +3,12 @@ import CoreData
 /// Applies observed authority to every household command, including insertion of
 /// new descendants. Private records deliberately have no household relationship.
 enum HomeEffectPersistencePolicy {
-    static func validate(in context: NSManagedObjectContext, controller: PersistenceController) throws {
+    static func validate(in context: NSManagedObjectContext, controller: PersistenceController,
+                         excluding authorizedDeletions: Set<NSManagedObjectID> = []) throws {
         guard controller.personalCartsEnabled, let provider = controller.personalCartSessionProvider else { return }
         let changed = context.insertedObjects.union(context.updatedObjects).union(context.deletedObjects)
         var homes: Set<Household> = []
-        for object in changed {
+        for object in changed where !authorizedDeletions.contains(object.objectID) {
             if let home = ShareAssociationScope.household(for: object) { homes.insert(home) }
             // A relationship move cannot evade the original home's restriction.
             if object.entity.relationshipsByName["household"] != nil,

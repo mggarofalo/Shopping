@@ -130,14 +130,16 @@ final class ActiveHomeBootstrapTests: XCTestCase {
     }
 
     private func freshBootstrap(accountStatus: CKAccountStatus,
-                                invitations: HomeInvitationController? = nil) throws -> PersistenceBootstrap {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                                invitations: HomeInvitationController? = nil,
+                                accountLookup: ShopperSessionProvider.AccountLookup? = nil,
+                                seededDirectory: URL? = nil) throws -> PersistenceBootstrap {
+        let root = seededDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = "FreshHomeBootstrap." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.first-home",
             environment: "Development", cacheDirectory: root.appendingPathComponent("Bindings"),
-            lookup: .init(status: { accountStatus }, recordName: { "account-A" }),
+            lookup: accountLookup ?? .init(status: { accountStatus }, recordName: { "account-A" }),
             notifications: NotificationCenter())
         let bootstrap = PersistenceBootstrap(
             configuration: { .local(storeURL: root.appendingPathComponent("Local.sqlite")) },
@@ -188,6 +190,47 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
     }
 
+    func testImmediateCreateRetiresDeletedPendingIDsBeforeStatusHydration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let seeded = try PersistenceController(storeURL: directory.appendingPathComponent("Local.sqlite"))
+        addTeardownBlock {
+            seeded.writer.performAndWait { seeded.writer.reset() }
+            for store in seeded.container.persistentStoreCoordinator.persistentStores {
+                try? seeded.container.persistentStoreCoordinator.remove(store)
+            }
+        }
+        let store = try XCTUnwrap(seeded.primaryStore)
+        let url = try XCTUnwrap(store.url)
+        let storeIdentifier = try XCTUnwrap(store.identifier)
+        let journal = LocalHomeCreationJournal(storeURL: url)
+        let oldCreation = try journal.begin(name: "Previous home", storeIdentifier: storeIdentifier)
+        _ = try NeedService(persistence: seeded).createLocalHousehold(command: oldCreation)
+        let graph = try XCTUnwrap(HomeDiscoveryService(persistence: seeded).discover().homes.first?.graph)
+        let deletion = HomeDeletionService(persistence: seeded)
+        let command = try await deletion.prepare(graph: graph, scope: nil)
+        _ = try await deletion.execute(command)
+        // Finish the durable fixture before launching Bootstrap. Its initial
+        // asynchronous discovery must never observe the home before deletion.
+        XCTAssertEqual(try journal.pending(storeIdentifier: storeIdentifier), oldCreation)
+        seeded.writer.performAndWait { seeded.writer.reset() }
+        seeded.container.viewContext.performAndWait { seeded.container.viewContext.reset() }
+        try seeded.container.persistentStoreCoordinator.remove(store)
+        let bootstrap = try freshBootstrap(accountStatus: .noAccount, seededDirectory: directory)
+        bootstrap.start()
+        try await waitForFirstHomeDecision(bootstrap)
+        // No explicit deletion-status hydration precedes the first Create action.
+        XCTAssertEqual(bootstrap.homeEntry.root, .noHomes)
+        try await bootstrap.createFirstHome()
+        let fresh = try ready(bootstrap)
+        XCTAssertNotNil(fresh.householdID)
+        XCTAssertNotEqual(fresh.householdID, oldCreation.householdID)
+        XCTAssertNotEqual(fresh.listID, oldCreation.listID)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
+        XCTAssertEqual(try HomeDiscoveryService(persistence: fresh.persistence).discover().homes.count, 1)
+    }
+
     func testDeferredUnboundInvitationAllowsExplicitOfflineFirstHome() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -203,16 +246,63 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertTrue(bootstrap.homeEntry.hasPendingInvitation)
         try await bootstrap.dismissJoin(entry.id)
         XCTAssertFalse(bootstrap.homeEntry.invitations.first?.openRequested == true)
+        // Not Now may coincide with the already-started connection. Wait for
+        // that exact task and the visible Create state before tapping it.
+        if let connection = bootstrap.automaticJoinConnectionTask(for: entry.id) {
+            let settled = expectation(description: "Deferred invitation connection settled")
+            Task { await connection.value; settled.fulfill() }
+            await fulfillment(of: [settled], timeout: 5)
+        }
+        try await waitForFirstHomeDecision(bootstrap)
         do { try await bootstrap.createFirstHome() }
         catch {
-            let entry = bootstrap.homeEntry
-            XCTFail("Deferred first-home creation failed: \(error); root=\(entry.root), local=\(entry.isLocalStore), resolving=\(bootstrap.isResolvingFirstAccount), automaticOpen=\(String(describing: bootstrap.autoOpeningInvitationID)), state=\(bootstrap.state)")
-            throw error
+            let entryState = bootstrap.homeEntry
+            XCTFail("Create rejected after Not Now: \(error); root=\(entryState.root); local=\(entryState.isLocalStore); "
+                + "resolving=\(entryState.isResolvingFirstAccount); pending=\(entryState.hasPendingInvitation); "
+                + "open=\(entryState.invitations.first?.openRequested == true); state=\(bootstrap.state)")
+            return
         }
         XCTAssertEqual(bootstrap.homeEntry.root, .localHome)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
         XCTAssertEqual(bootstrap.homeEntry.invitations.first?.id, entry.id)
         XCTAssertFalse(bootstrap.invitations?.allEntries.first?.openRequested == true)
+    }
+
+    func testDismissingInviteDuringHeldAccountLookupAllowsFirstLocalHome() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let inbox = try HomeInvitationInbox(url: directory.appendingPathComponent("Invitations.json"),
+            containerIdentifier: "iCloud.test.first-home", environment: "Development")
+        let entry = try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.first-home",
+            environment: "Development", share: HomeShareIdentity(recordName: "held-share",
+                zoneName: "zone", zoneOwnerName: "owner")), metadataArchive: Data([1]))
+        let lookup = HeldSecondAccountLookup()
+        addTeardownBlock { await lookup.release() }
+        let bootstrap = try freshBootstrap(accountStatus: .noAccount,
+            invitations: HomeInvitationController(inbox: inbox),
+            accountLookup: .init(status: { await lookup.status() }, recordName: { "account-A" }))
+        bootstrap.start()
+        try await waitForFirstHomeDecision(bootstrap)
+        let heldDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !(await lookup.hasHeld()), ContinuousClock.now < heldDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let reachedHeldLookup = await lookup.hasHeld()
+        XCTAssertTrue(reachedHeldLookup, "The invitation connection must reach its held account lookup")
+        XCTAssertEqual(bootstrap.homeEntry.root, .noHomes)
+
+        try await bootstrap.dismissJoin(entry.id)
+        try await bootstrap.createFirstHome()
+        XCTAssertEqual(bootstrap.homeEntry.root, .localHome)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first?.openRequested == true)
+        let connection = try XCTUnwrap(bootstrap.automaticJoinConnectionTask(for: entry.id))
+        let settled = expectation(description: "Dismissed invitation connection settled")
+        Task { await connection.value; settled.fulfill() }
+        await lookup.release()
+        await fulfillment(of: [settled], timeout: 5)
+        XCTAssertEqual(bootstrap.homeEntry.root, .localHome)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
     }
 
     func testColdInvitationRestoresSelectionHoldBeforeFirstHomeDiscovery() async throws {
@@ -571,6 +661,30 @@ final class ActiveHomeBootstrapTests: XCTestCase {
 private actor BootstrapAccountAvailability {
     var status: CKAccountStatus = .available
     func setUnavailable(_ unavailable: Bool) { status = unavailable ? .temporarilyUnavailable : .available }
+}
+
+private actor HeldSecondAccountLookup {
+    private var requests = 0
+    private var held = false
+    private var released = false
+    private var resume: CheckedContinuation<Void, Never>?
+
+    func status() async -> CKAccountStatus {
+        requests += 1
+        if requests == 2 {
+            held = true
+            if !released { await withCheckedContinuation { resume = $0 } }
+        }
+        return .noAccount
+    }
+
+    func hasHeld() -> Bool { held }
+
+    func release() {
+        released = true
+        resume?.resume()
+        resume = nil
+    }
 }
 
 private enum BootstrapDiscoveryRequest {

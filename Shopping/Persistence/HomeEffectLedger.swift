@@ -47,11 +47,13 @@ extension PersonalCartRepository {
             requiredRestrictions.formUnion(edit.snapshot.token.homeEffectAuthority?.observedRestrictionIDs ?? [])
         }
         return try HomeEffectAccess(records: records.values.filter { $0.scope == scope }, requiredBlockIDs: required,
-            requiredRestrictionIDs: requiredRestrictions)
+            requiredRestrictionIDs: requiredRestrictions,
+            isDeleted: isHomeDeleted(householdID: householdID, listID: listID))
     }
 
     func homeEffectMayPublish(kind: HomeEffectKind, subjectID: UUID,
                              householdID: UUID, listID: UUID) throws -> Bool {
+        if try isHomeDeleted(householdID: householdID, listID: listID) { return false }
         guard try nativePublicationAllowed(householdID: householdID, listID: listID) else { return false }
         let authority: HomeEffectAuthority
         switch kind {

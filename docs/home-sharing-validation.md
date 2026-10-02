@@ -58,6 +58,38 @@ for this journey; it does not validate the later Phase 24 rewrite.
 Phase 24 preserves this working transport while replacing home entry and
 navigation. SHOPPING-174 records validation of the rewritten journeys.
 
+## Phase 24 journey contract
+
+The approved interaction reference is [Home experience](design/home-experience.md),
+with an [HTML mockup](design/home-experience.html). The native implementation must
+meet these paths; the mockup does not establish native routing or cloud delivery.
+
+| Journey | App interaction | Required retained state |
+| --- | --- | --- |
+| First home | Create Home from the first screen. | Exact durable creation IDs; no automatic replacement after deletion. |
+| Accepted invitation | Native link acceptance opens the exact home when import is ready, without an additional app Join action. | Original home and private carts; newer explicit selection wins. |
+| Deferred invitation | Home control → Open on the invitation. | Durable Not Now decision; independently recoverable invitations. |
+| Switch | Home control → home row. | Selected scope shown in Groceries, Catalog, My cart and Settings. |
+| Local home → iCloud | Use iCloud in Home Settings. | A distinct owned copy and selectable exact local source; no cart attribution or merge into a joined home. |
+| Delete | Home Settings → Delete Home → named confirmation. | Private history and unrelated homes; pending recovery stays reachable after the root disappears. |
+| Create after delete | Create Home from No Homes. | Fresh IDs, even before background recovery finishes. |
+| Account change | Homes retains the device-local source; account commands require the current account. | Old account stores, commands and history remain isolated. |
+| Watch | The selected home name is visible in Groceries, Stores and Cart. | Watch selection keeps its existing independent policy. |
+
+SHOPPING-173 adds durable deletion and copy recovery. Tests must cover later
+same-home imports during confirmed deletion, an absent server zone with local
+residue, missing root/list remnants, a committed copy whose acknowledgment was
+interrupted, and deletion followed by a new local home. Retained adoption
+decisions are evidence, not authority to reuse a replacement home's identity.
+
+Exact local run results, failures and corrections belong in the
+[test ownership ledger](test-ownership.md). SHOPPING-174 must record the final
+source SHA and pinned CI run. Physical validation still requires cold/warm native
+links, both phones' resulting graphs, owner deletion/revocation, account changes,
+and the device Animation Hitches trace defined by the
+[responsiveness contract](ui-responsiveness.md). Michael's reported initial join
+above establishes the installed transport's success, not these rewritten paths.
+
 ## Required live assertions
 
 | Live case | Evidence required on the sharing candidate |

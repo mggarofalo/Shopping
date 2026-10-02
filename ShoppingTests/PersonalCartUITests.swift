@@ -24,6 +24,61 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertFalse(create.exists)
     }
 
+    func testLocalHomeDeleteCanCancelThenRecreateAfterRelaunch() throws {
+        let app = XCUIApplication()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launch()
+        XCTAssertTrue(app.buttons["shopping.home.createFirst"].existsOrAppears(timeout: 8))
+        app.buttons["shopping.home.createFirst"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["shopping.settings.homeDetails"].tap()
+        XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.home.useICloud"].exists,
+            "The created home must be the local home, not an account-backed fixture")
+        let rename = app.buttons["shopping.home.rename"]
+        XCTAssertTrue(rename.existsOrAppears(timeout: 3))
+        rename.tap()
+        let name = app.textFields["shopping.home.nameEditor"]
+        XCTAssertTrue(name.existsOrAppears(timeout: 3))
+        name.tap()
+        let previous = name.value as? String ?? ""
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + "Cedar Home")
+        app.buttons["Save home name"].tap()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(rename.label.contains("Cedar Home"))
+        app.terminate()
+        app.launch()
+        let scope = app.buttons["shopping.home.scope"]
+        XCTAssertTrue(scope.existsOrAppears(timeout: 8))
+        XCTAssertTrue((scope.value as? String)?.contains("Cedar Home") == true)
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["shopping.settings.homeDetails"].tap()
+        XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
+        let delete = app.buttons["shopping.home.delete"]
+        XCTAssertTrue(delete.existsOrAppears(timeout: 3))
+        delete.tap()
+        let alert = app.alerts["Delete “Cedar Home”?"]
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Deletes its list, catalog, and settings. This can’t be undone."].exists)
+        try alertAction("Cancel", id: "shopping.home.cancelDelete", in: alert).tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(delete.isEnabled)
+        delete.tap()
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        try alertAction("Delete Home", id: "shopping.home.confirmDelete", in: alert).tap()
+        XCTAssertTrue(app.staticTexts["No Homes"].existsOrAppears(timeout: 8))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["No Homes"].existsOrAppears(timeout: 8))
+        app.buttons["shopping.home.createFirst"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].exists)
+    }
+
     func testAcceptedInvitationOpensExactHomeWithoutAppJoinTap() {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -353,9 +408,9 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue((local.value as? String)?.contains("On This iPhone") == true)
         app.buttons["shopping.home.settings"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
-        XCTAssertTrue(app.buttons["shopping.home.openICloud"].exists)
-        XCTAssertFalse(app.buttons["shopping.home.useICloud"].exists)
-        XCTAssertFalse(app.staticTexts["Copies this home to iCloud. Your local home stays saved."].exists)
+        XCTAssertTrue(app.buttons["shopping.home.useICloud"].exists)
+        XCTAssertFalse(app.buttons["shopping.home.openICloud"].exists)
+        XCTAssertTrue(app.staticTexts["Copies this home to iCloud. Your local home stays saved."].exists)
         app.navigationBars["Home Settings"].buttons.firstMatch.tap()
         app.buttons["Done"].tap()
         app.terminate()
@@ -364,6 +419,51 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
         openManageHomes(app)
         XCTAssertTrue(local.existsOrAppears(timeout: 3))
+    }
+
+    func testRetainedLocalUseICloudCopiesHomeAndKeepsSourceSelectable() {
+        let app = launch(personalCart: false, homeAdoption: true)
+        let notNow = app.buttons["shopping.invitation.notNow"]
+        XCTAssertTrue(notNow.existsOrAppears(timeout: 8))
+        notNow.tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        openManageHomes(app)
+        let local = app.buttons["shopping.home.retainedLocal"]
+        XCTAssertTrue(local.existsOrAppears(timeout: 3))
+        app.buttons["shopping.home.settings"].tap()
+        XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
+        let useICloud = app.buttons["shopping.home.useICloud"]
+        XCTAssertTrue(useICloud.exists)
+        useICloud.tap()
+        let copying = app.descendants(matching: .any)["shopping.home.copyingToICloud"]
+        let copied = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.buttons["shopping.home.openICloud"].exists || !app.navigationBars["Home Settings"].exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [copied], timeout: 12), .completed,
+            "The retained source must finish copying or open its new home")
+        XCTAssertFalse(copying.exists)
+        if app.navigationBars["Home Settings"].exists {
+            app.navigationBars["Home Settings"].buttons.firstMatch.tap()
+        }
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        let scope = app.buttons["shopping.home.scope"]
+        XCTAssertTrue(scope.existsOrAppears(timeout: 8))
+        let selectedCopy = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            scope.exists && (scope.value as? String)?.contains("On This iPhone") == false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [selectedCopy], timeout: 8), .completed)
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 5),
+            "The copied owned home must contain the retained source's grocery need")
+        openManageHomes(app)
+        XCTAssertTrue(local.existsOrAppears(timeout: 3), "The original local home must remain selectable")
+        local.tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        XCTAssertTrue((scope.value as? String)?.contains("On This iPhone") == true)
+        openManageHomes(app)
+        app.buttons["shopping.home.settings"].tap()
+        XCTAssertTrue(app.buttons["shopping.home.openICloud"].existsOrAppears(timeout: 3),
+            "A completed exact copy should open the existing iCloud home rather than create another")
+        XCTAssertFalse(app.buttons["shopping.home.useICloud"].exists)
     }
 
     private func openLegacyReview(_ app: XCUIApplication) {
@@ -410,6 +510,7 @@ final class PersonalCartUITests: XCTestCase {
         if unavailableSetup { app.launchEnvironment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] = "1" }
         if purchaseNotice { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_NOTICE"] = "1" }
         if revoked { app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_REVOKED"] = "1" }
+        addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app
     }
@@ -417,5 +518,15 @@ final class PersonalCartUITests: XCTestCase {
     private func groceryRow(_ name: String, app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
             "shopping.grocery.row.", "Edit \(name)")).firstMatch
+    }
+
+    private func alertAction(_ label: String, id: String, in alert: XCUIElement,
+                             file: StaticString = #filePath, line: UInt = #line) throws -> XCUIElement {
+        let leaves = alert.buttons.matching(NSPredicate(format: "label == %@", label))
+            .allElementsBoundByIndex.filter { $0.descendants(matching: .button).count == 0 }
+        XCTAssertEqual(leaves.count, 1, "Expected one native alert action", file: file, line: line)
+        let button = try XCTUnwrap(leaves.first, file: file, line: line)
+        XCTAssertEqual(button.identifier, id, file: file, line: line)
+        return button
     }
 }

@@ -859,27 +859,48 @@ final class NeedService: @unchecked Sendable {
                   session.accountBinding == scope.accountBinding,
                   session.containerIdentifier == scope.containerIdentifier,
                   session.environment == scope.environment else { throw ShopperSessionError.accountChanged }
-            let graph = scope.graph
-            guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
-                throw NeedServiceError.scopeChanged
-            }
-            let rootRequest = Household.fetchRequest()
-            rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
-            let listRequest = GroceryList.fetchRequest()
-            listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
-            let roots = try context.fetch(rootRequest)
-            let lists = try context.fetch(listRequest)
-            guard roots.count == 1, lists.count == 1,
-                  let root = roots.first, let list = lists.first,
-                  !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
-                  let store = root.objectID.persistentStore,
-                  self.persistence.role(of: store) != nil,
-                  store.identifier == graph.storeIdentifier,
-                  root.objectID.uriRepresentation().absoluteString == graph.rootURI,
-                  list.objectID.persistentStore == store,
-                  root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+            let root = try self.exactHomeRoot(scope.graph, in: context)
             root.name = name
         }
+    }
+
+    /// Local names have no account session, but still require the exact mounted
+    /// graph and its store. A stale Settings screen cannot rename a new home.
+    func renameLocalHome(name: String, graph: HomeGraphIdentity) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard self.persistence.personalCartSessionProvider == nil,
+                  let store = self.persistence.primaryStore,
+                  self.persistence.role(of: store) == .local,
+                  store.identifier == graph.storeIdentifier else {
+                throw NeedServiceError.scopeChanged
+            }
+            let root = try self.exactHomeRoot(graph, in: context)
+            guard root.objectID.persistentStore === store else { throw NeedServiceError.scopeChanged }
+            root.name = name
+        }
+    }
+
+    private func exactHomeRoot(_ graph: HomeGraphIdentity, in context: NSManagedObjectContext) throws -> Household {
+        guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
+            throw NeedServiceError.scopeChanged
+        }
+        let rootRequest = Household.fetchRequest()
+        rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
+        let listRequest = GroceryList.fetchRequest()
+        listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
+        let roots = try context.fetch(rootRequest)
+        let lists = try context.fetch(listRequest)
+        guard roots.count == 1, lists.count == 1,
+              let root = roots.first, let list = lists.first,
+              !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
+              let store = root.objectID.persistentStore,
+              persistence.role(of: store) != nil,
+              store.identifier == graph.storeIdentifier,
+              root.objectID.uriRepresentation().absoluteString == graph.rootURI,
+              list.objectID.persistentStore === store,
+              root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+        return root
     }
 
     /// Retries only the identities from a durable, explicitly initiated creation command.

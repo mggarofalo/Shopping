@@ -1604,7 +1604,7 @@ The fixture does not assert successful native CloudKit delivery.
 owns the flat Homes picker and scope-specific grocery/cart contents across
 switch and relaunch. `testLocalHomeRemainsAvailableInHomesPicker` owns the
 On This iPhone row, unchanged local groceries after declining an invitation,
-and accurate Open iCloud Homes wording for the retained local copy.
+and the retained local home's explicit Use iCloud action before copying.
 Account activation and exact retained source are covered by
 `HomeAdoptionBootstrapTests`; no accepted-local UI journey is claimed.
 
@@ -1614,6 +1614,113 @@ pending membership, and Resend opens the sheet again. The owner pending-member
 removal and contributor native Leave alert scenarios remain separate UI owners.
 `HomeMembershipRemovalTests` retains Stop Sharing backend recovery proof after
 its ordinary UI entry was removed. SHOPPING-173 owns owner Delete Home UI proof.
+
+## Home deletion and retained local conversion (SHOPPING-173)
+
+`HomeDetailsUITests.testOwnerDeleteRequiresExactHomeConfirmationAndCanRecreateAfterRelaunch`
+owns the owner-only native exact-name Delete alert, cancellation without
+submission, deletion of the fixture's sole home, `No Homes` after relaunch,
+continued private-cart recovery access, and explicit creation of a new home.
+The contributor fixture asserts Delete is absent. Its unshared fixture does
+not claim a live CloudKit delete.
+
+`PersonalCartUITests.testLocalHomeDeleteCanCancelThenRecreateAfterRelaunch`
+owns the equivalent local-only exact-name warning and explicit recreate after
+relaunch. `testRetainedLocalUseICloudCopiesHomeAndKeepsSourceSelectable`
+uses the isolated retained-local fixture to prove one explicit copy opens an
+owned home with its grocery need while the source stays selectable. Domain
+tests own the exact captured identity, account guard, replay, cart disposition,
+and pending remote deletion permutations. The Homes recovery row reconciles
+the recorded command. An owner purge can retry only after fresh exact share,
+owner, account, store, and zone validation. No two-phone deletion proof is claimed.
+
+`HomeDeletionTests` owns complete local and unshared owner graph removal,
+preservation of every prior private record and unrelated home, SQLite reopen,
+retired presentation and changed graph rejection, durable local intent before
+save, and account fencing. Its injected native backend owns offline failures
+before submission, uncertain submission, and local removal before server
+confirmation. Reconciliation checks ownership again; a completed operation
+does not submit another purge. These deterministic tests do not prove live
+CloudKit zone behavior. `HomeAdoptionBootstrapTests` owns discovery and recovery
+of an interrupted retained-local deletion while the account store is mounted.
+
+The 13 `HomeDeletionTests` cases own these boundaries:
+
+| Test | Boundary |
+| --- | --- |
+| `testLocalDeletionRemovesCompleteGraphPreservesOtherHomeAndSurvivesReopen` | Complete local graph, unrelated home, durable deletion, fresh IDs, rejected old-ID replay. |
+| `testOwnedUnsharedDeletionRetainsPrivateCartAndEveryPriorSemanticRecord` | Unshared owner deletion preserves private record bytes, cart tokens and quantities after reopen; household demand becomes unavailable. |
+| `testStaleCapturedGraphAndRetiredPresentationNeverRetainDeletion` | Changes before confirmation and retired UI authority cannot start deletion. |
+| `testLocalMarkerBeforeSaveCanFinishAfterReopen` | A retained local command survives termination before graph deletion. |
+| `testOfflineSubmittedOwnerDeleteRetriesOnlyAfterFreshOwnershipValidation` | Uncertain native submission can resume after fresh validation. |
+| `testOfflineBeforeSubmissionRetainsExactConfirmationAndResumesAfterReconnect` | Offline preflight retains intent without falsely recording native submission. |
+| `testLocallyPurgedButServerZonePresentRecoversWithoutDeletedRoot` | Recovery does not depend on an already removed local root. |
+| `testAccountChangeCannotRetryOldSubmittedDelete` | Another account cannot resume the captured deletion. |
+| `testConfirmedDeletionCoversLaterImportedChildrenOfOnlyTheSameHome` | Later children require validated, append-only coverage; the original command remains unchanged. |
+| `testConfirmedServerAbsenceCleansLocalResidueWithoutAnotherPurge` | Confirmed server-zone absence permits exact local cleanup, preserving private evidence. |
+| `testCompletedDeletionRetiresOnlyItsPendingCreationAndAllowsFreshIDs` | Local and account creation journals retire only the deleted result and allocate new identities. |
+| `testPartialLocalRootOrListRetriesRecordedCoverageWhileServerZoneExists` | Missing root or list does not strand already covered children; missing relationships cannot expand authority. |
+| `testPartialLocalRootOrListCleansRecordedCoverageAfterServerZoneIsGone` | The same partial residues are removed after authoritative server absence; every covered URI must disappear. |
+
+`ActiveHomeBootstrapTests.testImmediateCreateRetiresDeletedPendingIDsBeforeStatusHydration`
+owns the immediate local Create boundary: an old pending creation still exists,
+the screen already offers Create, and no deletion-status refresh is requested
+before the action. The result must have fresh household/list IDs and exactly
+one home. Creation itself awaits exact completed-deletion retirement; screen
+hydration is not the authority for choosing IDs.
+
+`RetainedHomeConversionTests` owns the selected source graph, exact-ID replay
+after save but before acknowledgement, private-cart/history exclusion,
+unchanged source and unrelated homes, account rejection, and fresh recopy IDs
+after a completed destination deletion. The Bootstrap owners are:
+
+- `HomeAdoptionBootstrapTests.testExplicitRetainedCopyCreatesOwnedAccountHomeAndKeepsOriginal`
+- `HomeAdoptionBootstrapTests.testCompletedCopiedHomeDeletionPermitsOneNewExplicitCopy`
+- `HomeAdoptionBootstrapTests.testRetainedDeviceHomeStaysReachableAcrossAccountChangeWithoutCopyingToNewAccount`
+- `HomeAdoptionBootstrapTests.testPendingRetainedLocalDeletionReconcilesWhileAccountHomeIsOpen`
+- `ActiveHomeBootstrapTests.testDismissingInviteDuringHeldAccountLookupAllowsFirstLocalHome`
+- `ActiveHomeBootstrapTests.testDeferredUnboundInvitationAllowsExplicitOfflineFirstHome`
+
+### SHOPPING-173 local validation record — October 2, 2026
+
+These runs used the issue worktree before integration. Their names identify
+the local `/tmp/shopping-phase24-173*.log` evidence; they are not CI or
+exact-commit release attestations.
+
+| Run | Result and correction |
+| --- | --- |
+| `173b` | Fast: 628 passed, 2 failed. The deletion test incorrectly expected `demandAvailable` to remain true after removing the household; it now separately asserts unavailable demand, unchanged private record bytes, cart tokens and quantities. The conversion test queried account A's store through account-bound discovery after switching to B; discovery correctly rejected it. The test now checks the unchanged raw root count without bypassing the account guard. |
+| `173d` | Focused run failed `testDeferredUnboundInvitationAllowsExplicitOfflineFirstHome` with `scopeChanged`; all 11 deletion cases then present passed. The test attempted Create while its automatic connection transition could still be in flight after Not Now. A bounded wait now settles that exact task and checks the visible `noHomes` state; production authority checks remain intact. |
+| `173e` | Full ShoppingFast passed **638/638**, including all 13 deletion cases and the immediate-Create Bootstrap regression. One QoS runtime warning remained in the run evidence. |
+| `173-ui-a` | Three of four focused UI cases passed. Retained copying left a stale local Home Settings screen after the account store became ready. The view now dismisses on that ready store transition; copy/content/original-source assertions remain. |
+| `173f` | Focused: 56 passed, 3 failed methods. Two retained-copy methods exposed missing returns in source-identity properties; fixed. Immediate-Create seeded/deleted its graph after Bootstrap started, allowing startup discovery to select it; the fixture now persists and closes its store before cold launch. Xcode's post-failure simulator diagnostic collection stalled for over five minutes; its diagnostic child was stopped after sampling, and the failed result bundle was retained. The test process was not stopped. |
+| `173g` | Focused: **58/58 passed** across home adoption, retained conversion, first-home Bootstrap and home naming. Two QoS runtime warnings remained. This validates the corrected source and fixtures, not the earlier `173e` source. |
+| `173-ui-b` | **4/4 passed**: owner delete/relaunch/recreate; local rename/relaunch, cancel/delete/recreate; retained copy with selected contents and original-source return; retained Homes picker. One QoS runtime warning remained. |
+
+Independent review found replacement-source and interrupted-copy deletion gaps.
+`DeviceLocalHome` now identifies an explicitly selected local graph independently
+of the immutable initial adoption record. Conversion history retains each source
+command, and exact completed deletion also retires a bound copy whose save
+committed before its acknowledgment. The added proof owners are:
+
+- `HomeAdoptionBootstrapTests.testDeletedRetainedSourceCanCreateAndCopyNewLocalHomeWithoutRewritingAdoption`
+- `HomeAdoptionBootstrapTests.testJoiningAfterReplacingDeletedLocalSourceKeepsNewHomeReachable`
+- `RetainedHomeConversionTests.testDeletedBoundDestinationRetiresCopyInterruptedBeforeJournalAcknowledgement`
+- `HomeNameTests.testLocalRenameKeepsExactGraphAndRejectsRetiredOrMismatchedCommands`
+
+The local rename UI scenario now verifies the saved name after relaunch and the
+same name in the deletion confirmation. Review also required the exact invitation
+open intent to be checked again after writing a selected-local reference, so Not
+Now cannot be overtaken by that asynchronous write. Both independent reviewers
+verified their requested fixes; the test review found no weakened assertions or
+fixture-isolation defect.
+
+Final validation of the committed, combined milestone source remains separate
+from these issue-worktree runs.
+Injected native backends prove command/recovery behavior, not actual CloudKit
+zone deletion. Owner deletion and its propagation still require live two-phone
+validation; the user's successful invitation join/sync does not establish that
+separate deletion result.
 
 ## Watch home scope (SHOPPING-183)
 

@@ -61,12 +61,20 @@ struct HomeEntrySnapshot: Equatable {
         case deferred(Invitation)
     }
 
+    enum RetainedLocalCopyState: Equatable {
+        case unavailable
+        case available
+        case copying
+        case copied
+    }
+
     let root: Root
     let isLocalStore: Bool
     let homes: [Home]
     let currentHomeName: String?
     let retainedLocalHomeName: String?
     let isShowingRetainedLocalHome: Bool
+    let retainedLocalCopyState: RetainedLocalCopyState
     let invitations: [Invitation]
     let hasPendingInvitation: Bool
     let hasVerifiedInvitationAccount: Bool
@@ -89,6 +97,7 @@ struct HomeEntrySnapshot: Equatable {
     init(store: Store, readiness: ActiveHomeCoordinator.Readiness,
          discovery: ActiveHomeCoordinator.DiscoveryState, homes: [HomeCandidate],
          currentHomeName: String?, retainedLocalHomeName: String?, isShowingRetainedLocalHome: Bool,
+         retainedLocalCopyState: RetainedLocalCopyState = .unavailable,
          invitations: [HomeInvitationInbox.Entry], hasPendingInvitation: Bool,
          hasVerifiedInvitationAccount: Bool, invitationProblem: String?, importProblems: [UUID: String],
          isCreatingHome: Bool, homeDiscoveryFailed: Bool,
@@ -100,6 +109,7 @@ struct HomeEntrySnapshot: Equatable {
         self.currentHomeName = currentHomeName
         self.retainedLocalHomeName = retainedLocalHomeName
         self.isShowingRetainedLocalHome = isShowingRetainedLocalHome
+        self.retainedLocalCopyState = retainedLocalCopyState
         self.invitations = invitations.map(Invitation.init)
         self.hasPendingInvitation = hasPendingInvitation
         self.hasVerifiedInvitationAccount = hasVerifiedInvitationAccount

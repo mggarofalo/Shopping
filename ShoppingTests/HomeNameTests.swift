@@ -88,6 +88,44 @@ final class HomeNameTests: XCTestCase {
             householdID: householdID ?? original.graph.householdID, listID: listID ?? original.graph.listID))
     }
 
+    func testLocalRenameKeepsExactGraphAndRejectsRetiredOrMismatchedCommands() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = try PersistenceController(storeURL: directory.appendingPathComponent("Local.sqlite"))
+        defer {
+            persistence.writer.performAndWait { persistence.writer.reset() }
+            persistence.container.viewContext.performAndWait { persistence.container.viewContext.reset() }
+            for store in persistence.container.persistentStoreCoordinator.persistentStores {
+                try? persistence.container.persistentStoreCoordinator.remove(store)
+            }
+        }
+        let service = NeedService(persistence: persistence)
+        _ = try service.createHousehold(name: "First local")
+        _ = try service.createHousehold(name: "Second local")
+        let homes = try HomeDiscoveryService(persistence: persistence).discover().homes
+        let first = try XCTUnwrap(homes.first { $0.name == "First local" })
+        let second = try XCTUnwrap(homes.first { $0.name == "Second local" })
+        try service.renameLocalHome(name: "  Kitchen \n", graph: first.graph)
+        let renamed = try HomeDiscoveryService(persistence: persistence).discover().homes
+        XCTAssertEqual(renamed.first { $0.graph == first.graph }?.name, "Kitchen")
+        XCTAssertEqual(renamed.first { $0.graph == second.graph }?.name, "Second local")
+        let wrong = HomeGraphIdentity(storeIdentifier: first.graph.storeIdentifier,
+            rootURI: second.graph.rootURI, householdID: first.graph.householdID, listID: first.graph.listID)
+        XCTAssertThrowsError(try service.renameLocalHome(name: "Wrong home", graph: wrong)) {
+            XCTAssertEqual($0 as? NeedServiceError, .scopeChanged)
+        }
+        let authority = UICommandAuthority()
+        let scoped = service.scoped(to: authority)
+        authority.retire()
+        XCTAssertThrowsError(try scoped.renameLocalHome(name: "Old screen", graph: first.graph)) {
+            XCTAssertEqual($0 as? UICommandAuthority.Failure, .retired)
+        }
+        let after = try HomeDiscoveryService(persistence: persistence).discover().homes
+        XCTAssertEqual(after.first { $0.graph == first.graph }?.name, "Kitchen")
+        XCTAssertEqual(after.first { $0.graph == second.graph }?.name, "Second local")
+    }
+
     func testOwnerAndContributorRenameOnlyTheirExactHomeAndPreservePeopleAndPrivateCart() throws {
         let fixture = try fixture()
         let beforeCart = try fixture.cart.entries(householdID: fixture.owner.graph.householdID, listID: fixture.owner.graph.listID)

@@ -130,15 +130,17 @@ struct PersistenceRootView: View {
     private var noHomes: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("Create a Home", systemImage: "house")
+                Label(hasExitedHome ? "No Homes" : "Create a Home", systemImage: "house")
             } description: {
-                Text("Invited? Open your invite link.")
+                if !hasExitedHome { Text("Invited? Open your invite link.") }
             } actions: {
                 Button("Create Home") { createFirstHome() }
                     .buttonStyle(.borderedProminent)
                     .disabled(isCreatingFirstHome || bootstrap.homeEntry.isCreatingHome)
                     .accessibilityIdentifier("shopping.home.createFirst")
-                if !bootstrap.homeEntry.invitations.isEmpty {
+                if !bootstrap.homeEntry.invitations.isEmpty ||
+                    bootstrap.homeDeletionStatuses.contains(where: \.requiresResolution) ||
+                    bootstrap.homeDeletionStatusError != nil {
                     Button("Homes") { present(.homes) }
                         .accessibilityIdentifier("shopping.home.choose")
                 }
@@ -148,6 +150,10 @@ struct PersistenceRootView: View {
             }
             .navigationTitle("Shopping")
         }
+    }
+
+    private var hasExitedHome: Bool {
+        bootstrap.hasDeletedHome || !bootstrap.homeLeaveStatuses.isEmpty
     }
 
     private var chooseHome: some View {

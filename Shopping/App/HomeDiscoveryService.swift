@@ -39,6 +39,7 @@ final class HomeDiscoveryService: @unchecked Sendable {
                     let session = try provider.currentSession()
                     guard session.accountBinding == persistence.personalCartInitialBinding else { throw PersonalCartError.accountChanged }
                     let repository = PersonalCartRepository(persistence: persistence, context: persistence.writer, session: session)
+                    if try repository.isHomeDeleted(householdID: root.id, listID: list.id) { continue }
                     let retained = try repository.homeEffectAccess(householdID: root.id, listID: list.id)
                     if retained.requiresExplicitRejoin { access = .unresolved }
                     else if !retained.permitsPublication(retained.capturedAuthority) { access = .restricted }
@@ -46,6 +47,11 @@ final class HomeDiscoveryService: @unchecked Sendable {
                         if native == .lost { access = .unresolved }
                         else if native == .readOnly, access != .unresolved { access = .restricted }
                     }
+                }
+                if persistence.role(of: store) == .local, let url = store.url {
+                    let graph = HomeGraphIdentity(storeIdentifier: storeID, rootURI: root.objectID.uriRepresentation().absoluteString,
+                        householdID: root.id, listID: list.id)
+                    if try LocalHomeDeletionJournal(storeURL: url).contains(graph) { continue }
                 }
                 homes.append(HomeCandidate(graph: HomeGraphIdentity(storeIdentifier: storeID,
                     rootURI: root.objectID.uriRepresentation().absoluteString,
