@@ -43,7 +43,7 @@ struct HomeScopeControl: View {
         if let scope {
             Button(action: presentHomes) {
                 HStack(spacing: 7) {
-                    Image(systemName: "house")
+                    Image(systemName: scope.isLocal ? "iphone" : "house")
                     Text(scope.name)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -59,7 +59,9 @@ struct HomeScopeControl: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Choose home")
-            .accessibilityValue(scope.name + (scope.isLocal ? ", On This iPhone" : ", Selected"))
+            .accessibilityValue(scope.name
+                + (scope.isLocal && !scope.name.hasSuffix("On This iPhone") ? ", On This iPhone" : "")
+                + ", Selected")
             .accessibilityIdentifier("shopping.home.scope")
             .background(Color(uiColor: .systemBackground))
             Divider()

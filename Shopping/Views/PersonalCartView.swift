@@ -159,7 +159,7 @@ private struct SavedCartHomeHeader: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "house")
-            Text(home.name)
+            Text(home.displayName)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
@@ -170,7 +170,7 @@ private struct SavedCartHomeHeader: View {
         .padding(.horizontal, 16)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Saved cart home")
-        .accessibilityValue(home.name)
+        .accessibilityValue(home.displayName)
         .accessibilityIdentifier("shopping.personalCart.savedHome")
         .background(Color(uiColor: .systemBackground))
         Divider()

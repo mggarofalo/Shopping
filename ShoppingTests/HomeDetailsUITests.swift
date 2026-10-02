@@ -156,24 +156,28 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
     }
 
-    func testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor() {
+    func testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor() throws {
         let app = launch(role: "owner")
         openHomeDetails(app)
         let remove = app.buttons["shopping.home.remove.fixture-long-name"]
         openMemberMenu("fixture-long-name", app: app)
         XCTAssertTrue(remove.existsOrAppears(timeout: 3))
         remove.tap()
-        let confirm = app.buttons["shopping.home.confirmRemoval"]
-        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Alexandra Penelope Montgomery-Wellington"].exists)
-        app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
-        XCTAssertTrue(confirm.waitForNonExistence(timeout: 3))
+        let alert = app.alerts["Remove “Alexandra Penelope Montgomery-Wellington”?"]
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        let confirm = try alertAction("Remove Member", id: "shopping.home.confirmRemoval", in: alert)
+        XCTAssertTrue(confirm.isEnabled)
+        try alertAction("Cancel", id: "shopping.home.cancelRemoval", in: alert).tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
+        assertMembership(app, contributor: true, invitation: false)
         openMemberMenu("fixture-long-name", app: app)
         XCTAssertTrue(remove.existsOrAppears(timeout: 3))
         remove.tap()
-        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
-        confirm.tap()
-        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        let confirmedRemoval = try alertAction("Remove Member", id: "shopping.home.confirmRemoval", in: alert)
+        XCTAssertTrue(confirmedRemoval.isEnabled)
+        confirmedRemoval.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
         assertMembership(app, contributor: false, invitation: false)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
         XCTAssertFalse(app.buttons["shopping.home.remove.fixture-owner"].exists)
@@ -185,7 +189,7 @@ final class HomeDetailsUITests: XCTestCase {
 
     /// Invitation delivery opens the system sheet directly. Cancelling delivery
     /// retains the pending member, who can be removed without changing groceries.
-    func testOwnerInviteAndCancelPendingInvitationPreservesGroceries() {
+    func testOwnerInviteAndCancelPendingInvitationPreservesGroceries() throws {
         let app = launch(role: "owner")
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))
@@ -202,12 +206,17 @@ final class HomeDetailsUITests: XCTestCase {
         openMemberMenu("fixture-invitation-1", app: app)
         XCTAssertTrue(remove.existsOrAppears(timeout: 3))
         remove.tap()
-        let confirm = app.buttons["shopping.home.confirmRemoval"]
-        XCTAssertTrue(confirm.existsOrAppears(timeout: 3))
-        app.navigationBars["Change sharing access"].buttons["Cancel"].tap()
+        let alert = app.alerts["Cancel invitation?"]
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        let confirm = try alertAction("Cancel Invitation", id: "shopping.home.confirmRemoval", in: alert)
+        XCTAssertTrue(confirm.isHittable)
+        try alertAction("Cancel", id: "shopping.home.cancelRemoval", in: alert).tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
         assertMembership(app, contributor: true, invitation: true)
         openMemberMenu("fixture-invitation-1", app: app)
         remove.tap()
+        XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         assertMembership(app, contributor: true, invitation: false)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)

@@ -156,22 +156,20 @@ struct HomeDetailsView: View {
                 onPresented: { Task { await model.presented(delivery) } },
                 onFinished: { model.delivery = nil })
         }
-        .sheet(item: $model.removalConfirmation) { confirmation in
-            NavigationStack {
-                List {
-                    Text(confirmation.homeName).font(.headline)
-                    Text(removalExplanation(confirmation))
-                    ForEach(Array(confirmation.memberNames.enumerated()), id: \.offset) { _, name in Text(name) }
-                    Text("Your home, groceries, People, and private cart history stay saved. Other devices may retain offline copies until they connect.")
-                    Button("Confirm", role: .destructive) { Task { await model.confirmRemoval(confirmation) } }
-                        .disabled(!model.canManageMembers)
-                        .accessibilityIdentifier("shopping.home.confirmRemoval")
-                }
-                .navigationTitle("Change sharing access")
-                .toolbar { ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { model.removalConfirmation = nil }
-                } }
+        .alert(removalPrompt?.title ?? "", isPresented: Binding(
+            get: { model.removalConfirmation != nil },
+            // Keep the prepared action until the confirmation button consumes it.
+            set: { _ in }
+        )) {
+            if let confirmation = model.removalConfirmation, let prompt = removalPrompt {
+                Button(prompt.action, role: .destructive) { Task { await model.confirmRemoval(confirmation) } }
+                    .disabled(!model.canManageMembers)
+                    .accessibilityIdentifier("shopping.home.confirmRemoval")
             }
+            Button("Cancel", role: .cancel) { model.removalConfirmation = nil }
+                .accessibilityIdentifier("shopping.home.cancelRemoval")
+        } message: {
+            if let message = removalPrompt?.message { Text(message) }
         }
         .alert("Leave “\(model.leaveConfirmation?.homeName ?? homeName)”?", isPresented: Binding(
             get: { model.leaveConfirmation != nil },
@@ -286,18 +284,41 @@ struct HomeDetailsView: View {
         .accessibilityIdentifier("shopping.home.cancelInvitation")
     }
 
-    private func removalExplanation(_ confirmation: HomeMembershipRemovalConfirmation) -> String {
-        switch confirmation.removal.purpose {
-        case .cancelInvitation:
-            "Cancel this invitation? If iCloud is still creating it, cancellation will finish when membership is checked."
-        case .removeMember:
-            "Remove this member or pending invitation from this home? They will lose shared access once iCloud applies the removal."
-        case .stopSharing:
-            "Remove access for the people below?"
+    private var removalPrompt: MembershipRemovalPrompt? {
+        guard let confirmation = model.removalConfirmation else { return nil }
+        return MembershipRemovalPrompt(confirmation: confirmation, members: model.snapshot?.members ?? [])
+    }
+}
+
+private struct MembershipRemovalPrompt {
+    let title: String
+    let action: String
+    let message: String?
+
+    init(confirmation: HomeMembershipRemovalConfirmation, members: [HomeMember]) {
+        let isPending = confirmation.removal.purpose == .cancelInvitation ||
+            (confirmation.removal.purpose == .removeMember && members.contains {
+                confirmation.removal.participantIDs.contains($0.id) && $0.acceptance == .pending
+            })
+        if isPending {
+            let invitedPerson = members.first { confirmation.removal.participantIDs.contains($0.id) }
+            let name = [invitedPerson?.name, invitedPerson?.email]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty }
+            title = name.map { "Cancel invitation to “\($0)”?" } ?? "Cancel invitation?"
+            action = "Cancel Invitation"
+            message = nil
+        } else if confirmation.removal.purpose == .removeMember {
+            let name = confirmation.memberNames.first
+            title = name.map { "Remove “\($0)”?" } ?? "Remove member?"
+            action = "Remove Member"
+            message = "They’ll lose access to “\(confirmation.homeName)”."
+        } else {
+            title = "Remove access?"
+            action = "Remove Access"
+            message = "Other people will lose access to “\(confirmation.homeName)”."
         }
     }
-
-
 }
 
 #Preview {

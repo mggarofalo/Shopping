@@ -325,7 +325,11 @@ final class PersistenceBootstrap: ObservableObject {
             hasVerifiedInvitationAccount: invitations?.hasVerifiedAccount ?? false,
             invitationProblem: invitations?.problem, importProblems: invitations?.importProblems ?? [:],
             isCreatingHome: isCreatingHome, homeDiscoveryFailed: homeDiscoveryError != nil,
-            isResolvingFirstAccount: isResolvingFirstAccount, joinError: joinError)
+            isResolvingFirstAccount: isResolvingFirstAccount, joinError: joinError,
+            retainedLocalScope: deviceLocalHome.flatMap {
+                guard let householdID = $0.householdID, let listID = $0.listID else { return nil }
+                return PersonalCartScopeSnapshot(householdID: householdID, listID: listID)
+            })
     }
 
     private func hasVerifiedDifferentAccount(for entry: HomeInvitationInbox.Entry) -> Bool {

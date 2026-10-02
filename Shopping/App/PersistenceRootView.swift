@@ -81,7 +81,7 @@ struct PersistenceRootView: View {
 
     private var scopeDisplay: HomeScopeDisplay? {
         let entry = bootstrap.homeEntry
-        guard let name = entry.currentHomeName ??
+        guard let name = entry.currentHomeDisplayName ??
             (entry.isShowingRetainedLocalHome ? entry.retainedLocalHomeName : nil) else { return nil }
         return HomeScopeDisplay(name: name,
             isLocal: entry.isLocalStore || entry.isShowingRetainedLocalHome)

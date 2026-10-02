@@ -25,6 +25,7 @@ struct HomeEntrySnapshot: Equatable {
     struct Home: Identifiable, Equatable {
         let candidate: HomeCandidate
         let isSelected: Bool
+        let presentation: HomePresentationName
 
         var id: HomeGraphIdentity { candidate.graph }
         var name: String { candidate.name }
@@ -73,6 +74,7 @@ struct HomeEntrySnapshot: Equatable {
     let homes: [Home]
     let currentHomeName: String?
     let retainedLocalHomeName: String?
+    let retainedLocalPresentation: HomePresentationName?
     let isShowingRetainedLocalHome: Bool
     let retainedLocalCopyState: RetainedLocalCopyState
     let invitations: [Invitation]
@@ -84,6 +86,11 @@ struct HomeEntrySnapshot: Equatable {
     let isCreatingHome: Bool
     let isResolvingFirstAccount: Bool
     let homeDiscoveryFailed: Bool
+
+    var currentHomeDisplayName: String? {
+        if isShowingRetainedLocalHome { return retainedLocalPresentation?.title ?? retainedLocalHomeName }
+        return homes.first(where: \.isSelected)?.presentation.title ?? currentHomeName
+    }
 
     var joinPresentation: JoinPresentation {
         if let invitation = invitations.first(where: { $0.openRequested }) { return .active(invitation) }
@@ -101,13 +108,28 @@ struct HomeEntrySnapshot: Equatable {
          invitations: [HomeInvitationInbox.Entry], hasPendingInvitation: Bool,
          hasVerifiedInvitationAccount: Bool, invitationProblem: String?, importProblems: [UUID: String],
          isCreatingHome: Bool, homeDiscoveryFailed: Bool,
-         isResolvingFirstAccount: Bool = false, joinError: String? = nil) {
+         isResolvingFirstAccount: Bool = false, joinError: String? = nil,
+         retainedLocalScope: PersonalCartScopeSnapshot? = nil) {
         let active = readiness.activeScope
         if case .local = store { isLocalStore = true }
         else { isLocalStore = false }
-        self.homes = homes.map { Home(candidate: $0, isSelected: $0.graph == active?.graph) }
+        var sources = homes.map {
+            HomePresentationSource(scope: PersonalCartScopeSnapshot(householdID: $0.graph.householdID,
+                listID: $0.graph.listID), name: $0.name, role: Self.presentationRole($0.access))
+        }
+        if let retainedLocalScope, let retainedLocalHomeName {
+            sources.append(HomePresentationSource(scope: retainedLocalScope,
+                name: retainedLocalHomeName, role: .local))
+        }
+        let presentations = HomePresentationNames.resolve(sources)
+        self.homes = homes.map {
+            let scope = PersonalCartScopeSnapshot(householdID: $0.graph.householdID, listID: $0.graph.listID)
+            return Home(candidate: $0, isSelected: $0.graph == active?.graph,
+                presentation: presentations[scope] ?? HomePresentationName(name: $0.name, context: nil))
+        }
         self.currentHomeName = currentHomeName
         self.retainedLocalHomeName = retainedLocalHomeName
+        self.retainedLocalPresentation = retainedLocalScope.flatMap { presentations[$0] }
         self.isShowingRetainedLocalHome = isShowingRetainedLocalHome
         self.retainedLocalCopyState = retainedLocalCopyState
         self.invitations = invitations.map(Invitation.init)
@@ -137,6 +159,15 @@ struct HomeEntrySnapshot: Equatable {
                     root = .waitingForHomes
                 } else { root = homes.isEmpty ? .noHomes : .chooseHome }
             }
+        }
+    }
+
+    private static func presentationRole(_ access: HomeCandidate.Access) -> HomePresentationSource.Role {
+        switch access {
+        case .owner: .owner
+        case .contributor: .member
+        case .restricted: .readOnly
+        case .unresolved: .unknown
         }
     }
 }

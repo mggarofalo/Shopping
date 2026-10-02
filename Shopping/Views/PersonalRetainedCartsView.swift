@@ -19,11 +19,11 @@ struct PersonalRetainedCartsView: View {
                     RetainedCartDetail(service: service, home: row.home)
                 } label: {
                     VStack(alignment: .leading) {
-                        Label(row.home.name, systemImage: "cart")
+                        Label(row.home.displayName, systemImage: "cart")
                         Text(row.summary).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .accessibilityLabel("Saved personal cart, \(row.home.name), \(row.summary)")
+                .accessibilityLabel("Saved personal cart, \(row.home.displayName), \(row.summary)")
             }
             if let error { Text(error).foregroundStyle(.secondary) }
         }

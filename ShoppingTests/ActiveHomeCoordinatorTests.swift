@@ -80,6 +80,99 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertTrue(snapshot.invitations.first?.acceptanceAttempted == true)
     }
 
+    func testDuplicateHomeNamesKeepStableContextAcrossDiscoveryAndStoreMounts() throws {
+        let firstID = UUID(), firstListID = UUID(), secondID = UUID(), secondListID = UUID()
+        func candidate(_ householdID: UUID, _ listID: UUID, store: String, uri: String,
+                       access: HomeCandidate.Access = .owner) -> HomeCandidate {
+            HomeCandidate(graph: HomeGraphIdentity(storeIdentifier: store, rootURI: uri,
+                householdID: householdID, listID: listID), name: "Home", access: access)
+        }
+        let first = candidate(firstID, firstListID, store: "owner-private", uri: "first")
+        let second = candidate(secondID, secondListID, store: "shared", uri: "second")
+        func snapshot(_ homes: [HomeCandidate], selected: HomeCandidate) throws -> HomeEntrySnapshot {
+            HomeEntrySnapshot(store: .account, readiness: .ready(ActiveHomeScope(session: try session(),
+                graph: selected.graph)), discovery: .complete, homes: homes, currentHomeName: "Home",
+                retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+                invitations: [], hasPendingInvitation: false, hasVerifiedInvitationAccount: true,
+                invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        }
+        let initial = try snapshot([first, second], selected: first)
+        let titles = initial.homes.map(\.presentation.title)
+        XCTAssertEqual(Set(titles).count, 2)
+        XCTAssertTrue(titles.allSatisfy { $0.hasPrefix("Home · ") })
+        XCTAssertEqual(initial.currentHomeDisplayName, titles[0])
+
+        let remountedFirst = candidate(firstID, firstListID, store: "another-device-store", uri: "new-first")
+        let remountedSecond = candidate(secondID, secondListID, store: "another-device-share", uri: "new-second")
+        let added = home("Other home")
+        let rediscovered = try snapshot([added, remountedSecond, remountedFirst], selected: remountedFirst)
+        XCTAssertEqual(rediscovered.homes[2].presentation.title, titles[0])
+        XCTAssertEqual(rediscovered.homes[1].presentation.title, titles[1])
+        XCTAssertEqual(rediscovered.homes[0].presentation.title, "Other home")
+        XCTAssertEqual(rediscovered.currentHomeDisplayName, titles[0])
+    }
+
+    func testDuplicateNamesUseExistingRoleAndLocalContextBeforeGeneratedTags() {
+        let owner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let member = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let local = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let sources = [
+            HomePresentationSource(scope: owner, name: "Home", role: .owner),
+            HomePresentationSource(scope: member, name: "Home", role: .member),
+            HomePresentationSource(scope: local, name: "Home", role: .local)
+        ]
+        let resolved = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(resolved[owner]?.title, "Home · Owner")
+        XCTAssertEqual(resolved[member]?.title, "Home · Member")
+        XCTAssertEqual(resolved[local]?.title, "Home · On This iPhone")
+        XCTAssertEqual(HomePresentationNames.resolve([sources[0]])[owner]?.title, "Home")
+    }
+
+    func testGeneratedContextsStayUniqueWhenShortWordTagsCollide() {
+        // Two words offer 32² labels. More than that many same-name owners must
+        // still have distinct accessible names without exposing graph UUIDs.
+        let sources = (0...1_024).map { index in
+            let scope = PersonalCartScopeSnapshot(
+                householdID: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", index))!,
+                listID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+            return HomePresentationSource(scope: scope, name: "Home", role: .owner)
+        }
+        let names = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(names.count, sources.count)
+        XCTAssertEqual(Set(names.values.map(\.title)).count, sources.count)
+        XCTAssertTrue(names.values.allSatisfy { !$0.title.contains("00000000-") })
+    }
+
+    func testLiteralHomeNameCannotMatchAnotherHomesGeneratedContext() {
+        let owner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let member = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let literal = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let sources = [
+            HomePresentationSource(scope: owner, name: "Home", role: .owner),
+            HomePresentationSource(scope: member, name: "Home", role: .member),
+            HomePresentationSource(scope: literal, name: "Home · Owner", role: .owner)
+        ]
+        let resolved = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(Set(resolved.values.map(\.title)).count, 3)
+        XCTAssertEqual(resolved[member]?.title, "Home · Member")
+        XCTAssertTrue(resolved[owner]?.title.hasPrefix("Home · ") == true)
+        XCTAssertTrue(resolved[literal]?.title.hasPrefix("Home · Owner · ") == true)
+        XCTAssertFalse(resolved.values.contains { $0.title.contains(owner.householdID.uuidString) })
+
+        let rediscovered = HomePresentationNames.resolve(Array(sources.reversed()))
+        XCTAssertEqual(rediscovered, resolved)
+        XCTAssertEqual(HomePresentationNames.resolve([sources[2]])[literal]?.title, "Home · Owner")
+
+        let otherOwner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let taggedSources = [sources[0], HomePresentationSource(scope: otherOwner,
+            name: "Home", role: .owner)]
+        let generatedTitle = HomePresentationNames.resolve(taggedSources)[owner]!.title
+        let matchingLiteral = HomePresentationSource(scope: literal, name: generatedTitle, role: .member)
+        let withLiteral = HomePresentationNames.resolve(taggedSources + [matchingLiteral])
+        XCTAssertEqual(Set(withLiteral.values.map(\.title)).count, 3)
+        XCTAssertEqual(HomePresentationNames.resolve(Array((taggedSources + [matchingLiteral]).reversed())), withLiteral)
+    }
+
     func testForgettingCapturedSelectionKeepsNewerChoiceAndReconcilesRemainingHome() throws {
         let (coordinator, defaults, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }

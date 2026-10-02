@@ -66,8 +66,8 @@ struct HomeSelectionView: View {
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(home.name).foregroundStyle(.primary)
-                    if needsContext(for: home) {
-                        Text(accessDescription(home.access))
+                    if let context = context(for: home) {
+                        Text(context)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -79,8 +79,8 @@ struct HomeSelectionView: View {
             .contentShape(Rectangle())
         }
         .disabled(isSelecting || home.access == .unresolved)
-        .accessibilityLabel(home.name)
-        .accessibilityValue((needsContext(for: home) ? accessDescription(home.access) + ", " : "")
+        .accessibilityLabel(home.presentation.title)
+        .accessibilityValue(accessDescription(home.access) + ", "
             + (home.isSelected ? "Selected" : "Not selected"))
         .accessibilityIdentifier("shopping.home.choice." + home.id.storeIdentifier + "." + home.id.rootURI)
     }
@@ -104,7 +104,7 @@ struct HomeSelectionView: View {
             .contentShape(Rectangle())
         }
         .disabled(isSelecting)
-        .accessibilityLabel(localName)
+        .accessibilityLabel(entry.retainedLocalPresentation?.title ?? localName)
         .accessibilityValue("On This iPhone" + (localSelected ? ", Selected" : ""))
         .accessibilityIdentifier("shopping.home.retainedLocal")
     }
@@ -183,8 +183,8 @@ struct HomeSelectionView: View {
         }
     }
 
-    private func needsContext(for home: HomeEntrySnapshot.Home) -> Bool {
-        entry.homes.filter { $0.name == home.name }.count > 1 || localName == home.name
+    private func context(for home: HomeEntrySnapshot.Home) -> String? {
+        home.presentation.context ?? (localName == home.name ? accessDescription(home.access) : nil)
     }
 
     private func accessDescription(_ access: HomeCandidate.Access) -> String {

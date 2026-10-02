@@ -120,6 +120,38 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertEqual(unchanged.homeName, "Home")
     }
 
+    func testDuplicateHomeNamesRemainDistinctOnWatchAcrossSelectionAndReload() async throws {
+        let f = try fixture()
+        let secondID = UUID(), secondListID = UUID()
+        try await Task.detached(priority: .userInitiated) {
+            try f.persistence.writer.performAndWait {
+                let home = Household(context: f.persistence.writer)
+                home.id = secondID
+                home.name = "Home"
+                let list = GroceryList(context: f.persistence.writer)
+                list.id = secondListID
+                list.household = home
+                try f.persistence.prepareForSave(f.persistence.writer)
+                try f.persistence.writer.save()
+            }
+        }.value
+        let first = PersistentWatchShoppingService(persistence: f.persistence,
+            sessionProvider: f.provider, preferredHouseholdID: f.householdID, cartService: f.cart)
+        let second = PersistentWatchShoppingService(persistence: f.persistence,
+            sessionProvider: f.provider, preferredHouseholdID: secondID, cartService: f.cart)
+        let firstSnapshot = try await first.load(storeID: nil)
+        let secondSnapshot = try await second.load(storeID: nil)
+        let firstName = try XCTUnwrap(firstSnapshot.homeName)
+        let secondName = try XCTUnwrap(secondSnapshot.homeName)
+        XCTAssertTrue(firstName.hasPrefix("Home · "))
+        XCTAssertTrue(secondName.hasPrefix("Home · "))
+        XCTAssertNotEqual(firstName, secondName)
+        let reloadedFirst = try await first.load(storeID: nil)
+        let reloadedSecond = try await second.load(storeID: nil)
+        XCTAssertEqual(reloadedFirst.homeName, firstName)
+        XCTAssertEqual(reloadedSecond.homeName, secondName)
+    }
+
     func testVerifiedBackgroundReplayDoesNotBlockLocalLoadsOrPrivateCleanup() async throws {
         let f = try fixture()
         let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,

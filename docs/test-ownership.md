@@ -1936,3 +1936,27 @@ and `.log`). The same source passed retained-copy and switch/relaunch native UI
 reviewers and test review verified task ownership, approval guards, all-discovery
 holding, explicit task-local access tagging, and bounded cleanup. Complete pinned
 Fast/Acceptance/Release/coverage remains required on the next exact pushed SHA.
+
+### SHOPPING-188 duplicate home identity
+
+`ActiveHomeCoordinatorTests.testDuplicateHomeNamesKeepStableContextAcrossDiscoveryAndStoreMounts`
+owns the iPhone snapshot boundary: same-name owner homes remain distinct in the
+picker and selected scope after discovery order, store URI, and store identifier
+change. `testDuplicateNamesUseExistingRoleAndLocalContextBeforeGeneratedTags`
+owns the concise role/local context rule and unchanged unique names.
+`testGeneratedContextsStayUniqueWhenShortWordTagsCollide` owns collision
+extension without exposing graph identifiers.
+`testLiteralHomeNameCannotMatchAnotherHomesGeneratedContext` owns final-title
+collisions between a literal saved name and either a role label or word tag,
+including discovery order changes.
+`PersonalCartServiceTests.testSavedCartNameUsesWholeHomeRosterWhenOnlyOneCartScopeIsRequested`
+owns saved-cart labels when only one of two same-name scopes has a visible cart.
+`PersistentWatchShoppingServiceTests.testDuplicateHomeNamesRemainDistinctOnWatchAcrossSelectionAndReload`
+owns Watch selection and reload projection. All labels are presentation-only;
+the household name and graph identities remain unchanged. These new tests await
+focused and exact-source validation.
+`HomeDetailsUITests.testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor`
+continues to own native removal-alert cancel and exact-contributor removal. It
+uses the alert’s unique action identifiers and retains the surviving-owner and
+member assertions; the pending-invitation cancellation and groceries proof
+remains in its separate existing UI test.

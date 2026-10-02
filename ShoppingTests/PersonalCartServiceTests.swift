@@ -85,6 +85,20 @@ final class PersonalCartServiceTests: XCTestCase {
         }
     }
 
+    func testSavedCartNameUsesWholeHomeRosterWhenOnlyOneCartScopeIsRequested() async throws {
+        let f = try makeFixture()
+        let original = PersonalCartScopeSnapshot(householdID: f.householdID, listID: f.listID)
+        let other = try f.service.createHousehold(name: "Household")
+        let second = PersonalCartScopeSnapshot(householdID: other.householdID, listID: other.listID)
+
+        let firstOnly = try await f.cart.savedCartHomeDisplays(for: [original])
+        let both = try await f.cart.savedCartHomeDisplays(for: [second, original])
+        XCTAssertEqual(firstOnly[0].displayName, both[1].displayName)
+        XCTAssertNotEqual(both[0].displayName, both[1].displayName)
+        XCTAssertEqual(both.map(\.name), ["Household", "Household"])
+        XCTAssertTrue(both.allSatisfy { $0.displayName.hasPrefix("Household · ") })
+    }
+
     func testCatalogMembershipIsolatesDuplicateNeedsAndKeepsUnrelatedItemsAvailable() throws {
         let f = try makeFixture()
         let otherID = try f.service.createItem(name: "Beans", householdID: f.householdID)
