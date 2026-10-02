@@ -184,6 +184,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertFalse(bootstrap.homeEntry.isLocalStore)
         XCTAssertTrue(bootstrap.homeCoordinator.homes.isEmpty)
         try await bootstrap.createFirstHome()
+        try await waitForPublishedHomes(bootstrap, count: 1)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "My Home")
         XCTAssertEqual(bootstrap.homeCoordinator.homes.count, 1)
     }

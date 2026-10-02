@@ -2057,3 +2057,39 @@ invocation used the wrong target name (`ShoppingTests` instead of
 result path `/tmp/shopping-phase24-187-roster-focused` are retained. Independent
 production and test reviews found no defect in the bounded readiness correction
 or permanent stale-state risk. Exact pushed-source CI remains the final gate.
+
+
+### SHOPPING-191 bootstrap publication readiness
+
+Pinned CI `37052765701` on `c175e80` passed Release and coverage, but Fast was
+**661/663**, with no skips; Acceptance was skipped. Both prior held copy-lookup
+methods passed. The first-home fixture observed name `nil` and roster count 0
+before committed creation published. The sharing-status fixture accepted the
+old `.ready` presentation before the latest discovery applied renewal; only
+the presentation UUID inequality failed. Complete evidence is retained under
+`/tmp/shopping-phase24-ci-failure-37052765701` and
+`/tmp/shopping-phase24-ci-summary-37052765701`.
+
+`ActiveHomeBootstrapTests.testFreshAvailableAccountDiscoversBeforeOfferingAccountHomeCreation`
+still owns discover-before-offer and explicit account-home creation. It reuses
+`waitForPublishedHomes(count: 1)` before the unchanged name/count assertions.
+`HomeSharingStatusBootstrapTests.testRenewedPresentationOfSameGraphDiscardsHeldRead`
+still owns same-graph renewed authority and discarding the held `888` result.
+The existing bounded `ready` helper now supports a predicate; this method awaits
+the same scope, current and newer generation, and a different presentation ID
+before its unchanged scope/UUID/stale-result assertions. An idempotent teardown
+opens the held gate and drains its actual completion if readiness fails.
+Neither method repeats a command or weakens any assertion. Independent source
+review confirms superseded discovery intentionally returns before the winning
+publication; no permanent stale-state defect was verified. This is test-only
+readiness work, requiring affected-suite validation and exact-source pinned CI.
+
+
+Committed test-only candidate `2255356` passed the two affected suites
+**27/27**, with no skips and exit 0, on iPhone 17 Pro/iOS 26.5 using ShoppingFast
+(`/tmp/shopping-phase24-191-focused.xcresult`, `.log` and `-summary.json`). Both
+pinned-CI failures passed. One internal QoS warning occurred in unchanged
+`testColdInvitationDoesNotCreateAnEmptyLocalHomeBeforeAccountSetup`; no runtime
+warning was reported. Independent correctness and test reviews found no issues
+in readiness predicates or bounded held-read teardown. App/Watch/UI source is
+unchanged from polished candidate `21fb7d8`; exact successor CI remains required.
