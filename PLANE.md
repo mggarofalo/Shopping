@@ -37,7 +37,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 22: UI Normalization | `6af6dc13-3c8d-4305-aa7e-e57a6b874e63` | SHOPPING-157: shared Catalog row geometry, store/filter controls, and Stores selection interactions including People. |
 | Phase 23: UI Normalization Release | `1ecd3b87-16ce-4fec-a433-31cc2baee7ae` | SHOPPING-158: publish the verified Phase 22 UI corrections as patch 1.2.2 with matching iPhone/Watch versions and exact-source TestFlight distribution evidence. |
 | Phase 24: Home Experience Rewrite | `9a1bf46d-f1f4-44f2-94a0-ce8821d68153` | SHOPPING-170/171/172/173/174/183/184/185/186/187/188/189/190/191: [design proposal](docs/design/home-experience.md), native home creation, invitations, switching, deletion, retained-local conversion, account-bound navigation intent, visible iPhone/Watch scope, distinct same-name home labels, exact saved-cart home names, pinned-compiler picker compatibility, copy selection recovery, explicit first-home catalog UI setup, native header and home-scope polish, published bootstrap readiness, and separate physical validation. |
-| Phase 25: iPhone Store Picker Counts | `6668dc28-385a-4325-92b5-2bf3f147434e` | SHOPPING-192: shared iPhone/Watch purchase-rule occurrence counts and native grocery store selection. |
+| Phase 25: iPhone Store Picker Counts | `6668dc28-385a-4325-92b5-2bf3f147434e` | SHOPPING-192/194: shared iPhone/Watch purchase-rule occurrence counts, native grocery store selection, and catalog acceptance readiness. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 

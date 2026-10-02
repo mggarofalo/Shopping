@@ -2141,3 +2141,49 @@ native checkmark are correct. Independent production and test reviewers verified
 the resolution/readiness corrections and found no remaining defect. The final
 integration changes only documentation from `e8b03cd`; exact pushed-source CI is
 still required for oldest pinned compiler/runtime compatibility and coverage.
+
+
+### Committed catalog name observation (SHOPPING-194)
+
+Pinned CI `37061467701` on integration `991dea4` passed Release, Fast
+**669/669** and the unchanged coverage baseline, but Acceptance was **5/6**,
+with no skips. The unchanged catalog Save/Add workflow timed out at its exact
+KVC-based text-value wait before keyboard dismissal. Raw results and video are
+retained in `/tmp/shopping-phase25-ci-failure-37061467701`; summaries are in
+`/tmp/shopping-phase25-ci-summary-37061467701`. Extracted frame
+`/tmp/shopping-phase25-ci-name-failure.png` visibly shows the full requested name.
+Activity evidence contains one property lookup during that predicate; stale
+observation is plausible, but the actual AX value was not captured.
+
+The catalog UI helper first gained explicit ownership of its unique fixture
+directory and termination-before-removal teardown. The workflow types once,
+commits editing through the existing native keyboard Done action, waits for
+keyboard disappearance, then polls a fresh field query with the same exact value
+and three-second bound. The separate exact-name, destination editor and one-need
+assertions remain. A failed wait now retains the accessibility hierarchy. No
+command retry, relaunch, timeout inflation, skip or acceptance selection change
+is introduced. This is test-only; app and Watch source stay at `e8b03cd`.
+
+Independent challenger review caught a fixture fallback collision introduced by
+the new catalog helper's constant SQLite basename. `uiTestStoreURL` maps
+non-writable runner paths into app Application Support using the basename only.
+The helper now preserves its unique directory identity in that filename too.
+The new count test's explicit fixture and shared PersonalCart UI launch helper
+use the same unique-basename rule. This prevents app-side fallback stores from
+sharing state while preserving each test's deliberate relaunch path. Existing
+bootstrap fallback tests own the path mapping; affected catalog/count workflows
+will validate the correction.
+
+Candidate `ecd11e3` passed all five affected catalog UI workflows **5/5**.
+The final fixture successor `8ce6809` passed the corrected catalog workflow,
+both count workflows (actual Large/XXXL and cart refresh), and first-home
+creation/relaunch **4/4**, no skips, on iPhone 18 Pro/iOS27. Raw bundles/logs and
+summaries: `/tmp/shopping-phase25-194-ui` and `-ui-final`. Both runs completed
+all test assertions before Xcode27's diagnostics child stalled. Samples retained
+under `/tmp/shopping-phase25-194-*-sample.txt` show the parent waiting in
+`collectSimulatorDiagnostics` / `simCtlDiagnose` and the child waiting for its
+diagnostic subprocess/group. Only each stalled `simctl diagnose` child was
+terminated; complete bundles and xcodebuild exit0 were preserved. No test or
+runner process was stopped. Independent correctness and test reviews verified
+exact-value proof, unique fallback filenames and stable relaunch paths. Hosted
+pinned iOS18.5 acceptance remains required on the exact integration successor.

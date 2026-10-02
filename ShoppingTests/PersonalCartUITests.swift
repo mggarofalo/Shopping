@@ -51,7 +51,8 @@ final class PersonalCartUITests: XCTestCase {
             app.terminate()
             try? FileManager.default.removeItem(at: directory)
         }
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         SystemTextSizeSettings.configure(app)
@@ -109,7 +110,8 @@ final class PersonalCartUITests: XCTestCase {
             app.terminate()
             try? FileManager.default.removeItem(at: directory)
         }
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         SystemTextSizeSettings.configure(app)
@@ -151,7 +153,8 @@ final class PersonalCartUITests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launch()
         let create = app.buttons["shopping.home.createFirst"]
@@ -177,7 +180,8 @@ final class PersonalCartUITests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launch()
         XCTAssertTrue(app.buttons["shopping.home.createFirst"].existsOrAppears(timeout: 8))
         app.buttons["shopping.home.createFirst"].tap()
@@ -232,7 +236,8 @@ final class PersonalCartUITests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { app.terminate(); try? FileManager.default.removeItem(at: directory) }
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_ACCEPTED_INVITATION"] = "1"
@@ -712,7 +717,8 @@ final class PersonalCartUITests: XCTestCase {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         if homeAdoption { app.launchEnvironment["SHOPPING_UI_TEST_HOME_ADOPTION"] = "1" }
         if pendingInvitation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_INVITATION"] = "1" }
