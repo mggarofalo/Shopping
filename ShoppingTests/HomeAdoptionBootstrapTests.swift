@@ -400,6 +400,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         waiter.cancel()
     }
 
+    private func waitForCopiedHomeRoster(_ bootstrap: PersistenceBootstrap) async throws {
+        // Copy completion drains its consumer chain. A newer startup or history
+        // discovery may still own publication of the account and copied homes.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeEntry.homes.count != 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func waitForCopyPreparation(_ copy: Task<Void, Error>) async -> Result<Void, Error>? {
         let completed = expectation(description: "Copy preparation completed")
         var outcome: Result<Void, Error>?
@@ -594,6 +603,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await bootstrap.runLoadingTransition()
         _ = try await waitForReady(bootstrap)
         await self.waitForRetainedConversionCompletion(bootstrap)
+        try await waitForCopiedHomeRoster(bootstrap)
         XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
         XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
@@ -648,6 +658,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await bootstrap.runLoadingTransition()
         _ = try await waitForReady(bootstrap)
         await self.waitForRetainedConversionCompletion(bootstrap)
+        try await waitForCopiedHomeRoster(bootstrap)
         XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
         XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")

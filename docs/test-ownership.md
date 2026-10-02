@@ -2021,3 +2021,39 @@ simulator diagnostic collection after all four tests passed. A process sample
 allowed xcodebuild to close a readable 4/4 bundle and exit 0. The sample, completed
 bundle and full log preserve this intervention. Pinned CI remains required; no
 remote ShoppingFull was dispatched and no local Full attestation is claimed.
+
+
+### SHOPPING-187 published roster readiness follow-up
+
+Pinned CI `37050761193` on `21fb7d8` passed Release and coverage, but Fast
+passed **661/663**, with no skips. The two copy-account-lookup ordering methods
+failed only the immediate `homes.count == 2` assertion; copy completion, current
+Account home, exclusion of copied-home selection and the pending invitation
+assertions passed. Full result, logs and summaries are retained under
+`/tmp/shopping-phase24-ci-failure-37050761193` and
+`/tmp/shopping-phase24-ci-summary-37050761193`.
+
+`testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
+and `testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+remain the proof owners for newer navigation intent during held account lookup.
+The owned conversion-consumer chain does not own a later startup/history
+request that supersedes its discovery. These tests now separately observe the
+actual published two-home roster within five seconds, as the ordinary explicit
+copy test already observes published selection separately from copy completion.
+All original copy, count, home-name, selection and invitation assertions remain;
+there is no refresh retry, fixed delay, expected failure or assertion removal.
+This test-only follow-up requires affected-suite validation and new exact-source
+pinned CI. The UI source and installed candidate remain unchanged.
+
+
+Committed test-only candidate `7cb2aa7` passed all **40/40** home-bootstrap
+methods, with no skips and exit 0, on iPhone 17 Pro/iOS 26.5 using ShoppingFast
+(`/tmp/shopping-phase24-187-roster-focused-b.xcresult`, `.log` and `-summary.json`).
+Both held account-lookup methods passed. One internal QoS warning occurred in
+`testDeletedRetainedSourceCanCreateAndCopyNewLocalHomeWithoutRewritingAdoption`,
+an unchanged production path; no runtime warning was reported. The first
+invocation used the wrong target name (`ShoppingTests` instead of
+`ShoppingPersistenceTests`) and exited 70 before running tests; its raw log and
+result path `/tmp/shopping-phase24-187-roster-focused` are retained. Independent
+production and test reviews found no defect in the bounded readiness correction
+or permanent stale-state risk. Exact pushed-source CI remains the final gate.
