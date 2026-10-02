@@ -21,125 +21,165 @@ struct HomeSelectionView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Your homes") {
-                    ForEach(entry.homes) { home in
-                        Button { select(home) } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "house")
-                                    .foregroundStyle(Color.groceryAccent)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(home.name).foregroundStyle(.primary)
-                                    if needsContext(for: home) {
-                                        Text(accessDescription(home.access))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if home.isSelected { Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent) }
-                            }
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                        }
-                        .disabled(isSelecting || home.access == .unresolved)
-                        .accessibilityLabel(home.name)
-                        .accessibilityValue((needsContext(for: home) ? accessDescription(home.access) + ", " : "")
-                            + (home.isSelected ? "Selected" : "Not selected"))
-                        .accessibilityIdentifier("shopping.home.choice." + home.id.storeIdentifier + "." + home.id.rootURI)
-                    }
-                    if let localName {
-                        Button { openRetainedLocalHome() } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "iphone")
-                                    .foregroundStyle(Color.groceryAccent)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(localName).foregroundStyle(.primary)
-                                    Text("On This iPhone").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if localSelected {
-                                    Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent)
-                                }
-                            }
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                        }
-                        .disabled(isSelecting)
-                        .accessibilityLabel(localName)
-                        .accessibilityValue("On This iPhone" + (localSelected ? ", Selected" : ""))
-                        .accessibilityIdentifier("shopping.home.retainedLocal")
-                    }
-                }
-                if !visibleInvitations.isEmpty {
-                    Section("Invitations") {
-                        ForEach(visibleInvitations) { invitation in
-                            Button(invitation.displayName ?? "Open Invitation", systemImage: "envelope") {
-                                resume(invitation.id)
-                            }
-                            .disabled(isSelecting)
-                            .accessibilityIdentifier("shopping.home.openInvitation.\(invitation.id.uuidString)")
-                        }
-                    }
-                }
-                Section {
-                    if entry.root == .noHomes {
-                        Button("Create Home", systemImage: "plus") { createFirstHome() }
-                            .accessibilityIdentifier("shopping.home.create")
-                    } else if !entry.isLocalStore {
-                        Button { showingNewHome = true } label: {
-                            Label("Create Home", systemImage: "plus")
-                        }
-                        .accessibilityIdentifier("shopping.home.create")
-                    }
-                    if case .activeHome(let scope) = entry.root {
-                        NavigationLink {
-                            HomeDetailsView(scope: scope, name: entry.currentHomeName ?? "Home",
-                                actions: bootstrap.homeDetailsActions(scope: scope))
-                        } label: {
-                            Label("Home Settings", systemImage: "gearshape")
-                        }
-                        .accessibilityIdentifier("shopping.home.settings")
-                    } else if localSelected {
-                        NavigationLink {
-                            LocalHomeSettingsView(bootstrap: bootstrap)
-                        } label: {
-                            Label("Home Settings", systemImage: "gearshape")
-                        }
-                        .accessibilityIdentifier("shopping.home.settings")
-                    }
-                }
-                if entry.homeDiscoveryFailed || entry.root == .selectedHomeUnavailable {
-                    Section {
-                        Button("Check Again") { Task { await refresh() } }
-                    } footer: {
-                        Text("Home unavailable")
-                    }
-                }
-                if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
-                    HomeLeaveStatusSection(bootstrap: bootstrap)
-                }
-                if bootstrap.homeDeletionStatuses.contains(where: \.requiresResolution) || bootstrap.homeDeletionStatusError != nil {
-                    HomeDeletionStatusSection(bootstrap: bootstrap)
-                }
-                if let error { Text(error).foregroundStyle(.red) }
+            homesList
+        }
+    }
+
+    private var homesList: some View {
+        List {
+            homesSection
+            invitationsSection
+            actionsSection
+            unavailableSection
+            leaveStatusSection
+            deletionStatusSection
+            if let error { Text(error).foregroundStyle(.red) }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Homes")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+        }
+        .sheet(isPresented: $showingNewHome) {
+            NewHomeView(bootstrap: bootstrap) { selected in
+                showingNewHome = false
+                if selected { dismiss() }
+                else { Task { await refresh() } }
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Homes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+        }
+        .task { await refresh() }
+    }
+
+    private var homesSection: some View {
+        Section("Your homes") {
+            ForEach(entry.homes) { home in homeRow(home) }
+            if let localName { localRow(localName) }
+        }
+    }
+
+    private func homeRow(_ home: HomeEntrySnapshot.Home) -> some View {
+        Button { select(home) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "house")
+                    .foregroundStyle(Color.groceryAccent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(home.name).foregroundStyle(.primary)
+                    if needsContext(for: home) {
+                        Text(accessDescription(home.access))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if home.isSelected { Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent) }
             }
-            .sheet(isPresented: $showingNewHome) {
-                NewHomeView(bootstrap: bootstrap) { selected in
-                    showingNewHome = false
-                    if selected { dismiss() }
-                    else { Task { await refresh() } }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .disabled(isSelecting || home.access == .unresolved)
+        .accessibilityLabel(home.name)
+        .accessibilityValue((needsContext(for: home) ? accessDescription(home.access) + ", " : "")
+            + (home.isSelected ? "Selected" : "Not selected"))
+        .accessibilityIdentifier("shopping.home.choice." + home.id.storeIdentifier + "." + home.id.rootURI)
+    }
+
+    private func localRow(_ localName: String) -> some View {
+        Button { openRetainedLocalHome() } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "iphone")
+                    .foregroundStyle(Color.groceryAccent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(localName).foregroundStyle(.primary)
+                    Text("On This iPhone").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if localSelected {
+                    Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent)
                 }
             }
-            .task { await refresh() }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .disabled(isSelecting)
+        .accessibilityLabel(localName)
+        .accessibilityValue("On This iPhone" + (localSelected ? ", Selected" : ""))
+        .accessibilityIdentifier("shopping.home.retainedLocal")
+    }
+
+    @ViewBuilder private var invitationsSection: some View {
+        if !visibleInvitations.isEmpty {
+            Section("Invitations") {
+                ForEach(visibleInvitations) { invitation in
+                    Button(invitation.displayName ?? "Open Invitation", systemImage: "envelope") {
+                        resume(invitation.id)
+                    }
+                    .disabled(isSelecting)
+                    .accessibilityIdentifier("shopping.home.openInvitation.\(invitation.id.uuidString)")
+                }
+            }
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            createHomeAction
+            homeSettingsAction
+        }
+    }
+
+    @ViewBuilder private var createHomeAction: some View {
+        if entry.root == .noHomes {
+            Button("Create Home", systemImage: "plus") { createFirstHome() }
+                .accessibilityIdentifier("shopping.home.create")
+        } else if !entry.isLocalStore {
+            Button { showingNewHome = true } label: {
+                Label("Create Home", systemImage: "plus")
+            }
+            .accessibilityIdentifier("shopping.home.create")
+        }
+    }
+
+    @ViewBuilder private var homeSettingsAction: some View {
+        if case .activeHome(let scope) = entry.root {
+            NavigationLink {
+                HomeDetailsView(scope: scope, name: entry.currentHomeName ?? "Home",
+                    actions: bootstrap.homeDetailsActions(scope: scope))
+            } label: {
+                Label("Home Settings", systemImage: "gearshape")
+            }
+            .accessibilityIdentifier("shopping.home.settings")
+        } else if localSelected {
+            NavigationLink {
+                LocalHomeSettingsView(bootstrap: bootstrap)
+            } label: {
+                Label("Home Settings", systemImage: "gearshape")
+            }
+            .accessibilityIdentifier("shopping.home.settings")
+        }
+    }
+
+    @ViewBuilder private var unavailableSection: some View {
+        if entry.homeDiscoveryFailed || entry.root == .selectedHomeUnavailable {
+            Section {
+                Button("Check Again") { Task { await refresh() } }
+            } footer: {
+                Text("Home unavailable")
+            }
+        }
+    }
+
+    @ViewBuilder private var leaveStatusSection: some View {
+        if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
+            HomeLeaveStatusSection(bootstrap: bootstrap)
+        }
+    }
+
+    @ViewBuilder private var deletionStatusSection: some View {
+        if bootstrap.homeDeletionStatuses.contains(where: \.requiresResolution) || bootstrap.homeDeletionStatusError != nil {
+            HomeDeletionStatusSection(bootstrap: bootstrap)
         }
     }
 

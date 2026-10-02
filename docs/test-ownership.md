@@ -1804,6 +1804,16 @@ was ShoppingFast **642/642**, eight home UI workflows **8/8**, and Watch
 warnings, home UI one, and Watch none.
 
 SHOPPING-184 source `e6773f6` passed Fast **644/644** with three QoS warnings.
+
+## Homes picker compiler compatibility (SHOPPING-186)
+
+`HomeSelectionView` now builds its existing native List from small section and
+row builders so the pinned Release compiler can type-check it. This is a
+structural change: the same home, local, invitation, create, Settings, status,
+and error rows retain their conditions, actions, labels, and accessibility
+identifiers. Existing `PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns flat selection and saved-cart scope; `testLocalHomeRemainsAvailableInHomesPicker`
+owns the local row. No new behavioral test is added for the split.
 The destination-readiness test successor `b9a1d00` passed switch/relaunch UI
 **1/1** without runtime warnings. Its integrated tree `6904246` matches issue
 `d1042c2`; the extra change was trailing whitespace cleanup. The first 184 build
