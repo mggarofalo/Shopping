@@ -1960,3 +1960,16 @@ continues to own native removal-alert cancel and exact-contributor removal. It
 uses the alert’s unique action identifiers and retains the surviving-owner and
 member assertions; the pending-invitation cancellation and groceries proof
 remains in its separate existing UI test.
+
+## Catalog UI first-home readiness (SHOPPING-189)
+
+Pinned CI `37040057456` passed Release, Fast **658/658**, and coverage, but
+Acceptance passed **5/6**. `CatalogRefreshUITests.testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates`
+stopped before its Catalog actions because a fresh isolated store showed the
+approved Create a Home screen. The class's two raw fresh launches now use its
+existing `launchApp` helper. That helper gives each test a unique store, uses
+the isolated no-account provider, explicitly taps Create Home only when no
+fixture was supplied, and waits for Groceries. The populated-fixture path and
+all catalog save/add, duplicate, Recently added, navigation, and one-time
+assertions remain unchanged. Focused catalog UI and exact-source pinned
+Acceptance validation are pending.
