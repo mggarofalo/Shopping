@@ -1814,6 +1814,15 @@ and error rows retain their conditions, actions, labels, and accessibility
 identifiers. Existing `PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
 owns flat selection and saved-cart scope; `testLocalHomeRemainsAvailableInHomesPicker`
 owns the local row. No new behavioral test is added for the split.
+The clean local source `8e0039c` has the same tracked tree as integrated
+`a8f10c0`. Its unsigned
+Xcode 27 Release archive passed (`/tmp/shopping-phase24-186-release.xcarchive`,
+`/tmp/shopping-phase24-186-release.log`), and the focused native picker UI run
+passed **2/2** without runtime issues (`/tmp/shopping-phase24-186-ui.xcresult`,
+`/tmp/shopping-phase24-186-ui.log`). Pinned Xcode 26.3 verification is pending.
+The first CI run `37029619808` on head `24b7e35` failed Release compilation in
+`HomeSelectionView.body`; Fast passed **649/652**, with three copy-selection
+failures assigned to SHOPPING-187. Coverage passed; Acceptance was skipped.
 The destination-readiness test successor `b9a1d00` passed switch/relaunch UI
 **1/1** without runtime warnings. Its integrated tree `6904246` matches issue
 `d1042c2`; the extra change was trailing whitespace cleanup. The first 184 build
