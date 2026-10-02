@@ -6,6 +6,7 @@ struct WatchStoreChooser: View {
 
     var body: some View {
         List {
+            WatchHomeScopeLabel(name: session.snapshot.homeName, identifier: "watch.home.stores")
             if session.snapshot.stores.isEmpty {
                 Text("No stores available").font(.footnote)
             }

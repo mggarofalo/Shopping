@@ -265,6 +265,7 @@ final class ShoppingAppearanceUITests: XCTestCase {
             ).path
         defer { select("System", in: app) }
         app.launch()
+        app.createFirstHomeForWorkflow()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         openSettings(app)
         let scheme = app.segmentedControls["shopping.appearance"]

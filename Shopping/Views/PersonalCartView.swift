@@ -3,8 +3,9 @@ import SwiftUI
 
 struct PersonalCartView: View {
     let cart: PersonalCartPresentation
-    @Environment(\.persistenceSelection) private var selection
     @ObservedObject var navigation: GroceryNavigationState
+    var savedHome: SavedCartHomeDisplay? = nil
+    @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @State private var selected: PersonalCartEntrySnapshot?
@@ -42,6 +43,15 @@ struct PersonalCartView: View {
 
     var body: some View {
         List {
+            if let savedHome {
+                SavedCartHomeHeader(home: savedHome)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
+                HomeScopeControl(allowsSwitching: false)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             if cart.isSelected(in: selection), !cart.pendingLegacyReview.isEmpty {
                 NavigationLink("Review old cart entries") { LegacyCartReviewView(cart: cart) }
                     .accessibilityIdentifier("shopping.personalCart.legacyReview")
@@ -88,6 +98,7 @@ struct PersonalCartView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("My cart")
+        .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)
@@ -145,6 +156,27 @@ struct PersonalCartView: View {
                 checkout = PersonalCheckoutSheet(token: token, storeName: storeName)
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+private struct SavedCartHomeHeader: View {
+    let home: SavedCartHomeDisplay
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "house")
+            Text(home.displayName)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Saved cart home")
+        .accessibilityValue(home.displayName)
+        .accessibilityIdentifier("shopping.personalCart.savedHome")
     }
 }
 

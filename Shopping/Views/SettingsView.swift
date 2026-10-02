@@ -31,6 +31,7 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
     private var appearancePicker: some View {

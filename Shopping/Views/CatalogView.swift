@@ -132,6 +132,9 @@ struct CatalogView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List(selection: $selectedIDs) {
+                    HomeScopeControl(allowsSwitching: false)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     catalogListRows
                 }
                 .listStyle(.insetGrouped)

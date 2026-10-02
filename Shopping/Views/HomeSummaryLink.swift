@@ -2,15 +2,17 @@ import SwiftUI
 
 struct HomeSummaryLink: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
-    @ObservedObject var coordinator: ActiveHomeCoordinator
     let scope: ActiveHomeScope
-    private var name: String { coordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home" }
+    private var name: String { bootstrap.homeEntry.currentHomeName ?? "Home" }
 
     var body: some View {
         NavigationLink {
             HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
         } label: {
-            LabeledContent("Home", value: name)
+            LabeledContent("Home") {
+                Text(bootstrap.homeEntry.currentHomeDisplayName ?? name)
+                    .accessibilityIdentifier("shopping.home.context")
+            }
         }
         .accessibilityIdentifier("shopping.settings.homeDetails")
     }

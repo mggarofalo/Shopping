@@ -26,6 +26,27 @@ final class HomeCreationTests: XCTestCase {
         return (persistence, HomeCreationJournal(url: url), url, session)
     }
 
+    func testFirstLocalHomeReplaysCommittedGraphAfterRelaunchWithoutClaimingAccount() throws {
+        let directory = try fixtureLifetime.makeDirectory()
+        let storeURL = directory.appendingPathComponent("local.sqlite")
+        let persistence = try fixtureLifetime.own(PersistenceController(configuration: .local(storeURL: storeURL)))
+        let identifier = try XCTUnwrap(persistence.primaryStore?.identifier)
+        let journal = LocalHomeCreationJournal(storeURL: storeURL)
+        let command = try journal.begin(name: "My Home", storeIdentifier: identifier)
+        _ = try NeedService(persistence: persistence).createLocalHousehold(command: command)
+        let reopened = try fixtureLifetime.own(PersistenceController(configuration: .local(storeURL: storeURL)))
+        let resumed = try journal.begin(name: "Accidental duplicate", storeIdentifier: XCTUnwrap(reopened.primaryStore?.identifier))
+        XCTAssertEqual(resumed, command)
+        _ = try NeedService(persistence: reopened).createLocalHousehold(command: resumed)
+        let reader = reopened.container.viewContext
+        try reader.performAndWait {
+            XCTAssertEqual(try reader.fetch(Household.fetchRequest()).map(\.name), ["My Home"])
+            XCTAssertEqual(try reader.fetch(GroceryList.fetchRequest()).map(\.id), [command.listID])
+        }
+        try journal.acknowledge(command)
+        XCTAssertNil(try journal.pending(storeIdentifier: identifier))
+    }
+
     func testIntentSurvivesRelaunchBeforeSaveAndRetryUsesOriginalNameAndIDs() throws {
         let (persistence, journal, url, session) = try fixture()
         let store = try XCTUnwrap(persistence.primaryStore)

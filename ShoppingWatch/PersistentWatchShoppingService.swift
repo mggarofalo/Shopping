@@ -261,7 +261,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : loaded.recoveryMessage
         currentAttention = attention
         let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
-            stores: stores, selectedStoreID: selectedStoreID,
+            homeName: projection.homeName, stores: stores, selectedStoreID: selectedStoreID,
             grocerySections: projection.sections(grocery) { try item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try item($0, inCart: true) },
             recentCheckouts: operations,

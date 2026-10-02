@@ -859,27 +859,48 @@ final class NeedService: @unchecked Sendable {
                   session.accountBinding == scope.accountBinding,
                   session.containerIdentifier == scope.containerIdentifier,
                   session.environment == scope.environment else { throw ShopperSessionError.accountChanged }
-            let graph = scope.graph
-            guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
-                throw NeedServiceError.scopeChanged
-            }
-            let rootRequest = Household.fetchRequest()
-            rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
-            let listRequest = GroceryList.fetchRequest()
-            listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
-            let roots = try context.fetch(rootRequest)
-            let lists = try context.fetch(listRequest)
-            guard roots.count == 1, lists.count == 1,
-                  let root = roots.first, let list = lists.first,
-                  !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
-                  let store = root.objectID.persistentStore,
-                  self.persistence.role(of: store) != nil,
-                  store.identifier == graph.storeIdentifier,
-                  root.objectID.uriRepresentation().absoluteString == graph.rootURI,
-                  list.objectID.persistentStore == store,
-                  root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+            let root = try self.exactHomeRoot(scope.graph, in: context)
             root.name = name
         }
+    }
+
+    /// Local names have no account session, but still require the exact mounted
+    /// graph and its store. A stale Settings screen cannot rename a new home.
+    func renameLocalHome(name: String, graph: HomeGraphIdentity) throws {
+        let name = try validatedName(name)
+        try write { context in
+            guard self.persistence.personalCartSessionProvider == nil,
+                  let store = self.persistence.primaryStore,
+                  self.persistence.role(of: store) == .local,
+                  store.identifier == graph.storeIdentifier else {
+                throw NeedServiceError.scopeChanged
+            }
+            let root = try self.exactHomeRoot(graph, in: context)
+            guard root.objectID.persistentStore === store else { throw NeedServiceError.scopeChanged }
+            root.name = name
+        }
+    }
+
+    private func exactHomeRoot(_ graph: HomeGraphIdentity, in context: NSManagedObjectContext) throws -> Household {
+        guard graph.householdID != PersistenceModel.unsetID, graph.listID != PersistenceModel.unsetID else {
+            throw NeedServiceError.scopeChanged
+        }
+        let rootRequest = Household.fetchRequest()
+        rootRequest.predicate = NSPredicate(format: "id == %@", graph.householdID as CVarArg)
+        let listRequest = GroceryList.fetchRequest()
+        listRequest.predicate = NSPredicate(format: "id == %@", graph.listID as CVarArg)
+        let roots = try context.fetch(rootRequest)
+        let lists = try context.fetch(listRequest)
+        guard roots.count == 1, lists.count == 1,
+              let root = roots.first, let list = lists.first,
+              !root.objectID.isTemporaryID, !list.objectID.isTemporaryID,
+              let store = root.objectID.persistentStore,
+              persistence.role(of: store) != nil,
+              store.identifier == graph.storeIdentifier,
+              root.objectID.uriRepresentation().absoluteString == graph.rootURI,
+              list.objectID.persistentStore === store,
+              root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+        return root
     }
 
     /// Retries only the identities from a durable, explicitly initiated creation command.
@@ -893,28 +914,47 @@ final class NeedService: @unchecked Sendable {
                   try self.persistence.personalCartSessionProvider?.currentSession() == command.session else {
                 throw ShopperSessionError.accountChanged
             }
-            let rootsRequest = Household.fetchRequest()
-            rootsRequest.predicate = NSPredicate(format: "id == %@", command.householdID as CVarArg)
-            let listsRequest = GroceryList.fetchRequest()
-            listsRequest.predicate = NSPredicate(format: "id == %@", command.listID as CVarArg)
-            let roots = try context.fetch(rootsRequest), lists = try context.fetch(listsRequest)
-            if !roots.isEmpty || !lists.isEmpty {
-                guard roots.count == 1, lists.count == 1,
-                      let root = roots.first, let list = lists.first,
-                      root.objectID.persistentStore == store, list.objectID.persistentStore == store,
-                      root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
-                return (root.id, list.id)
-            }
-            let household: Household = self.insert("Household", in: context)
-            household.id = command.householdID
-            household.name = name
-            context.assign(household, to: store)
-            let list: GroceryList = self.insert("GroceryList", in: context)
-            list.id = command.listID
-            self.route(list, with: household, in: context)
-            list.household = household
-            return (household.id, list.id)
+            return try self.replayHousehold(name: name, householdID: command.householdID,
+                listID: command.listID, store: store, context: context)
         }
+    }
+
+    func createLocalHousehold(command: LocalHomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {
+        let name = try validatedName(command.name)
+        return try write { context in
+            guard let store = self.persistence.primaryStore,
+                  store.identifier == command.storeIdentifier,
+                  self.persistence.role(of: store) == .local,
+                  self.persistence.personalCartSessionProvider == nil else { throw NeedServiceError.scopeChanged }
+            return try self.replayHousehold(name: name, householdID: command.householdID,
+                listID: command.listID, store: store, context: context)
+        }
+    }
+
+    private func replayHousehold(name: String, householdID: UUID, listID: UUID,
+                                 store: NSPersistentStore, context: NSManagedObjectContext)
+        throws -> (householdID: UUID, listID: UUID) {
+        let rootsRequest = Household.fetchRequest()
+        rootsRequest.predicate = NSPredicate(format: "id == %@", householdID as CVarArg)
+        let listsRequest = GroceryList.fetchRequest()
+        listsRequest.predicate = NSPredicate(format: "id == %@", listID as CVarArg)
+        let roots = try context.fetch(rootsRequest), lists = try context.fetch(listsRequest)
+        if !roots.isEmpty || !lists.isEmpty {
+            guard roots.count == 1, lists.count == 1,
+                  let root = roots.first, let list = lists.first,
+                  root.objectID.persistentStore == store, list.objectID.persistentStore == store,
+                  root.groceryList == list, list.household == root else { throw NeedServiceError.scopeChanged }
+            return (root.id, list.id)
+        }
+        let household: Household = insert("Household", in: context)
+        household.id = householdID
+        household.name = name
+        context.assign(household, to: store)
+        let list: GroceryList = insert("GroceryList", in: context)
+        list.id = listID
+        route(list, with: household, in: context)
+        list.household = household
+        return (household.id, list.id)
     }
 
     @discardableResult

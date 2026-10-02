@@ -159,8 +159,12 @@ final class PersonalCartService: @unchecked Sendable {
         persistence.writer.performAndWait {
             let context = persistence.writer
             context.reset()
+            context.userInfo.removeObject(forKey: HomeDeletionSaveAuthority.key)
             context.userInfo[PersonalCartPersistencePolicy.authorizedAccountKey] = session.accountBinding
-            defer { context.userInfo.removeObject(forKey: PersonalCartPersistencePolicy.authorizedAccountKey) }
+            defer {
+                context.userInfo.removeObject(forKey: PersonalCartPersistencePolicy.authorizedAccountKey)
+                context.userInfo.removeObject(forKey: HomeDeletionSaveAuthority.key)
+            }
             do {
                 if save {
                     try commandAuthority?.validate()

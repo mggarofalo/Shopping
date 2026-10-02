@@ -27,6 +27,7 @@ final class HomeInvitationController: ObservableObject {
     /// Retire an outstanding Open choice at ingress, before the journal worker
     /// can publish its replacement entry. The callback performs no file work.
     var onChoiceInvalidated: ((HomeInvitationIdentity) -> Void)?
+    var onAcceptedIngress: (() -> Void)?
     private(set) var allEntries: [HomeInvitationInbox.Entry] = []
     private let worker: HomeInvitationWorker
     private var session: ShopperSession?
@@ -79,15 +80,20 @@ final class HomeInvitationController: ObservableObject {
 
     func receive(_ metadata: CKShare.Metadata) {
         let id = metadata.share.recordID
+        let rawName = metadata.share[CKShare.SystemFieldKey.title] as? String
+        let trimmedName = rawName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = trimmedName?.isEmpty == false ? trimmedName : nil
         let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String ?? ""
         let identity = HomeInvitationIdentity(containerIdentifier: metadata.containerIdentifier, environment: environment,
             share: HomeShareIdentity(recordName: id.recordName, zoneName: id.zoneID.zoneName, zoneOwnerName: id.zoneID.ownerName))
+        onAcceptedIngress?()
         let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
         submit({ inbox in
             return try inbox.enqueue(identity: identity,
                 metadataArchive: ManagedHomeInvitationTransport.archive(metadata),
+                displayName: displayName,
                 participantPending: metadata.participantStatus == .pending)
         }) { [weak self] result in
             guard let self else { return }
@@ -104,13 +110,16 @@ final class HomeInvitationController: ObservableObject {
     /// Value ingress also serves isolated fixtures; production scene ingress archives on the worker.
     @discardableResult
     func enqueue(identity: HomeInvitationIdentity, metadataArchive: Data,
+                 displayName: String? = nil,
                  participantPending: Bool = false) async throws -> HomeInvitationInbox.Entry {
+        onAcceptedIngress?()
         let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
         defer { pendingChoiceChanges.removeValue(forKey: change); pendingIngress -= 1; publish() }
         let entry = try await perform {
-            try $0.enqueue(identity: identity, metadataArchive: metadataArchive, participantPending: participantPending)
+            try $0.enqueue(identity: identity, metadataArchive: metadataArchive,
+                displayName: displayName, participantPending: participantPending)
         }
         process()
         return entry
@@ -144,6 +153,12 @@ final class HomeInvitationController: ObservableObject {
         }
     }
 
+    func retryAndWait(_ id: UUID) async throws {
+        try await perform { try $0.retry(id: id) }
+        problem = nil
+        process()
+    }
+
     func dismiss(_ id: UUID) {
         let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
         submit({ try $0.dismiss(id: id) }) { [weak self] result in
@@ -151,6 +166,35 @@ final class HomeInvitationController: ObservableObject {
             if case .failure = result { self?.problem = "The invitation could not be dismissed. Try again." }
             self?.publish()
         }
+    }
+
+    func dismissAndWait(_ id: UUID) async throws {
+        let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
+        defer { if let change { pendingChoiceChanges.removeValue(forKey: change) }; publish() }
+        try await perform { try $0.dismiss(id: id) }
+    }
+
+    func requestOpen(_ id: UUID) async throws {
+        try await perform { try $0.requestOpen(id: id) }
+        process()
+    }
+
+    func deferOpen(_ id: UUID, expectedSession: ShopperSession? = nil) async throws {
+        let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
+        defer { if let change { pendingChoiceChanges.removeValue(forKey: change) }; publish() }
+        try await perform { try $0.deferOpen(id: id, expectedSession: expectedSession) }
+    }
+
+    func retireAutomaticOpen(boundTo session: ShopperSession) async throws {
+        try await perform { try $0.retireAutomaticOpen(boundTo: session) }
+    }
+
+    func retireAutomaticOpen(boundToOtherAccountThan session: ShopperSession) async throws {
+        try await perform { try $0.retireAutomaticOpen(boundToOtherAccountThan: session) }
+    }
+
+    func retireAutomaticOpenForAllBoundAccounts() async throws {
+        try await perform { try $0.retireAutomaticOpenForAllBoundAccounts() }
     }
 
     func resolveActivation(_ id: UUID) async throws {

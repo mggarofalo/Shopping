@@ -26,6 +26,193 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.reconcile(HomeDiscovery(homes: homes, hasIncompleteRoots: incomplete), request: request))
     }
 
+    func testEntrySnapshotDistinguishesUnknownIncompleteAndConfirmedEmptyDiscovery() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        coordinator.bind(try session())
+        func snapshot(failed: Bool = false) -> HomeEntrySnapshot {
+            HomeEntrySnapshot(store: .account, readiness: coordinator.readiness,
+                discovery: coordinator.discoveryState, homes: coordinator.homes,
+                currentHomeName: nil, retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+                invitations: [], hasPendingInvitation: false, hasVerifiedInvitationAccount: true,
+                invitationProblem: nil, importProblems: [:], isCreatingHome: false,
+                homeDiscoveryFailed: failed)
+        }
+        XCTAssertEqual(snapshot().root, .waitingForHomes)
+        try discover([], using: coordinator, incomplete: true)
+        XCTAssertEqual(snapshot().root, .waitingForHomes)
+        try discover([], using: coordinator)
+        XCTAssertEqual(snapshot().root, .noHomes)
+        XCTAssertEqual(snapshot(failed: true).root, .waitingForHomes)
+        coordinator.setInvitationPending(true)
+        XCTAssertEqual(snapshot().root, .noHomes)
+        let held = HomeEntrySnapshot(store: .account, readiness: coordinator.readiness,
+            discovery: coordinator.discoveryState, homes: coordinator.homes,
+            currentHomeName: nil, retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+            invitations: [], hasPendingInvitation: true, hasVerifiedInvitationAccount: true,
+            invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        XCTAssertEqual(held.root, .waitingForHomes)
+    }
+
+    func testEntrySnapshotKeepsExactInvitationIdentityWithoutArchivedMetadata() throws {
+        let session = try session()
+        let invited = home("Shared", store: "shared")
+        let identity = HomeInvitationIdentity(containerIdentifier: session.containerIdentifier,
+            environment: session.environment,
+            share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"))
+        var entry = HomeInvitationInbox.Entry(id: UUID(), identity: identity,
+            metadataArchive: Data(repeating: 8, count: 100_000), session: session)
+        entry.state = .ready(invited.graph)
+        entry.acceptanceAttempted = true
+        let scope = ActiveHomeScope(session: session, graph: invited.graph)
+        let snapshot = HomeEntrySnapshot(store: .account, readiness: .ready(scope),
+            discovery: .complete, homes: [invited], currentHomeName: invited.name,
+            retainedLocalHomeName: "Old home", isShowingRetainedLocalHome: false,
+            invitations: [entry], hasPendingInvitation: true, hasVerifiedInvitationAccount: true,
+            invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        XCTAssertEqual(snapshot.root, .activeHome(scope))
+        XCTAssertEqual(snapshot.homes.first?.id, invited.graph)
+        XCTAssertTrue(snapshot.homes.first?.isSelected == true)
+        XCTAssertEqual(snapshot.invitations.first?.id, entry.id)
+        XCTAssertEqual(snapshot.invitations.first?.identity, identity)
+        XCTAssertEqual(snapshot.invitations.first?.accountBinding, session.accountBinding)
+        XCTAssertEqual(snapshot.invitations.first?.state, .ready(invited.graph))
+        XCTAssertTrue(snapshot.invitations.first?.acceptanceAttempted == true)
+    }
+
+    func testDuplicateHomeNamesKeepStableContextAcrossDiscoveryAndStoreMounts() throws {
+        let firstID = UUID(), firstListID = UUID(), secondID = UUID(), secondListID = UUID()
+        func candidate(_ householdID: UUID, _ listID: UUID, store: String, uri: String,
+                       access: HomeCandidate.Access = .owner) -> HomeCandidate {
+            HomeCandidate(graph: HomeGraphIdentity(storeIdentifier: store, rootURI: uri,
+                householdID: householdID, listID: listID), name: "Home", access: access)
+        }
+        let first = candidate(firstID, firstListID, store: "owner-private", uri: "first")
+        let second = candidate(secondID, secondListID, store: "shared", uri: "second")
+        func snapshot(_ homes: [HomeCandidate], selected: HomeCandidate) throws -> HomeEntrySnapshot {
+            HomeEntrySnapshot(store: .account, readiness: .ready(ActiveHomeScope(session: try session(),
+                graph: selected.graph)), discovery: .complete, homes: homes, currentHomeName: "Home",
+                retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+                invitations: [], hasPendingInvitation: false, hasVerifiedInvitationAccount: true,
+                invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        }
+        let initial = try snapshot([first, second], selected: first)
+        let titles = initial.homes.map(\.presentation.title)
+        XCTAssertEqual(Set(titles).count, 2)
+        XCTAssertTrue(titles.allSatisfy { $0.hasPrefix("Home · ") })
+        XCTAssertEqual(initial.currentHomeDisplayName, titles[0])
+
+        let remountedFirst = candidate(firstID, firstListID, store: "another-device-store", uri: "new-first")
+        let remountedSecond = candidate(secondID, secondListID, store: "another-device-share", uri: "new-second")
+        let added = home("Other home")
+        let rediscovered = try snapshot([added, remountedSecond, remountedFirst], selected: remountedFirst)
+        XCTAssertEqual(rediscovered.homes[2].presentation.title, titles[0])
+        XCTAssertEqual(rediscovered.homes[1].presentation.title, titles[1])
+        XCTAssertEqual(rediscovered.homes[0].presentation.title, "Other home")
+        XCTAssertEqual(rediscovered.currentHomeDisplayName, titles[0])
+    }
+
+    func testDuplicateNamesUseExistingRoleAndLocalContextBeforeGeneratedTags() {
+        let owner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let member = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let local = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let sources = [
+            HomePresentationSource(scope: owner, name: "Home", role: .owner),
+            HomePresentationSource(scope: member, name: "Home", role: .member),
+            HomePresentationSource(scope: local, name: "Home", role: .local)
+        ]
+        let resolved = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(resolved[owner]?.title, "Home · Owner")
+        XCTAssertEqual(resolved[member]?.title, "Home · Member")
+        XCTAssertEqual(resolved[local]?.title, "Home · On This iPhone")
+        XCTAssertEqual(HomePresentationNames.resolve([sources[0]])[owner]?.title, "Home")
+    }
+
+    func testGeneratedContextsStayUniqueWhenShortWordTagsCollide() {
+        // Two words offer 32² labels. More than that many same-name owners must
+        // still have distinct accessible names without exposing graph UUIDs.
+        let sources = (0...1_024).map { index in
+            let scope = PersonalCartScopeSnapshot(
+                householdID: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", index))!,
+                listID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+            return HomePresentationSource(scope: scope, name: "Home", role: .owner)
+        }
+        let names = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(names.count, sources.count)
+        XCTAssertEqual(Set(names.values.map(\.title)).count, sources.count)
+        XCTAssertTrue(names.values.allSatisfy { !$0.title.contains("00000000-") })
+    }
+
+    func testLiteralHomeNameCannotMatchAnotherHomesGeneratedContext() {
+        let owner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let member = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let literal = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let sources = [
+            HomePresentationSource(scope: owner, name: "Home", role: .owner),
+            HomePresentationSource(scope: member, name: "Home", role: .member),
+            HomePresentationSource(scope: literal, name: "Home · Owner", role: .owner)
+        ]
+        let resolved = HomePresentationNames.resolve(sources)
+        XCTAssertEqual(Set(resolved.values.map(\.title)).count, 3)
+        XCTAssertEqual(resolved[member]?.title, "Home · Member")
+        XCTAssertTrue(resolved[owner]?.title.hasPrefix("Home · ") == true)
+        XCTAssertTrue(resolved[literal]?.title.hasPrefix("Home · Owner · ") == true)
+        XCTAssertFalse(resolved.values.contains { $0.title.contains(owner.householdID.uuidString) })
+
+        let rediscovered = HomePresentationNames.resolve(Array(sources.reversed()))
+        XCTAssertEqual(rediscovered, resolved)
+        XCTAssertEqual(HomePresentationNames.resolve([sources[2]])[literal]?.title, "Home · Owner")
+
+        let otherOwner = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let taggedSources = [sources[0], HomePresentationSource(scope: otherOwner,
+            name: "Home", role: .owner)]
+        let generatedTitle = HomePresentationNames.resolve(taggedSources)[owner]!.title
+        let matchingLiteral = HomePresentationSource(scope: literal, name: generatedTitle, role: .member)
+        let withLiteral = HomePresentationNames.resolve(taggedSources + [matchingLiteral])
+        XCTAssertEqual(Set(withLiteral.values.map(\.title)).count, 3)
+        XCTAssertEqual(HomePresentationNames.resolve(Array((taggedSources + [matchingLiteral]).reversed())), withLiteral)
+    }
+
+    func testForgettingCapturedSelectionKeepsNewerChoiceAndReconcilesRemainingHome() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = home("First"), second = home("Second"), third = home("Third")
+        coordinator.bind(try session())
+        try discover([first, second, third], using: coordinator)
+        try coordinator.select(first.graph)
+        let staleScope = try XCTUnwrap(coordinator.activeScope)
+        let staleGeneration = coordinator.generation
+        try coordinator.select(second.graph)
+        XCTAssertFalse(coordinator.forgetSelectedHome(staleScope, generation: staleGeneration))
+        XCTAssertEqual(coordinator.activeScope?.graph, second.graph)
+        let selectedScope = try XCTUnwrap(coordinator.activeScope)
+        let selectedGeneration = coordinator.generation
+        XCTAssertTrue(coordinator.forgetSelectedHome(selectedScope, generation: selectedGeneration))
+        XCTAssertEqual(coordinator.readiness, .choiceRequired)
+        XCTAssertEqual(Set(coordinator.homes.map(\.graph)), [first.graph, third.graph])
+        try coordinator.select(third.graph)
+        let reopened = ActiveHomeCoordinator(defaults: defaults)
+        reopened.bind(try session())
+        try discover([first, third], using: reopened)
+        XCTAssertEqual(reopened.activeScope?.graph, third.graph)
+    }
+
+    func testForgettingSelectedHomeChoosesOnlyRemainingCompleteHomeWithinSameAccount() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = home("First"), second = home("Second")
+        coordinator.bind(try session())
+        try discover([first, second], using: coordinator)
+        try coordinator.select(first.graph)
+        let scope = try XCTUnwrap(coordinator.activeScope), generation = coordinator.generation
+        XCTAssertTrue(coordinator.forgetSelectedHome(scope, generation: generation))
+        XCTAssertEqual(coordinator.activeScope?.graph, second.graph)
+        let secondScope = try XCTUnwrap(coordinator.activeScope), secondGeneration = coordinator.generation
+        coordinator.bind(try session("B"))
+        XCTAssertFalse(coordinator.forgetSelectedHome(secondScope, generation: secondGeneration))
+        XCTAssertNil(coordinator.activeScope)
+    }
+
     func testNotNowWithoutCurrentHomePreventsAutomaticSelectionAfterRelaunch() throws {
         let (coordinator, defaults, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -195,6 +382,32 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         try discover([HomeCandidate(graph: a.graph, name: a.name, access: .restricted)], using: coordinator)
         XCTAssertEqual(coordinator.activeScope, scope)
         XCTAssertFalse(coordinator.isCurrent(scope: scope, generation: generation))
+    }
+
+    func testDiscoveryAuthorityDoesNotReplaceExplicitHomeChoice() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = home("Account"), copied = home("Copy")
+        coordinator.bind(try session())
+        try discover([account], using: coordinator)
+        let approvedChoice = coordinator.choiceRevision
+        let writeGeneration = coordinator.generation
+
+        // Same-account discovery can change the active home's access and command
+        // authority while an approved copy is being written.
+        try discover([HomeCandidate(graph: account.graph, name: account.name, access: .restricted)],
+            using: coordinator)
+        XCTAssertNotEqual(coordinator.generation, writeGeneration)
+        XCTAssertEqual(coordinator.choiceRevision, approvedChoice)
+        try discover([account, copied], using: coordinator)
+        XCTAssertEqual(coordinator.choiceRevision, approvedChoice)
+
+        try coordinator.select(account.graph)
+        XCTAssertNotEqual(coordinator.choiceRevision, approvedChoice,
+            "Reaffirming the same home is a newer explicit choice")
+        let reaffirmedChoice = coordinator.choiceRevision
+        coordinator.deferSelection()
+        XCTAssertNotEqual(coordinator.choiceRevision, reaffirmedChoice)
     }
 
     func testIncompleteDuplicateRootAndOrphanListPreventAmbiguousSelection() throws {

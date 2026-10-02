@@ -5,10 +5,62 @@ import XCTest
 
 @MainActor
 final class HomeAdoptionBootstrapTests: XCTestCase {
+    private actor CopyDiscoveryGate {
+        private var firstCopyDiscoveryHeld = false
+        private var released = false
+        private var releaseContinuations: [CheckedContinuation<Void, Never>] = []
+
+        func discover(_ service: HomeDiscoveryService, accessChange: Bool,
+                      onHold: @Sendable () -> Void) async throws -> HomeDiscovery {
+            let snapshot = try await Task.detached(priority: .utility) { try service.discover() }.value
+            guard snapshot.homes.count == 2 else { return snapshot }
+            if accessChange {
+                let account = snapshot.homes.filter { $0.name == "Account home" }.map {
+                    HomeCandidate(graph: $0.graph, name: $0.name, access: .restricted)
+                }
+                return HomeDiscovery(homes: account, hasIncompleteRoots: false)
+            }
+            guard !released else { return snapshot }
+            if !firstCopyDiscoveryHeld {
+                firstCopyDiscoveryHeld = true
+                onHold()
+            }
+            await withCheckedContinuation { releaseContinuations.append($0) }
+            return snapshot
+        }
+
+        func release() {
+            released = true
+            for continuation in releaseContinuations { continuation.resume() }
+            releaseContinuations.removeAll()
+        }
+    }
+
+    private actor CopyProviderRefreshGate {
+        private var armed = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func arm() { armed = true }
+
+        func status(onHold: @Sendable () -> Void) async -> CKAccountStatus {
+            guard armed else { return .available }
+            armed = false
+            onHold()
+            await withCheckedContinuation { continuation = $0 }
+            return .available
+        }
+
+        func release() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
     private actor AccountIdentity {
         var name = "account-A"
         func current() -> String { name }
         func change() { name = "account-B" }
+        func set(_ name: String) { self.name = name }
     }
 
     private struct Fixture {
@@ -49,17 +101,25 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             defaults: defaults, provider: provider, homeID: home.householdID)
     }
 
-    private func bootstrap(_ fixture: Fixture, offline: Bool = false) -> PersistenceBootstrap {
+    private func bootstrap(_ fixture: Fixture, offline: Bool = false,
+                           provider replacementProvider: ShopperSessionProvider? = nil,
+                           accountStore: (@Sendable (ShopperSession) -> URL)? = nil,
+                           invitations: HomeInvitationController? = nil,
+                           discoverHomes: @escaping @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery = { service in
+                               try await Task.detached(priority: .utility) { try service.discover() }.value
+                           }) -> PersistenceBootstrap {
         let destination = fixture.destination
         let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: fixture.source) }, defaults: fixture.defaults,
+            invitations: invitations, autoJoinInvitations: false,
             makeAccountProvider: { _ in
                 if offline { throw ShopperSessionError.temporarilyUnavailable }
-                return fixture.provider
+                return replacementProvider ?? fixture.provider
             }, accountStoreDirectory: { fixture.directory },
-            activateAccountStore: { source, _, _, importing in
+            discoverHomes: discoverHomes,
+            activateAccountStore: { source, session, _, importing in
                 XCTAssertNil(source, "Keeping a local home must never copy or merge it into account data")
                 XCTAssertFalse(importing)
-                return .local(storeURL: destination)
+                return .local(storeURL: accountStore?(session) ?? destination)
             })
         retireBeforeCleanup(bootstrap)
         return bootstrap
@@ -194,6 +254,747 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertEqual(restored.persistence.container.persistentStoreCoordinator.persistentStores.count, 1)
     }
 
+    func testRetainedDeviceHomeStaysReachableAcrossAccountChangeWithoutCopyingToNewAccount() async throws {
+        let fixture = try fixture()
+        let identity = AccountIdentity()
+        let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", cacheDirectory: fixture.directory.appendingPathComponent("SwitchingBindings"),
+            lookup: .init(status: { .available }, recordName: { await identity.current() }),
+            notifications: NotificationCenter())
+        let expectedA = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", accountRecordName: "account-A")
+        let firstAccountURL = fixture.destination
+        let otherAccountURL = fixture.directory.appendingPathComponent("OtherAccount.sqlite")
+        let otherAccount = try PersistenceController(storeURL: otherAccountURL)
+        let otherHome = try NeedService(persistence: otherAccount).createHousehold(name: "Other account home")
+        for store in otherAccount.container.persistentStoreCoordinator.persistentStores {
+            try otherAccount.container.persistentStoreCoordinator.remove(store)
+        }
+        let bootstrap = PersistenceBootstrap(configuration: { .local(storeURL: fixture.source) },
+            defaults: fixture.defaults, makeAccountProvider: { _ in provider },
+            accountStoreDirectory: { fixture.directory },
+            activateAccountStore: { source, session, _, importing in
+                XCTAssertNil(source)
+                XCTAssertFalse(importing)
+                return .local(storeURL: session == expectedA
+                    ? firstAccountURL : otherAccountURL)
+            })
+        retireBeforeCleanup(bootstrap)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        let firstAccount = try await waitForReady(bootstrap)
+        let sessionA = try provider.currentSession()
+        XCTAssertEqual(bootstrap.retainedLocalHomeName, "Original home")
+        await identity.change()
+        await provider.refresh()
+        let retirementDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while firstAccount.presentation.isActive, ContinuousClock.now < retirementDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(firstAccount.presentation.isActive)
+        await bootstrap.runLoadingTransition()
+        let secondAccount = try await waitForReady(bootstrap)
+        let sessionB = try provider.currentSession()
+        XCTAssertNotEqual(sessionA, sessionB)
+        XCTAssertEqual(secondAccount.householdID, otherHome.householdID)
+        XCTAssertEqual(bootstrap.currentHomeName, "Other account home")
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "Original home")
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 1)
+        // Simulate an approved A copy interrupted before opening its target.
+        // Stage it after A's startup recovery has settled so only B's reload
+        // can observe the durable command.
+        let retainedRecord = try XCTUnwrap(HomeAdoptionJournal(baseDirectory: fixture.directory).retainedLocalRecord())
+        let detachedSource = try PersistenceController(storeURL: fixture.source)
+        let proposed = try RetainedHomeConversionService(persistence: detachedSource)
+            .capture(record: retainedRecord, session: sessionA)
+        for store in detachedSource.container.persistentStoreCoordinator.persistentStores {
+            try detachedSource.container.persistentStoreCoordinator.remove(store)
+        }
+        let journalA = RetainedHomeConversionJournal(baseDirectory: fixture.directory, session: sessionA)
+        let pendingA = try journalA.begin(proposed)
+
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let local = try await waitForReady(bootstrap)
+        XCTAssertEqual(local.householdID, fixture.homeID)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .unavailable)
+        let categories = try local.persistence.container.viewContext.fetch(Category.fetchRequest())
+        XCTAssertTrue(categories.contains { $0.name == "Keep this category" })
+        do {
+            try await bootstrap.useICloudForRetainedLocalHome()
+            XCTFail("Account B must not reuse account A’s explicit copy approval")
+        } catch { XCTAssertEqual(error as? ShopperSessionError, .accountChanged) }
+        XCTAssertEqual(try journalA.read(session: sessionA)?.id, pendingA.id)
+        XCTAssertFalse(try XCTUnwrap(journalA.read(session: sessionA)).copied)
+        XCTAssertNil(try RetainedHomeConversionJournal(baseDirectory: fixture.directory, session: sessionB)
+            .read(session: sessionB))
+
+        try await bootstrap.connectBackToAccount()
+        await bootstrap.runLoadingTransition()
+        let returned = try await waitForReady(bootstrap)
+        XCTAssertEqual(returned.householdID, otherHome.householdID)
+        XCTAssertEqual(bootstrap.currentHomeName, "Other account home")
+        XCTAssertEqual(bootstrap.retainedLocalHomeName, "Original home")
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 1)
+        XCTAssertFalse(try XCTUnwrap(journalA.read(session: sessionA)).copied)
+    }
+
+    func testExplicitRetainedCopyCreatesOwnedAccountHomeAndKeepsOriginal() async throws {
+        let fixture = try fixture()
+        let bootstrap = bootstrap(fixture)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        let account = try await waitForReady(bootstrap)
+        XCTAssertEqual(account.householdID == fixture.homeID, false)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let retained = try await waitForReady(bootstrap)
+        XCTAssertEqual(retained.householdID, fixture.homeID)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .available)
+
+        try await bootstrap.homeEntryCommands.useICloudForRetainedLocalHome()
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .copying)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeEntry.retainedLocalCopyState != .copied, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .copied,
+            bootstrap.homeSetupError?.localizedDescription ?? "Copy did not complete")
+        while !bootstrap.homeEntry.homes.contains(where: { $0.name == "Original home" && $0.isSelected }),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let homes = bootstrap.homeEntry.homes
+        XCTAssertEqual(homes.count, 2)
+        let copied = try XCTUnwrap(homes.first { $0.name == "Original home" })
+        XCTAssertNotEqual(copied.id.householdID, fixture.homeID)
+        XCTAssertEqual(copied.access, .owner)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Original home")
+        XCTAssertTrue(copied.isSelected)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "Original home")
+
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let original = try await waitForReady(bootstrap)
+        XCTAssertEqual(original.householdID, fixture.homeID)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .copied)
+        let categories = try original.persistence.container.viewContext.fetch(Category.fetchRequest())
+        XCTAssertTrue(categories.contains { $0.name == "Keep this category" })
+    }
+
+    private func waitForRetainedConversionCompletion(_ bootstrap: PersistenceBootstrap) async {
+        let completed = expectation(description: "Retained copy consumer completed")
+        let waiter = Task {
+            await bootstrap.awaitRetainedConversionCompletion()
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 5)
+        waiter.cancel()
+    }
+
+    private func waitForCopiedHomeRoster(_ bootstrap: PersistenceBootstrap) async throws {
+        // Copy completion drains its consumer chain. A newer startup or history
+        // discovery may still own publication of the account and copied homes.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeEntry.homes.count != 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func waitForCopyPreparation(_ copy: Task<Void, Error>) async -> Result<Void, Error>? {
+        let completed = expectation(description: "Copy preparation completed")
+        var outcome: Result<Void, Error>?
+        let waiter = Task {
+            outcome = await copy.result
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 5)
+        waiter.cancel()
+        return outcome
+    }
+
+    func testRetainedCopyOpensAfterSameAccountAccessRefreshAndLateDiscovery() async throws {
+        let fixture = try fixture()
+        let gate = CopyDiscoveryGate()
+        let held = expectation(description: "Copied graph discovery held after durable write")
+        let bootstrap = bootstrap(fixture, discoverHomes: { service in
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
+        })
+        addTeardownBlock {
+            await gate.release()
+            await self.waitForRetainedConversionCompletion(bootstrap)
+        }
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.useICloudForRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        await fulfillment(of: [held], timeout: 5)
+
+        let choiceRevision = bootstrap.homeCoordinator.choiceRevision
+        let writeGeneration = bootstrap.homeCoordinator.generation
+        try await CopyDiscoveryRequest.$accessChange.withValue(true) {
+            try await bootstrap.refreshHomes()
+        }
+        XCTAssertNotEqual(bootstrap.homeCoordinator.generation, writeGeneration)
+        XCTAssertEqual(bootstrap.homeCoordinator.choiceRevision, choiceRevision)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
+
+        await gate.release()
+        try await bootstrap.refreshHomes()
+        await self.waitForRetainedConversionCompletion(bootstrap)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !bootstrap.homeEntry.homes.contains(where: { $0.name == "Original home" && $0.isSelected }),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Original home")
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        let copied = try XCTUnwrap(bootstrap.homeEntry.homes.first { $0.name == "Original home" })
+        XCTAssertNotEqual(copied.id.householdID, fixture.homeID)
+        XCTAssertTrue(copied.isSelected)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "Original home")
+    }
+
+    func testReaffirmingCurrentHomeDuringHeldCopyPreventsLateAutomaticOpen() async throws {
+        let fixture = try fixture()
+        let gate = CopyDiscoveryGate()
+        let held = expectation(description: "Copied graph discovery held after durable write")
+        let bootstrap = bootstrap(fixture, discoverHomes: { service in
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
+        })
+        addTeardownBlock {
+            await gate.release()
+            await self.waitForRetainedConversionCompletion(bootstrap)
+        }
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.useICloudForRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        await fulfillment(of: [held], timeout: 5)
+
+        let account = try XCTUnwrap(bootstrap.homeEntry.homes.first { $0.name == "Account home" })
+        let choiceRevision = bootstrap.homeCoordinator.choiceRevision
+        try await bootstrap.selectHome(account.id)
+        XCTAssertNotEqual(bootstrap.homeCoordinator.choiceRevision, choiceRevision)
+        await gate.release()
+        try await bootstrap.refreshHomes()
+        await self.waitForRetainedConversionCompletion(bootstrap)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (bootstrap.homeEntry.homes.count != 2 || bootstrap.retainedLocalCopyState != .copied),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
+        XCTAssertTrue(bootstrap.homeEntry.homes.first { $0.id == account.id }?.isSelected == true)
+        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+    }
+
+    func testAcceptedInvitationDuringHeldCopyKeepsNewerNavigationIntent() async throws {
+        let fixture = try fixture()
+        let inbox = try HomeInvitationInbox(url: fixture.directory.appendingPathComponent("CopyIngress.json"),
+            containerIdentifier: "iCloud.test.adoption-bootstrap", environment: "Development")
+        let invitations = HomeInvitationController(inbox: inbox)
+        await invitations.prepare()
+        let gate = CopyDiscoveryGate()
+        let held = expectation(description: "Copied graph discovery held before invitation ingress")
+        let bootstrap = bootstrap(fixture, invitations: invitations, discoverHomes: { service in
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
+        })
+        addTeardownBlock {
+            await gate.release()
+            await self.waitForRetainedConversionCompletion(bootstrap)
+        }
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.useICloudForRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        await fulfillment(of: [held], timeout: 5)
+
+        let entry = try await invitations.enqueue(identity: HomeInvitationIdentity(
+            containerIdentifier: "iCloud.test.adoption-bootstrap", environment: "Development",
+            share: HomeShareIdentity(recordName: "new-invitation", zoneName: "new-zone", zoneOwnerName: "owner")),
+            metadataArchive: Data([1]))
+        XCTAssertEqual(bootstrap.homeEntry.invitations.first?.id, entry.id)
+        await gate.release()
+        try await bootstrap.refreshHomes()
+        await self.waitForRetainedConversionCompletion(bootstrap)
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
+        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+        XCTAssertTrue(bootstrap.invitations?.allEntries.contains { $0.id == entry.id && $0.openRequested } == true)
+    }
+
+    func testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent() async throws {
+        let fixture = try fixture()
+        let held = expectation(description: "Copy account verification held before conversion journal")
+        let gate = CopyProviderRefreshGate()
+        let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", cacheDirectory: fixture.directory.appendingPathComponent("HeldCopyBinding"),
+            lookup: .init(status: { await gate.status(onHold: { held.fulfill() }) },
+                recordName: { "account-A" }), notifications: NotificationCenter())
+        let inbox = try HomeInvitationInbox(url: fixture.directory.appendingPathComponent("CopyLookupIngress.json"),
+            containerIdentifier: "iCloud.test.adoption-bootstrap", environment: "Development")
+        let invitations = HomeInvitationController(inbox: inbox)
+        await invitations.prepare()
+        let bootstrap = bootstrap(fixture, provider: provider, invitations: invitations)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+
+        await gate.arm()
+        let copy = Task { try await bootstrap.useICloudForRetainedLocalHome() }
+        addTeardownBlock {
+            await gate.release()
+            _ = await self.waitForCopyPreparation(copy)
+            await self.waitForRetainedConversionCompletion(bootstrap)
+        }
+        await fulfillment(of: [held], timeout: 5)
+        let entry = try await invitations.enqueue(identity: HomeInvitationIdentity(
+            containerIdentifier: "iCloud.test.adoption-bootstrap", environment: "Development",
+            share: HomeShareIdentity(recordName: "newer-accepted-share", zoneName: "zone", zoneOwnerName: "owner")),
+            metadataArchive: Data([1]))
+        await gate.release()
+        let prepared = await self.waitForCopyPreparation(copy)
+        try XCTUnwrap(prepared).get()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        await self.waitForRetainedConversionCompletion(bootstrap)
+        try await waitForCopiedHomeRoster(bootstrap)
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
+        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+        XCTAssertTrue(invitations.allEntries.contains { $0.id == entry.id && $0.openRequested })
+    }
+
+    func testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification() async throws {
+        let fixture = try fixture()
+        let held = expectation(description: "Copy account lookup held before invalidation")
+        let gate = CopyProviderRefreshGate()
+        let center = NotificationCenter()
+        let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", cacheDirectory: fixture.directory.appendingPathComponent("InvalidatedCopyBinding"),
+            lookup: .init(status: { await gate.status(onHold: { held.fulfill() }) },
+                recordName: { "account-A" }), notifications: center)
+        let sessionA = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", accountRecordName: "account-A")
+        let bootstrap = bootstrap(fixture, provider: provider)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+
+        await gate.arm()
+        let copy = Task { try await bootstrap.useICloudForRetainedLocalHome() }
+        addTeardownBlock {
+            await gate.release()
+            _ = await self.waitForCopyPreparation(copy)
+            await self.waitForRetainedConversionCompletion(bootstrap)
+        }
+        await fulfillment(of: [held], timeout: 5)
+        XCTAssertTrue(bootstrap.hasPendingLocalCopyPreparation)
+        center.post(name: .CKAccountChanged, object: nil)
+        await provider.refresh()
+        XCTAssertEqual(try provider.currentSession(), sessionA)
+        let invalidationDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.hasPendingLocalCopyPreparation, ContinuousClock.now < invalidationDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(bootstrap.hasPendingLocalCopyPreparation,
+            "The exact account invalidation must retire the in-flight copy approval")
+
+        await gate.release()
+        let prepared = await self.waitForCopyPreparation(copy)
+        try XCTUnwrap(prepared).get()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        await self.waitForRetainedConversionCompletion(bootstrap)
+        try await waitForCopiedHomeRoster(bootstrap)
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
+        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+    }
+
+    func testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection() async throws {
+        let fixture = try fixture()
+        let identity = AccountIdentity()
+        let center = NotificationCenter()
+        let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", cacheDirectory: fixture.directory.appendingPathComponent("ChangingBindings"),
+            lookup: .init(status: { .available }, recordName: { await identity.current() }), notifications: center)
+        let accountA = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.adoption-bootstrap",
+            environment: "Development", accountRecordName: "account-A")
+        let accountAURL = fixture.destination
+        let accountBURL = fixture.directory.appendingPathComponent("AccountB.sqlite")
+        let bootstrap = bootstrap(fixture, provider: provider,
+            accountStore: { $0 == accountA ? accountAURL : accountBURL })
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        let originalAccount = try await waitForReady(bootstrap)
+        let originalScope = try XCTUnwrap(originalAccount.homeScope)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let retained = try await waitForReady(bootstrap)
+        XCTAssertEqual(retained.householdID, fixture.homeID)
+
+        try await bootstrap.homeEntryCommands.useICloudForRetainedLocalHome()
+        await identity.change()
+        center.post(name: .CKAccountChanged, object: nil)
+        await bootstrap.runLoadingTransition()
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if case .failed = bootstrap.state { return true }
+            return false
+        }, object: nil)], timeout: 5)
+        bootstrap.retry()
+        await bootstrap.runLoadingTransition()
+        let otherAccount = try await waitForReady(bootstrap)
+        XCTAssertNil(otherAccount.homeScope,
+            "The account-B store must not receive account-A's pending copy")
+
+        await identity.set("account-A")
+        let beforeReturn = otherAccount
+        center.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !beforeReturn.presentation.isActive
+        }, object: nil)], timeout: 5)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeEntry.retainedLocalCopyState != .copied
+            || bootstrap.homeEntry.homes.count != 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalCopyState, .copied)
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope, originalScope,
+            "The copy history can recover, but an old account's navigation intent cannot")
+        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+    }
+
+    func testPendingRetainedLocalDeletionReconcilesWhileAccountHomeIsOpen() async throws {
+        let fixture = try fixture()
+        let bootstrap = bootstrap(fixture)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        let account = try await waitForReady(bootstrap)
+        let accountHomeID = try XCTUnwrap(account.householdID)
+
+        let local = try PersistenceController(storeURL: fixture.source)
+        let sourceGraph = try XCTUnwrap(HomeDiscoveryService(persistence: local).discover().homes
+            .first { $0.graph.householdID == fixture.homeID }?.graph)
+        let deletion = try await HomeDeletionService(persistence: local)
+            .prepare(graph: sourceGraph, scope: nil)
+        try LocalHomeDeletionJournal(storeURL: fixture.source).retain(deletion)
+        for store in local.container.persistentStoreCoordinator.persistentStores {
+            try local.container.persistentStoreCoordinator.remove(store)
+        }
+        XCTAssertNotNil(try HomeAdoptionJournal(baseDirectory: fixture.directory).retainedLocalRecord(),
+            "A pending sidecar must keep the exact source available for replay")
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !bootstrap.homeDeletionStatuses.contains(where: { $0.command == deletion && $0.completed }),
+              ContinuousClock.now < deadline {
+            await bootstrap.refreshHomeDeletionStatuses()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(bootstrap.homeDeletionStatuses.contains { $0.command == deletion && $0.completed },
+            bootstrap.homeDeletionStatusError ?? "Retained deletion did not finish")
+        XCTAssertNil(bootstrap.retainedLocalHomeName)
+        if case .ready(let current) = bootstrap.state { XCTAssertEqual(current.householdID, accountHomeID) }
+        else { XCTFail("The selected account home should remain open") }
+        XCTAssertNil(try HomeAdoptionJournal(baseDirectory: fixture.directory).retainedLocalRecord())
+        let reopened = try PersistenceController(storeURL: fixture.source)
+        XCTAssertFalse(try HomeDiscoveryService(persistence: reopened).discover().homes
+            .contains { $0.graph.householdID == fixture.homeID })
+        for store in reopened.container.persistentStoreCoordinator.persistentStores {
+            try reopened.container.persistentStoreCoordinator.remove(store)
+        }
+    }
+
+    func testCompletedCopiedHomeDeletionPermitsOneNewExplicitCopy() async throws {
+        let fixture = try fixture()
+        let bootstrap = bootstrap(fixture)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.homeEntryCommands.useICloudForRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let firstDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (bootstrap.retainedLocalCopyState != .copied
+               || bootstrap.homeEntry.homes.count != 2
+               || bootstrap.homeEntry.currentHomeName != "Original home"),
+              ContinuousClock.now < firstDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied,
+            bootstrap.homeSetupError?.localizedDescription ?? "First copy did not finish")
+        let first = try XCTUnwrap(bootstrap.homeEntry.homes.first { $0.name == "Original home" })
+        let account = try await waitForReady(bootstrap)
+        let scope = try XCTUnwrap(account.homeScope)
+        XCTAssertEqual(scope.graph, first.id)
+        let cart = try XCTUnwrap(account.personalCartService)
+        let deletion = HomeDeletionService(persistence: account.persistence, cart: cart)
+        let command = try await deletion.prepare(graph: first.id, scope: scope)
+        let deleted = try await deletion.execute(command)
+        XCTAssertTrue(deleted.completed)
+
+        let deletionDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.retainedLocalCopyState != .available, ContinuousClock.now < deletionDeadline {
+            await bootstrap.refreshHomeDeletionStatuses()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .available,
+            bootstrap.homeDeletionStatusError ?? "Completed deletion was not observed")
+        XCTAssertTrue(bootstrap.homeDeletionStatuses.contains { $0.command == command && $0.completed })
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let original = try await waitForReady(bootstrap)
+        XCTAssertEqual(original.householdID, fixture.homeID)
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .available)
+
+        try await bootstrap.homeEntryCommands.useICloudForRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let secondDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (bootstrap.retainedLocalCopyState != .copied
+               || bootstrap.homeEntry.homes.count != 2
+               || bootstrap.homeEntry.currentHomeName != "Original home"),
+              ContinuousClock.now < secondDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied,
+            bootstrap.homeSetupError?.localizedDescription ?? "Second copy did not finish")
+        let second = try XCTUnwrap(bootstrap.homeEntry.homes.first { $0.name == "Original home" })
+        XCTAssertNotEqual(first.id.householdID, second.id.householdID)
+        XCTAssertNotEqual(second.id.householdID, fixture.homeID)
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2, "The unrelated account home remains")
+        XCTAssertTrue(second.isSelected)
+    }
+
+    func testDeletedRetainedSourceCanCreateAndCopyNewLocalHomeWithoutRewritingAdoption() async throws {
+        let fixture = try fixture()
+        let bootstrap = bootstrap(fixture)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let adoption = try XCTUnwrap(HomeAdoptionJournal(baseDirectory: fixture.directory).verifiedRecord())
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+
+        let actions = try XCTUnwrap(bootstrap.localHomeDeletionActions())
+        let deletion = try await actions.prepare()
+        let deleted = try await actions.confirm(deletion)
+        XCTAssertTrue(deleted.completed)
+        XCTAssertEqual(bootstrap.homeEntry.root, .noHomes)
+        try await bootstrap.createFirstHome()
+        let fresh = try await waitForReady(bootstrap)
+        let freshID = try XCTUnwrap(fresh.householdID)
+        XCTAssertNotEqual(freshID, fixture.homeID)
+        _ = try fresh.service.createCategory(name: "New local category", householdID: freshID)
+        XCTAssertEqual(bootstrap.homeEntry.root, .localHome)
+
+        try await bootstrap.homeEntryCommands.useICloudForLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (bootstrap.retainedLocalCopyState != .copied
+               || bootstrap.homeEntry.homes.count != 2
+               || bootstrap.homeEntry.currentHomeName != "My Home"),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied,
+            bootstrap.homeSetupError?.localizedDescription ?? "New local copy did not complete")
+        XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "My Home")
+        let copied = try XCTUnwrap(bootstrap.homeEntry.homes.first { $0.name == "My Home" })
+        XCTAssertNotEqual(copied.id.householdID, freshID)
+        XCTAssertTrue(copied.isSelected)
+        XCTAssertEqual(try HomeAdoptionJournal(baseDirectory: fixture.directory).verifiedRecord(), adoption)
+
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let returned = try await waitForReady(bootstrap)
+        XCTAssertEqual(returned.householdID, freshID)
+        let categories = try returned.persistence.container.viewContext.fetch(Category.fetchRequest())
+        XCTAssertTrue(categories.contains { $0.name == "New local category" })
+        XCTAssertFalse(categories.contains { $0.name == "Keep this category" })
+    }
+
+    func testJoiningAfterReplacingDeletedLocalSourceKeepsNewHomeReachable() async throws {
+        let fixture = try fixture()
+        let bootstrap = bootstrap(fixture)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        let choice = try await bootstrap.prepareInvitationSetup()
+        try await bootstrap.confirmInvitationSetup(choice, copyLocal: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let adoption = try XCTUnwrap(HomeAdoptionJournal(baseDirectory: fixture.directory).verifiedRecord())
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        let actions = try XCTUnwrap(bootstrap.localHomeDeletionActions())
+        let deletion = try await actions.prepare()
+        _ = try await actions.confirm(deletion)
+        try await bootstrap.createFirstHome()
+        let replacement = try await waitForReady(bootstrap)
+        let replacementID = try XCTUnwrap(replacement.householdID)
+        _ = try replacement.service.createCategory(name: "Replacement groceries", householdID: replacementID)
+
+        try await bootstrap.connectForJoiningKeepingLocalHome()
+        await bootstrap.runLoadingTransition()
+        let account = try await waitForReady(bootstrap)
+        XCTAssertEqual(account.householdID == fixture.homeID, false)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "My Home")
+        XCTAssertEqual(try HomeAdoptionJournal(baseDirectory: fixture.directory).verifiedRecord(), adoption)
+
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        let restored = try await waitForReady(bootstrap)
+        XCTAssertEqual(restored.householdID, replacementID)
+        let categories = try restored.persistence.container.viewContext.fetch(Category.fetchRequest())
+        XCTAssertTrue(categories.contains { $0.name == "Replacement groceries" })
+        XCTAssertFalse(categories.contains { $0.name == "Keep this category" })
+    }
+
+    func testNotNowDuringLocalJoinReturnsOriginalAndDeferredInviteStaysSafeAfterRelaunch() async throws {
+        let fixture = try fixture()
+        let inboxURL = fixture.directory.appendingPathComponent("Invitations.json")
+        let namespace = "iCloud.test.adoption-bootstrap"
+        let inbox = try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
+            environment: "Development")
+        let entry = try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: namespace,
+            environment: "Development", share: HomeShareIdentity(recordName: "invited-share",
+                zoneName: "zone", zoneOwnerName: "owner")), metadataArchive: Data([1]))
+        let accountURL = fixture.directory.appendingPathComponent("EmptyAccount.sqlite")
+        let makeBootstrap: (Bool) throws -> PersistenceBootstrap = { autoJoin in
+            let controller = try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
+                environment: "Development")
+            return PersistenceBootstrap(configuration: { .local(storeURL: fixture.source) },
+                defaults: fixture.defaults, invitations: HomeInvitationController(inbox: controller),
+                autoJoinInvitations: autoJoin, makeAccountProvider: { _ in fixture.provider },
+                accountStoreDirectory: { fixture.directory },
+                activateAccountStore: { source, _, _, copying in
+                    XCTAssertNil(source)
+                    XCTAssertFalse(copying)
+                    return .local(storeURL: accountURL)
+                })
+        }
+        let bootstrap = try makeBootstrap(false)
+        retireBeforeCleanup(bootstrap)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.joinInvitation(entry.id)
+        XCTAssertEqual(bootstrap.homeEntry.invitations.first?.id, entry.id,
+            "The same accepted invitation stays visible during account retirement")
+        try await bootstrap.dismissJoin(entry.id)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true)
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !bootstrap.isShowingRetainedLocalHome, ContinuousClock.now < deadline {
+            if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(bootstrap.isShowingRetainedLocalHome)
+        if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+        let original = try await waitForReady(bootstrap)
+        XCTAssertEqual(original.householdID, fixture.homeID)
+        XCTAssertNil(original.homeScope)
+
+        // Reopen the account, then reconstruct the bootstrap as though the app
+        // relaunched after the durable Not Now but before returning locally.
+        try await bootstrap.connectBackToAccount()
+        await bootstrap.runLoadingTransition()
+        let accountBeforeRelaunch = try await waitForReady(bootstrap)
+        XCTAssertNil(accountBeforeRelaunch.householdID)
+        bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await bootstrap.runLoadingTransition()
+        let relaunched = try makeBootstrap(true)
+        retireBeforeCleanup(relaunched)
+        // The application factory restores this saved account-mode preference
+        // before start(); direct test bootstraps use the same activation entry.
+        XCTAssertTrue(fixture.defaults.bool(forKey: "shopping.personalCart.enabled"))
+        relaunched.activatePersonalCarts(importLegacy: false)
+        await relaunched.runLoadingTransition()
+        let account = try await waitForReady(relaunched)
+        XCTAssertNil(account.householdID)
+        XCTAssertFalse(relaunched.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true)
+        XCTAssertEqual(relaunched.homeEntry.invitations.first?.id, entry.id)
+        XCTAssertEqual(relaunched.retainedLocalHomeName, "Original home")
+        try await relaunched.openRetainedLocalHome()
+        await relaunched.runLoadingTransition()
+        let restored = try await waitForReady(relaunched)
+        XCTAssertEqual(restored.householdID, fixture.homeID)
+    }
+
     private struct ImportedInvitationFixture {
         let directory: URL
         let privateURL: URL
@@ -209,10 +1010,25 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let originalNeedID: UUID?
     }
 
+    private func saveOriginalHomeSelection(_ fixture: ImportedInvitationFixture) throws -> HomeGraphIdentity {
+        let original = try XCTUnwrap(fixture.original)
+        let session = try fixture.provider.currentSession()
+        let saved = ActiveHomeCoordinator(defaults: fixture.defaults)
+        saved.bind(session)
+        let request = try XCTUnwrap(saved.beginDiscovery())
+        _ = saved.reconcile(HomeDiscovery(homes: [
+            HomeCandidate(graph: original, name: "Original account home", access: .owner),
+            HomeCandidate(graph: fixture.invited, name: "Invited home", access: .contributor)
+        ], hasIncompleteRoots: false), request: request)
+        try saved.select(original)
+        return original
+    }
+
     /// These are two plain SQLite stores. The participant-store lookup and native
     /// rejoin verification boundary are substituted; no CloudKit result is proven.
     private func importedInvitation(originalHome: Bool = true, ready: Bool = true,
-                                    unrelatedInvitation: Bool = false, secondImportedHome: Bool = false) async throws -> ImportedInvitationFixture {
+                                    unrelatedInvitation: Bool = false, secondImportedHome: Bool = false,
+                                    notifications: NotificationCenter = NotificationCenter()) async throws -> ImportedInvitationFixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let privateURL = directory.appendingPathComponent("Private.sqlite")
@@ -226,7 +1042,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         }
         let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.imported-choice",
             environment: "Development", cacheDirectory: directory.appendingPathComponent("Bindings"),
-            lookup: .init(status: { .available }, recordName: { "account-A" }))
+            lookup: .init(status: { .available }, recordName: { "account-A" }), notifications: notifications)
         await provider.refresh()
         let session = try provider.currentSession()
         let originalStore = try PersistenceController(storeURL: privateURL)
@@ -285,7 +1101,9 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
     }
 
     private func openImportedFixture(_ fixture: ImportedInvitationFixture,
+                                     autoJoinInvitations: Bool = false,
                                      accountProvider: ShopperSessionProvider? = nil,
+                                     accountStoreForSession: (@Sendable (ShopperSession) -> PersistenceConfiguration)? = nil,
                                      detectedShare: HomeShareIdentity = HomeShareIdentity(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
                                      verifyMembership: @escaping @Sendable (HomeNativeAccessIdentity) async throws -> Void = { _ in },
                                      observeInvitationWorker: (HomeInvitationWorker) -> Void = { _ in },
@@ -301,6 +1119,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let privateURL = fixture.privateURL
         let participantURL = fixture.participantURL
         let bootstrap = PersistenceBootstrap(defaults: fixture.defaults, invitations: invitations,
+            autoJoinInvitations: autoJoinInvitations,
             makeAccountProvider: { _ in accountProvider ?? fixture.provider }, accountStoreDirectory: { fixture.directory },
             participantStoreForHomeChoice: { persistence in
                 persistence.container.persistentStoreCoordinator.persistentStores.first { $0.url == participantURL }
@@ -312,10 +1131,11 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             },
             makeHomeRejoinVerifier: { _ in LocalRejoinVerifier(refreshMembership: verifyMembership) },
             discoverHomes: discoverHomes,
-            activateAccountStore: { source, _, _, importing in
+            activateAccountStore: { source, session, _, importing in
                 XCTAssertNil(source)
                 XCTAssertFalse(importing)
-                return .local(storeURL: privateURL, additionalStoreURLs: [participantURL])
+                return accountStoreForSession?(session)
+                    ?? .local(storeURL: privateURL, additionalStoreURLs: [participantURL])
             })
         retireBeforeCleanup(bootstrap)
         bootstrap.activatePersonalCarts(importLegacy: false)
@@ -381,6 +1201,188 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             XCTFail("A resolved entry cannot mint another grant")
         } catch { }
         XCTAssertEqual(try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited).currentGrants.count, 1)
+    }
+
+    func testAcceptedInvitationOpensImportedHomeWithoutAnotherOpenChoice() async throws {
+        let fixture = try await importedInvitation()
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        while bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
+    }
+
+    func testAccountChangeDuringHeldAcceptedOpenDoesNotReviveItAfterColdReturn() async throws {
+        let fixture = try await importedInvitation()
+        let original = try saveOriginalHomeSelection(fixture)
+        let accountA = try fixture.provider.currentSession()
+
+        let account = AccountIdentity()
+        let center = NotificationCenter()
+        let provider = try ShopperSessionProvider(containerIdentifier: accountA.containerIdentifier,
+            environment: accountA.environment, cacheDirectory: fixture.directory.appendingPathComponent("ChangingBindings"),
+            lookup: .init(status: { .available }, recordName: { await account.current() }), notifications: center)
+        let privateURL = fixture.privateURL
+        let participantURL = fixture.participantURL
+        let otherURL = fixture.directory.appendingPathComponent("OtherAccount.sqlite")
+        let stores: @Sendable (ShopperSession) -> PersistenceConfiguration = { session in
+            session == accountA ? .local(storeURL: privateURL, additionalStoreURLs: [participantURL])
+                : .local(storeURL: otherURL)
+        }
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Automatic Open held during native verification")
+        addTeardownBlock { await held.release() }
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            accountProvider: provider, accountStoreForSession: stores,
+            verifyMembership: { await held.hold($0) { started.fulfill() } })
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, original)
+        await fulfillment(of: [started], timeout: 5)
+        let beforeChange = try await waitForReady(bootstrap)
+        await account.change()
+        center.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !beforeChange.presentation.isActive
+        }, object: nil)], timeout: 5)
+        await bootstrap.runLoadingTransition()
+        await held.release()
+        let otherAccount = try await waitForReady(bootstrap)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            bootstrap.autoOpeningInvitationID == nil
+        }, object: nil)], timeout: 5)
+        XCTAssertNil(bootstrap.autoOpeningInvitationID,
+            "The retired native verification must settle before the cold bootstrap reopens its journal")
+        XCTAssertNil(otherAccount.homeScope)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
+
+        bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await bootstrap.runLoadingTransition()
+        let relaunchCenter = NotificationCenter()
+        let relaunchedProvider = try ShopperSessionProvider(containerIdentifier: accountA.containerIdentifier,
+            environment: accountA.environment, cacheDirectory: fixture.directory.appendingPathComponent("RelaunchBindings"),
+            lookup: .init(status: { .available }, recordName: { await account.current() }),
+            notifications: relaunchCenter)
+        let relaunched = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            accountProvider: relaunchedProvider, accountStoreForSession: stores)
+        XCTAssertNil(relaunched.homeCoordinator.activeScope)
+        await account.set("account-A")
+        let beforeReturn = try await waitForReady(relaunched)
+        relaunchCenter.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !beforeReturn.presentation.isActive
+        }, object: nil)], timeout: 5)
+        await relaunched.runLoadingTransition()
+        _ = try await waitForReady(relaunched)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            relaunched.invitations?.entries.contains { $0.id == fixture.entryID } == true
+                && relaunched.homeCoordinator.discoveryState == .complete
+        }, object: nil)], timeout: 5)
+        XCTAssertEqual(relaunched.homeCoordinator.activeScope?.graph, original)
+        XCTAssertFalse(relaunched.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
+        try await relaunched.joinInvitation(fixture.entryID)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            relaunched.homeCoordinator.activeScope?.graph == fixture.invited
+        }, object: nil)], timeout: 5)
+        XCTAssertEqual(relaunched.homeCoordinator.activeScope?.graph, fixture.invited,
+            "The accepted home remains available through an explicit Open")
+    }
+
+    func testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification() async throws {
+        let center = NotificationCenter()
+        let fixture = try await importedInvitation(notifications: center)
+        let original = try saveOriginalHomeSelection(fixture)
+        let session = try fixture.provider.currentSession()
+        // Simulate a process ending after the provider durably invalidates its
+        // cached account but before Bootstrap can write the invitation journal.
+        center.post(name: .CKAccountChanged, object: nil)
+        let provider = try ShopperSessionProvider(containerIdentifier: session.containerIdentifier,
+            environment: session.environment, cacheDirectory: fixture.directory.appendingPathComponent("Bindings"),
+            lookup: .init(status: { .available }, recordName: { "account-A" }),
+            notifications: NotificationCenter())
+        XCTAssertEqual(provider.state, .accountChanged)
+        let before = try HomeInvitationInbox(url: fixture.inboxURL,
+            containerIdentifier: session.containerIdentifier, environment: session.environment)
+        XCTAssertTrue(before.entries.first { $0.id == fixture.entryID }?.openRequested == true)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true, accountProvider: provider)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, original)
+        let persisted = try HomeInvitationInbox(url: fixture.inboxURL,
+            containerIdentifier: session.containerIdentifier, environment: session.environment)
+        XCTAssertEqual(persisted.entries.first { $0.id == fixture.entryID }?.state, .ready(fixture.invited))
+        XCTAssertFalse(persisted.entries.first { $0.id == fixture.entryID }?.openRequested == true)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
+        try await bootstrap.joinInvitation(fixture.entryID)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            bootstrap.homeCoordinator.activeScope?.graph == fixture.invited
+        }, object: nil)], timeout: 5)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+    }
+
+    func testBoundInvitationPresentationSurvivesAccountStoreRetirement() async throws {
+        let fixture = try await importedInvitation()
+        let bootstrap = try await openImportedFixture(fixture)
+        let invitation = try XCTUnwrap(bootstrap.homeEntry.invitations.first { $0.id == fixture.entryID })
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .active(invitation))
+
+        bootstrap.retry()
+        XCTAssertFalse(bootstrap.invitations?.entries.contains { $0.id == fixture.entryID } == true,
+            "The controller must continue filtering entries without a verified session")
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .active(invitation),
+            "A presentation-only exact entry survives the temporary store transition")
+    }
+
+    func testExplicitRetryOpensReadyInvitationAfterNativeVerificationFailsOnce() async throws {
+        let fixture = try await importedInvitation()
+        let verification = FirstRejoinFailure()
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            verifyMembership: { try await verification.refresh($0) })
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.joinError == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotNil(bootstrap.joinError)
+        XCTAssertNotEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+
+        try await bootstrap.joinInvitation(fixture.entryID)
+        while bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        while bootstrap.autoOpeningInvitationID != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertTrue(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
+        XCTAssertNil(bootstrap.joinError)
+        let attempts = await verification.attempts
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testNewerHomeSelectionDefersAutomaticOpenDuringNativeVerification() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Automatic verification held")
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            verifyMembership: { await held.hold($0) { started.fulfill() } })
+        await fulfillment(of: [started], timeout: 5)
+        let original = try XCTUnwrap(fixture.original)
+        try await bootstrap.selectHome(original)
+        await held.release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.autoOpeningInvitationID != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(bootstrap.autoOpeningInvitationID, "The retired automatic Open must finish before state is asserted")
+        let invitation = try XCTUnwrap(bootstrap.homeEntry.invitations.first { $0.id == fixture.entryID })
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .deferred(invitation))
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, original)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
     }
 
     func testOpenSelectionSurvivesRefreshWhileCommittedDiscoveryIsHeld() async throws {
@@ -836,6 +1838,17 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
 
 }
 
+private actor FirstRejoinFailure {
+    enum Failure: Error { case firstVerification }
+
+    private(set) var attempts = 0
+
+    func refresh(_ identity: HomeNativeAccessIdentity) throws {
+        attempts += 1
+        if attempts == 1 { throw Failure.firstVerification }
+    }
+}
+
 private actor RejoinVerificationProbe {
     private(set) var identities: [HomeNativeAccessIdentity] = []
     private var continuation: CheckedContinuation<Void, Never>?
@@ -847,6 +1860,10 @@ private actor RejoinVerificationProbe {
         await withCheckedContinuation { continuation = $0; started() }
     }
     func release() { released = true; continuation?.resume(); continuation = nil }
+}
+
+private enum CopyDiscoveryRequest {
+    @TaskLocal static var accessChange = false
 }
 
 private enum OpenDiscoveryRequest {

@@ -85,13 +85,16 @@ struct HomeEffectAccess {
     let restrictionIDs: Set<UUID>
     let unresolvedRestrictionIDs: Set<UUID>
     let hasCompletePermissions: Bool
+    let isDeleted: Bool
 
-    init(records: [HomeAccessRecord], requiredBlockIDs: Set<UUID> = [], requiredRestrictionIDs: Set<UUID> = []) throws {
+    init(records: [HomeAccessRecord], requiredBlockIDs: Set<UUID> = [], requiredRestrictionIDs: Set<UUID> = [],
+         isDeleted: Bool = false) throws {
         for record in records { try record.validate() }
         guard Set(records.map(\.id)).count == records.count,
               Set(records.map { $0.scope.accountBinding }).count <= 1,
               records.allSatisfy({ $0.scope == records.first?.scope }) else { throw PersonalCartError.corruptRecord }
         self.records = records
+        self.isDeleted = isDeleted
         let imported = Set(records.compactMap { if case .blocked = $0.action { $0.id } else { nil } })
         blockIDs = records.reduce(into: imported.union(requiredBlockIDs)) { ids, record in
             if case .joined(let observed) = record.action { ids.formUnion(observed) }
@@ -124,11 +127,11 @@ struct HomeEffectAccess {
     private var hasConsistentShare: Bool { Set(currentGrants.map(\.share)).count <= 1 }
 
     func permitsPublication(_ authority: HomeEffectAuthority) -> Bool {
-        hasCompletePermissions && unresolvedRestrictionIDs.isEmpty
+        !isDeleted && hasCompletePermissions && unresolvedRestrictionIDs.isEmpty
             && authority.observedRestrictionIDs.isSubset(of: restrictionIDs) && permitsMembership(authority)
     }
 
-    var requiresExplicitRejoin: Bool { !permitsMembership(capturedAuthority) }
+    var requiresExplicitRejoin: Bool { isDeleted || !permitsMembership(capturedAuthority) }
 
     private func permitsMembership(_ authority: HomeEffectAuthority) -> Bool {
         guard hasCompleteBoundary, hasConsistentShare, authority.observedBlockIDs == blockIDs else { return false }

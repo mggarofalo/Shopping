@@ -56,6 +56,9 @@ struct CartedGroceriesView: View {
         let visibleCarted = visibleCartedNeeds
         let activeStores = validActiveStores
         List {
+            HomeScopeControl(allowsSwitching: false)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             Section {
                 GroceryScopeControls(
                     navigation: navigation,
@@ -95,6 +98,7 @@ struct CartedGroceriesView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("In cart")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {
             GroceryFiltersView(

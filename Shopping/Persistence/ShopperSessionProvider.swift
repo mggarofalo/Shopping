@@ -92,8 +92,13 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
         lock.withLock { storedState }
     }
 
-    func observeSessionChanges(_ handler: @escaping @Sendable () -> Void) -> NSObjectProtocol {
-        notifications.addObserver(forName: .shopperSessionDidChange, object: self, queue: nil) { _ in handler() }
+    func observeSessionChanges(
+        _ handler: @escaping @Sendable (ShopperSessionState, ShopperSession?) -> Void
+    ) -> NSObjectProtocol {
+        notifications.addObserver(forName: .shopperSessionDidChange, object: self, queue: nil) { notification in
+            guard let announced = notification.userInfo?["state"] as? ShopperSessionState else { return }
+            handler(announced, notification.userInfo?["invalidatedSession"] as? ShopperSession)
+        }
     }
 
     func removeSessionObserver(_ observer: NSObjectProtocol) {
@@ -138,8 +143,9 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
         } catch {
             resolution = .failed(error)
         }
-        let changedState: ShopperSessionState? = lock.withLock {
+        let change: (state: ShopperSessionState, invalidatedSession: ShopperSession?)? = lock.withLock {
             guard generation == requestGeneration else { return nil }
+            let outgoingSession = cachedBinding?.session
             switch resolution {
             case .authenticated(let session):
                 do {
@@ -166,19 +172,27 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
                     storedState = .temporarilyUnavailable(error.localizedDescription)
                 }
             }
-            return storedState
+            let invalidatedSession: ShopperSession?
+            switch storedState {
+            case .setupRequired(.noAccount), .setupRequired(.restricted):
+                invalidatedSession = outgoingSession
+            default:
+                invalidatedSession = nil
+            }
+            return (storedState, invalidatedSession)
         }
-        if let changedState { announce(changedState) }
+        if let change { announce(change.state, invalidatedSession: change.invalidatedSession) }
     }
 
     private func accountDidChange() {
-        let newState: ShopperSessionState = lock.withLock {
+        let (newState, invalidatedSession): (ShopperSessionState, ShopperSession?) = lock.withLock {
+            let invalidatedSession = cachedBinding?.session
             generation &+= 1 // Ignore any in-flight response from the previous account.
             invalidateCache()
             storedState = .accountChanged
-            return storedState
+            return (storedState, invalidatedSession)
         }
-        announce(newState)
+        announce(newState, invalidatedSession: invalidatedSession)
     }
 
     // Called only with the lock held. The cache is a pointer, never the grocery database.
@@ -199,8 +213,10 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
         try JSONEncoder().encode(binding).write(to: cacheURL, options: .atomic)
     }
 
-    private func announce(_ state: ShopperSessionState) {
-        notifications.post(name: .shopperSessionDidChange, object: self, userInfo: ["state": state])
+    private func announce(_ state: ShopperSessionState, invalidatedSession: ShopperSession? = nil) {
+        var details: [String: Any] = ["state": state]
+        if let invalidatedSession { details["invalidatedSession"] = invalidatedSession }
+        notifications.post(name: .shopperSessionDidChange, object: self, userInfo: details)
     }
 
     private static func validateConfiguration(containerIdentifier: String, environment: String) throws {

@@ -106,10 +106,12 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         return Fixture(bootstrap: bootstrap, provider: provider, account: account)
     }
 
-    private func ready(_ bootstrap: PersistenceBootstrap) async throws -> PersistenceBootstrap.ReadyState {
+    private func ready(_ bootstrap: PersistenceBootstrap,
+                       matching predicate: (PersistenceBootstrap.ReadyState) -> Bool = { _ in true }) async throws
+        -> PersistenceBootstrap.ReadyState {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while ContinuousClock.now < deadline {
-            if case .ready(let value) = bootstrap.state { return value }
+            if case .ready(let value) = bootstrap.state, predicate(value) { return value }
             if case .failed(let error) = bootstrap.state { throw error }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -183,13 +185,24 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             let result = try Self.snapshot(service, scope, count: 888)
             started.fulfill(); await gate.wait(); return result
         })
+        addTeardownBlock {
+            await gate.open()
+            try await self.drain(f.bootstrap)
+        }
         let before = try await ready(f.bootstrap)
         let graph = try XCTUnwrap(before.homeScope?.graph)
         let check = Task { await f.bootstrap.refreshSharingStatus() }
         await fulfillment(of: [started], timeout: 2)
         try f.bootstrap.homeCoordinator.select(graph, renewingAuthority: true)
         try await f.bootstrap.refreshHomes()
-        let after = try await ready(f.bootstrap)
+        // A newer discovery can own publication after refreshHomes returns.
+        // Observe the renewed authority before releasing the captured old read.
+        let after = try await ready(f.bootstrap, matching: {
+            $0.homeScope == before.homeScope
+                && $0.homeGeneration == f.bootstrap.homeCoordinator.generation
+                && $0.homeGeneration > before.homeGeneration
+                && $0.presentation.id != before.presentation.id
+        })
         XCTAssertEqual(after.homeScope, before.homeScope)
         XCTAssertNotEqual(after.presentation.id, before.presentation.id)
         await check.value

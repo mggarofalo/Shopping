@@ -332,6 +332,7 @@ final class GroceryEditingUITests: XCTestCase {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize]
         }
         app.launch()
+        if fixture == nil { app.createFirstHomeForWorkflow() }
         XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         return app
     }

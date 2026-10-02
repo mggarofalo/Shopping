@@ -49,6 +49,163 @@ final class HomeInvitationInboxTests: XCTestCase {
         XCTAssertTrue(try restored.finishAcceptance(attempt))
     }
 
+    func testVerifiedDisplayNamePersistsAndOldJournalDecodesWithoutIt() throws {
+        let (url, _) = try fixture()
+        let service = try inbox(url)
+        let first = try service.enqueue(identity: identity(), metadataArchive: Data([1]), displayName: "Kitchen")
+        XCTAssertEqual(try inbox(url).entries.first?.displayName, "Kitchen")
+        XCTAssertEqual(try service.enqueue(identity: identity(), metadataArchive: Data([2])).displayName,
+            "Kitchen", "A link without a title retains the last known plain name")
+        let renamed = try service.enqueue(identity: identity(), metadataArchive: Data([3]), displayName: "Our Home")
+        XCTAssertEqual(renamed.id, first.id)
+        XCTAssertEqual(try inbox(url).entries.first?.displayName, "Our Home")
+
+        var journal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var entries = try XCTUnwrap(journal["entries"] as? [[String: Any]])
+        entries[0].removeValue(forKey: "displayName")
+        journal["entries"] = entries
+        try JSONSerialization.data(withJSONObject: journal).write(to: url, options: .atomic)
+        XCTAssertNil(try inbox(url).entries.first?.displayName)
+    }
+
+    func testOpenIntentSurvivesImportButDismissalAndNewerChoiceDeferNavigation() throws {
+        let (url, session) = try fixture()
+        let service = try inbox(url)
+        let entry = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        XCTAssertTrue(entry.openRequested)
+        try service.setSession(session)
+        let attempt = try service.beginAcceptance(id: entry.id, sharedStoreIdentifier: "shared-store")
+        try service.finishAcceptance(attempt)
+        XCTAssertTrue(service.entries[0].openRequested)
+        try service.deferOpen(id: entry.id)
+        let reopened = try inbox(url)
+        try reopened.setSession(session)
+        XCTAssertFalse(reopened.entries[0].openRequested)
+        let imported = graph()
+        let resolution = try reopened.beginImportResolution(id: entry.id, sharedStoreIdentifier: imported.storeIdentifier)
+        XCTAssertTrue(try reopened.markReady(resolution, graph: imported))
+        XCTAssertEqual(reopened.entries[0].state, .ready(imported))
+        XCTAssertFalse(reopened.entries[0].openRequested)
+        try reopened.requestOpen(id: entry.id)
+        XCTAssertTrue(try inbox(url).entries[0].openRequested)
+        try reopened.resolveActivation(id: entry.id)
+        XCTAssertFalse(reopened.entries[0].openRequested)
+        XCTAssertTrue(reopened.entries[0].activationResolved)
+    }
+
+    func testUnboundNotNowRetainsInvitationAndHomesOpenRearmsExactIntent() throws {
+        let (url, _) = try fixture()
+        let service = try inbox(url)
+        let entry = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        try service.deferOpen(id: entry.id)
+        let deferred = try inbox(url)
+        XCTAssertEqual(deferred.entries.first?.id, entry.id)
+        XCTAssertEqual(deferred.entries.first?.state, .queued)
+        XCTAssertFalse(deferred.entries.first?.openRequested == true)
+        try deferred.requestOpen(id: entry.id)
+        XCTAssertTrue(try inbox(url).entries.first?.openRequested == true)
+    }
+
+    func testColdDuplicateKeepsItsDeferredChoiceWhenMergedIntoBoundInvitation() throws {
+        let (url, session) = try fixture()
+        let service = try inbox(url)
+        try service.setSession(session)
+        let bound = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        try service.setSession(nil)
+        let cold = try service.enqueue(identity: identity(), metadataArchive: Data([2]))
+        XCTAssertNotEqual(cold.id, bound.id)
+        try service.deferOpen(id: cold.id)
+        try service.setSession(session)
+
+        let merged = try XCTUnwrap(service.entries.first)
+        XCTAssertEqual(service.entries.count, 1)
+        XCTAssertEqual(merged.id, bound.id)
+        XCTAssertEqual(merged.metadataArchive, Data([2]))
+        XCTAssertFalse(merged.openRequested)
+        let relaunched = try inbox(url)
+        try relaunched.setSession(session)
+        XCTAssertFalse(relaunched.entries.first?.openRequested == true)
+    }
+
+    func testDeferredInvitationFromOriginalAccountCannotBeRearmedByAnotherAccount() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let entry = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        try service.deferOpen(id: entry.id)
+        try service.setSession(otherSession)
+        XCTAssertThrowsError(try service.requestOpen(id: entry.id))
+        XCTAssertThrowsError(try service.deferOpen(id: entry.id))
+        XCTAssertFalse(service.entries[0].openRequested)
+        try service.setSession(originalSession)
+        XCTAssertFalse(service.entries[0].openRequested)
+    }
+
+    func testAccountBoundaryDurablyDefersOnlyBoundOldNavigationAndKeepsManualOpen() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let old = try service.enqueue(identity: identity("old"), metadataArchive: Data([1]))
+        let attempt = try service.beginAcceptance(id: old.id, sharedStoreIdentifier: "shared-store")
+        try service.finishAcceptance(attempt)
+        try service.setSession(otherSession)
+        let current = try service.enqueue(identity: identity("current"), metadataArchive: Data([2]))
+        try service.setSession(nil)
+        let cold = try service.enqueue(identity: identity("cold"), metadataArchive: Data([3]))
+
+        try service.retireAutomaticOpen(boundToOtherAccountThan: otherSession)
+        let restored = try inbox(url)
+        XCTAssertEqual(restored.entries.first { $0.id == old.id }?.state, .loading)
+        XCTAssertFalse(restored.entries.first { $0.id == old.id }?.openRequested == true)
+        XCTAssertTrue(restored.entries.first { $0.id == current.id }?.openRequested == true)
+        XCTAssertTrue(restored.entries.first { $0.id == cold.id }?.openRequested == true,
+            "An unbound native delivery still opens after its account is verified")
+
+        try restored.setSession(originalSession)
+        try restored.requestOpen(id: old.id)
+        XCTAssertTrue(try inbox(url).entries.first { $0.id == old.id }?.openRequested == true)
+        try restored.setSession(nil)
+        try restored.retireAutomaticOpen(boundTo: originalSession)
+        XCTAssertFalse(try inbox(url).entries.first { $0.id == old.id }?.openRequested == true)
+    }
+
+    func testPersistedUnknownAccountInvalidationDefersAllBoundButNotFreshUnboundIngress() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let original = try service.enqueue(identity: identity("old"), metadataArchive: Data([1]))
+        try service.setSession(otherSession)
+        let other = try service.enqueue(identity: identity("other"), metadataArchive: Data([2]))
+        try service.setSession(nil)
+        let fresh = try service.enqueue(identity: identity("cold"), metadataArchive: Data([3]))
+
+        try service.retireAutomaticOpenForAllBoundAccounts()
+        let relaunched = try inbox(url)
+        XCTAssertFalse(relaunched.entries.first { $0.id == original.id }?.openRequested == true)
+        XCTAssertFalse(relaunched.entries.first { $0.id == other.id }?.openRequested == true)
+        XCTAssertTrue(relaunched.entries.first { $0.id == fresh.id }?.openRequested == true)
+        try relaunched.setSession(originalSession)
+        try relaunched.requestOpen(id: original.id)
+        XCTAssertTrue(try inbox(url).entries.first { $0.id == original.id }?.openRequested == true)
+    }
+
+    func testCachedAccountCanDeferOnlyItsOwnNavigationIntent() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let entry = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        try service.setSession(nil)
+        XCTAssertThrowsError(try service.deferOpen(id: entry.id, expectedSession: otherSession))
+        try service.deferOpen(id: entry.id, expectedSession: originalSession)
+        XCTAssertFalse(service.entries[0].openRequested)
+        XCTAssertThrowsError(try service.requestOpen(id: entry.id),
+            "A cached account can stop navigation but cannot start an invitation operation")
+    }
+
     func testAlreadyAcceptedColdDuplicateCollapsesAfterAuthentication() throws {
         let (url, session) = try fixture()
         let first = try inbox(url)

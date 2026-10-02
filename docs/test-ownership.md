@@ -258,6 +258,12 @@ per-home filters and draft lease isolation. Draft lease cases retain the origina
 scope, prevent late completion from deleting a reopened draft, and prevent parent
 completion from resurrecting nested drafts.
 
+SHOPPING-171 adds value-only home entry coverage here: unknown and incomplete
+discovery cannot appear as confirmed empty; the snapshot preserves exact invitation
+and graph identity without carrying archived metadata; scoped forgetting cannot
+erase a newer selection or another account, and reconciles the remaining homes.
+`ActiveHomeBootstrapTests` retains the actual store and account wiring proof.
+
 `ActiveHomeBootstrapTests` owns actual startup, explicit owned-home creation,
 selection retirement and the committed-creation/discovery race using isolated
 SQLite and an injected account provider/store opener. Its creation checkpoint
@@ -301,6 +307,11 @@ Its DEBUG fixture seeds an unacknowledged command for the existing populated hom
 only under the fresh UI-test store and active-home fixture flags. The fixture flag is
 removed before relaunch so the test exercises the journal, not repeated seeding.
 
+SHOPPING-172 adds `HomeCreationTests` proof that explicit first local creation reuses
+its exact saved IDs after relaunch without account ownership. `ActiveHomeBootstrapTests`
+owns available-account discovery before first creation and offline explicit local
+creation. The rendered one-tap entry remains UI-owned.
+
 ## Incoming invitations (SHOPPING-126)
 
 `HomeInvitationInboxTests` owns durable pre-authentication ingress, full share identity,
@@ -318,8 +329,15 @@ native imported relationships or CloudKit membership.
 
 `ActiveHomeBootstrapTests/testColdInvitationRestoresSelectionHoldBeforeFirstHomeDiscovery`
 owns the production bootstrap ordering which prevents sole-home autoactivation.
+
+SHOPPING-172 adds `HomeInvitationInboxTests` proof that open intent survives import
+and relaunch, while dismissal, a newer choice, activation resolution, and an account
+change have distinct durable results. `HomeAdoptionBootstrapTests` owns automatic
+exact-home activation and a held native verification where a newer home selection
+prevents late navigation. UI tests own the direct sheet and tap count.
 `PersonalCartUITests/testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries`
-owns the rendered invitation notice, dismissal, and retention after relaunch. Its DEBUG
+owns the direct invitation sheet, Not Now dismissal, no automatic reopening after
+relaunch, unchanged groceries, and the recovery row in Homes. Its DEBUG
 fixture requires a unique UI-test store and the active-home fixture; the seed flag is
 removed before relaunch. It uses no real CloudKit account or archived native capability.
 Native cold/warm delivery and real two-account sharing remain SHOPPING-30 proof.
@@ -350,11 +368,12 @@ plus the existing exact-home/account selection boundaries.
 fresh pending grant. Simulated import and decision evidence does not establish native
 share receipt or the two-iPhone invitation workflow; SHOPPING-30 retains that gate.
 
-`PersonalCartUITests/testInvitationSetupKeepsOriginalOnDeviceAndReturnsAfterRelaunch`
-owns the visible named setup choice, Not now followed by reconnect, keeping the home
-on-device, navigating back to its groceries, and relaunch without fixture reseeding.
-Its original and simulated account stores have distinct identities; its account,
-invitation journal and preferences are scoped to the unique UI fixture.
+`PersonalCartUITests/testLocalHomeRemainsAvailableInHomesPicker` owns the visible
+On This iPhone row after declining an invitation, its original groceries, and
+relaunch without fixture reseeding. `HomeAdoptionBootstrapTests` owns actual
+local-source retention and return through the account activation boundary.
+The UI fixture's account, invitation journal and preferences are scoped to its
+unique store. It does not claim a successful accepted-local UI join.
 `testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch` replaces the old
 setup-failure expectation that the original UI should retire before identity lookup:
 it now asserts the visible error and usable original groceries before and after
@@ -393,8 +412,8 @@ rollback, retired command rejection, and unchanged People and private carts.
 explicit delivery acknowledgement, pending versus accepted presentation, failed
 rename recovery, and the isolated UI fixture's contract.
 
-`HomeDetailsUITests` owns the disclosure's cancellation boundary, the ordinary system
-URL share sheet, retaining and resending a pending invitation after closing that
+`HomeDetailsUITests` owns direct presentation of the ordinary system URL share
+sheet, retaining and resending a pending invitation after closing that
 sheet, contributor renaming through SQLite and relaunch, and restricted membership
 with long names at accessibility text size. Its DEBUG fixture requires an explicit
 role and unique UI-test store; membership is simulated in memory while renaming
@@ -692,16 +711,16 @@ scope matching, cancellation, repeated confirmation, and stale prepare/confirm
 completion after presentation retirement. The native transport remains the owner
 of durable authorization, quarantine, and at-most-once purge behavior.
 
-`HomeDetailsUITests/testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome`
-owns the visible unsynced-change/private-history disclosure, Cancel returning
-without submission, Leave now producing an honest pending result, and disabling
+`HomeDetailsUITests/testContributorLeaveAlertCanCancelThenConfirmPendingOutcome`
+owns the native named Leave alert, Cancel returning without submission,
+Leave Home producing an honest pending result, and disabling
 a repeated leave. Its isolated DEBUG fixture provides native membership and an
 uncertain callback only; it does not seed a completed leave or prove CloudKit.
 
-`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome`
+`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughHomes`
 performs Leave now through the real transport and private ledger, with a DEBUG
 backend simulating loss of the native callback after exact root/list deletion.
-It opens Choose a home, verifies the removed root is unavailable and retained
+It opens Homes, verifies the removed root is unavailable and retained
 leave status remains reachable, then checks the explicit status action's
 idle → checking → uncertain-result transition. The bounded simulated network
 response makes that interaction distinguishable from an earlier automatic check;
@@ -931,11 +950,13 @@ cart reducers or expanding the quick acceptance selection.
   owns the durable private removal capture before membership-journal submission,
   SQLite/coordinator reconstruction, failure without passive retry, explicit retry,
   exact accepted/pending targets and retention of later members and original data.
-- `HomeDetailsUITests.testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers`
-  owns the real confirmation binding: cancel preserves membership, then confirm
-  removes the captured accepted and pending members while owner/home/groceries
-  remain usable. The existing isolated membership fixture supplies native results;
-  the UI never sends an actual invitation or removes a CloudKit participant.
+- `HomeDetailsUITests.testOwnerInviteAndCancelPendingInvitationPreservesGroceries`
+  owns direct Invite presentation and the pending-member confirmation binding:
+  cancel preserves membership, then confirm removes only the captured pending
+  invitation while owner/home/groceries remain usable. The isolated membership
+  fixture supplies native results; the UI never sends a real invitation or
+  removes a CloudKit participant. Stop Sharing backend recovery remains owned by
+  `HomeMembershipRemovalTests` and `HomeMembershipPrivateLedgerTests`.
 - `PersistenceContainerTests.testPostShareChildrenStayWithEachRootAndOnlyOwnerGraphEntersAssociationJournal`
   owns real child creation in two SQLite stores and owner-only association staging.
   The internal role-lookup overload substitutes store classification only; production
@@ -1563,3 +1584,512 @@ passed. Earlier failures and the bounded corrective reruns remain in the local
 evidence; this is not a claim that every affected owner ran together on the
 final candidate. No Full suite or new Full attestation was run. Physical-device
 before/after timing is recorded separately with the release evidence.
+
+## Native home entry and selection (SHOPPING-172)
+
+`PersonalCartUITests.testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch`
+uses a unique empty account fixture to prove the first Create Home action mounts
+My Home with an empty list and restores it after relaunch. It does not depend on
+a production iCloud account.
+
+`PersonalCartUITests.testAcceptedInvitationOpensExactHomeWithoutAppJoinTap`
+uses a unique accepted invitation fixture to prove the direct Invitation sheet,
+absence of a second Join action, automatic selection of Second home, and the
+original home still present in Homes. `testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries`
+uses a separate incomplete archive fixture to prove Not Now survives relaunch,
+retains the selected groceries, and leaves an Open Invitation recovery row.
+The fixture does not assert successful native CloudKit delivery.
+
+`PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns the flat Homes picker and scope-specific grocery/cart contents across
+switch and relaunch. `testLocalHomeRemainsAvailableInHomesPicker` owns the
+On This iPhone row, unchanged local groceries after declining an invitation,
+and the retained local home's explicit Use iCloud action before copying.
+Account activation and exact retained source are covered by
+`HomeAdoptionBootstrapTests`; no accepted-local UI journey is claimed.
+
+`HomeDetailsUITests.testOwnerDirectShareCancellationKeepsPendingInvitationAvailableToResend`
+proves Invite opens the system share sheet in one action, cancellation retains
+pending membership, and Resend opens the sheet again. The owner pending-member
+removal and contributor native Leave alert scenarios remain separate UI owners.
+`HomeMembershipRemovalTests` retains Stop Sharing backend recovery proof after
+its ordinary UI entry was removed. SHOPPING-173 owns owner Delete Home UI proof.
+
+## Home deletion and retained local conversion (SHOPPING-173)
+
+`HomeDetailsUITests.testOwnerDeleteRequiresExactHomeConfirmationAndCanRecreateAfterRelaunch`
+owns the owner-only native exact-name Delete alert, cancellation without
+submission, deletion of the fixture's sole home, `No Homes` after relaunch,
+continued private-cart recovery access, and explicit creation of a new home.
+The contributor fixture asserts Delete is absent. Its unshared fixture does
+not claim a live CloudKit delete.
+
+`PersonalCartUITests.testLocalHomeDeleteCanCancelThenRecreateAfterRelaunch`
+owns the equivalent local-only exact-name warning and explicit recreate after
+relaunch. `testRetainedLocalUseICloudCopiesHomeAndKeepsSourceSelectable`
+uses the isolated retained-local fixture to prove one explicit copy opens an
+owned home with its grocery need while the source stays selectable. Domain
+tests own the exact captured identity, account guard, replay, cart disposition,
+and pending remote deletion permutations. The Homes recovery row reconciles
+the recorded command. An owner purge can retry only after fresh exact share,
+owner, account, store, and zone validation. No two-phone deletion proof is claimed.
+
+`HomeDeletionTests` owns complete local and unshared owner graph removal,
+preservation of every prior private record and unrelated home, SQLite reopen,
+retired presentation and changed graph rejection, durable local intent before
+save, and account fencing. Its injected native backend owns offline failures
+before submission, uncertain submission, and local removal before server
+confirmation. Reconciliation checks ownership again; a completed operation
+does not submit another purge. These deterministic tests do not prove live
+CloudKit zone behavior. `HomeAdoptionBootstrapTests` owns discovery and recovery
+of an interrupted retained-local deletion while the account store is mounted.
+
+The 13 `HomeDeletionTests` cases own these boundaries:
+
+| Test | Boundary |
+| --- | --- |
+| `testLocalDeletionRemovesCompleteGraphPreservesOtherHomeAndSurvivesReopen` | Complete local graph, unrelated home, durable deletion, fresh IDs, rejected old-ID replay. |
+| `testOwnedUnsharedDeletionRetainsPrivateCartAndEveryPriorSemanticRecord` | Unshared owner deletion preserves private record bytes, cart tokens and quantities after reopen; household demand becomes unavailable. |
+| `testStaleCapturedGraphAndRetiredPresentationNeverRetainDeletion` | Changes before confirmation and retired UI authority cannot start deletion. |
+| `testLocalMarkerBeforeSaveCanFinishAfterReopen` | A retained local command survives termination before graph deletion. |
+| `testOfflineSubmittedOwnerDeleteRetriesOnlyAfterFreshOwnershipValidation` | Uncertain native submission can resume after fresh validation. |
+| `testOfflineBeforeSubmissionRetainsExactConfirmationAndResumesAfterReconnect` | Offline preflight retains intent without falsely recording native submission. |
+| `testLocallyPurgedButServerZonePresentRecoversWithoutDeletedRoot` | Recovery does not depend on an already removed local root. |
+| `testAccountChangeCannotRetryOldSubmittedDelete` | Another account cannot resume the captured deletion. |
+| `testConfirmedDeletionCoversLaterImportedChildrenOfOnlyTheSameHome` | Later children require validated, append-only coverage; the original command remains unchanged. |
+| `testConfirmedServerAbsenceCleansLocalResidueWithoutAnotherPurge` | Confirmed server-zone absence permits exact local cleanup, preserving private evidence. |
+| `testCompletedDeletionRetiresOnlyItsPendingCreationAndAllowsFreshIDs` | Local and account creation journals retire only the deleted result and allocate new identities. |
+| `testPartialLocalRootOrListRetriesRecordedCoverageWhileServerZoneExists` | Missing root or list does not strand already covered children; missing relationships cannot expand authority. |
+| `testPartialLocalRootOrListCleansRecordedCoverageAfterServerZoneIsGone` | The same partial residues are removed after authoritative server absence; every covered URI must disappear. |
+
+`ActiveHomeBootstrapTests.testImmediateCreateRetiresDeletedPendingIDsBeforeStatusHydration`
+owns the immediate local Create boundary: an old pending creation still exists,
+the screen already offers Create, and no deletion-status refresh is requested
+before the action. The result must have fresh household/list IDs and exactly
+one home. Creation itself awaits exact completed-deletion retirement; screen
+hydration is not the authority for choosing IDs.
+
+`RetainedHomeConversionTests` owns the selected source graph, exact-ID replay
+after save but before acknowledgement, private-cart/history exclusion,
+unchanged source and unrelated homes, account rejection, and fresh recopy IDs
+after a completed destination deletion. The Bootstrap owners are:
+
+- `HomeAdoptionBootstrapTests.testExplicitRetainedCopyCreatesOwnedAccountHomeAndKeepsOriginal`
+- `HomeAdoptionBootstrapTests.testCompletedCopiedHomeDeletionPermitsOneNewExplicitCopy`
+- `HomeAdoptionBootstrapTests.testRetainedDeviceHomeStaysReachableAcrossAccountChangeWithoutCopyingToNewAccount`
+- `HomeAdoptionBootstrapTests.testPendingRetainedLocalDeletionReconcilesWhileAccountHomeIsOpen`
+- `ActiveHomeBootstrapTests.testDismissingInviteDuringHeldAccountLookupAllowsFirstLocalHome`
+- `ActiveHomeBootstrapTests.testDeferredUnboundInvitationAllowsExplicitOfflineFirstHome`
+
+### SHOPPING-173 local validation record — October 2, 2026
+
+These runs used the issue worktree before integration. Their names identify
+the local `/tmp/shopping-phase24-173*.log` evidence; they are not CI or
+exact-commit release attestations.
+
+| Run | Result and correction |
+| --- | --- |
+| `173b` | Fast: 628 passed, 2 failed. The deletion test incorrectly expected `demandAvailable` to remain true after removing the household; it now separately asserts unavailable demand, unchanged private record bytes, cart tokens and quantities. The conversion test queried account A's store through account-bound discovery after switching to B; discovery correctly rejected it. The test now checks the unchanged raw root count without bypassing the account guard. |
+| `173d` | Focused run failed `testDeferredUnboundInvitationAllowsExplicitOfflineFirstHome` with `scopeChanged`; all 11 deletion cases then present passed. The test attempted Create while its automatic connection transition could still be in flight after Not Now. A bounded wait now settles that exact task and checks the visible `noHomes` state; production authority checks remain intact. |
+| `173e` | Full ShoppingFast passed **638/638**, including all 13 deletion cases and the immediate-Create Bootstrap regression. One QoS runtime warning remained in the run evidence. |
+| `173-ui-a` | Three of four focused UI cases passed. Retained copying left a stale local Home Settings screen after the account store became ready. The view now dismisses on that ready store transition; copy/content/original-source assertions remain. |
+| `173f` | Focused: 56 passed, 3 failed methods. Two retained-copy methods exposed missing returns in source-identity properties; fixed. Immediate-Create seeded/deleted its graph after Bootstrap started, allowing startup discovery to select it; the fixture now persists and closes its store before cold launch. Xcode's post-failure simulator diagnostic collection stalled for over five minutes; its diagnostic child was stopped after sampling, and the failed result bundle was retained. The test process was not stopped. |
+| `173g` | Focused: **58/58 passed** across home adoption, retained conversion, first-home Bootstrap and home naming. Two QoS runtime warnings remained. This validates the corrected source and fixtures, not the earlier `173e` source. |
+| `173-ui-b` | **4/4 passed**: owner delete/relaunch/recreate; local rename/relaunch, cancel/delete/recreate; retained copy with selected contents and original-source return; retained Homes picker. One QoS runtime warning remained. |
+
+Independent review found replacement-source and interrupted-copy deletion gaps.
+`DeviceLocalHome` now identifies an explicitly selected local graph independently
+of the immutable initial adoption record. Conversion history retains each source
+command, and exact completed deletion also retires a bound copy whose save
+committed before its acknowledgment. The added proof owners are:
+
+- `HomeAdoptionBootstrapTests.testDeletedRetainedSourceCanCreateAndCopyNewLocalHomeWithoutRewritingAdoption`
+- `HomeAdoptionBootstrapTests.testJoiningAfterReplacingDeletedLocalSourceKeepsNewHomeReachable`
+- `RetainedHomeConversionTests.testDeletedBoundDestinationRetiresCopyInterruptedBeforeJournalAcknowledgement`
+- `HomeNameTests.testLocalRenameKeepsExactGraphAndRejectsRetiredOrMismatchedCommands`
+
+The local rename UI scenario now verifies the saved name after relaunch and the
+same name in the deletion confirmation. Review also required the exact invitation
+open intent to be checked again after writing a selected-local reference, so Not
+Now cannot be overtaken by that asynchronous write. Both independent reviewers
+verified their requested fixes; the test review found no weakened assertions or
+fixture-isolation defect.
+
+Final validation of the committed, combined milestone source remains separate
+from these issue-worktree runs.
+Injected native backends prove command/recovery behavior, not actual CloudKit
+zone deletion. Owner deletion and its propagation still require live two-phone
+validation; the user's successful invitation join/sync does not establish that
+separate deletion result.
+
+## Watch home scope (SHOPPING-183)
+
+`PersistentWatchShoppingServiceTests/testHomeNameFollowsWatchSelectionAndRefreshesAfterRename`
+owns the selected household's displayed name across two separate homes and a
+rename, including stable command authority through a rename. The existing
+`WatchShoppingUITests/testStoreAndSyncScrollAwayAndReturnOnlyAtTop` and
+`testSyncIconShowsDetailsWithoutRoutineBannerAndDismisses` also assert the home
+label on groceries, store selection, and cart, with the complete name available
+to accessibility. Watch selection remains independent of iPhone selection.
+These fixtures do not prove physical presentation or CloudKit delivery.
+
+## Saved cart home identity (SHOPPING-184)
+
+`PersonalCartServiceTests.testSavedCartHomeDisplayUsesExactGraphAndFallsBackForMissingOrAmbiguousHome`
+owns exact household/list name resolution and generic Saved Home for absent or
+duplicate roots. `testSavedCartHomeDisplayRejectsAnotherAccount` owns account
+isolation. `HomeDeletionTests.testOwnedUnsharedDeletionRetainsPrivateCartAndEveryPriorSemanticRecord`
+also checks the deleted home's captured name after reopening its private cart
+ledger. These reads use the serial persistence writer off the main actor.
+
+`PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns the distinction between the selected home shown across Groceries,
+Catalog, Settings and current My cart, and the static original-home label in
+the saved cart before and after relaunch. Its cart contents and home-switch
+assertions remain in place. This simulator workflow does not prove CloudKit
+delivery or the two-phone acceptance required by SHOPPING-174.
+
+## Account-bound home navigation (SHOPPING-185)
+
+`HomeInvitationInboxTests.testAccountBoundaryDurablyDefersOnlyBoundOldNavigationAndKeepsManualOpen`
+owns the atomic journal boundary: it retires old account automatic Open while
+preserving accepted state, the current account's intent, an unbound native
+delivery, and manual Open after a cold journal read.
+`testPersistedUnknownAccountInvalidationDefersAllBoundButNotFreshUnboundIngress`
+owns the narrower crash recovery rule when the provider has saved only that an
+account changed: all older bound auto Opens retire atomically, while a new
+unbound native delivery remains eligible for verified onboarding.
+`ActiveHomeBootstrapTests.testAccountChangeDefersQueuedNavigationBeforeNewMountAndColdReturnKeepsPriorHome`
+owns the held account verification ordering and restored prior selection across
+A→B, termination, and B→A. `testCachedOtherAccountDefersOldIntentWhenVerifiedBeforeReturning`
+owns the cold cached-B to verified-B boundary; it leaves the old intent intact
+while offline and retires it on verification before returning to A.
+`HomeAdoptionBootstrapTests.testAccountChangeDuringHeldAcceptedOpenDoesNotReviveItAfterColdReturn`
+owns the imported-ready automatic activation path with native verification held,
+a prior selected home, cold return, and a later explicit Open.
+`testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification`
+owns the interrupted provider invalidation before any inbox write, including
+the same account being freshly verified on restart.
+`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityAcrossFastReverificationAndSignOut`
+owns the exact outgoing identity carried by account-change and sign-out events
+even if the provider resolves again before Bootstrap handles the event.
+`testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection`
+owns the separate conversion-command versus navigation-intent result: A's copy
+recovers after B without selecting it over A's saved home. These isolated stores
+and substituted account lookups do not prove live CloudKit propagation.
+
+The first SHOPPING-185 focused attempt (`185-a`) selected the obsolete
+`ShoppingFastTests` target and stopped before building or running tests. The
+corrected `185-b` compiled until an out-of-scope `session` reference in the new
+copy-intent guard; no tests ran. `185-c` ran 74 focused tests: 73 passed, and
+the existing retained-copy test observed durable `.copied` before the later
+home-discovery/selection task completed. Its assertion now awaits that exact
+selected copied home within a bound. The final source and added cases require
+the next exact-tree validation; these earlier runs do not validate them.
+The committed `7b477ab` candidate passed ShoppingFast **649/649** with three
+runtime QoS warnings. Review then found a persisted account invalidation that
+could lose its meaning across a crash, plus delayed provider callbacks that
+could mistake a fresh account for the invalidated one. The successor adds the
+cold-start journal barrier, exact outgoing-session event capture, and a bounded
+drain assertion after releasing held native verification. This later production
+source and its fixture changes require exact-tree validation before integration.
+
+
+## Final Phase 24 validation (SHOPPING-174)
+
+The committed combined lifecycle source `2e634c631f68dfcf2f8be0a8c54701f30290d7a3`
+was integrated as `8433077` with exact tracked-tree equality. Final local proof
+was ShoppingFast **642/642**, eight home UI workflows **8/8**, and Watch
+**63/63** (61 unit checks and two UI workflows). Fast retained two QoS runtime
+warnings, home UI one, and Watch none.
+
+SHOPPING-184 source `e6773f6` passed Fast **644/644** with three QoS warnings.
+
+## Homes picker compiler compatibility (SHOPPING-186)
+
+`HomeSelectionView` now builds its existing native List from small section and
+row builders so the pinned Release compiler can type-check it. This is a
+structural change: the same home, local, invitation, create, Settings, status,
+and error rows retain their conditions, actions, labels, and accessibility
+identifiers. Existing `PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns flat selection and saved-cart scope; `testLocalHomeRemainsAvailableInHomesPicker`
+owns the local row. No new behavioral test is added for the split.
+The clean local source `8e0039c` has the same tracked tree as integrated
+`a8f10c0`. Its unsigned
+Xcode 27 Release archive passed (`/tmp/shopping-phase24-186-release.xcarchive`,
+`/tmp/shopping-phase24-186-release.log`), and the focused native picker UI run
+passed **2/2** without runtime issues (`/tmp/shopping-phase24-186-ui.xcresult`,
+`/tmp/shopping-phase24-186-ui.log`). Pinned Xcode 26.3 verification is pending.
+The first CI run `37029619808` on head `24b7e35` failed Release compilation in
+`HomeSelectionView.body`; Fast passed **649/652**, with three copy-selection
+failures assigned to SHOPPING-187. Coverage passed; Acceptance was skipped.
+The destination-readiness test successor `b9a1d00` passed switch/relaunch UI
+**1/1** without runtime warnings. Its integrated tree `6904246` matches issue
+`d1042c2`; the extra change was trailing whitespace cleanup. The first 184 build
+stopped before tests because a project path containing `+` was unquoted; the
+quoted path passed project lint and subsequent builds.
+
+SHOPPING-185 source `423cd8a` ran Fast **651/652**. The first-home test helper
+repeated `start()` through the no-transition loading branch, permitting a late
+local fixture load to publish during account entry. The helper now drives only
+the requested account transition. Review also replaced a default notification
+broadcast with the exact fixture's private center. Existing outcome assertions
+were preserved. Final committed `ac5512b` passed Fast **652/652** and five native
+UI workflows **5/5**; its tracked tree equals integrated `d1feb35`. Fast retained
+three QoS warnings; UI none. A navigation-update warning appeared in the Fast
+log during presentation retirement. No physical responsiveness result is claimed.
+
+## Retained-copy home selection (SHOPPING-187)
+
+Pinned CI run `37029619808` on the pre-fix milestone source passed **649/652**
+Fast tests. Three `HomeAdoptionBootstrapTests` methods found that the explicit
+Use iCloud copy committed while ordinary same-account discovery left the
+existing account home selected: initial retained copy, deletion followed by
+recopy, and deletion of the retained source followed by copying a fresh local
+home. The original graph, home-count, name, and selected-row assertions remain.
+`ActiveHomeCoordinatorTests.testDiscoveryAuthorityDoesNotReplaceExplicitHomeChoice`
+owns the distinction between access/discovery command authority and an explicit
+home choice, including same-home reaffirmation and Not Now. The two held-copy
+Bootstrap tests own a same-account access refresh with delayed copied-graph
+discovery and a newer reaffirmed home choice during that delay. The exact copy
+destination must be discovered in the verified account before automatic Open;
+an unavailable first observation keeps the in-memory intent for a later refresh.
+`testAcceptedInvitationDuringHeldCopyKeepsNewerNavigationIntent` owns a native
+invitation ingress while copied discovery is held; it drains the actual copy
+consumer before asserting that the accepted invitation stays open and the
+existing account home stays selected. The Homes picker sends a checked-row tap
+through the same selection command so reaffirmation is recorded.
+`testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
+holds account verification before the copy journal is prepared, accepts a newer
+invitation, then drains the copy consumer. The copy may commit, but its older
+navigation choice must not be installed after the newer invitation arrives.
+`testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+holds that same lookup across an exact CloudKit account invalidation and a fresh
+verification of the same account. It waits for the actual in-flight approval to
+retire before releasing the old lookup; a committed copy must leave the prior
+account home selected. The preparation task and copy consumer have bounded
+completion checks before fixture cleanup.
+The existing account-change copy test continues to own the different-account
+deferral rule. CI coverage passed its app and domain gates; no baseline changed.
+The fix awaits exact-source local and pinned-CI validation.
+The first focused source passed **62/62**, and its successor passed Fast
+**656/656** with no failures or skips. Both precede the held account-lookup
+ordering fix and do not validate that final source.
+The next candidate passed Fast **657/657** with no failures or skips. Review
+then found an account-invalidation window before the copy intent was installed;
+the exact-session preparation fence and held-lookup regression were added
+after that run and need final validation.
+
+The [home-sharing execution record](home-sharing-validation.md) records source,
+local bundles, app-menu counts and remaining physical acceptance. Pinned CI and
+its final pushed SHA belong in the phase PR and SHOPPING-174 comment. These
+focused UI selections are not ShoppingFull attestation.
+
+The first combined SHOPPING-187 Fast attempt (`187-fast-a`) stopped before tests
+at an optional Boolean assertion in the new invitation-ingress regression. The
+assertion now explicitly requires `true`. Review also bounded the owned copy
+consumer completion and teardown expectations; selection assertions remain intact.
+The earlier focused `187-focused-a` run passed **62/62** before the invitation
+ordering and completion follow-ups. Final combined validation is still pending.
+
+Final SHOPPING-187 production candidate `71d86d2` passed the six affected
+account/invitation/recovery suites **119/119**, with no skips and one QoS warning
+(`/tmp/shopping-phase24-187-final-focused.xcresult` and `.log`). The same committed
+source passed four native UI workflows **4/4**, no skips or runtime warnings
+(`/tmp/shopping-phase24-187-final-ui.xcresult` and `.log`): automatic accepted
+invitation Open, durable Not Now, retained local Use iCloud, and switching with
+saved-cart scope across relaunch. The ordinary preparation callback now shares
+185's current-provider authority; exact invalidation retains outgoing identity.
+Both independent production reviewers verified the final fixes; test review
+verified bounded preparation/consumer cleanup and fixture isolation.
+
+Earlier committed `3146c2c` passed full local Fast **657/657**, no skips and three
+QoS warnings (`/tmp/shopping-phase24-187-final-fast.xcresult` and `.log`). This
+predates the account-preparation follow-up. `9d5773b` passed affected suites
+**119/119**, one QoS warning, before the ordinary-callback correction
+(`/tmp/shopping-phase24-187-account-focused.xcresult`). The final complete pinned
+Fast/Acceptance/Release/coverage result must be recorded against the pushed SHA
+in PR 68 and Plane. No Full attestation, physical CloudKit proof, or device trace
+is claimed by these focused local runs.
+
+Pinned CI `37036719461` built the Release app and passed coverage (app
+**51.70%**, domain **96.30%**), but Fast passed **656/658**. All three original
+copy-selection regressions passed. Two new held-order methods failed: the
+discovery gate allowed a competing two-home refresh to escape before its
+synthetic access observation, and the copy consumer handle could be replaced by
+a later account load while the original resume task still owned the write.
+The gate now holds every real two-home result until release and identifies the
+synthetic access refresh with a task-local request value. Bootstrap serializes
+retained-copy resume tasks under one owned completion chain; a later task waits
+for its predecessor, and tests drain the actual chain. A distinct approval ID
+keeps an older failed resume or awaited fulfillment from clearing a newer
+explicit approval that happens to reuse an idempotent conversion command.
+The copied-home count and selected-home assertions remain unchanged. This
+successor requires exact-source validation; the earlier CI result does not
+validate it.
+
+Committed ownership follow-up `55180bf` passed six affected suites **119/119**,
+no skips and one QoS warning (`/tmp/shopping-phase24-187-ownership-focused.xcresult`
+and `.log`). The same source passed retained-copy and switch/relaunch native UI
+**2/2**, no skips or runtime warnings
+(`/tmp/shopping-phase24-187-ownership-ui.xcresult` and `.log`). Both production
+reviewers and test review verified task ownership, approval guards, all-discovery
+holding, explicit task-local access tagging, and bounded cleanup. Complete pinned
+Fast/Acceptance/Release/coverage remains required on the next exact pushed SHA.
+
+### SHOPPING-188 duplicate home identity
+
+`ActiveHomeCoordinatorTests.testDuplicateHomeNamesKeepStableContextAcrossDiscoveryAndStoreMounts`
+owns the iPhone snapshot boundary: same-name owner homes remain distinct in the
+picker and selected scope after discovery order, store URI, and store identifier
+change. `testDuplicateNamesUseExistingRoleAndLocalContextBeforeGeneratedTags`
+owns the concise role/local context rule and unchanged unique names.
+`testGeneratedContextsStayUniqueWhenShortWordTagsCollide` owns collision
+extension without exposing graph identifiers.
+`testLiteralHomeNameCannotMatchAnotherHomesGeneratedContext` owns final-title
+collisions between a literal saved name and either a role label or word tag,
+including discovery order changes.
+`PersonalCartServiceTests.testSavedCartNameUsesWholeHomeRosterWhenOnlyOneCartScopeIsRequested`
+owns saved-cart labels when only one of two same-name scopes has a visible cart.
+`PersistentWatchShoppingServiceTests.testDuplicateHomeNamesRemainDistinctOnWatchAcrossSelectionAndReload`
+owns Watch selection and reload projection. All labels are presentation-only;
+the household name and graph identities remain unchanged. These new tests await
+focused and exact-source validation.
+`HomeDetailsUITests.testOwnerRemovalConfirmationCanCancelThenRemoveOnlyContributor`
+continues to own native removal-alert cancel and exact-contributor removal. It
+uses the alert’s unique action identifiers and retains the surviving-owner and
+member assertions; the pending-invitation cancellation and groceries proof
+remains in its separate existing UI test.
+
+## Catalog UI first-home readiness (SHOPPING-189)
+
+Pinned CI `37040057456` passed Release, Fast **658/658**, and coverage, but
+Acceptance passed **5/6**. `CatalogRefreshUITests.testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates`
+stopped before its Catalog actions because a fresh isolated store showed the
+approved Create a Home screen. The class's two raw fresh launches now use its
+existing `launchApp` helper. That helper gives each test a unique store, uses
+the isolated no-account provider, explicitly taps Create Home only when no
+fixture was supplied, and waits for Groceries. The populated-fixture path and
+all catalog save/add, duplicate, Recently added, navigation, and one-time
+assertions remain unchanged. Focused catalog UI and exact-source pinned
+Acceptance validation are pending.
+
+### Native home scope layout (SHOPPING-190)
+
+`PersonalCartUITests.testTabHeadersStayVisibleAndSettingsStartAtTop` owns visible,
+top-aligned Groceries/Catalog/Settings titles, a short Settings list beginning in
+the upper half, and title visibility after scrolling. It uses actual system Large
+and accessibility XXXL sizes and restores the original setting before app/store
+cleanup through ordered XCTest teardown blocks. Screenshots retain all three tabs
+at both sizes. Only Groceries presents a home switch action. The existing
+`testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch` also checks the onboarding
+title placement. Cross-home selection, private/saved carts, and relaunch remain
+owned by `testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`; its
+helper now returns through the native Groceries back stack before switching,
+while the other tabs assert the same home through passive labels.
+
+Initial candidate `31b98ed` passed native invitation cancellation, contributor
+removal/cancel, and automatic accepted-invitation UI **3/3**, but two additional
+UI scenarios failed: a switch helper assumed reselecting a tab reset its retained
+cart navigation stack, and the new layout fixture omitted the active-home fixture
+flag. Those setup assumptions were corrected without removing outcomes.
+`f86ef6e` then passed both affected Catalog workflows, retained-home copy, and
+cross-home/cart/relaunch **4/4**. The layout body passed all six normal/XXXL tab
+screens and scrolling assertions, but failed its restoration guard because Swift
+`defer` stopped the app before the text-size helper's XCTest teardown. Cleanup is
+now registered first as a teardown block, so restoration executes while the app
+and metadata are available. Failed runs remain at
+`/tmp/shopping-phase24-190-layout-ui{,-b}.xcresult` and corresponding logs.
+These are focused selections, not ShoppingFull attestation. Final candidate,
+Fast, Watch identity, and pinned CI validation remain pending.
+
+Final local candidate `155e7dd` passed ShoppingFast **663/663**, no skips;
+header/onboarding/actual-size/restoration UI **2/2**, no skips; Watch duplicate-home
+selection/reload **1/1**, no skips; and the four Catalog/copy/switch/cart/relaunch
+UI scenarios **4/4**, no skips. Bundles/logs use prefixes
+`shopping-phase24-190-final-fast`, `shopping-phase24-190-layout-ui-c`,
+`shopping-phase24-188-watch-identity`, and `shopping-phase24-190-navigation-final`
+under `/tmp`. All six Large/XXXL tab screenshots were inspected. No Thread
+Performance Checker or runtime warning was reported in these runs.
+
+The earlier `-b` run's simulator-diagnostic collection never finalized its bundle;
+the post-test build process was stopped with exit 143 after its logged outcomes.
+It is not a successful validation run. The final navigation run also waited in
+simulator diagnostic collection after all four tests passed. A process sample
+(`/tmp/shopping-phase24-190-result-writer-sample.txt`) identified
+`XCTHProcessInvocation.simCtlDiagnose`. Stopping only that diagnostic child
+allowed xcodebuild to close a readable 4/4 bundle and exit 0. The sample, completed
+bundle and full log preserve this intervention. Pinned CI remains required; no
+remote ShoppingFull was dispatched and no local Full attestation is claimed.
+
+
+### SHOPPING-187 published roster readiness follow-up
+
+Pinned CI `37050761193` on `21fb7d8` passed Release and coverage, but Fast
+passed **661/663**, with no skips. The two copy-account-lookup ordering methods
+failed only the immediate `homes.count == 2` assertion; copy completion, current
+Account home, exclusion of copied-home selection and the pending invitation
+assertions passed. Full result, logs and summaries are retained under
+`/tmp/shopping-phase24-ci-failure-37050761193` and
+`/tmp/shopping-phase24-ci-summary-37050761193`.
+
+`testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
+and `testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+remain the proof owners for newer navigation intent during held account lookup.
+The owned conversion-consumer chain does not own a later startup/history
+request that supersedes its discovery. These tests now separately observe the
+actual published two-home roster within five seconds, as the ordinary explicit
+copy test already observes published selection separately from copy completion.
+All original copy, count, home-name, selection and invitation assertions remain;
+there is no refresh retry, fixed delay, expected failure or assertion removal.
+This test-only follow-up requires affected-suite validation and new exact-source
+pinned CI. The UI source and installed candidate remain unchanged.
+
+
+Committed test-only candidate `7cb2aa7` passed all **40/40** home-bootstrap
+methods, with no skips and exit 0, on iPhone 17 Pro/iOS 26.5 using ShoppingFast
+(`/tmp/shopping-phase24-187-roster-focused-b.xcresult`, `.log` and `-summary.json`).
+Both held account-lookup methods passed. One internal QoS warning occurred in
+`testDeletedRetainedSourceCanCreateAndCopyNewLocalHomeWithoutRewritingAdoption`,
+an unchanged production path; no runtime warning was reported. The first
+invocation used the wrong target name (`ShoppingTests` instead of
+`ShoppingPersistenceTests`) and exited 70 before running tests; its raw log and
+result path `/tmp/shopping-phase24-187-roster-focused` are retained. Independent
+production and test reviews found no defect in the bounded readiness correction
+or permanent stale-state risk. Exact pushed-source CI remains the final gate.
+
+
+### SHOPPING-191 bootstrap publication readiness
+
+Pinned CI `37052765701` on `c175e80` passed Release and coverage, but Fast was
+**661/663**, with no skips; Acceptance was skipped. Both prior held copy-lookup
+methods passed. The first-home fixture observed name `nil` and roster count 0
+before committed creation published. The sharing-status fixture accepted the
+old `.ready` presentation before the latest discovery applied renewal; only
+the presentation UUID inequality failed. Complete evidence is retained under
+`/tmp/shopping-phase24-ci-failure-37052765701` and
+`/tmp/shopping-phase24-ci-summary-37052765701`.
+
+`ActiveHomeBootstrapTests.testFreshAvailableAccountDiscoversBeforeOfferingAccountHomeCreation`
+still owns discover-before-offer and explicit account-home creation. It reuses
+`waitForPublishedHomes(count: 1)` before the unchanged name/count assertions.
+`HomeSharingStatusBootstrapTests.testRenewedPresentationOfSameGraphDiscardsHeldRead`
+still owns same-graph renewed authority and discarding the held `888` result.
+The existing bounded `ready` helper now supports a predicate; this method awaits
+the same scope, current and newer generation, and a different presentation ID
+before its unchanged scope/UUID/stale-result assertions. An idempotent teardown
+opens the held gate and drains its actual completion if readiness fails.
+Neither method repeats a command or weakens any assertion. Independent source
+review confirms superseded discovery intentionally returns before the winning
+publication; no permanent stale-state defect was verified. This is test-only
+readiness work, requiring affected-suite validation and exact-source pinned CI.
+
+
+Committed test-only candidate `2255356` passed the two affected suites
+**27/27**, with no skips and exit 0, on iPhone 17 Pro/iOS 26.5 using ShoppingFast
+(`/tmp/shopping-phase24-191-focused.xcresult`, `.log` and `-summary.json`). Both
+pinned-CI failures passed. One internal QoS warning occurred in unchanged
+`testColdInvitationDoesNotCreateAnEmptyLocalHomeBeforeAccountSetup`; no runtime
+warning was reported. Independent correctness and test reviews found no issues
+in readiness predicates or bounded held-read teardown. App/Watch/UI source is
+unchanged from polished candidate `21fb7d8`; exact successor CI remains required.

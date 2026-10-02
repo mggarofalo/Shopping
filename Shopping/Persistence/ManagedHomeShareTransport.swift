@@ -88,6 +88,12 @@ final class ManagedHomeShareTransport: HomeShareTransport, @unchecked Sendable {
 
     private func graph(_ scope: ActiveHomeScope, store: NSPersistentStore,
                        context: NSManagedObjectContext) throws -> (Household, [NSManagedObject]) {
+        if let provider = persistence.personalCartSessionProvider {
+            let repository = PersonalCartRepository(persistence: persistence, context: context, session: try provider.currentSession())
+            guard try !repository.isHomeDeleted(householdID: scope.graph.householdID, listID: scope.graph.listID) else {
+                throw HomeSharingError.scopeChanged
+            }
+        }
         guard let uri = URL(string: scope.graph.rootURI),
               let id = persistence.container.persistentStoreCoordinator.managedObjectID(forURIRepresentation: uri),
               id.persistentStore == store,

@@ -10,6 +10,7 @@ final class ClearInterruptionUITests: XCTestCase {
             .appendingPathComponent("ShoppingClearInterruption-\(UUID().uuidString).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] = "1"
         app.launch()
+        app.createFirstHomeForWorkflow()
         XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         app.buttons["shopping.addGrocery"].tap()
         XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))

@@ -1,43 +1,4 @@
-import CryptoKit
 import Foundation
-
-/// A local graph identity is deliberately stronger than the synchronized household UUID.
-/// Reimporting a removed share requires choosing its new local graph explicitly.
-struct HomeGraphIdentity: Codable, Equatable, Hashable, Sendable {
-    let storeIdentifier: String
-    let rootURI: String
-    let householdID: UUID
-    let listID: UUID
-}
-
-struct ActiveHomeScope: Codable, Equatable, Hashable, Sendable {
-    let accountBinding: String
-    let containerIdentifier: String
-    let environment: String
-    let graph: HomeGraphIdentity
-
-    init(session: ShopperSession, graph: HomeGraphIdentity) {
-        accountBinding = session.accountBinding
-        containerIdentifier = session.containerIdentifier
-        environment = session.environment
-        self.graph = graph
-    }
-
-    var preferenceNamespace: String {
-        // Fixed ordered fields avoid depending on JSON dictionary key ordering.
-        Self.digest([accountBinding, containerIdentifier, environment, graph.storeIdentifier,
-            graph.rootURI, graph.householdID.uuidString, graph.listID.uuidString])
-    }
-
-    static func accountNamespace(_ session: ShopperSession) -> String {
-        digest([session.accountBinding, session.containerIdentifier, session.environment])
-    }
-
-    private static func digest(_ fields: [String]) -> String {
-        let data = try! JSONEncoder().encode(fields) // An array of strings is always encodable.
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
-}
 
 struct HomeCandidate: Equatable, Identifiable, Sendable {
     enum Access: String, Sendable { case owner, contributor, restricted, unresolved }
@@ -56,6 +17,12 @@ struct HomeDiscovery: Equatable, Sendable {
 /// Account authentication remains exclusively owned by ShopperSessionProvider.
 @MainActor
 final class ActiveHomeCoordinator: ObservableObject {
+    enum DiscoveryState: Equatable {
+        case unknown
+        case incomplete
+        case complete
+    }
+
     enum Readiness: Equatable {
         case accountUnavailable
         case waitingForImport
@@ -72,9 +39,13 @@ final class ActiveHomeCoordinator: ObservableObject {
     }
 
     @Published private(set) var readiness: Readiness = .accountUnavailable
+    @Published private(set) var discoveryState: DiscoveryState = .unknown
     @Published private(set) var homes: [HomeCandidate] = []
     @Published private(set) var pendingInvitation = false
     private(set) var generation: UInt64 = 0
+    /// Changes only when a person explicitly chooses to keep, open, or leave a home.
+    /// Discovery and store rebinding can renew command authority without replacing that choice.
+    private(set) var choiceRevision: UInt64 = 0
     private var requestSequence: UInt64 = 0
     private var session: ShopperSession?
     private var savedScope: ActiveHomeScope?
@@ -93,6 +64,7 @@ final class ActiveHomeCoordinator: ObservableObject {
         generation &+= 1
         self.session = session
         homes = []
+        discoveryState = .unknown
         pendingInvitation = false
         savedScope = nil
         selectionDeferred = session.map { defaults.bool(forKey: key($0) + ".deferred") } ?? false
@@ -125,6 +97,8 @@ final class ActiveHomeCoordinator: ObservableObject {
         // Duplicate identities are incomplete data, never a reason to choose the first row.
         let grouped = Dictionary(grouping: discovery.homes, by: \.graph)
         homes = discovery.homes.filter { grouped[$0.graph]?.count == 1 }
+        discoveryState = discovery.hasIncompleteRoots || grouped.count != discovery.homes.count
+            ? .incomplete : .complete
         if let savedScope {
             readiness = homes.contains { $0.graph == savedScope.graph && $0.access != .unresolved }
                 ? .ready(savedScope) : .selectedHomeUnavailable
@@ -140,10 +114,12 @@ final class ActiveHomeCoordinator: ObservableObject {
         return true
     }
 
-    func select(_ graph: HomeGraphIdentity, renewingAuthority: Bool = false) throws {
+    func select(_ graph: HomeGraphIdentity, renewingAuthority: Bool = false,
+                recordingChoice: Bool = true) throws {
         guard let session, homes.contains(where: { $0.graph == graph && $0.access != .unresolved }) else {
             throw NeedServiceError.scopeChanged
         }
+        if recordingChoice { choiceRevision &+= 1 }
         guard activeScope?.graph != graph || renewingAuthority else { return }
         generation &+= 1
         activate(graph, session: session)
@@ -153,11 +129,42 @@ final class ActiveHomeCoordinator: ObservableObject {
     /// Later discovery must not interpret the sole accepted home as an implicit choice.
     func deferSelection() {
         guard let session else { return }
+        choiceRevision &+= 1
         selectionDeferred = true
         defaults.set(true, forKey: key(session) + ".deferred")
     }
 
+    func recordExplicitChoice() {
+        choiceRevision &+= 1
+    }
+
     func setInvitationPending(_ pending: Bool) { pendingInvitation = pending }
+
+    /// Forget only the selection that the operation captured. A later home choice or
+    /// account change must survive an earlier leave or deletion completing.
+    @discardableResult
+    func forgetSelectedHome(_ scope: ActiveHomeScope, generation expectedGeneration: UInt64) -> Bool {
+        guard generation == expectedGeneration, let session,
+              scope.accountBinding == session.accountBinding,
+              scope.containerIdentifier == session.containerIdentifier,
+              scope.environment == session.environment,
+              savedScope == scope else { return false }
+        choiceRevision &+= 1
+        generation &+= 1
+        requestSequence &+= 1
+        savedScope = nil
+        defaults.removeObject(forKey: key(session))
+        defaults.removeObject(forKey: key(session) + ".deferred")
+        selectionDeferred = false
+        homes.removeAll { $0.graph == scope.graph }
+        if homes.count == 1, discoveryState == .complete, !pendingInvitation,
+           let home = homes.first, home.access != .unresolved {
+            activate(home.graph, session: session)
+        } else {
+            readiness = homes.isEmpty ? .waitingForImport : .choiceRequired
+        }
+        return true
+    }
 
     func isCurrent(scope: ActiveHomeScope, generation: UInt64) -> Bool {
         self.generation == generation && activeScope == scope

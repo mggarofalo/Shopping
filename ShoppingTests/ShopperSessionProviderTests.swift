@@ -154,6 +154,39 @@ final class ShopperSessionProviderTests: XCTestCase {
         await fulfillment(of: [received], timeout: 1)
     }
 
+    func testTypedAccountEventsCaptureOutgoingIdentityAcrossFastReverificationAndSignOut() async throws {
+        let cache = try directory()
+        let center = NotificationCenter()
+        let provider = try provider(cache: cache, notifications: center)
+        await provider.refresh()
+        let original = try provider.currentSession()
+        let changed = expectation(description: "Exact invalidated account announced")
+        let observer = provider.observeSessionChanges { state, outgoing in
+            guard state == .accountChanged else { return }
+            XCTAssertEqual(outgoing, original)
+            changed.fulfill()
+        }
+        defer { provider.removeSessionObserver(observer) }
+        center.post(name: .CKAccountChanged, object: nil)
+        await provider.refresh()
+        await fulfillment(of: [changed], timeout: 1)
+        XCTAssertEqual(provider.state, .ready(original),
+            "The captured event remains exact even when the provider is ready again")
+
+        let signedOut = expectation(description: "Exact signed-out account announced")
+        let unavailable = try self.provider(cache: cache, lookup: .init(status: { .noAccount },
+            recordName: { XCTFail("Signed out account cannot fetch identity"); return "unused" }),
+            notifications: center)
+        let signoutObserver = unavailable.observeSessionChanges { state, outgoing in
+            guard state == .setupRequired(.noAccount) else { return }
+            XCTAssertEqual(outgoing, original)
+            signedOut.fulfill()
+        }
+        defer { unavailable.removeSessionObserver(signoutObserver) }
+        await unavailable.refresh()
+        await fulfillment(of: [signedOut], timeout: 1)
+    }
+
     private var offlineLookup: ShopperSessionProvider.AccountLookup {
         .init(status: { throw CKError(.networkUnavailable) }, recordName: { "unused" })
     }

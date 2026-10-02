@@ -22,6 +22,7 @@ final class HomeInvitationInbox {
         let id: UUID
         let identity: HomeInvitationIdentity
         var metadataArchive: Data
+        var displayName: String?
         var session: ShopperSession?
         var sharedStoreIdentifier: String?
         var state: State = .queued
@@ -30,18 +31,24 @@ final class HomeInvitationInbox {
         var activationResolved = false
         var participantPending = false
         var requiresNativeAcceptance = false
+        /// System acceptance or an explicit Join requests opening after exact import.
+        /// Dismissal and a newer home choice clear this durably without cancelling acceptance.
+        var openRequested = false
 
-        init(id: UUID, identity: HomeInvitationIdentity, metadataArchive: Data, session: ShopperSession?) {
+        init(id: UUID, identity: HomeInvitationIdentity, metadataArchive: Data,
+             displayName: String? = nil, session: ShopperSession?) {
             self.id = id
             self.identity = identity
             self.metadataArchive = metadataArchive
+            self.displayName = displayName
             self.session = session
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, identity, metadataArchive, session, sharedStoreIdentifier, state
+            case id, identity, metadataArchive, displayName, session, sharedStoreIdentifier, state
             case dismissalRequested, acceptanceAttempted, activationResolved
             case participantPending, requiresNativeAcceptance
+            case openRequested
         }
 
         init(from decoder: Decoder) throws {
@@ -49,6 +56,7 @@ final class HomeInvitationInbox {
             id = try values.decode(UUID.self, forKey: .id)
             identity = try values.decode(HomeInvitationIdentity.self, forKey: .identity)
             metadataArchive = try values.decode(Data.self, forKey: .metadataArchive)
+            displayName = try values.decodeIfPresent(String.self, forKey: .displayName)
             session = try values.decodeIfPresent(ShopperSession.self, forKey: .session)
             sharedStoreIdentifier = try values.decodeIfPresent(String.self, forKey: .sharedStoreIdentifier)
             state = try values.decode(State.self, forKey: .state)
@@ -57,6 +65,7 @@ final class HomeInvitationInbox {
             activationResolved = try values.decode(Bool.self, forKey: .activationResolved)
             participantPending = try values.decodeIfPresent(Bool.self, forKey: .participantPending) ?? false
             requiresNativeAcceptance = try values.decodeIfPresent(Bool.self, forKey: .requiresNativeAcceptance) ?? false
+            openRequested = try values.decodeIfPresent(Bool.self, forKey: .openRequested) ?? false
         }
     }
 
@@ -162,7 +171,10 @@ final class HomeInvitationInbox {
                 if let index = updated.firstIndex(where: { $0.identity == entry.identity && $0.session == session }) {
                     if entry.state == .queued {
                         Self.reopen(&updated[index], metadataArchive: entry.metadataArchive,
-                            participantPending: entry.participantPending)
+                            displayName: entry.displayName, participantPending: entry.participantPending)
+                        // The cold delivery is newer than the bound entry. Its
+                        // durable Not Now/Open choice must survive deduplication.
+                        updated[index].openRequested = entry.openRequested
                     }
                     continue
                 }
@@ -175,7 +187,8 @@ final class HomeInvitationInbox {
     }
 
     @discardableResult
-    func enqueue(identity: HomeInvitationIdentity, metadataArchive: Data, participantPending: Bool = false) throws -> Entry {
+    func enqueue(identity: HomeInvitationIdentity, metadataArchive: Data,
+                 displayName: String? = nil, participantPending: Bool = false) throws -> Entry {
         guard identity.containerIdentifier == containerIdentifier, identity.environment == environment,
               !identity.share.recordName.isEmpty, !identity.share.zoneName.isEmpty,
               !identity.share.zoneOwnerName.isEmpty, !metadataArchive.isEmpty else { throw Error.invalidInvitation }
@@ -186,15 +199,18 @@ final class HomeInvitationInbox {
             default: invalidatesImport = false
             }
             var updated = entries
-            Self.reopen(&updated[index], metadataArchive: metadataArchive, participantPending: participantPending)
+            Self.reopen(&updated[index], metadataArchive: metadataArchive,
+                displayName: displayName, participantPending: participantPending)
             if updated != entries { try commit(updated) }
             // A renewed grant invalidates work that inspected the previous membership,
             // even if its callback arrives after the renewed acceptance reaches .loading.
             if invalidatesImport { generation &+= 1 }
             return entries[index]
         }
-        var entry = Entry(id: UUID(), identity: identity, metadataArchive: metadataArchive, session: currentSession)
+        var entry = Entry(id: UUID(), identity: identity, metadataArchive: metadataArchive,
+            displayName: displayName, session: currentSession)
         entry.participantPending = participantPending
+        entry.openRequested = true
         try commit(entries + [entry])
         return entry
     }
@@ -255,13 +271,89 @@ final class HomeInvitationInbox {
     }
 
     func retry(id: UUID) throws {
-        let index = try currentIndex(id)
+        let index: Int
+        if currentSession == nil {
+            guard let unbound = entries.firstIndex(where: { $0.id == id && $0.session == nil }) else {
+                throw Error.accountMismatch
+            }
+            index = unbound
+        } else { index = try currentIndex(id) }
         guard inFlight?.entryID != id else { throw Error.busy }
         guard case .failed = entries[index].state else { throw Error.invalidState }
         var updated = entries
         updated[index].state = .queued
         updated[index].dismissalRequested = false
+        updated[index].openRequested = true
         try commit(updated)
+    }
+
+    func requestOpen(id: UUID) throws {
+        let index: Int
+        if currentSession == nil {
+            guard let unbound = entries.firstIndex(where: { $0.id == id && $0.session == nil }) else {
+                throw Error.accountMismatch
+            }
+            index = unbound
+        } else { index = try currentIndex(id) }
+        guard !entries[index].activationResolved, entries[index].state != .dismissed else {
+            throw Error.invalidState
+        }
+        var updated = entries
+        updated[index].openRequested = true
+        updated[index].dismissalRequested = false
+        try commit(updated)
+    }
+
+    func deferOpen(id: UUID, expectedSession: ShopperSession? = nil) throws {
+        let index: Int
+        if currentSession == nil, let expectedSession {
+            guard expectedSession.isWellFormed,
+                  expectedSession.containerIdentifier == containerIdentifier,
+                  expectedSession.environment == environment,
+                  let matching = entries.firstIndex(where: { $0.id == id && $0.session == expectedSession }) else {
+                throw Error.accountMismatch
+            }
+            index = matching
+        } else if currentSession == nil {
+            guard let unbound = entries.firstIndex(where: { $0.id == id && $0.session == nil }) else {
+                throw Error.accountMismatch
+            }
+            index = unbound
+        } else { index = try currentIndex(id) }
+        guard !entries[index].activationResolved else { return }
+        var updated = entries
+        updated[index].openRequested = false
+        try commit(updated)
+    }
+
+    /// Account identity, rather than presentation loading, retires automatic navigation.
+    /// Keep accepted membership and the manual Open route for every affected entry.
+    func retireAutomaticOpen(boundToOtherAccountThan session: ShopperSession) throws {
+        guard session.isWellFormed, session.containerIdentifier == containerIdentifier,
+              session.environment == environment else { throw Error.accountMismatch }
+        try retireAutomaticOpen { $0 != session }
+    }
+
+    func retireAutomaticOpen(boundTo session: ShopperSession) throws {
+        guard session.isWellFormed, session.containerIdentifier == containerIdentifier,
+              session.environment == environment else { throw Error.accountMismatch }
+        try retireAutomaticOpen { $0 == session }
+    }
+
+    /// A persisted account invalidation has no trusted current identity yet.
+    /// Preserve fresh unbound ingress while retiring every older bound auto Open.
+    func retireAutomaticOpenForAllBoundAccounts() throws {
+        try retireAutomaticOpen { _ in true }
+    }
+
+    private func retireAutomaticOpen(matching account: (ShopperSession) -> Bool) throws {
+        var updated = entries
+        for index in updated.indices {
+            guard let bound = updated[index].session, account(bound), updated[index].openRequested,
+                  !updated[index].activationResolved else { continue }
+            updated[index].openRequested = false
+        }
+        if updated != entries { try commit(updated) }
     }
 
     func dismiss(id: UUID) throws {
@@ -272,6 +364,7 @@ final class HomeInvitationInbox {
         }
         var updated = entries
         updated[index].dismissalRequested = true
+        updated[index].openRequested = false
         // Keep receiving callbacks/imports after dismissal. A UI action cannot cancel
         // the server operation or remove its automatic-selection hold.
         if !updated[index].acceptanceAttempted { updated[index].state = .dismissed }
@@ -284,6 +377,7 @@ final class HomeInvitationInbox {
         guard case .ready = entries[index].state else { throw Error.invalidState }
         var updated = entries
         updated[index].activationResolved = true
+        updated[index].openRequested = false
         try commit(updated)
     }
 
@@ -294,8 +388,11 @@ final class HomeInvitationInbox {
         return index
     }
 
-    private static func reopen(_ entry: inout Entry, metadataArchive: Data, participantPending: Bool) {
+    private static func reopen(_ entry: inout Entry, metadataArchive: Data,
+                               displayName: String?, participantPending: Bool) {
+        if let displayName { entry.displayName = displayName }
         entry.dismissalRequested = false
+        entry.openRequested = true
         entry.participantPending = participantPending
         switch entry.state {
         case .queued, .failed, .dismissed:

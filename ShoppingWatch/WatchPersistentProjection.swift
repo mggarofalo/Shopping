@@ -3,6 +3,7 @@ import Foundation
 
 struct WatchPersistentProjection: Sendable {
     let scope: PersonalCartScopeSnapshot
+    let homeName: String?
     let stores: [WatchStore]
     let needs: [PersonalCartEntrySnapshot]
     let oneTimeIDs: Set<UUID>
@@ -16,6 +17,23 @@ struct WatchPersistentProjection: Sendable {
             let households = try repository.context.fetch(Household.fetchRequest())
                 .filter { $0.id != PersistenceModel.unsetID && $0.groceryList?.id != PersistenceModel.unsetID && $0.groceryList != nil }
                 .sorted { $0.id.uuidString < $1.id.uuidString }
+            let presentationSources = households.compactMap { home -> HomePresentationSource? in
+                guard let list = home.groceryList, let store = home.objectID.persistentStore,
+                      list.objectID.persistentStore == store else { return nil }
+                let role: HomePresentationSource.Role
+                switch repository.persistence.role(of: store) {
+                case .local: role = .local
+                case .ownerPrivate: role = .owner
+                case .participantShared:
+                    if let cloud = repository.persistence.container as? NSPersistentCloudKitContainer {
+                        role = cloud.canUpdateRecord(forManagedObjectWith: home.objectID) ? .member : .readOnly
+                    } else { role = .unknown }
+                case nil: role = .unknown
+                }
+                return HomePresentationSource(scope: PersonalCartScopeSnapshot(householdID: home.id,
+                    listID: list.id), name: home.name, role: role)
+            }
+            let presentedNames = HomePresentationNames.resolve(presentationSources)
             let household = preferredHouseholdID.map { id in households.first { $0.id == id } } ?? households.first
             guard let scope = household.map({ PersonalCartScopeSnapshot(householdID: $0.id, listID: $0.groceryList!.id) })
                 ?? retained.filter { preferredHouseholdID == nil || $0.householdID == preferredHouseholdID }.sorted(by: { $0.householdID.uuidString < $1.householdID.uuidString }).first else { return nil }
@@ -33,7 +51,8 @@ struct WatchPersistentProjection: Sendable {
                 mayWrite = mayWrite && native != .readOnly && native != .lost
             }
             if let writable { mayWrite = mayWrite && writable(scope.householdID) }
-            return try WatchPersistentProjection(scope: scope, stores: stores,
+            return try WatchPersistentProjection(scope: scope,
+                homeName: presentedNames[scope]?.title ?? household?.name, stores: stores,
                 needs: needs.map { try PersonalCartSnapshotBuilder.make(need: $0, session: repository.session,
                     generation: $0.id, evidence: [], quantity: $0.quantity) },
                 oneTimeIDs: Set(needs.filter { $0.kind == NeedKind.oneTime.rawValue }.map(\.id)),

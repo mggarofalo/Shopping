@@ -6,11 +6,7 @@ final class CatalogRefreshUITests: XCTestCase {
     }
 
     func testNewCatalogItemAppearsWithoutNavigatingAway() {
-        let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ShoppingCatalogRefreshUITest-\(UUID().uuidString).sqlite").path
-        app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        let app = launchApp(named: "ShoppingCatalogRefreshUITest")
         app.tabBars.buttons["Catalog"].tap()
         app.buttons["shopping.catalog.add"].tap()
         XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 2))
@@ -43,11 +39,7 @@ final class CatalogRefreshUITests: XCTestCase {
     }
 
     func testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates() {
-        let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ShoppingCatalogSaveAddUITest-\(UUID().uuidString).sqlite").path
-        app.launch()
-        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        let app = launchApp(named: "ShoppingCatalogSaveAddUITest")
         app.tabBars.buttons["Catalog"].tap()
 
         app.buttons["shopping.catalog.add"].tap()
@@ -184,6 +176,7 @@ final class CatalogRefreshUITests: XCTestCase {
             .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
+        if fixture == nil { app.createFirstHomeForWorkflow() }
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         return app
     }
