@@ -143,6 +143,7 @@ struct CatalogView: View {
             .environment(\.editMode, $editMode)
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
+            .homeScopeControl()
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
                 ShoppingCollectionToolbar(

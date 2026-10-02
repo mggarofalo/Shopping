@@ -5,6 +5,8 @@ import UIKit
 struct HomeSharingStatusView: View {
     @EnvironmentObject private var bootstrap: PersistenceBootstrap
     @Environment(\.openURL) private var openURL
+    @Environment(\.presentHomes) private var presentHomes
+    @Environment(\.presentInvitation) private var presentInvitation
     @State private var announcements = HomeSharingStatusAnnouncements()
 
     private var activity: HomeSharingActivity { bootstrap.homeSharingStatus.activity }
@@ -59,15 +61,11 @@ struct HomeSharingStatusView: View {
             .accessibilityHint("Opens this app’s settings. Apple Account settings are available from the main Settings screen.")
             .accessibilityIdentifier("shopping.sharing.settings")
         case .chooseHome:
-            NavigationLink("Manage homes") {
-                HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
-            }
+            Button("Homes", action: presentHomes)
             .accessibilityIdentifier("shopping.sharing.homes")
         case .reviewInvitation:
-            if let invitations = bootstrap.invitations {
-                NavigationLink("Review invitation") {
-                    HomeInvitationsView(invitations: invitations, bootstrap: bootstrap)
-                }
+            if let invitation = bootstrap.homeEntry.invitations.first(where: { !$0.dismissalRequested }) {
+                Button("Open invitation") { presentInvitation(invitation.id) }
                 .accessibilityIdentifier("shopping.sharing.invitation")
             }
         }

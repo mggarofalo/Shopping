@@ -88,6 +88,7 @@ struct PersonalCartView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("My cart")
+        .homeScopeControl()
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)

@@ -159,6 +159,19 @@ final class PersistenceBootstrap: ObservableObject {
     private var homeLeaveRefreshID: UUID?
     private let makeHomeRejoinVerifier: @Sendable (PersonalCartService) -> any HomeRejoinVerifying
     private var invitationActivations: [UUID: (entry: HomeInvitationInbox.Entry, authority: UICommandAuthority, presentationID: UUID)] = [:]
+    private(set) var autoOpeningInvitationID: UUID?
+    private var autoOpenFailures: Set<UUID> = []
+    private var autoConnectionAttemptedFor: Set<UUID> = []
+    private var joiningPresentationID: UUID?
+    private struct LocalJoinOrigin: Equatable {
+        let invitationID: UUID
+        let storeIdentifier: String
+        let householdID: UUID
+        let listID: UUID
+    }
+    private var localJoinOrigin: LocalJoinOrigin?
+    private var localReturnAfterDismiss: LocalJoinOrigin?
+    @Published private(set) var joinError: String?
     private var invitationDiscoveryReservations: [UUID: UUID] = [:]
     private let activateAccountStore: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration
     @Published private(set) var state: State = .loading
@@ -212,6 +225,10 @@ final class PersistenceBootstrap: ObservableObject {
     private var retainedLocalRecord: HomeAdoptionJournal.Record?
     private var retainedLocalConfiguration: PersistenceConfiguration?
     private var localHomeName: String?
+    private var localDiscoveryComplete = false
+    @Published private(set) var isResolvingFirstAccount = false
+    private let autoResolveFreshAccount: Bool
+    private let autoJoinInvitations: Bool
     private var restoringLocalRoute = false
     private var preferredAdoptedHome: (householdID: UUID, listID: UUID)?
     @Published private(set) var retainedLocalHomeName: String?
@@ -243,16 +260,36 @@ final class PersistenceBootstrap: ObservableObject {
         switch state {
         case .loading: store = .opening
         case .failed: store = .failed
-        case .ready(let ready): store = personalMode ? .account : .local(hasHome: ready.householdID != nil)
+        case .ready(let ready):
+            store = personalMode ? .account : .local(hasHome: ready.householdID != nil,
+                discoveryComplete: localDiscoveryComplete)
+        }
+        var visibleInvitations = invitations?.entries ?? []
+        if let id = joiningPresentationID,
+           !visibleInvitations.contains(where: { $0.id == id }),
+           let held = invitations?.allEntries.first(where: {
+               $0.id == id && $0.openRequested && !$0.activationResolved && $0.state != .dismissed
+           }),
+           !hasVerifiedDifferentAccount(for: held) {
+            // Store retirement temporarily removes a bound entry from the
+            // controller's verified-session filter. This is presentation only;
+            // every invitation command still validates its original authority.
+            visibleInvitations.append(held)
         }
         return HomeEntrySnapshot(store: store, readiness: homeCoordinator.readiness,
             discovery: homeCoordinator.discoveryState, homes: homeCoordinator.homes,
             currentHomeName: currentHomeName, retainedLocalHomeName: retainedLocalHomeName,
             isShowingRetainedLocalHome: isShowingRetainedLocalHome,
-            invitations: invitations?.entries ?? [], hasPendingInvitation: invitations?.hasPendingActivation ?? false,
+            invitations: visibleInvitations, hasPendingInvitation: invitations?.hasPendingActivation ?? false,
             hasVerifiedInvitationAccount: invitations?.hasVerifiedAccount ?? false,
             invitationProblem: invitations?.problem, importProblems: invitations?.importProblems ?? [:],
-            isCreatingHome: isCreatingHome, homeDiscoveryFailed: homeDiscoveryError != nil)
+            isCreatingHome: isCreatingHome, homeDiscoveryFailed: homeDiscoveryError != nil,
+            isResolvingFirstAccount: isResolvingFirstAccount, joinError: joinError)
+    }
+
+    private func hasVerifiedDifferentAccount(for entry: HomeInvitationInbox.Entry) -> Bool {
+        guard let bound = entry.session, case .ready(let verified) = accountProvider?.state else { return false }
+        return bound != verified
     }
 
     var homeEntryCommands: HomeEntryCommands { HomeEntryCommands(bootstrap: self) }
@@ -270,6 +307,8 @@ final class PersistenceBootstrap: ObservableObject {
         preloadedPreviewEnvironment: ShoppingPreviewEnvironment? = nil,
         defaults: UserDefaults = .standard,
         invitations: HomeInvitationController? = nil,
+        autoResolveFreshAccount: Bool = true,
+        autoJoinInvitations: Bool = true,
         makeAccountProvider: ((URL) throws -> ShopperSessionProvider)? = nil,
         accountStoreDirectory: (() throws -> URL)? = nil,
         participantStoreForHomeChoice: @escaping (PersistenceController) -> NSPersistentStore? = { $0.store(for: .participantShared) },
@@ -296,6 +335,8 @@ final class PersistenceBootstrap: ObservableObject {
         self.preloadedPreviewEnvironment = preloadedPreviewEnvironment
         self.defaults = defaults
         self.invitations = invitations
+        self.autoResolveFreshAccount = autoResolveFreshAccount
+        self.autoJoinInvitations = autoJoinInvitations
         self.homeCoordinator = ActiveHomeCoordinator(defaults: defaults)
         self.editorDrafts = HomeEditorDraftStore(defaults: defaults)
         self.makeAccountProvider = makeAccountProvider
@@ -313,14 +354,25 @@ final class PersistenceBootstrap: ObservableObject {
             for activation in self.invitationActivations.values where activation.entry.identity == identity {
                 activation.authority.retire()
             }
+            for entry in self.invitations?.allEntries ?? [] where entry.identity == identity {
+                self.autoOpenFailures.remove(entry.id)
+            }
         }
         invitations?.onChange = { [weak self] in
             guard let self else { return }
             for activation in self.invitationActivations.values {
                 if self.invitations?.allEntries.contains(activation.entry) != true { activation.authority.retire() }
             }
+            if let activeID = self.autoOpeningInvitationID,
+               let latest = self.invitations?.entries.last(where: {
+                   $0.openRequested && !$0.activationResolved
+               }), latest.id != activeID {
+                self.invitationActivations[activeID]?.authority.retire()
+            }
             self.homeCoordinator.setInvitationPending(self.invitations?.hasPendingActivation == true)
             self.objectWillChange.send()
+            self.scheduleAutomaticJoinConnection()
+            self.scheduleAutomaticInvitationOpen()
         }
     }
 
@@ -581,25 +633,26 @@ final class PersistenceBootstrap: ObservableObject {
                 let unavailableSetup = processInfo.environment["SHOPPING_UI_TEST_SETUP_UNAVAILABLE"] == "1"
                 let activeHomesFixture = processInfo.environment["SHOPPING_UI_TEST_ACTIVE_HOMES"] == "1"
                 let homeAdoptionFixture = processInfo.environment["SHOPPING_UI_TEST_HOME_ADOPTION"] == "1"
+                let acceptedInvitationFixture = activeHomesFixture
+                    && processInfo.environment["SHOPPING_UI_TEST_ACCEPTED_INVITATION"] == "1"
 #else
                 let unavailableSetup = false
                 let activeHomesFixture = false
                 let homeAdoptionFixture = false
+                let acceptedInvitationFixture = false
 #endif
                 let providerFactory: (URL) throws -> ShopperSessionProvider = { base in
                     if unavailableSetup { throw ShopperSessionError.temporarilyUnavailable }
-                    if activeHomesFixture || homeAdoptionFixture {
-                        return try ShopperSessionProvider(containerIdentifier: "iCloud.test.shopping-homes", environment: "Development",
-                            cacheDirectory: base.appendingPathComponent("Bindings"),
-                            lookup: .init(status: { .available }, recordName: { "isolated-home-test-account" }))
-                    }
-                    return try productionAccountProvider(base)
+                    let available = activeHomesFixture || homeAdoptionFixture
+                    return try ShopperSessionProvider(containerIdentifier: "iCloud.test.shopping-homes", environment: "Development",
+                        cacheDirectory: base.appendingPathComponent("Bindings"),
+                        lookup: .init(status: { available ? .available : .noAccount },
+                            recordName: { "isolated-home-test-account" }),
+                        notifications: NotificationCenter())
                 }
                 let accountDirectory: () throws -> URL = {
-                    if homeAdoptionFixture || activeHomesFixture {
-                        return storeURL.deletingLastPathComponent().appendingPathComponent(storeURL.lastPathComponent + "-accounts", isDirectory: true)
-                    }
-                    return try productionAccountDirectory()
+                    storeURL.deletingLastPathComponent()
+                        .appendingPathComponent(storeURL.lastPathComponent + "-accounts", isDirectory: true)
                 }
                 let activate: @Sendable (URL?, ShopperSession, URL, Bool) throws -> PersistenceConfiguration = { source, session, base, approved in
                     if activeHomesFixture { return .local(storeURL: storeURL) }
@@ -607,14 +660,14 @@ final class PersistenceBootstrap: ObservableObject {
                         guard source == nil, !approved else { throw HomeAdoptionJournal.Failure.copyUnavailable }
                         return .local(storeURL: base.appendingPathComponent("Account.sqlite"))
                     }
-                    return try productionAccountActivation(source: source, session: session, base: base, importLegacy: approved)
+                    return .local(storeURL: base.appendingPathComponent("Account.sqlite"))
                 }
 #if DEBUG
                 let rootGoneLeaveFixture = HomeLeaveRootGoneUITestBackend.isEnabled(processInfo.environment)
 #endif
                 let participantStoreLookup: (PersistenceController) -> NSPersistentStore? = { persistence in
 #if DEBUG
-                    if rootGoneLeaveFixture { return persistence.primaryStore }
+                    if rootGoneLeaveFixture || acceptedInvitationFixture { return persistence.primaryStore }
 #endif
                     return persistence.store(for: .participantShared)
                 }
@@ -635,11 +688,13 @@ final class PersistenceBootstrap: ObservableObject {
                 }
                 var fixtureInvitations: HomeInvitationController?
 #if DEBUG
+                var fixtureInbox: HomeInvitationInbox?
                 if activeHomesFixture || homeAdoptionFixture {
                     let inboxURL = storeURL.deletingLastPathComponent()
                         .appendingPathComponent(storeURL.lastPathComponent + "-invitations/inbox.json")
                     let inbox = try HomeInvitationInbox(url: inboxURL,
                         containerIdentifier: "iCloud.test.shopping-homes", environment: "Development")
+                    fixtureInbox = inbox
                     if (homeAdoptionFixture || processInfo.environment["SHOPPING_UI_TEST_PENDING_INVITATION"] == "1"),
                        processInfo.environment["SHOPPING_UI_TEST_FIXTURE"] != nil {
                         try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.shopping-homes",
@@ -653,8 +708,33 @@ final class PersistenceBootstrap: ObservableObject {
                    let fixture = ShoppingPreviewCase(rawValue: fixtureName) {
                     let environment = try ShoppingPreviewFixtures.make(fixture, storeURL: storeURL)
 #if DEBUG
-                    if activeHomesFixture && processInfo.environment["SHOPPING_UI_TEST_SECOND_HOME"] == "1" {
+                    if activeHomesFixture && (processInfo.environment["SHOPPING_UI_TEST_SECOND_HOME"] == "1"
+                        || acceptedInvitationFixture) {
                         _ = try environment.service.createHousehold(name: "Second home")
+                    }
+                    if acceptedInvitationFixture,
+                       processInfo.environment["SHOPPING_UI_TEST_FIXTURE"] != nil,
+                       let inbox = fixtureInbox {
+                        let invited = try HomeDiscoveryService(persistence: environment.persistence).discover().homes
+                            .first { $0.name == "Second home" }
+                        guard let invited, let sharedStoreIdentifier = environment.persistence.primaryStore?.identifier else {
+                            throw HomeInvitationInbox.Error.invalidState
+                        }
+                        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.shopping-homes",
+                            environment: "Development", accountRecordName: "isolated-home-test-account")
+                        let entry = try inbox.enqueue(identity: HomeInvitationIdentity(
+                            containerIdentifier: session.containerIdentifier, environment: session.environment,
+                            share: HomeShareIdentity(recordName: "fixture-share", zoneName: "fixture-zone",
+                                zoneOwnerName: "fixture-owner")), metadataArchive: Data([1]),
+                            displayName: invited.name)
+                        try inbox.setSession(session)
+                        let acceptance = try inbox.beginAcceptance(id: entry.id,
+                            sharedStoreIdentifier: sharedStoreIdentifier)
+                        try inbox.finishAcceptance(acceptance)
+                        let imported = try inbox.beginImportResolution(id: entry.id,
+                            sharedStoreIdentifier: sharedStoreIdentifier)
+                        try inbox.markReady(imported, graph: invited.graph)
+                        fixtureInvitations = HomeInvitationController(inbox: inbox)
                     }
 #endif
                     let bootstrap = PersistenceBootstrap(
@@ -663,6 +743,12 @@ final class PersistenceBootstrap: ObservableObject {
                         defaults: fixtureDefaults, invitations: fixtureInvitations, makeAccountProvider: providerFactory,
                         accountStoreDirectory: accountDirectory, participantStoreForHomeChoice: participantStoreLookup,
                         invitationShareIdentity: shareLookup, makeHomeLeaveTransport: leaveTransportFactory,
+                        makeHomeRejoinVerifier: { service in
+#if DEBUG
+                            if acceptedInvitationFixture { return UITestHomeRejoinVerifier() }
+#endif
+                            return ManagedHomeRejoinVerifier(cart: service)
+                        },
                         activateAccountStore: activate
                     )
 #if DEBUG
@@ -894,6 +980,9 @@ final class PersistenceBootstrap: ObservableObject {
         previous?.presentation.retire()
         clearHomeLeavePresentation()
         clearSharingStatusPresentation()
+        if let active = invitations?.entries.first(where: { $0.openRequested }) {
+            joiningPresentationID = active.id
+        }
         invitations?.configure(session: nil)
         homeCoordinator.bind(nil)
         generation += 1
@@ -1012,7 +1101,8 @@ final class PersistenceBootstrap: ObservableObject {
             generation: capturedGeneration)
     }
 
-    func confirmInvitationSetup(_ choice: InvitationSetupChoice, copyLocal: Bool) async throws {
+    func confirmInvitationSetup(_ choice: InvitationSetupChoice, copyLocal: Bool,
+                                joiningInvitationID: UUID? = nil) async throws {
         guard !accountLoadInProgress, transition == nil, generation == choice.generation,
               let provider = accountProvider,
               try verifiedSession(provider) == choice.proposal.session else { throw ShopperSessionError.accountChanged }
@@ -1031,6 +1121,12 @@ final class PersistenceBootstrap: ObservableObject {
             } else if copyLocal { throw HomeAdoptionJournal.Failure.copyUnavailable }
             guard generation == choice.generation, transition == nil,
                   try verifiedSession(provider) == proposal.session else { throw ShopperSessionError.accountChanged }
+            if let joiningInvitationID {
+                guard invitations?.allEntries.contains(where: {
+                    $0.id == joiningInvitationID && $0.openRequested && !$0.activationResolved
+                        && ($0.session == nil || $0.session == proposal.session)
+                }) == true else { throw HomeAdoptionJournal.Failure.staleProposal }
+            }
             // Intent is durable before the UI retires or the restart preference changes.
             personalMode = true
             defaults.set(true, forKey: Self.personalModeKey)
@@ -1043,14 +1139,22 @@ final class PersistenceBootstrap: ObservableObject {
 
     /// Joining keeps legacy groceries on this device under the existing durable
     /// adoption journal. A separate migration remains an explicit later action.
-    func connectForJoiningKeepingLocalHome() async throws {
+    func connectForJoiningKeepingLocalHome(invitationID: UUID? = nil) async throws {
+        guard requiresHomeAccountSetup else { return }
+        if let invitationID {
+            guard invitations?.allEntries.contains(where: { $0.id == invitationID && $0.openRequested }) == true
+                else { throw HomeAdoptionJournal.Failure.staleProposal }
+        }
         let choice = try await prepareInvitationSetup()
-        try await confirmInvitationSetup(choice, copyLocal: false)
+        try await confirmInvitationSetup(choice, copyLocal: false, joiningInvitationID: invitationID)
     }
 
     private func openPersonalStore(expectedSession: ShopperSession? = nil) {
         Task {
-            defer { accountLoadInProgress = false }
+            defer {
+                accountLoadInProgress = false
+                scheduleLocalReturnAfterDismiss()
+            }
             do {
                 let base = try await resolvedAccountDirectory()
                 let provider = try await resolvedAccountProvider(base: base)
@@ -1111,15 +1215,35 @@ final class PersistenceBootstrap: ObservableObject {
         }
     }
 
-    func openRetainedLocalHome() async throws {
+    func openRetainedLocalHome(expectedSelectionGeneration: UInt64? = nil,
+                               expectedPresentationID: UUID? = nil) async throws {
         guard !accountLoadInProgress, transition == nil, let record = retainedLocalRecord,
               let source = record.sourceURL else { throw HomeAdoptionJournal.Failure.staleProposal }
         let capturedGeneration = generation
+        if let expectedSelectionGeneration {
+            guard homeCoordinator.generation == expectedSelectionGeneration,
+                  homeCoordinator.activeScope == nil else { throw HomeAdoptionJournal.Failure.staleProposal }
+        }
+        if let expectedPresentationID {
+            guard case .ready(let ready) = state,
+                  ready.presentation.id == expectedPresentationID else { throw HomeAdoptionJournal.Failure.staleProposal }
+        }
+        if let session = try? accountProvider?.currentSession() {
+            try await deferAutomaticInvitationOpens(for: session)
+        }
         let base = try await resolvedAccountDirectory()
         try await Task.detached(priority: .userInitiated) {
             try HomeAdoptionJournal(baseDirectory: base).validateRetainedSource(record)
         }.value
-        guard generation == capturedGeneration, transition == nil else { throw HomeAdoptionJournal.Failure.staleProposal }
+        guard generation == capturedGeneration, transition == nil,
+              expectedSelectionGeneration == nil || homeCoordinator.generation == expectedSelectionGeneration,
+              expectedSelectionGeneration == nil || homeCoordinator.activeScope == nil else {
+            throw HomeAdoptionJournal.Failure.staleProposal
+        }
+        if let expectedPresentationID {
+            guard case .ready(let ready) = state,
+                  ready.presentation.id == expectedPresentationID else { throw HomeAdoptionJournal.Failure.staleProposal }
+        }
         retainedLocalConfiguration = .local(storeURL: source)
         personalConfiguration = nil
         preferredAdoptedHome = nil
@@ -1201,22 +1325,11 @@ final class PersistenceBootstrap: ObservableObject {
         activeAccountBinding = nil
     }
 
-    private var allowsLocalHouseholdCreation: Bool {
-        if isShowingRetainedLocalHome { return false }
-        if invitations?.hasPendingActivation == true { return false }
-#if DEBUG
-        return !personalMode && !personalFixture
-#else
-        return !personalMode
-#endif
-    }
-
     private func load() {
         guard preloadedPreviewEnvironment == nil else { finishLoad(prepared: nil); return }
         let requestedGeneration = generation
         let configuration = self.configuration
         let personalConfiguration = personalMode ? self.personalConfiguration : retainedLocalConfiguration
-        let allowsLocalHouseholdCreation = self.allowsLocalHouseholdCreation
         let accountProvider = self.accountProvider
         let personalMode = self.personalMode
         let retainedLocalRecord = self.retainedLocalRecord
@@ -1246,12 +1359,6 @@ final class PersistenceBootstrap: ObservableObject {
                                && $0.graph.listID == retainedLocalRecord.listID
                        }) {
                         selection = (home.graph.householdID, home.graph.listID)
-                    }
-                    if selection == nil, allowsLocalHouseholdCreation, !resolved.isManaged,
-                       try service.isPersistentStoreEmpty() {
-                        let created = try service.createHousehold()
-                        selection = (created.householdID, created.listID)
-                        discovery = try HomeDiscoveryService(persistence: persistence).discover()
                     }
                     var cartService: PersonalCartService?
                     let resumeError: String? = nil
@@ -1311,6 +1418,7 @@ final class PersistenceBootstrap: ObservableObject {
                 localHomeName = prepared.homeDiscovery.homes.first {
                     $0.graph.householdID == selection?.householdID && $0.graph.listID == selection?.listID
                 }?.name
+                localDiscoveryComplete = !prepared.homeDiscovery.hasIncompleteRoots
                 personalService = prepared.personalCartService
                 if let resumeError = prepared.resumeError {
                     cartResumeError = NSError(domain: "ShoppingCartResume", code: 1,
@@ -1378,6 +1486,10 @@ final class PersistenceBootstrap: ObservableObject {
                 associationWorker = ManagedShareAssociationWorker(persistence: persistence, journal: journal)
             }
             installAssociationObserver(for: persistence)
+            let resolveFirstAccount = autoResolveFreshAccount && !personalMode && !isShowingRetainedLocalHome
+                && selection == nil && localDiscoveryComplete && prepared != nil
+                && persistence.primaryStore?.type == NSSQLiteStoreType
+            isResolvingFirstAccount = resolveFirstAccount
             state = .ready(ReadyState(
                 persistence: persistence,
                 service: service,
@@ -1388,11 +1500,41 @@ final class PersistenceBootstrap: ObservableObject {
                 personalCartService: personalService
             ))
             configureInvitations()
+            scheduleAutomaticJoinConnection()
+            scheduleLocalReturnAfterDismiss()
+            if resolveFirstAccount, case .ready(let ready) = state {
+                Task { await resolveFirstAccountIfAvailable(ready) }
+            }
             resumePendingCart()
             consumeHistory()
             retryShareAssociations()
         } catch {
             state = .failed(error)
+        }
+    }
+
+    private func resolveFirstAccountIfAvailable(_ ready: ReadyState) async {
+        let capturedGeneration = generation
+        do {
+            let service = ready.service
+            let empty = try await Task.detached(priority: .utility) {
+                try service.isPersistentStoreEmpty()
+            }.value
+            guard generation == capturedGeneration, ready.presentation.isActive,
+                  case .ready(let current) = state, current.presentation.id == ready.presentation.id else { return }
+            guard empty else {
+                isResolvingFirstAccount = false
+                scheduleAutomaticJoinConnection()
+                return
+            }
+            let choice = try await prepareInvitationSetup()
+            try await confirmInvitationSetup(choice, copyLocal: false)
+        } catch {
+            guard generation == capturedGeneration, ready.presentation.isActive else { return }
+            // An unavailable account leaves explicit local creation usable.
+            isResolvingFirstAccount = false
+            if invitations?.hasPendingActivation == true { joinError = error.localizedDescription }
+            scheduleAutomaticJoinConnection()
         }
     }
 
@@ -1478,6 +1620,139 @@ final class PersistenceBootstrap: ObservableObject {
                 transport: ManagedHomeInvitationTransport(persistence: ready.persistence, session: session, cart: personalService))
         } else { invitations.configure(session: verifiedSession) }
         homeCoordinator.setInvitationPending(invitations.hasPendingActivation)
+        scheduleAutomaticJoinConnection()
+        scheduleAutomaticInvitationOpen()
+    }
+
+    private func scheduleAutomaticJoinConnection() {
+        guard autoJoinInvitations, !personalMode, !isResolvingFirstAccount, !accountLoadInProgress,
+              transition == nil,
+              case .ready(let ready) = state, ready.presentation.isActive,
+              let entry = invitations?.entries.first(where: {
+                  $0.openRequested && !autoConnectionAttemptedFor.contains($0.id)
+              }) else { return }
+        autoConnectionAttemptedFor.insert(entry.id)
+        captureLocalJoinOrigin(entry.id, ready: ready)
+        Task {
+            do {
+                try await connectForJoiningKeepingLocalHome(invitationID: entry.id)
+                joinError = nil
+            } catch {
+                if invitations?.allEntries.first(where: { $0.id == entry.id })?.openRequested == true {
+                    joinError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func captureLocalJoinOrigin(_ id: UUID, ready: ReadyState) {
+        guard !personalMode, let householdID = ready.householdID, let listID = ready.listID,
+              let store = ready.persistence.primaryStore else { return }
+        localJoinOrigin = LocalJoinOrigin(invitationID: id, storeIdentifier: store.identifier,
+            householdID: householdID, listID: listID)
+    }
+
+    private func scheduleLocalReturnAfterDismiss() {
+        guard let origin = localReturnAfterDismiss, personalMode, !accountLoadInProgress,
+              transition == nil, case .ready(let ready) = state, ready.presentation.isActive,
+              ready.householdID == nil, ready.homeScope == nil, homeCoordinator.activeScope == nil,
+              let record = retainedLocalRecord, record.action == .keepLocal,
+              record.proposal.sourceStoreIdentifier == origin.storeIdentifier,
+              record.householdID == origin.householdID, record.listID == origin.listID,
+              case .ready(let session) = accountProvider?.state, session == record.session,
+              invitations?.allEntries.contains(where: {
+                  $0.id != origin.invitationID && $0.openRequested && !$0.activationResolved
+                      && ($0.session == nil || $0.session == session)
+              }) != true else { return }
+        let selectionGeneration = homeCoordinator.generation
+        let presentationID = ready.presentation.id
+        localReturnAfterDismiss = nil
+        Task {
+            do {
+                try await openRetainedLocalHome(expectedSelectionGeneration: selectionGeneration,
+                    expectedPresentationID: presentationID)
+            } catch HomeAdoptionJournal.Failure.staleProposal {
+                // A newer selection or store presentation owns navigation now.
+            } catch { homeSetupError = error }
+        }
+    }
+
+    private func scheduleAutomaticInvitationOpen() {
+        guard autoJoinInvitations, autoOpeningInvitationID == nil, personalMode,
+              case .ready(let ready) = state, ready.presentation.isActive,
+              let invitations, let session = try? accountProvider?.currentSession() else { return }
+        guard let entry = invitations.entries.last(where: {
+            $0.openRequested && !$0.activationResolved && $0.session == session
+        }), !autoOpenFailures.contains(entry.id), case .ready(let graph) = entry.state,
+              homeCoordinator.homes.contains(where: { $0.graph == graph }) else { return }
+        let selectionGeneration = homeCoordinator.generation
+        autoOpeningInvitationID = entry.id
+        Task {
+            defer {
+                autoOpeningInvitationID = nil
+                scheduleAutomaticInvitationOpen()
+            }
+            do {
+                // One accepted invitation owns automatic navigation. Earlier
+                // accepted homes remain available through a deliberate Open.
+                try await deferAutomaticInvitationOpens(for: session, except: entry.id)
+                guard homeCoordinator.generation == selectionGeneration else {
+                    throw HomeInvitationInbox.Error.invalidState
+                }
+                try await activateInvitedHome(entryID: entry.id, graph: graph,
+                    expectedSelectionGeneration: selectionGeneration)
+                joinError = nil
+            } catch {
+                if invitations.allEntries.first(where: { $0.id == entry.id })?.openRequested == true,
+                   homeCoordinator.generation == selectionGeneration {
+                    autoOpenFailures.insert(entry.id)
+                    joinError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func deferAutomaticInvitationOpens(for session: ShopperSession, except preservedID: UUID? = nil)
+        async throws {
+        guard let invitations else { return }
+        for entry in invitations.allEntries where entry.openRequested && !entry.activationResolved
+            && entry.session == session && entry.id != preservedID {
+            try await invitations.deferOpen(entry.id, expectedSession: session)
+        }
+    }
+
+    func joinInvitation(_ id: UUID) async throws {
+        guard let invitations, let entry = invitations.entries.first(where: { $0.id == id }) else {
+            throw HomeInvitationInbox.Error.invalidState
+        }
+        joinError = nil
+        let wasFailed: Bool
+        if case .failed = entry.state { wasFailed = true }
+        else { wasFailed = false }
+        let needsConnection = requiresHomeAccountSetup
+        if needsConnection {
+            autoConnectionAttemptedFor.insert(id)
+            if case .ready(let ready) = state { captureLocalJoinOrigin(id, ready: ready) }
+        }
+        if wasFailed { try await invitations.retryAndWait(id) }
+        else { try await invitations.requestOpen(id) }
+        if needsConnection {
+            try await connectForJoiningKeepingLocalHome(invitationID: id)
+        }
+        autoOpenFailures.remove(id)
+        scheduleAutomaticInvitationOpen()
+    }
+
+    func dismissJoin(_ id: UUID) async throws {
+        guard let invitations, let entry = invitations.allEntries.first(where: { $0.id == id }) else {
+            throw HomeInvitationInbox.Error.invalidState
+        }
+        try await invitations.deferOpen(id, expectedSession: entry.session)
+        joinError = nil
+        if localJoinOrigin?.invitationID == id {
+            localReturnAfterDismiss = localJoinOrigin
+            scheduleLocalReturnAfterDismiss()
+        }
     }
 
     func selectHome(_ graph: HomeGraphIdentity) async throws {
@@ -1510,12 +1785,16 @@ final class PersistenceBootstrap: ObservableObject {
                     throw pendingChoice
                 }
             }
+            try await deferAutomaticInvitationOpens(for: session)
+            guard generation == capturedGeneration, ready.presentation.isActive,
+                  try accountProvider?.currentSession() == session else { throw ShopperSessionError.accountChanged }
         }
         try homeCoordinator.select(graph)
         applyHomeSelection(to: ready)
     }
 
-    func activateInvitedHome(entryID: UUID, graph: HomeGraphIdentity) async throws {
+    func activateInvitedHome(entryID: UUID, graph: HomeGraphIdentity,
+                             expectedSelectionGeneration: UInt64? = nil) async throws {
         let (ready, invitationController) = try validateInvitationChoice(entryID, graph: graph)
         guard !invitationActivations.values.contains(where: { $0.presentationID == ready.presentation.id }),
               let cart = ready.personalCartService,
@@ -1552,6 +1831,8 @@ final class PersistenceBootstrap: ObservableObject {
                     try choiceAuthority.validate()
                     let (current, _) = try self.validateInvitationChoice(entryID, graph: graph)
                     guard self.generation == capturedGeneration, current.presentation.id == ready.presentation.id,
+                          expectedSelectionGeneration == nil
+                              || self.homeCoordinator.generation == expectedSelectionGeneration,
                           invitationController.allEntries.first(where: { $0.id == entryID }) == entry else {
                         throw HomeInvitationInbox.Error.invalidState
                     }
@@ -1626,10 +1907,74 @@ final class PersistenceBootstrap: ObservableObject {
         let selected: Bool
     }
 
+    /// Ordinary first use is explicit. The local path uses a separate exact-ID
+    /// journal and never represents an unauthenticated store as account owned.
+    func createFirstHome() async throws {
+        let entry = homeEntry
+        guard entry.root == .noHomes else {
+            throw NeedServiceError.scopeChanged
+        }
+        if personalMode {
+            guard !entry.hasPendingInvitation else { throw NeedServiceError.scopeChanged }
+            let created = try await createHome(name: "My Home")
+            if created.selected { try await acknowledgeHomeCreation(created) }
+            return
+        }
+        guard !entry.invitations.contains(where: { $0.openRequested }) else {
+            throw NeedServiceError.scopeChanged
+        }
+        try await createFirstLocalHome()
+    }
+
+    private func createFirstLocalHome() async throws {
+        guard !isCreatingHome, !isShowingRetainedLocalHome,
+              case .ready(let ready) = state, ready.presentation.isActive,
+              ready.householdID == nil, let store = ready.persistence.primaryStore,
+              ready.persistence.role(of: store) == .local,
+              let storeURL = store.url, let storeIdentifier = store.identifier else {
+            throw NeedServiceError.scopeChanged
+        }
+        let capturedGeneration = generation
+        isCreatingHome = true
+        defer { isCreatingHome = false }
+        let journal = LocalHomeCreationJournal(storeURL: storeURL)
+        let command = try await Task.detached(priority: .userInitiated) {
+            try journal.begin(name: "My Home", storeIdentifier: storeIdentifier)
+        }.value
+        let service = ready.service
+        _ = try await Task.detached(priority: .userInitiated) {
+            try service.createLocalHousehold(command: command)
+        }.value
+        // The save is durable. A later presentation change cannot make this a
+        // retryable creation failure or select a home in a different store.
+        guard generation == capturedGeneration, ready.presentation.isActive else { return }
+        let discovery = HomeDiscoveryService(persistence: ready.persistence)
+        let snapshot = try await Task.detached(priority: .utility) { try discovery.discover() }.value
+        guard generation == capturedGeneration, ready.presentation.isActive,
+              let home = snapshot.homes.first(where: {
+                  $0.graph.storeIdentifier == storeIdentifier
+                      && $0.graph.householdID == command.householdID
+                      && $0.graph.listID == command.listID
+              }) else { return }
+        localHomeName = home.name
+        localDiscoveryComplete = !snapshot.hasIncompleteRoots
+        ready.presentation.retire()
+        state = .ready(ReadyState(persistence: ready.persistence, service: ready.service,
+            householdID: command.householdID, listID: command.listID,
+            personalCartService: personalService))
+        do {
+            try await Task.detached(priority: .utility) { try journal.acknowledge(command) }.value
+        } catch { homeSetupError = error }
+    }
+
     func createHome(name: String, resuming: HomeCreationCommand? = nil, beforeSelectionReconciliation: () async -> Void = {}) async throws -> CreatedHome {
         guard !isCreatingHome, case .ready(let ready) = state,
               let provider = accountProvider else { throw ShopperSessionError.setupRequired }
         let session = try provider.currentSession()
+        try await deferAutomaticInvitationOpens(for: session)
+        guard ready.presentation.isActive, try provider.currentSession() == session else {
+            throw ShopperSessionError.accountChanged
+        }
         let capturedGeneration = homeCoordinator.generation
         isCreatingHome = true
         defer { isCreatingHome = false }
@@ -2003,3 +2348,18 @@ final class PersistenceBootstrap: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+private struct UITestHomeRejoinVerifier: HomeRejoinVerifying {
+    func validate(_ identity: HomeNativeAccessIdentity, in repository: PersonalCartRepository) throws {
+        guard let provider = repository.persistence.personalCartSessionProvider as? ShopperSessionProvider,
+              case .ready(let session) = provider.state, session == repository.session else {
+            throw PersonalCartError.accountChanged
+        }
+    }
+
+    func refresh(_ identity: HomeNativeAccessIdentity) async throws {
+        try await Task.sleep(for: .seconds(1))
+    }
+}
+#endif

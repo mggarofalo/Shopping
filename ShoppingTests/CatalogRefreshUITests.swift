@@ -184,6 +184,7 @@ final class CatalogRefreshUITests: XCTestCase {
             .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
+        if fixture == nil { app.createFirstHomeForWorkflow() }
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         return app
     }

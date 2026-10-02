@@ -90,6 +90,7 @@ struct GroceriesView: View {
         NavigationStack {
             groceryContent
             .navigationTitle("Groceries")
+            .homeScopeControl()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)

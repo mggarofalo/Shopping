@@ -1,130 +1,195 @@
 import SwiftUI
 
+/// One scoped join surface; native acceptance has already recorded intent before it appears.
 struct HomeInvitationsView: View {
-    @ObservedObject var invitations: HomeInvitationController
     @ObservedObject var bootstrap: PersistenceBootstrap
-    @State private var setup: PersistenceBootstrap.InvitationSetupChoice?
-    @State private var isWorking = false
-    @State private var error: String?
+    let invitationID: UUID
+    @Environment(\.dismiss) private var dismiss
+    @State private var isRetrying = false
+    @State private var retryError: String?
+    @State private var showingDetails = false
+
+    private var invitation: HomeEntrySnapshot.Invitation? {
+        bootstrap.homeEntry.invitations.first { $0.id == invitationID }
+    }
 
     var body: some View {
-        List {
-            if setup != nil || bootstrap.requiresHomeAccountSetup || !invitations.hasVerifiedAccount {
-                Section {
-                    if let setup {
-                        if let name = setup.currentHomeName {
-                            Text("Your current home is \(name). Its groceries will stay separate from the invited home.")
-                            if setup.canAdopt {
-                                Button("Keep \(name) in iCloud") { connect(setup, copyLocal: true) }
-                            }
-                            Button("Keep \(name) on this device") { connect(setup, copyLocal: false) }
-                        } else {
-                            Text("Connect to iCloud to load your invited home.")
-                            Button("Continue with iCloud") { connect(setup, copyLocal: false) }
-                        }
-                        Button("Not now", role: .cancel) { self.setup = nil }
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    Image(systemName: "house")
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundStyle(Color.groceryAccent)
+                        .accessibilityHidden(true)
+                    if let invitation {
+                        content(for: invitation)
                     } else {
-                        Text("Connect to iCloud to accept your home invitation. Your existing groceries stay saved.")
-                        Button("Connect to iCloud") {
-                            perform { setup = try await bootstrap.prepareInvitationSetup() }
-                        }
+                        Text("Invitation unavailable")
+                            .font(.title2.weight(.semibold))
+                            .padding(.top, 18)
                     }
                 }
-                .disabled(isWorking)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
             }
-            if let problem = invitations.problem {
-                Section {
-                    Text(problem)
-                    Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
-                        .disabled(bootstrap.isCheckingSharingStatus)
+            .navigationTitle("Invitation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Not Now") { dismiss() }
+                        .accessibilityIdentifier("shopping.invitation.notNow")
                 }
             }
-            ForEach(invitations.entries) { entry in
-                Section {
-                    switch entry.state {
-                    case .queued:
-                        Label("Invitation waiting", systemImage: "envelope")
-                        Text("Joining will start when your iCloud account and saved groceries are ready.")
-                    case .joining:
-                        Label("Joining home", systemImage: "person.crop.circle.badge.plus")
-                    case .loading:
-                        Label("Loading groceries", systemImage: "tray.and.arrow.down")
-                        if let problem = invitations.importProblems[entry.id] { Text(problem) }
-                        Text("Your current home stays selected.")
-                        Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
-                            .disabled(bootstrap.isCheckingSharingStatus)
-                    case .ready(let graph):
-                        if let home = bootstrap.homeCoordinator.homes.first(where: { $0.graph == graph }) {
-                            Label(home.name, systemImage: "house")
-                            if let current = bootstrap.currentHomeName {
-                                Text("Switch from \(current) to \(home.name).")
-                            }
-                            Button("Open \(home.name)") {
-                                perform { try await bootstrap.activateInvitedHome(entryID: entry.id, graph: graph) }
-                            }
-                            .accessibilityIdentifier("shopping.invitation.open")
-                            Button("Not now", role: .cancel) {
-                                perform { try await bootstrap.keepCurrentHome(entryID: entry.id) }
-                            }
-                            .accessibilityIdentifier("shopping.invitation.notNow")
-                        } else {
-                            Text("Your invited home is ready. Refresh your homes to open it.")
-                            Button("Check again") { Task { await bootstrap.checkSharingStatus() } }
-                                .disabled(bootstrap.isCheckingSharingStatus)
-                        }
-                    case .failed(let failure):
-                        Text(failureMessage(failure))
-                        Button("Retry invitation") { invitations.retry(entry.id) }
-                    case .dismissed:
-                        EmptyView()
-                    }
-                    if case .ready = entry.state { }
-                    else if case .failed = entry.state, entry.acceptanceAttempted { }
-                    else {
-                        Button(entry.acceptanceAttempted ? "Hide for now" : "Dismiss invitation", role: .cancel) {
-                            invitations.dismiss(entry.id)
-                        }
-                    }
-                }
-                .disabled(isWorking)
+            .alert("Invitation details", isPresented: $showingDetails) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(detailMessage)
             }
-            if isWorking { ProgressView("Preparing home…") }
-            if let error { Text(error).foregroundStyle(.red) }
         }
-        .navigationTitle("Home invitations")
-        .task { try? await bootstrap.refreshHomes() }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
-    private func connect(_ choice: PersistenceBootstrap.InvitationSetupChoice, copyLocal: Bool) {
-        perform { try await bootstrap.confirmInvitationSetup(choice, copyLocal: copyLocal) }
+    @ViewBuilder
+    private func content(for invitation: HomeEntrySnapshot.Invitation) -> some View {
+        if let retryError {
+            stateTitle("Couldn’t Join")
+            Text(retryError).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            retryButton
+        } else if !bootstrap.homeEntry.hasVerifiedInvitationAccount,
+                  bootstrap.homeEntry.joinError != nil {
+            stateTitle("Sign In to iCloud")
+            Text("Sign in in iPhone Settings, then return here.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            retryButton
+        } else if bootstrap.homeEntry.importProblems[invitation.id] != nil {
+            stateTitle("Couldn’t Load Home")
+            Text("Check your connection and try again.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Check Again") { checkAgain() }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRetrying)
+                .padding(.top, 20)
+                .accessibilityIdentifier("shopping.invitation.checkAgain")
+        } else if bootstrap.homeEntry.joinError != nil {
+            stateTitle("Couldn’t Open Home")
+            Text("Try again.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            retryButton
+        } else {
+            switch invitation.state {
+            case .queued, .joining:
+                stateTitle(progressTitle("Joining", invitation: invitation))
+                ProgressView().padding(.top, 20)
+            case .loading:
+                stateTitle(progressTitle("Loading", invitation: invitation))
+                ProgressView().padding(.top, 20)
+            case .ready(let graph):
+                if invitation.openRequested {
+                    stateTitle(progressTitle("Opening", invitation: invitation))
+                    ProgressView().padding(.top, 20)
+                } else {
+                    let name = bootstrap.homeEntry.homes.first { $0.id == graph }?.name ?? "Home"
+                    stateTitle("\(name) is ready")
+                    Button("Open") { open(invitation.id, graph: graph) }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 20)
+                }
+            case .failed(let failure):
+                stateTitle(failureTitle(failure))
+                Text(failureMessage(failure))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 7)
+                retryButton
+                if case .acceptance = failure {
+                    Button("Details") { showingDetails = true }
+                        .padding(.top, 7)
+                }
+            case .dismissed:
+                stateTitle("Invite Unavailable")
+                Text("Ask for a new invite.")
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 7)
+            }
+        }
     }
 
-    private func perform(_ action: @escaping @MainActor () async throws -> Void) {
-        guard !isWorking else { return }
-        isWorking = true
-        error = nil
-        Task { @MainActor in
-            defer { isWorking = false }
-            do { try await action() }
-            catch { self.error = error.localizedDescription }
+    private func stateTitle(_ value: String) -> some View {
+        Text(value)
+            .font(.title2.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .padding(.top, 18)
+            .accessibilityIdentifier("shopping.invitation.state")
+    }
+
+    private func progressTitle(_ action: String, invitation: HomeEntrySnapshot.Invitation) -> String {
+        "\(action) \(invitation.displayName ?? "Home")…"
+    }
+
+    private var retryButton: some View {
+        Button("Retry") { retry() }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRetrying)
+            .padding(.top, 20)
+            .accessibilityIdentifier("shopping.invitation.retry")
+    }
+
+    private var detailMessage: String {
+        guard let invitation else { return "The invitation is no longer available." }
+        if case .failed(.acceptance(let message)) = invitation.state { return message }
+        return bootstrap.homeEntry.joinError ?? "Try again."
+    }
+
+    private func failureTitle(_ failure: HomeInvitationInbox.Failure) -> String {
+        switch failure {
+        case .accountChanged: "iCloud Account Changed"
+        case .interrupted, .acceptance: "Couldn’t Join"
         }
     }
 
     private func failureMessage(_ failure: HomeInvitationInbox.Failure) -> String {
         switch failure {
-        case .interrupted: return "Joining was interrupted. Retry to check the same invitation."
-        case .accountChanged: return "Your iCloud account changed. Return to the original account to retry this invitation."
-        case .acceptance(let message): return message
+        case .accountChanged: "Switch back to continue joining."
+        case .interrupted, .acceptance: "Try again."
+        }
+    }
+
+    private func retry() {
+        guard !isRetrying else { return }
+        isRetrying = true
+        retryError = nil
+        Task {
+            defer { isRetrying = false }
+            do { try await bootstrap.homeEntryCommands.joinInvitation(invitationID) }
+            catch { retryError = "Try again." }
+        }
+    }
+
+    private func checkAgain() {
+        guard !isRetrying else { return }
+        isRetrying = true
+        retryError = nil
+        Task {
+            defer { isRetrying = false }
+            do { try await bootstrap.homeEntryCommands.refreshHomes() }
+            catch { retryError = "Try again." }
+        }
+    }
+
+    private func open(_ id: UUID, graph: HomeGraphIdentity) {
+        Task {
+            do { try await bootstrap.homeEntryCommands.openInvitation(id, graph: graph) }
+            catch { retryError = "Couldn’t open home. Try again." }
         }
     }
 }
 
 #Preview {
-    let inbox = try! HomeInvitationInbox(url: FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString).appendingPathComponent("inbox.json"),
-        containerIdentifier: "iCloud.preview", environment: "Development")
-    NavigationStack {
-        HomeInvitationsView(invitations: HomeInvitationController(inbox: inbox),
-            bootstrap: PersistenceBootstrap(preloadedPreviewEnvironment: try! ShoppingPreviewFixtures.make(.populated)))
-    }
+    let bootstrap = PersistenceBootstrap(preloadedPreviewEnvironment: try! ShoppingPreviewFixtures.make(.populated))
+    HomeInvitationsView(bootstrap: bootstrap, invitationID: UUID())
 }

@@ -31,6 +31,7 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Settings")
+            .homeScopeControl()
         }
     }
     private var appearancePicker: some View {

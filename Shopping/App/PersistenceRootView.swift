@@ -1,8 +1,27 @@
 import SwiftUI
 
+private enum HomeRootSheet: Identifiable, Equatable {
+    case homes
+    case invitation(UUID)
+
+    var id: String {
+        switch self {
+        case .homes: "homes"
+        case .invitation(let id): "invitation-\(id.uuidString)"
+        }
+    }
+}
+
 struct PersistenceRootView: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
     @Environment(\.scenePhase) private var scenePhase
+    @State private var sheet: HomeRootSheet?
+    @State private var lastSheet: HomeRootSheet?
+    @State private var pendingSheet: HomeRootSheet?
+    @State private var dismissedInvitationID: UUID?
+    @State private var isCreatingFirstHome = false
+    @State private var rootError: String?
+    @State private var showingJoinDismissError = false
 
     var body: some View {
         Group {
@@ -12,70 +31,230 @@ struct PersistenceRootView: View {
                     .accessibilityIdentifier("shopping.persistence.loading")
                     .task(id: bootstrap.loadingTransitionID) { await bootstrap.runLoadingTransition() }
             case .ready(let ready):
-                Group {
-                    if !ready.presentation.isActive { EmptyView() }
-                    else if ready.householdID == nil {
-                        NavigationStack {
-                            ContentUnavailableView {
-                                Label("Waiting for your household", systemImage: "icloud")
-                            } description: {
-                                if bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) {
-                                    Text("Leaving a home is still being verified. Open Homes to check its status. Your personal cart and history remain saved.")
-                                } else if bootstrap.homeLeaveStatuses.contains(where: \.completed) {
-                                    Text("Your personal cart and history remain saved after leaving. Choose a home when you are ready.")
-                                } else {
-                                    Text(bootstrap.sharingStatusDescription)
-                                    Text("Your existing groceries will appear after import. An empty cache does not create another household.")
-                                }
-                            } actions: {
-                                NavigationLink("Choose a home") {
-                                    HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
-                                }
-                                Button("Check again") { bootstrap.applicationDidEnterForeground() }
-                                NavigationLink("Sharing status") { HomeSharingStatusView() }
-                                    .accessibilityIdentifier("shopping.waiting.sharingStatus")
-                                if let service = ready.personalCartService {
-                                    NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
-                                }
-                        }
-                        }
-                    } else { ContentView() }
-                }
-                    .id(ready.presentation.id)
-                    .onAppear { bootstrap.presentationDidAppear(ready.presentation.id) }
-                    .onDisappear { bootstrap.presentationDidDisappear(ready.presentation.id) }
-                    .environment(\.persistencePresentation, ready.presentation)
-                    .environment(\.managedObjectContext, ready.persistence.container.viewContext)
-                    .environment(\.needService, ready.service)
-                    .environment(\.personalCart, ready.personalCart)
-                    .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
-                    .environment(\.persistenceSelection, PersistenceSelection(
-                        householdID: ready.householdID,
-                        listID: ready.listID,
-                        homeScope: ready.homeScope
-                    ))
+                readyBody(ready)
             case .failed(let error):
                 NavigationStack {
                     PersistenceRecoveryView(error: error, retry: bootstrap.retry)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                NavigationLink("Sharing status") { HomeSharingStatusView() }
-                            }
-                        }
                 }
             }
         }
-        .safeAreaInset(edge: .top) {
-            if let invitations = bootstrap.invitations {
-                HomeInvitationNotice(invitations: invitations, bootstrap: bootstrap)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if case .deferred(let invitation) = bootstrap.homeEntry.joinPresentation {
+                HomeInvitationNotice(bootstrap: bootstrap, invitation: invitation)
             }
         }
+        .sheet(item: $sheet, onDismiss: sheetDismissed) { route in
+            switch route {
+            case .homes:
+                HomeSelectionView(bootstrap: bootstrap)
+            case .invitation(let id):
+                HomeInvitationsView(bootstrap: bootstrap, invitationID: id)
+            }
+        }
+        .alert("Couldn’t pause joining", isPresented: $showingJoinDismissError) {
+            Button("Open Invitation") {
+                if let dismissedInvitationID { present(.invitation(dismissedInvitationID)) }
+            }
+        } message: {
+            Text("Your join is still in progress.")
+        }
+        .environment(\.homeScopeDisplay, scopeDisplay)
         .environmentObject(bootstrap)
+        .environment(\.presentHomes) { present(.homes) }
+        .environment(\.presentInvitation) { present(.invitation($0)) }
         .environment(\.homeEditorDraftStore, bootstrap.editorDrafts)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
         .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
+        .onChange(of: bootstrap.homeEntry.joinPresentation, initial: true) { _, presentation in
+            switch presentation {
+            case .active(let invitation):
+                if dismissedInvitationID != invitation.id { present(.invitation(invitation.id)) }
+            case .deferred, .none:
+                dismissedInvitationID = nil
+                if case .invitation = sheet { sheet = nil }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { bootstrap.applicationDidEnterForeground() }
+        }
+    }
+
+    private var scopeDisplay: HomeScopeDisplay? {
+        let entry = bootstrap.homeEntry
+        guard let name = entry.currentHomeName ??
+            (entry.isShowingRetainedLocalHome ? entry.retainedLocalHomeName : nil) else { return nil }
+        return HomeScopeDisplay(name: name,
+            isLocal: entry.isLocalStore || entry.isShowingRetainedLocalHome)
+    }
+
+    @ViewBuilder
+    private func readyBody(_ ready: PersistenceBootstrap.ReadyState) -> some View {
+        Group {
+            if !ready.presentation.isActive {
+                EmptyView()
+            } else {
+                switch bootstrap.homeEntry.root {
+                case .activeHome, .localHome:
+                    if ready.householdID != nil { ContentView() }
+                    else { waitingHomes }
+                case .noHomes:
+                    noHomes
+                case .chooseHome:
+                    chooseHome
+                case .selectedHomeUnavailable:
+                    unavailableHome
+                case .opening, .waitingForHomes:
+                    waitingHomes
+                case .accountUnavailable:
+                    unavailableHome
+                case .failed:
+                    unavailableHome
+                }
+            }
+        }
+        .id(ready.presentation.id)
+        .onAppear { bootstrap.presentationDidAppear(ready.presentation.id) }
+        .onDisappear { bootstrap.presentationDidDisappear(ready.presentation.id) }
+        .environment(\.persistencePresentation, ready.presentation)
+        .environment(\.managedObjectContext, ready.persistence.container.viewContext)
+        .environment(\.needService, ready.service)
+        .environment(\.personalCart, ready.personalCart)
+        .environment(\.activatePersonalCart, { bootstrap.activatePersonalCarts(importLegacy: $0) })
+        .environment(\.persistenceSelection, PersistenceSelection(
+            householdID: ready.householdID,
+            listID: ready.listID,
+            homeScope: ready.homeScope
+        ))
+    }
+
+    private var noHomes: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("Create a Home", systemImage: "house")
+            } description: {
+                Text("Invited? Open your invite link.")
+            } actions: {
+                Button("Create Home") { createFirstHome() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCreatingFirstHome || bootstrap.homeEntry.isCreatingHome)
+                    .accessibilityIdentifier("shopping.home.createFirst")
+                if !bootstrap.homeEntry.invitations.isEmpty {
+                    Button("Homes") { present(.homes) }
+                        .accessibilityIdentifier("shopping.home.choose")
+                }
+                if isCreatingFirstHome { ProgressView() }
+                if let rootError { Text(rootError).foregroundStyle(.red) }
+                savedCartsLink
+            }
+            .navigationTitle("Shopping")
+        }
+    }
+
+    private var chooseHome: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("Choose a Home", systemImage: "house")
+            } actions: {
+                Button("Homes") { present(.homes) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("shopping.home.choose")
+                savedCartsLink
+            }
+            .navigationTitle("Shopping")
+        }
+    }
+
+    private var unavailableHome: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("Home unavailable", systemImage: "house")
+            } actions: {
+                Button("Homes") { present(.homes) }
+                Button("Check Again") { bootstrap.applicationDidEnterForeground() }
+                savedCartsLink
+            }
+            .navigationTitle("Shopping")
+        }
+    }
+
+    @ViewBuilder
+    private var waitingHomes: some View {
+        NavigationStack {
+            Group {
+                if bootstrap.homeEntry.homeDiscoveryFailed {
+                    ContentUnavailableView {
+                        Label("Couldn’t load homes", systemImage: "house")
+                    } description: {
+                        Text("Try again.")
+                    } actions: {
+                        Button("Check Again") { bootstrap.applicationDidEnterForeground() }
+                        if bootstrap.homeEntry.retainedLocalHomeName != nil {
+                            Button("Homes") { present(.homes) }
+                                .accessibilityIdentifier("shopping.home.choose")
+                        }
+                        savedCartsLink
+                    }
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading Homes…")
+                        if bootstrap.homeEntry.retainedLocalHomeName != nil {
+                            Button("Homes") { present(.homes) }
+                                .accessibilityIdentifier("shopping.home.choose")
+                        }
+                        savedCartsLink
+                    }
+                }
+            }
+            .navigationTitle("Shopping")
+        }
+    }
+
+    @ViewBuilder
+    private var savedCartsLink: some View {
+        if case .ready(let ready) = bootstrap.state, let service = ready.personalCartService {
+            NavigationLink("Saved personal carts") { PersonalRetainedCartsView(service: service) }
+                .accessibilityIdentifier("shopping.home.savedCarts")
+        }
+    }
+
+    private func createFirstHome() {
+        guard !isCreatingFirstHome else { return }
+        isCreatingFirstHome = true
+        rootError = nil
+        Task {
+            defer { isCreatingFirstHome = false }
+            do { try await bootstrap.homeEntryCommands.createFirstHome() }
+            catch { rootError = "Couldn’t create home. Try again." }
+        }
+    }
+
+    private func present(_ route: HomeRootSheet) {
+        if sheet != nil && sheet != route {
+            pendingSheet = route
+            sheet = nil
+            return
+        }
+        lastSheet = route
+        sheet = route
+    }
+
+    private func sheetDismissed() {
+        let dismissed = lastSheet
+        lastSheet = nil
+        if let pendingSheet {
+            self.pendingSheet = nil
+            lastSheet = pendingSheet
+            sheet = pendingSheet
+            return
+        }
+        guard case .invitation(let id) = dismissed,
+              case .active(let invitation) = bootstrap.homeEntry.joinPresentation,
+              invitation.id == id else { return }
+        dismissedInvitationID = id
+        Task {
+            do { try await bootstrap.homeEntryCommands.dismissJoin(id) }
+            catch { showingJoinDismissError = true }
         }
     }
 }

@@ -6,7 +6,7 @@ struct HomeEntrySnapshot: Equatable {
     enum Store: Equatable {
         case opening
         case failed
-        case local(hasHome: Bool)
+        case local(hasHome: Bool, discoveryComplete: Bool)
         case account
     }
 
@@ -34,24 +34,35 @@ struct HomeEntrySnapshot: Equatable {
     struct Invitation: Identifiable, Equatable {
         let id: UUID
         let identity: HomeInvitationIdentity
+        let displayName: String?
         let accountBinding: String?
         let state: HomeInvitationInbox.State
         let acceptanceAttempted: Bool
         let participantPending: Bool
         let dismissalRequested: Bool
+        let openRequested: Bool
 
         init(_ entry: HomeInvitationInbox.Entry) {
             id = entry.id
             identity = entry.identity
+            displayName = entry.displayName
             accountBinding = entry.session?.accountBinding
             state = entry.state
             acceptanceAttempted = entry.acceptanceAttempted
             participantPending = entry.participantPending
             dismissalRequested = entry.dismissalRequested
+            openRequested = entry.openRequested
         }
     }
 
+    enum JoinPresentation: Equatable {
+        case none
+        case active(Invitation)
+        case deferred(Invitation)
+    }
+
     let root: Root
+    let isLocalStore: Bool
     let homes: [Home]
     let currentHomeName: String?
     let retainedLocalHomeName: String?
@@ -60,17 +71,31 @@ struct HomeEntrySnapshot: Equatable {
     let hasPendingInvitation: Bool
     let hasVerifiedInvitationAccount: Bool
     let invitationProblem: String?
+    let joinError: String?
     let importProblems: [UUID: String]
     let isCreatingHome: Bool
+    let isResolvingFirstAccount: Bool
     let homeDiscoveryFailed: Bool
+
+    var joinPresentation: JoinPresentation {
+        if let invitation = invitations.first(where: { $0.openRequested }) { return .active(invitation) }
+        if let invitation = invitations.first(where: {
+            if case .ready = $0.state { return true }
+            return false
+        }) { return .deferred(invitation) }
+        return .none
+    }
 
     init(store: Store, readiness: ActiveHomeCoordinator.Readiness,
          discovery: ActiveHomeCoordinator.DiscoveryState, homes: [HomeCandidate],
          currentHomeName: String?, retainedLocalHomeName: String?, isShowingRetainedLocalHome: Bool,
          invitations: [HomeInvitationInbox.Entry], hasPendingInvitation: Bool,
          hasVerifiedInvitationAccount: Bool, invitationProblem: String?, importProblems: [UUID: String],
-         isCreatingHome: Bool, homeDiscoveryFailed: Bool) {
+         isCreatingHome: Bool, homeDiscoveryFailed: Bool,
+         isResolvingFirstAccount: Bool = false, joinError: String? = nil) {
         let active = readiness.activeScope
+        if case .local = store { isLocalStore = true }
+        else { isLocalStore = false }
         self.homes = homes.map { Home(candidate: $0, isSelected: $0.graph == active?.graph) }
         self.currentHomeName = currentHomeName
         self.retainedLocalHomeName = retainedLocalHomeName
@@ -79,14 +104,18 @@ struct HomeEntrySnapshot: Equatable {
         self.hasPendingInvitation = hasPendingInvitation
         self.hasVerifiedInvitationAccount = hasVerifiedInvitationAccount
         self.invitationProblem = invitationProblem
+        self.joinError = joinError
         self.importProblems = importProblems.filter { id, _ in invitations.contains { $0.id == id } }
         self.isCreatingHome = isCreatingHome
+        self.isResolvingFirstAccount = isResolvingFirstAccount
         self.homeDiscoveryFailed = homeDiscoveryFailed
 
         switch store {
         case .opening: root = .opening
         case .failed: root = .failed
-        case .local(let hasHome): root = hasHome ? .localHome : .noHomes
+        case .local(let hasHome, let discoveryComplete):
+            root = hasHome ? .localHome : (discoveryComplete && !isResolvingFirstAccount
+                ? .noHomes : .waitingForHomes)
         case .account:
             switch readiness {
             case .accountUnavailable: root = .accountUnavailable

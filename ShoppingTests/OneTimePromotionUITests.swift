@@ -127,6 +127,7 @@ final class OneTimePromotionUITests: XCTestCase {
             .appendingPathComponent("ShoppingPromotionUITest-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
+        if fixture == nil { app.createFirstHomeForWorkflow() }
         XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         return app

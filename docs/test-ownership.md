@@ -307,6 +307,11 @@ Its DEBUG fixture seeds an unacknowledged command for the existing populated hom
 only under the fresh UI-test store and active-home fixture flags. The fixture flag is
 removed before relaunch so the test exercises the journal, not repeated seeding.
 
+SHOPPING-172 adds `HomeCreationTests` proof that explicit first local creation reuses
+its exact saved IDs after relaunch without account ownership. `ActiveHomeBootstrapTests`
+owns available-account discovery before first creation and offline explicit local
+creation. The rendered one-tap entry remains UI-owned.
+
 ## Incoming invitations (SHOPPING-126)
 
 `HomeInvitationInboxTests` owns durable pre-authentication ingress, full share identity,
@@ -324,8 +329,15 @@ native imported relationships or CloudKit membership.
 
 `ActiveHomeBootstrapTests/testColdInvitationRestoresSelectionHoldBeforeFirstHomeDiscovery`
 owns the production bootstrap ordering which prevents sole-home autoactivation.
+
+SHOPPING-172 adds `HomeInvitationInboxTests` proof that open intent survives import
+and relaunch, while dismissal, a newer choice, activation resolution, and an account
+change have distinct durable results. `HomeAdoptionBootstrapTests` owns automatic
+exact-home activation and a held native verification where a newer home selection
+prevents late navigation. UI tests own the direct sheet and tap count.
 `PersonalCartUITests/testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries`
-owns the rendered invitation notice, dismissal, and retention after relaunch. Its DEBUG
+owns the direct invitation sheet, Not Now dismissal, no automatic reopening after
+relaunch, unchanged groceries, and the recovery row in Homes. Its DEBUG
 fixture requires a unique UI-test store and the active-home fixture; the seed flag is
 removed before relaunch. It uses no real CloudKit account or archived native capability.
 Native cold/warm delivery and real two-account sharing remain SHOPPING-30 proof.
@@ -356,11 +368,12 @@ plus the existing exact-home/account selection boundaries.
 fresh pending grant. Simulated import and decision evidence does not establish native
 share receipt or the two-iPhone invitation workflow; SHOPPING-30 retains that gate.
 
-`PersonalCartUITests/testInvitationSetupKeepsOriginalOnDeviceAndReturnsAfterRelaunch`
-owns the visible named setup choice, Not now followed by reconnect, keeping the home
-on-device, navigating back to its groceries, and relaunch without fixture reseeding.
-Its original and simulated account stores have distinct identities; its account,
-invitation journal and preferences are scoped to the unique UI fixture.
+`PersonalCartUITests/testLocalHomeRemainsAvailableInHomesPicker` owns the visible
+On This iPhone row after declining an invitation, its original groceries, and
+relaunch without fixture reseeding. `HomeAdoptionBootstrapTests` owns actual
+local-source retention and return through the account activation boundary.
+The UI fixture's account, invitation journal and preferences are scoped to its
+unique store. It does not claim a successful accepted-local UI join.
 `testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch` replaces the old
 setup-failure expectation that the original UI should retire before identity lookup:
 it now asserts the visible error and usable original groceries before and after
@@ -399,8 +412,8 @@ rollback, retired command rejection, and unchanged People and private carts.
 explicit delivery acknowledgement, pending versus accepted presentation, failed
 rename recovery, and the isolated UI fixture's contract.
 
-`HomeDetailsUITests` owns the disclosure's cancellation boundary, the ordinary system
-URL share sheet, retaining and resending a pending invitation after closing that
+`HomeDetailsUITests` owns direct presentation of the ordinary system URL share
+sheet, retaining and resending a pending invitation after closing that
 sheet, contributor renaming through SQLite and relaunch, and restricted membership
 with long names at accessibility text size. Its DEBUG fixture requires an explicit
 role and unique UI-test store; membership is simulated in memory while renaming
@@ -698,16 +711,16 @@ scope matching, cancellation, repeated confirmation, and stale prepare/confirm
 completion after presentation retirement. The native transport remains the owner
 of durable authorization, quarantine, and at-most-once purge behavior.
 
-`HomeDetailsUITests/testContributorLeaveDisclosureCanCancelThenConfirmPendingOutcome`
-owns the visible unsynced-change/private-history disclosure, Cancel returning
-without submission, Leave now producing an honest pending result, and disabling
+`HomeDetailsUITests/testContributorLeaveAlertCanCancelThenConfirmPendingOutcome`
+owns the native named Leave alert, Cancel returning without submission,
+Leave Home producing an honest pending result, and disabling
 a repeated leave. Its isolated DEBUG fixture provides native membership and an
 uncertain callback only; it does not seed a completed leave or prove CloudKit.
 
-`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughChooseHome`
+`HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughHomes`
 performs Leave now through the real transport and private ledger, with a DEBUG
 backend simulating loss of the native callback after exact root/list deletion.
-It opens Choose a home, verifies the removed root is unavailable and retained
+It opens Homes, verifies the removed root is unavailable and retained
 leave status remains reachable, then checks the explicit status action's
 idle → checking → uncertain-result transition. The bounded simulated network
 response makes that interaction distinguishable from an earlier automatic check;
@@ -937,11 +950,13 @@ cart reducers or expanding the quick acceptance selection.
   owns the durable private removal capture before membership-journal submission,
   SQLite/coordinator reconstruction, failure without passive retry, explicit retry,
   exact accepted/pending targets and retention of later members and original data.
-- `HomeDetailsUITests.testOwnerStopSharingCanCancelThenRemoveAcceptedAndPendingMembers`
-  owns the real confirmation binding: cancel preserves membership, then confirm
-  removes the captured accepted and pending members while owner/home/groceries
-  remain usable. The existing isolated membership fixture supplies native results;
-  the UI never sends an actual invitation or removes a CloudKit participant.
+- `HomeDetailsUITests.testOwnerInviteAndCancelPendingInvitationPreservesGroceries`
+  owns direct Invite presentation and the pending-member confirmation binding:
+  cancel preserves membership, then confirm removes only the captured pending
+  invitation while owner/home/groceries remain usable. The isolated membership
+  fixture supplies native results; the UI never sends a real invitation or
+  removes a CloudKit participant. Stop Sharing backend recovery remains owned by
+  `HomeMembershipRemovalTests` and `HomeMembershipPrivateLedgerTests`.
 - `PersistenceContainerTests.testPostShareChildrenStayWithEachRootAndOnlyOwnerGraphEntersAssociationJournal`
   owns real child creation in two SQLite stores and owner-only association staging.
   The internal role-lookup overload substitutes store classification only; production
@@ -1569,3 +1584,33 @@ passed. Earlier failures and the bounded corrective reruns remain in the local
 evidence; this is not a claim that every affected owner ran together on the
 final candidate. No Full suite or new Full attestation was run. Physical-device
 before/after timing is recorded separately with the release evidence.
+
+## Native home entry and selection (SHOPPING-172)
+
+`PersonalCartUITests.testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch`
+uses a unique empty account fixture to prove the first Create Home action mounts
+My Home with an empty list and restores it after relaunch. It does not depend on
+a production iCloud account.
+
+`PersonalCartUITests.testAcceptedInvitationOpensExactHomeWithoutAppJoinTap`
+uses a unique accepted invitation fixture to prove the direct Invitation sheet,
+absence of a second Join action, automatic selection of Second home, and the
+original home still present in Homes. `testDismissPendingInvitationPersistsAfterRelaunchAndKeepsGroceries`
+uses a separate incomplete archive fixture to prove Not Now survives relaunch,
+retains the selected groceries, and leaves an Open Invitation recovery row.
+The fixture does not assert successful native CloudKit delivery.
+
+`PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns the flat Homes picker and scope-specific grocery/cart contents across
+switch and relaunch. `testLocalHomeRemainsAvailableInHomesPicker` owns the
+On This iPhone row, unchanged local groceries after declining an invitation,
+and accurate Open iCloud Homes wording for the retained local copy.
+Account activation and exact retained source are covered by
+`HomeAdoptionBootstrapTests`; no accepted-local UI journey is claimed.
+
+`HomeDetailsUITests.testOwnerDirectShareCancellationKeepsPendingInvitationAvailableToResend`
+proves Invite opens the system share sheet in one action, cancellation retains
+pending membership, and Resend opens the sheet again. The owner pending-member
+removal and contributor native Leave alert scenarios remain separate UI owners.
+`HomeMembershipRemovalTests` retains Stop Sharing backend recovery proof after
+its ordinary UI entry was removed. SHOPPING-173 owns owner Delete Home UI proof.

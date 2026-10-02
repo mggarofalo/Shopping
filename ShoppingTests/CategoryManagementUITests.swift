@@ -51,6 +51,7 @@ final class CategoryManagementUITests: XCTestCase {
             .appendingPathComponent("ShoppingCategoryUITest-\(UUID().uuidString).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = storePath
         app.launch()
+        app.createFirstHomeForWorkflow()
         XCTAssertTrue(app.tabBars.buttons["Settings"].existsOrAppears(timeout: 5))
         openSettings(in: app)
         app.buttons["Categories"].tap()

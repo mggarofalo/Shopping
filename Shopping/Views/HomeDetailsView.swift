@@ -4,8 +4,7 @@ struct HomeDetailsView: View {
     @StateObject private var model: HomeDetailsModel
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var bootstrap: PersistenceBootstrap
-    @State private var showingInvitationExplanation = false
-    @State private var requestedInvitation = false
+    @State private var showingInviteRequirement = false
     @State private var showingNameEditor = false
     @State private var name = ""
     let initialName: String
@@ -26,6 +25,20 @@ struct HomeDetailsView: View {
 
     var body: some View {
         List {
+            Section("Home") {
+                if model.snapshot?.canEditName == true {
+                    Button {
+                        name = homeName
+                        showingNameEditor = true
+                    } label: {
+                        LabeledContent("Name", value: homeName)
+                    }
+                    .disabled(!model.canRename)
+                    .accessibilityIdentifier("shopping.home.rename")
+                } else {
+                    LabeledContent("Name", value: homeName)
+                }
+            }
             Section {
                 if let snapshot = model.snapshot {
                     if snapshot.source == .localUnshared {
@@ -48,25 +61,18 @@ struct HomeDetailsView: View {
                     }
                 }
             } header: {
-                HStack {
-                    Text("Members").font(.headline).accessibilityIdentifier("shopping.home.membersHeading")
-                    Spacer()
-                    if model.snapshot?.canInvite == true {
-                        Button {
-                            showingInvitationExplanation = true
-                        } label: {
-                            Image(systemName: "plus").frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(!model.canInvite || !supportsLinks || model.pending != nil || model.needsPreparationRetry)
-                        .accessibilityLabel("Invite contributor")
-                        .accessibilityIdentifier("shopping.home.invite")
-                    }
-                }
-                .textCase(nil)
-                .frame(minHeight: 44)
+                Text("Members").accessibilityIdentifier("shopping.home.membersHeading")
             }
             if let snapshot = model.snapshot {
+                if snapshot.canInvite {
+                    Section {
+                        Button("Invite", systemImage: "person.badge.plus") { invite() }
+                            .disabled(!model.canInvite || model.pending != nil || model.needsPreparationRetry)
+                            .accessibilityIdentifier("shopping.home.invite")
+                    } footer: {
+                        Text("Anyone with this link can join. One person per link.")
+                    }
+                }
                 if snapshot.access == .owner && snapshot.source == .server {
                     let pendingRemovals = snapshot.removals.filter { $0.absentObservedAt == nil }
                     if !pendingRemovals.isEmpty {
@@ -82,19 +88,10 @@ struct HomeDetailsView: View {
                             }
                         }
                     }
-                    if snapshot.members.filter({ !$0.isCurrentUser && $0.role != .owner }).count > 1 {
-                        Section {
-                            Button("Stop sharing this home", role: .destructive) {
-                                Task { await model.prepareRemoval(.stopSharing) }
-                            }
-                            .disabled(!model.canManageMembers)
-                            .accessibilityIdentifier("shopping.home.stopSharing")
-                        }
-                    }
                 }
                 if snapshot.access != .owner && snapshot.source == .server {
                     Section {
-                        Button("Leave home", role: .destructive) {
+                        Button("Leave Home", role: .destructive) {
                             Task { await model.prepareLeave() }
                         }
                         .disabled(!model.canLeave)
@@ -112,32 +109,9 @@ struct HomeDetailsView: View {
                     Button("Check members again") { Task { await model.refresh() } }.disabled(model.busy)
                 }
             }
-            if bootstrap.homeCoordinator.homes.count > 1 || bootstrap.retainedLocalHomeName != nil
-                || bootstrap.homeCoordinator.pendingInvitation
-                || bootstrap.homeLeaveStatuses.contains(where: \.requiresResolution) || bootstrap.homeLeaveStatusError != nil {
-                Section {
-                    NavigationLink("Choose home") {
-                        HomeSelectionView(bootstrap: bootstrap, coordinator: bootstrap.homeCoordinator)
-                    }
-                    .accessibilityIdentifier("shopping.home.manageHomes")
-                }
-            }
         }
-        .navigationTitle(homeName)
+        .navigationTitle("Home Settings")
         .toolbar {
-            if model.snapshot?.canEditName == true {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        name = homeName
-                        showingNameEditor = true
-                    } label: {
-                        Label("Rename home", systemImage: "pencil")
-                    }
-                    .labelStyle(.iconOnly)
-                    .disabled(!model.canRename)
-                    .accessibilityIdentifier("shopping.home.rename")
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     HomeSharingStatusView()
@@ -156,26 +130,8 @@ struct HomeDetailsView: View {
             if phase == .active { Task { await model.refresh() } }
         }
         .onChange(of: bootstrap.cloudStatus) { _, _ in Task { await model.refresh() } }
-        .sheet(isPresented: $showingInvitationExplanation, onDismiss: {
-            guard requestedInvitation else { return }
-            requestedInvitation = false
-            Task { await model.invite() }
-        }) {
-            NavigationStack {
-                List {
-                    Text("Invite someone to \(homeName)").font(.headline)
-                    Text("Contributors can edit this home’s groceries, catalog and settings. Members can see one another and shared shopping activity. Personal carts and purchase history stay private.")
-                    Text("This private link admits one person using iCloud. Anyone with the link can claim it. Send a separate link to each person you invite.")
-                    Button("Create and share join link") {
-                        requestedInvitation = true
-                        showingInvitationExplanation = false
-                    }
-                    .disabled(!model.canInvite)
-                    .accessibilityIdentifier("shopping.home.confirmInvite")
-                }
-                .navigationTitle("Invite contributor")
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showingInvitationExplanation = false } } }
-            }
+        .alert("Inviting requires iOS 18 or later.", isPresented: $showingInviteRequirement) {
+            Button("OK", role: .cancel) {}
         }
         .sheet(item: $model.delivery, onDismiss: { Task { await model.refresh() } }) { delivery in
             HomeInvitationActivityView(delivery: delivery,
@@ -199,10 +155,21 @@ struct HomeDetailsView: View {
                 } }
             }
         }
-        .sheet(item: $model.leaveConfirmation) { command in
-            HomeLeaveConfirmationView(homeName: command.homeName, canConfirm: model.canLeave,
-                onConfirm: { Task { await model.confirmLeave(command) } },
-                onCancel: { model.leaveConfirmation = nil })
+        .alert("Leave “\(model.leaveConfirmation?.homeName ?? homeName)”?", isPresented: Binding(
+            get: { model.leaveConfirmation != nil },
+            // The confirm task consumes the captured command before suspending.
+            // Automatic alert dismissal must not clear it first.
+            set: { _ in }
+        )) {
+            if let command = model.leaveConfirmation {
+                Button("Leave Home", role: .destructive) { Task { await model.confirmLeave(command) } }
+                    .disabled(!model.canLeave)
+                    .accessibilityIdentifier("shopping.home.confirmLeave")
+            }
+            Button("Cancel", role: .cancel) { model.leaveConfirmation = nil }
+                .accessibilityIdentifier("shopping.home.cancelLeave")
+        } message: {
+            Text("You’ll need another invite to rejoin.")
         }
         .sheet(isPresented: $showingNameEditor) {
             VStack(spacing: 0) {
@@ -215,6 +182,14 @@ struct HomeDetailsView: View {
                 if let error = model.error { Text(error).foregroundStyle(.red).padding() }
             }
         }
+    }
+
+    private func invite() {
+        guard supportsLinks else {
+            showingInviteRequirement = true
+            return
+        }
+        Task { await model.invite() }
     }
 
     private func hasActions(_ member: HomeMember, in snapshot: HomeMembershipSnapshot) -> Bool {
@@ -260,9 +235,13 @@ struct HomeDetailsView: View {
 
     private var continueInvitationButton: some View {
         Button(model.needsPreparationRetry ? "Retry invitation" : "Continue invitation") {
+            guard supportsLinks else {
+                showingInviteRequirement = true
+                return
+            }
             Task { await model.invite(retryPreparation: model.needsPreparationRetry) }
         }
-        .disabled(!model.canInvite || !supportsLinks)
+        .disabled(!model.canInvite)
         .accessibilityIdentifier("shopping.home.continueInvitation")
     }
 

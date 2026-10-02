@@ -11,6 +11,8 @@ struct HomeEntryCommands {
 
     func select(_ graph: HomeGraphIdentity) async throws { try await bootstrap.selectHome(graph) }
 
+    func createFirstHome() async throws { try await bootstrap.createFirstHome() }
+
     func create(name: String = "My Home", resuming: HomeCreationCommand? = nil)
         async throws -> PersistenceBootstrap.CreatedHome {
         try await bootstrap.createHome(name: name, resuming: resuming)
@@ -32,6 +34,10 @@ struct HomeEntryCommands {
         try await bootstrap.activateInvitedHome(entryID: id, graph: graph)
     }
 
+    func joinInvitation(_ id: UUID) async throws { try await bootstrap.joinInvitation(id) }
+
+    func dismissJoin(_ id: UUID) async throws { try await bootstrap.dismissJoin(id) }
+
     func deferInvitation(_ id: UUID) async throws {
         try await bootstrap.keepCurrentHome(entryID: id)
     }
@@ -43,4 +49,6 @@ struct HomeEntryCommands {
     func openRetainedLocalHome() async throws { try await bootstrap.openRetainedLocalHome() }
 
     func connectBackToAccount() async throws { try await bootstrap.connectBackToAccount() }
+
+    func useICloudForLocalHome() { bootstrap.activatePersonalCarts(importLegacy: true) }
 }

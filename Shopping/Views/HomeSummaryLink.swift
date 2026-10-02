@@ -2,9 +2,8 @@ import SwiftUI
 
 struct HomeSummaryLink: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
-    @ObservedObject var coordinator: ActiveHomeCoordinator
     let scope: ActiveHomeScope
-    private var name: String { coordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home" }
+    private var name: String { bootstrap.homeEntry.currentHomeName ?? "Home" }
 
     var body: some View {
         NavigationLink {

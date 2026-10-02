@@ -581,6 +581,7 @@ final class ShoppingLaunchTests: XCTestCase {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
         }
         app.launch()
+        if fixture == nil { app.createFirstHomeForWorkflow() }
         return app
     }
 

@@ -194,6 +194,76 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertEqual(restored.persistence.container.persistentStoreCoordinator.persistentStores.count, 1)
     }
 
+    func testNotNowDuringLocalJoinReturnsOriginalAndDeferredInviteStaysSafeAfterRelaunch() async throws {
+        let fixture = try fixture()
+        let inboxURL = fixture.directory.appendingPathComponent("Invitations.json")
+        let namespace = "iCloud.test.adoption-bootstrap"
+        let inbox = try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
+            environment: "Development")
+        let entry = try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: namespace,
+            environment: "Development", share: HomeShareIdentity(recordName: "invited-share",
+                zoneName: "zone", zoneOwnerName: "owner")), metadataArchive: Data([1]))
+        let accountURL = fixture.directory.appendingPathComponent("EmptyAccount.sqlite")
+        let makeBootstrap: (Bool) throws -> PersistenceBootstrap = { autoJoin in
+            let controller = try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
+                environment: "Development")
+            return PersistenceBootstrap(configuration: { .local(storeURL: fixture.source) },
+                defaults: fixture.defaults, invitations: HomeInvitationController(inbox: controller),
+                autoJoinInvitations: autoJoin, makeAccountProvider: { _ in fixture.provider },
+                accountStoreDirectory: { fixture.directory },
+                activateAccountStore: { source, _, _, copying in
+                    XCTAssertNil(source)
+                    XCTAssertFalse(copying)
+                    return .local(storeURL: accountURL)
+                })
+        }
+        let bootstrap = try makeBootstrap(false)
+        retireBeforeCleanup(bootstrap)
+        bootstrap.start()
+        _ = try await waitForReady(bootstrap)
+        try await bootstrap.joinInvitation(entry.id)
+        XCTAssertEqual(bootstrap.homeEntry.invitations.first?.id, entry.id,
+            "The same accepted invitation stays visible during account retirement")
+        try await bootstrap.dismissJoin(entry.id)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true)
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !bootstrap.isShowingRetainedLocalHome, ContinuousClock.now < deadline {
+            if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(bootstrap.isShowingRetainedLocalHome)
+        if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+        let original = try await waitForReady(bootstrap)
+        XCTAssertEqual(original.householdID, fixture.homeID)
+        XCTAssertNil(original.homeScope)
+
+        // Reopen the account, then reconstruct the bootstrap as though the app
+        // relaunched after the durable Not Now but before returning locally.
+        try await bootstrap.connectBackToAccount()
+        await bootstrap.runLoadingTransition()
+        let accountBeforeRelaunch = try await waitForReady(bootstrap)
+        XCTAssertNil(accountBeforeRelaunch.householdID)
+        bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await bootstrap.runLoadingTransition()
+        let relaunched = try makeBootstrap(true)
+        retireBeforeCleanup(relaunched)
+        // The application factory restores this saved account-mode preference
+        // before start(); direct test bootstraps use the same activation entry.
+        XCTAssertTrue(fixture.defaults.bool(forKey: "shopping.personalCart.enabled"))
+        relaunched.activatePersonalCarts(importLegacy: false)
+        await relaunched.runLoadingTransition()
+        let account = try await waitForReady(relaunched)
+        XCTAssertNil(account.householdID)
+        XCTAssertFalse(relaunched.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true)
+        XCTAssertEqual(relaunched.homeEntry.invitations.first?.id, entry.id)
+        XCTAssertEqual(relaunched.retainedLocalHomeName, "Original home")
+        try await relaunched.openRetainedLocalHome()
+        await relaunched.runLoadingTransition()
+        let restored = try await waitForReady(relaunched)
+        XCTAssertEqual(restored.householdID, fixture.homeID)
+    }
+
     private struct ImportedInvitationFixture {
         let directory: URL
         let privateURL: URL
@@ -285,6 +355,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
     }
 
     private func openImportedFixture(_ fixture: ImportedInvitationFixture,
+                                     autoJoinInvitations: Bool = false,
                                      accountProvider: ShopperSessionProvider? = nil,
                                      detectedShare: HomeShareIdentity = HomeShareIdentity(recordName: "invited-share", zoneName: "zone", zoneOwnerName: "owner"),
                                      verifyMembership: @escaping @Sendable (HomeNativeAccessIdentity) async throws -> Void = { _ in },
@@ -301,6 +372,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let privateURL = fixture.privateURL
         let participantURL = fixture.participantURL
         let bootstrap = PersistenceBootstrap(defaults: fixture.defaults, invitations: invitations,
+            autoJoinInvitations: autoJoinInvitations,
             makeAccountProvider: { _ in accountProvider ?? fixture.provider }, accountStoreDirectory: { fixture.directory },
             participantStoreForHomeChoice: { persistence in
                 persistence.container.persistentStoreCoordinator.persistentStores.first { $0.url == participantURL }
@@ -381,6 +453,84 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             XCTFail("A resolved entry cannot mint another grant")
         } catch { }
         XCTAssertEqual(try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited).currentGrants.count, 1)
+    }
+
+    func testAcceptedInvitationOpensImportedHomeWithoutAnotherOpenChoice() async throws {
+        let fixture = try await importedInvitation()
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        while bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
+    }
+
+    func testBoundInvitationPresentationSurvivesAccountStoreRetirement() async throws {
+        let fixture = try await importedInvitation()
+        let bootstrap = try await openImportedFixture(fixture)
+        let invitation = try XCTUnwrap(bootstrap.homeEntry.invitations.first { $0.id == fixture.entryID })
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .active(invitation))
+
+        bootstrap.retry()
+        XCTAssertFalse(bootstrap.invitations?.entries.contains { $0.id == fixture.entryID } == true,
+            "The controller must continue filtering entries without a verified session")
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .active(invitation),
+            "A presentation-only exact entry survives the temporary store transition")
+    }
+
+    func testExplicitRetryOpensReadyInvitationAfterNativeVerificationFailsOnce() async throws {
+        let fixture = try await importedInvitation()
+        let verification = FirstRejoinFailure()
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            verifyMembership: { try await verification.refresh($0) })
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.joinError == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNotNil(bootstrap.joinError)
+        XCTAssertNotEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+
+        try await bootstrap.joinInvitation(fixture.entryID)
+        while bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        while bootstrap.autoOpeningInvitationID != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertTrue(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
+        XCTAssertNil(bootstrap.joinError)
+        let attempts = await verification.attempts
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testNewerHomeSelectionDefersAutomaticOpenDuringNativeVerification() async throws {
+        let fixture = try await importedInvitation()
+        let held = RejoinVerificationProbe()
+        let started = expectation(description: "Automatic verification held")
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            verifyMembership: { await held.hold($0) { started.fulfill() } })
+        await fulfillment(of: [started], timeout: 5)
+        let original = try XCTUnwrap(fixture.original)
+        try await bootstrap.selectHome(original)
+        await held.release()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.autoOpeningInvitationID != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(bootstrap.autoOpeningInvitationID, "The retired automatic Open must finish before state is asserted")
+        let invitation = try XCTUnwrap(bootstrap.homeEntry.invitations.first { $0.id == fixture.entryID })
+        XCTAssertEqual(bootstrap.homeEntry.joinPresentation, .deferred(invitation))
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, original)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
+        XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
     }
 
     func testOpenSelectionSurvivesRefreshWhileCommittedDiscoveryIsHeld() async throws {
@@ -834,6 +984,17 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         } catch ManagedHomeInvitationError.accountUnavailable { }
     }
 
+}
+
+private actor FirstRejoinFailure {
+    enum Failure: Error { case firstVerification }
+
+    private(set) var attempts = 0
+
+    func refresh(_ identity: HomeNativeAccessIdentity) throws {
+        attempts += 1
+        if attempts == 1 { throw Failure.firstVerification }
+    }
 }
 
 private actor RejoinVerificationProbe {

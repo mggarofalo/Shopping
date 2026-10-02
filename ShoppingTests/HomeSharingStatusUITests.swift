@@ -29,7 +29,7 @@ final class HomeSharingStatusUITests: XCTestCase {
         let home = app.buttons["shopping.settings.homeDetails"]
         reveal(home, in: app)
         home.tap()
-        XCTAssertTrue(app.navigationBars["Preview household"].existsOrAppears(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 5))
         let status = app.buttons["shopping.home.sharingStatus"]
         XCTAssertTrue(status.existsOrAppears(timeout: 3))
         XCTAssertTrue(status.isHittable)

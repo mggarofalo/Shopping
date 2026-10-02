@@ -95,6 +95,7 @@ struct CartedGroceriesView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("In cart")
+        .homeScopeControl()
         .searchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {
             GroceryFiltersView(
