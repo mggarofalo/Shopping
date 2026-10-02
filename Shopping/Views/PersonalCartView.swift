@@ -3,8 +3,9 @@ import SwiftUI
 
 struct PersonalCartView: View {
     let cart: PersonalCartPresentation
-    @Environment(\.persistenceSelection) private var selection
     @ObservedObject var navigation: GroceryNavigationState
+    var savedHome: SavedCartHomeDisplay? = nil
+    @Environment(\.persistenceSelection) private var selection
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @State private var selected: PersonalCartEntrySnapshot?
@@ -88,7 +89,10 @@ struct PersonalCartView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("My cart")
-        .homeScopeControl()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let savedHome { SavedCartHomeHeader(home: savedHome) }
+            else { HomeScopeControl() }
+        }
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)
@@ -146,6 +150,30 @@ struct PersonalCartView: View {
                 checkout = PersonalCheckoutSheet(token: token, storeName: storeName)
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+private struct SavedCartHomeHeader: View {
+    let home: SavedCartHomeDisplay
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "house")
+            Text(home.name)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Saved cart home")
+        .accessibilityValue(home.name)
+        .accessibilityIdentifier("shopping.personalCart.savedHome")
+        .background(Color(uiColor: .systemBackground))
+        Divider()
     }
 }
 

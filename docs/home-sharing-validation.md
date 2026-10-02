@@ -70,6 +70,7 @@ meet these paths; the mockup does not establish native routing or cloud delivery
 | Accepted invitation | Native link acceptance opens the exact home when import is ready, without an additional app Join action. | Original home and private carts; newer explicit selection wins. |
 | Deferred invitation | Home control → Open on the invitation. | Durable Not Now decision; independently recoverable invitations. |
 | Switch | Home control → home row. | Selected scope shown in Groceries, Catalog, My cart and Settings. |
+| Saved cart from another home | Saved carts → cart. | A static label names that cart's exact home; the application selector must not identify its contents as belonging to the current home. |
 | Local home → iCloud | Use iCloud in Home Settings. | A distinct owned copy and selectable exact local source; no cart attribution or merge into a joined home. |
 | Delete | Home Settings → Delete Home → named confirmation. | Private history and unrelated homes; pending recovery stays reachable after the root disappears. |
 | Create after delete | Create Home from No Homes. | Fresh IDs, even before background recovery finishes. |

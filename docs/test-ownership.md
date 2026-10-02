@@ -1732,3 +1732,19 @@ rename, including stable command authority through a rename. The existing
 label on groceries, store selection, and cart, with the complete name available
 to accessibility. Watch selection remains independent of iPhone selection.
 These fixtures do not prove physical presentation or CloudKit delivery.
+
+## Saved cart home identity (SHOPPING-184)
+
+`PersonalCartServiceTests.testSavedCartHomeDisplayUsesExactGraphAndFallsBackForMissingOrAmbiguousHome`
+owns exact household/list name resolution and generic Saved Home for absent or
+duplicate roots. `testSavedCartHomeDisplayRejectsAnotherAccount` owns account
+isolation. `HomeDeletionTests.testOwnedUnsharedDeletionRetainsPrivateCartAndEveryPriorSemanticRecord`
+also checks the deleted home's captured name after reopening its private cart
+ledger. These reads use the serial persistence writer off the main actor.
+
+`PersonalCartUITests.testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`
+owns the distinction between the selected home shown across Groceries,
+Catalog, Settings and current My cart, and the static original-home label in
+the saved cart before and after relaunch. Its cart contents and home-switch
+assertions remain in place. This simulator workflow does not prove CloudKit
+delivery or the two-phone acceptance required by SHOPPING-174.

@@ -51,6 +51,40 @@ final class PersonalCartServiceTests: XCTestCase {
         return try XCTUnwrap(cart.entries(householdID: fixture.householdID, listID: fixture.listID).first)
     }
 
+    func testSavedCartHomeDisplayUsesExactGraphAndFallsBackForMissingOrAmbiguousHome() async throws {
+        let f = try makeFixture()
+        let original = PersonalCartScopeSnapshot(householdID: f.householdID, listID: f.listID)
+        let missing = PersonalCartScopeSnapshot(householdID: UUID(), listID: UUID())
+        let other = try f.service.createHousehold(name: "Other home")
+        let otherScope = PersonalCartScopeSnapshot(householdID: other.householdID, listID: other.listID)
+        let names = try await f.cart.savedCartHomeDisplays(for: [original, otherScope, missing])
+        XCTAssertEqual(names.map(\.name), ["Household", "Other home", "Saved Home"])
+        XCTAssertEqual(names.map(\.scope), [original, otherScope, missing])
+
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
+        try context.performAndWait {
+            let second = try XCTUnwrap(context.fetch(Household.fetchRequest()).first { $0.id == other.householdID })
+            second.id = f.householdID
+            try context.save()
+        }
+        let ambiguous = try await f.cart.savedCartHomeDisplays(for: [original])
+        XCTAssertEqual(ambiguous, [.unknown(original)])
+    }
+
+    func testSavedCartHomeDisplayRejectsAnotherAccount() async throws {
+        let f = try makeFixture()
+        let provider = MutableSession(try session().session)
+        let cart = PersonalCartService(persistence: f.persistence, sessionProvider: provider)
+        provider.value = try session("bob").session
+        do {
+            _ = try await cart.savedCartHomeDisplays(for: [PersonalCartScopeSnapshot(
+                householdID: f.householdID, listID: f.listID)])
+            XCTFail("An old account's home name must not be displayed")
+        } catch {
+            XCTAssertEqual(error as? PersonalCartError, .accountChanged)
+        }
+    }
+
     func testCatalogMembershipIsolatesDuplicateNeedsAndKeepsUnrelatedItemsAvailable() throws {
         let f = try makeFixture()
         let otherID = try f.service.createItem(name: "Beans", householdID: f.householdID)

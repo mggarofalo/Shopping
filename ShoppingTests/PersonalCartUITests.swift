@@ -324,6 +324,13 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(originalChoice.existsOrAppears(timeout: 5))
         originalChoice.tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
+        assertActiveHome("Preview household", on: "Groceries", app: app)
+        app.tabBars.buttons["Catalog"].tap()
+        assertActiveHome("Preview household", on: "Catalog", app: app)
+        app.tabBars.buttons["Settings"].tap()
+        assertActiveHome("Preview household", on: "Settings", app: app)
+        app.tabBars.buttons["Groceries"].tap()
+        assertActiveHome("Preview household", on: "Groceries", app: app)
         groceryRow("Granola", app: app).swipeLeft()
         let cartAction = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.checklist.cart.")).firstMatch
         XCTAssertTrue(cartAction.existsOrAppears(timeout: 3))
@@ -337,8 +344,16 @@ final class PersonalCartUITests: XCTestCase {
         second.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertFalse(groceryRow("Granola", app: app).exists)
+        assertActiveHome("Second home", on: "Groceries", app: app)
+        app.tabBars.buttons["Catalog"].tap()
+        assertActiveHome("Second home", on: "Catalog", app: app)
+        app.tabBars.buttons["Settings"].tap()
+        assertActiveHome("Second home", on: "Settings", app: app)
+        app.tabBars.buttons["Groceries"].tap()
+        assertActiveHome("Second home", on: "Groceries", app: app)
         app.buttons["In cart (0)"].tap()
         XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        assertActiveHome("Second home", on: "My cart", app: app)
         let saved = app.buttons["shopping.personalCart.otherHomes"]
         XCTAssertTrue(saved.existsOrAppears(timeout: 5))
         XCTAssertTrue(saved.isHittable)
@@ -347,9 +362,14 @@ final class PersonalCartUITests: XCTestCase {
         let retained = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Saved personal cart")).element
         XCTAssertTrue(retained.existsOrAppears(timeout: 3))
         retained.tap()
+        let savedHome = app.descendants(matching: .any)["shopping.personalCart.savedHome"]
+        XCTAssertTrue(savedHome.existsOrAppears(timeout: 5))
+        XCTAssertEqual(savedHome.value as? String, "Preview household")
+        XCTAssertNotEqual(savedHome.elementType, .button, "A saved cart must not claim to switch the selected home")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
         app.tabBars.buttons["Settings"].tap()
+        assertActiveHome("Second home", on: "Settings", app: app)
         openManageHomes(app)
         XCTAssertTrue(homeChoice("Second home", app: app).existsOrAppears(timeout: 3))
         XCTAssertTrue((homeChoice("Second home", app: app).value as? String)?.contains("Selected") == true)
@@ -358,6 +378,20 @@ final class PersonalCartUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         XCTAssertFalse(groceryRow("Granola", app: app).exists)
+        assertActiveHome("Second home", on: "Groceries", app: app)
+        app.buttons["In cart (0)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        assertActiveHome("Second home", on: "My cart", app: app)
+        app.buttons["shopping.personalCart.otherHomes"].tap()
+        XCTAssertTrue(app.navigationBars["Saved carts"].existsOrAppears(timeout: 3))
+        let savedAgain = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Saved personal cart")).element
+        XCTAssertTrue(savedAgain.existsOrAppears(timeout: 5))
+        savedAgain.tap()
+        let reopenedHome = app.descendants(matching: .any)["shopping.personalCart.savedHome"]
+        XCTAssertTrue(reopenedHome.existsOrAppears(timeout: 5))
+        XCTAssertEqual(reopenedHome.value as? String, "Preview household")
+        app.tabBars.buttons["Settings"].tap()
+        assertActiveHome("Second home", on: "Settings", app: app)
         openManageHomes(app)
         XCTAssertTrue(homeChoice("Second home", app: app).existsOrAppears(timeout: 3))
         XCTAssertTrue((homeChoice("Second home", app: app).value as? String)?.contains("Selected") == true)
@@ -368,6 +402,7 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.buttons["In cart (1)"].existsOrAppears(timeout: 5))
         app.buttons["In cart (1)"].tap()
         XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        assertActiveHome("Preview household", on: "My cart", app: app)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
     }
@@ -487,6 +522,21 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(scope.isHittable)
         scope.tap()
         XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 3))
+    }
+
+    private func assertActiveHome(_ name: String, on title: String, app: XCUIApplication,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let destination = app.navigationBars[title]
+        XCTAssertTrue(destination.existsOrAppears(timeout: 5), file: file, line: line)
+        let controls = app.buttons.matching(identifier: "shopping.home.scope")
+        let unique = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            destination.exists && controls.count == 1
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [unique], timeout: 5), .completed,
+            "Expected one home control on \(title)", file: file, line: line)
+        let scope = controls.element(boundBy: 0)
+        XCTAssertTrue(scope.isHittable, file: file, line: line)
+        XCTAssertTrue((scope.value as? String)?.contains(name) == true, file: file, line: line)
     }
 
     private func homeChoice(_ name: String, app: XCUIApplication) -> XCUIElement {

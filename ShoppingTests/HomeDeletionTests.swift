@@ -85,6 +85,9 @@ final class HomeDeletionTests: XCTestCase {
 
     func testOwnedUnsharedDeletionRetainsPrivateCartAndEveryPriorSemanticRecord() async throws {
         let f = try fixture(account: true), cart = try XCTUnwrap(f.cart)
+        let savedScope = PersonalCartScopeSnapshot(householdID: f.graph.householdID, listID: f.graph.listID)
+        let beforeDisplay = try await cart.savedCartHomeDisplays(for: [savedScope])
+        XCTAssertEqual(beforeDisplay.first?.name, "Delete me")
         let before = try privateEvidence(f.persistence)
         XCTAssertFalse(before.isEmpty)
         let entries = try cart.entries(householdID: f.graph.householdID, listID: f.graph.listID)
@@ -109,6 +112,9 @@ final class HomeDeletionTests: XCTestCase {
         let reopened = try PersistenceController(storeURL: url)
         defer { try? close(reopened) }
         let reopenedCart = PersonalCartService(persistence: reopened, sessionProvider: f.provider)
+        let afterDisplay = try await reopenedCart.savedCartHomeDisplays(for: [savedScope])
+        XCTAssertEqual(afterDisplay.first?.name, "Delete me",
+            "The saved cart names its deleted home from exact private evidence after relaunch")
         XCTAssertTrue(try reopenedCart.hasCompletedHomeDeletion(storeIdentifier: f.graph.storeIdentifier,
             householdID: f.graph.householdID, listID: f.graph.listID))
         let reopenedEvidence = try privateEvidence(reopened)
