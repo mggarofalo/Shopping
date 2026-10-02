@@ -326,6 +326,36 @@ final class HomeInvitationInbox {
         try commit(updated)
     }
 
+    /// Account identity, rather than presentation loading, retires automatic navigation.
+    /// Keep accepted membership and the manual Open route for every affected entry.
+    func retireAutomaticOpen(boundToOtherAccountThan session: ShopperSession) throws {
+        guard session.isWellFormed, session.containerIdentifier == containerIdentifier,
+              session.environment == environment else { throw Error.accountMismatch }
+        try retireAutomaticOpen { $0 != session }
+    }
+
+    func retireAutomaticOpen(boundTo session: ShopperSession) throws {
+        guard session.isWellFormed, session.containerIdentifier == containerIdentifier,
+              session.environment == environment else { throw Error.accountMismatch }
+        try retireAutomaticOpen { $0 == session }
+    }
+
+    /// A persisted account invalidation has no trusted current identity yet.
+    /// Preserve fresh unbound ingress while retiring every older bound auto Open.
+    func retireAutomaticOpenForAllBoundAccounts() throws {
+        try retireAutomaticOpen { _ in true }
+    }
+
+    private func retireAutomaticOpen(matching account: (ShopperSession) -> Bool) throws {
+        var updated = entries
+        for index in updated.indices {
+            guard let bound = updated[index].session, account(bound), updated[index].openRequested,
+                  !updated[index].activationResolved else { continue }
+            updated[index].openRequested = false
+        }
+        if updated != entries { try commit(updated) }
+    }
+
     func dismiss(id: UUID) throws {
         guard let index = entries.firstIndex(where: { $0.id == id }),
               (entries[index].session == nil && currentSession == nil)

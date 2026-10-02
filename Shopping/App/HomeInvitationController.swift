@@ -182,6 +182,18 @@ final class HomeInvitationController: ObservableObject {
         try await perform { try $0.deferOpen(id: id, expectedSession: expectedSession) }
     }
 
+    func retireAutomaticOpen(boundTo session: ShopperSession) async throws {
+        try await perform { try $0.retireAutomaticOpen(boundTo: session) }
+    }
+
+    func retireAutomaticOpen(boundToOtherAccountThan session: ShopperSession) async throws {
+        try await perform { try $0.retireAutomaticOpen(boundToOtherAccountThan: session) }
+    }
+
+    func retireAutomaticOpenForAllBoundAccounts() async throws {
+        try await perform { try $0.retireAutomaticOpenForAllBoundAccounts() }
+    }
+
     func resolveActivation(_ id: UUID) async throws {
         let change = allEntries.first(where: { $0.id == id }).map { beginChoiceChange($0.identity) }
         defer { if let change { pendingChoiceChanges.removeValue(forKey: change) }; publish() }

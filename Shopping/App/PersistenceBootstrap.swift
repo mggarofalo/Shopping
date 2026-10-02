@@ -223,6 +223,10 @@ final class PersistenceBootstrap: ObservableObject {
     private var accountObserver: NSObjectProtocol?
     private var personalConfiguration: PersistenceConfiguration?
     private var activeAccountBinding: String?
+    private var mountedAccountSession: ShopperSession?
+    private var pendingAccountNavigationRetirements: [ShopperSession] = []
+    private var verifiedAccountIntentRetirement: ShopperSession?
+    private var pendingColdAccountInvalidation = false
     private var accountLoadInProgress = false
     private var pendingRetirement: ReadyState?
     private var personalService: PersonalCartService?
@@ -240,6 +244,7 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var isShowingRetainedLocalHome = false
     @Published private(set) var retainedLocalCopyState: HomeEntrySnapshot.RetainedLocalCopyState = .unavailable
     private var retainedConversionSelectionIntent: UUID?
+    private var retainedConversionSelectionSession: ShopperSession?
     private var retainedConversionChoiceGeneration: UInt64?
     private var retainedConversionResumingID: UUID?
 
@@ -1082,7 +1087,19 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func retireAndFail(_ error: Error) {
-        beginTransition { [weak self] in self?.state = .failed(error) }
+        beginTransition { [weak self] in
+            guard let self else { return }
+            guard !self.pendingAccountNavigationRetirements.isEmpty else {
+                self.state = .failed(error)
+                return
+            }
+            Task {
+                do {
+                    try await self.retirePendingAccountNavigation()
+                    self.state = .failed(error)
+                } catch { self.state = .failed(error) }
+            }
+        }
     }
 
     func applicationDidEnterForeground() {
@@ -1090,7 +1107,12 @@ final class PersistenceBootstrap: ObservableObject {
         Task { await refreshHomeDeletionStatuses() }
         if let accountProvider {
             Task {
+                do { try await retireColdAccountInvalidation() }
+                catch { retireAndFail(error); return }
                 await accountProvider.refresh()
+                noteAccountNavigationBoundary(using: accountProvider)
+                do { try await retireVerifiedAccountNavigation() }
+                catch { retireAndFail(error); return }
                 configureInvitations()
                 Task { await refreshHomeLeaveStatuses() }
                 await refreshHomeAccessAndReplay()
@@ -1128,7 +1150,10 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func resolvedAccountProvider(base: URL) async throws -> ShopperSessionProvider {
-        if let accountProvider { return accountProvider }
+        if let accountProvider {
+            try await retireColdAccountInvalidation()
+            return accountProvider
+        }
         let provider: ShopperSessionProvider
         if let makeAccountProvider { provider = try makeAccountProvider(base) }
         else {
@@ -1137,11 +1162,18 @@ final class PersistenceBootstrap: ObservableObject {
             }.value
         }
         // Concurrent read-only preparation may have installed the provider while construction ran.
-        if let accountProvider { return accountProvider }
-        accountProvider = provider
-        accountObserver = provider.observeSessionChanges { [weak self] in
-            Task { @MainActor in self?.accountStateChanged() }
+        if let accountProvider {
+            try await retireColdAccountInvalidation()
+            return accountProvider
         }
+        if case .accountChanged = provider.state { pendingColdAccountInvalidation = true }
+        accountProvider = provider
+        accountObserver = provider.observeSessionChanges { [weak self] announced, invalidatedSession in
+            Task { @MainActor in
+                self?.accountStateChanged(announcedState: announced, invalidatedSession: invalidatedSession)
+            }
+        }
+        try await retireColdAccountInvalidation()
         return provider
     }
 
@@ -1284,13 +1316,35 @@ final class PersistenceBootstrap: ObservableObject {
                 scheduleLocalReturnAfterDismiss()
             }
             do {
+                try await retireVerifiedAccountNavigation()
+                try await retirePendingAccountNavigation()
                 let base = try await resolvedAccountDirectory()
                 let provider = try await resolvedAccountProvider(base: base)
+                try await retireColdAccountInvalidation()
                 await provider.refresh()
                 let session = try provider.currentSession()
                 if let expectedSession {
                     guard try verifiedSession(provider) == expectedSession else { throw ShopperSessionError.accountChanged }
                 }
+                if let mountedAccountSession, mountedAccountSession != session {
+                    markAccountNavigationBoundary(for: mountedAccountSession)
+                    if retainedConversionSelectionSession == mountedAccountSession {
+                        retainedConversionSelectionIntent = nil
+                        retainedConversionSelectionSession = nil
+                        retainedConversionChoiceGeneration = nil
+                    }
+                }
+                // An invalidation may arrive during refresh, after the first
+                // drain. Recheck even when the verified identity stays the same.
+                try await retireColdAccountInvalidation()
+                try await retirePendingAccountNavigation()
+                // A verified cold launch may have bound invitations from an older
+                // account even though no store from that account is mounted now.
+                if case .ready = provider.state {
+                    verifiedAccountIntentRetirement = session
+                    try await retireVerifiedAccountNavigation()
+                }
+                guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
                 let activate = activateAccountStore
                 let legacyPendingSource = defaults.string(forKey: Self.pendingImportKey).map { URL(fileURLWithPath: $0) }
                 let journalRecord = try await Task.detached(priority: .userInitiated) {
@@ -1349,7 +1403,15 @@ final class PersistenceBootstrap: ObservableObject {
                 if let householdID = activated.preferredHouseholdID, let listID = activated.preferredListID {
                     preferredAdoptedHome = (householdID, listID)
                 } else { preferredAdoptedHome = nil }
+                // Delayed provider callbacks may mark another boundary during
+                // detached activation work. No new account store is loaded until
+                // every captured navigation intent is durably retired.
+                try await retireColdAccountInvalidation()
+                try await retireVerifiedAccountNavigation()
+                try await retirePendingAccountNavigation()
+                guard try provider.currentSession() == session else { throw ShopperSessionError.accountChanged }
                 activeAccountBinding = session.accountBinding
+                mountedAccountSession = session
                 personalMode = true
                 defaults.set(true, forKey: Self.personalModeKey)
                 defaults.removeObject(forKey: Self.pendingImportKey)
@@ -1598,6 +1660,7 @@ final class PersistenceBootstrap: ObservableObject {
         homeSetupError = nil
         retainedLocalCopyState = command.copied ? .copied : .copying
         retainedConversionSelectionIntent = command.copied ? nil : command.id
+        retainedConversionSelectionSession = command.copied ? nil : session
         retainedConversionChoiceGeneration = nil
         accountLoadInProgress = true
         personalMode = true
@@ -1680,22 +1743,147 @@ final class PersistenceBootstrap: ObservableObject {
                 // The atomic copy is complete; normal home discovery can recover its row.
             }
             retainedConversionSelectionIntent = nil
+            retainedConversionSelectionSession = nil
             retainedConversionChoiceGeneration = nil
         } catch {
             retainedLocalCopyState = .available
             retainedConversionSelectionIntent = nil
+            retainedConversionSelectionSession = nil
             retainedConversionChoiceGeneration = nil
             homeSetupError = error
         }
     }
 
-    private func accountStateChanged() {
+    private func accountStateChanged(announcedState: ShopperSessionState,
+                                     invalidatedSession: ShopperSession?) {
         objectWillChange.send()
+        let announcedInvalidation: Bool
+        switch announcedState {
+        case .accountChanged, .setupRequired(.noAccount), .setupRequired(.restricted):
+            announcedInvalidation = true
+        default:
+            announcedInvalidation = false
+        }
+        let boundaryState: ShopperSessionState
+        if announcedInvalidation, invalidatedSession != nil { boundaryState = announcedState }
+        else { boundaryState = accountProvider?.state ?? announcedState }
+        let identityChanged = accountProvider.map {
+            noteAccountNavigationBoundary(using: $0, announcedState: boundaryState,
+                invalidatedSession: invalidatedSession)
+        } ?? false
+        if announcedInvalidation, let invalidatedSession,
+           mountedAccountSession != invalidatedSession {
+            Task {
+                do { try await retirePendingAccountNavigation() }
+                catch {
+                    guard transition == nil, case .ready = state else { return }
+                    retireAndFail(error)
+                }
+            }
+            return
+        }
         guard personalMode, let accountProvider, !accountLoadInProgress else { return }
-        switch accountPresentationChange(using: accountProvider) {
-        case .unchanged: break
+        let change = accountPresentationChange(using: accountProvider)
+        if identityChanged, case .unchanged = change {
+            activatePersonalCarts(importLegacy: false)
+            return
+        }
+        switch change {
+        case .unchanged:
+            guard verifiedAccountIntentRetirement != nil else { return }
+            Task {
+                do {
+                    try await retireVerifiedAccountNavigation()
+                    scheduleAutomaticInvitationOpen()
+                } catch {
+                    guard transition == nil, case .ready = state else { return }
+                    retireAndFail(error)
+                }
+            }
         case .reopen: activatePersonalCarts(importLegacy: false)
         case .unavailable(let error): retireAndFail(error)
+        }
+    }
+
+    @discardableResult
+    private func noteAccountNavigationBoundary(using provider: ShopperSessionProvider,
+                                               announcedState: ShopperSessionState? = nil,
+                                               invalidatedSession: ShopperSession? = nil) -> Bool {
+        let state = announcedState ?? provider.state
+        let unknownInvalidation: Bool
+        switch state {
+        case .accountChanged, .setupRequired(.noAccount), .setupRequired(.restricted):
+            unknownInvalidation = true
+        default:
+            unknownInvalidation = false
+        }
+        if unknownInvalidation, mountedAccountSession == nil, invalidatedSession == nil {
+            pendingColdAccountInvalidation = true
+        }
+        if case .ready(let verified) = state,
+           mountedAccountSession == verified {
+            verifiedAccountIntentRetirement = verified
+        }
+        let identityChanged: Bool
+        switch state {
+        case .accountChanged, .setupRequired(.noAccount), .setupRequired(.restricted):
+            identityChanged = true
+        case .ready(let session), .cached(let session):
+            identityChanged = mountedAccountSession.map { $0 != session } ?? false
+                || retainedConversionSelectionSession.map { $0 != session } == true
+        case .unresolved, .temporarilyUnavailable, .setupRequired:
+            identityChanged = false
+        }
+        guard identityChanged else { return false }
+        if unknownInvalidation, let invalidatedSession {
+            markAccountNavigationBoundary(for: invalidatedSession)
+        } else if let mountedAccountSession {
+            markAccountNavigationBoundary(for: mountedAccountSession)
+        }
+        let copySelectionInvalidated: Bool
+        switch state {
+        case .ready(let session), .cached(let session):
+            copySelectionInvalidated = retainedConversionSelectionSession.map { $0 != session } ?? false
+        case .accountChanged, .setupRequired(.noAccount), .setupRequired(.restricted):
+            copySelectionInvalidated = invalidatedSession == nil
+                || retainedConversionSelectionSession == invalidatedSession
+        case .unresolved, .temporarilyUnavailable, .setupRequired:
+            copySelectionInvalidated = false
+        }
+        if copySelectionInvalidated {
+            retainedConversionSelectionIntent = nil
+            retainedConversionSelectionSession = nil
+            retainedConversionChoiceGeneration = nil
+        }
+        return true
+    }
+
+    private func markAccountNavigationBoundary(for session: ShopperSession) {
+        if !pendingAccountNavigationRetirements.contains(session) {
+            pendingAccountNavigationRetirements.append(session)
+        }
+    }
+
+    private func retirePendingAccountNavigation() async throws {
+        while let session = pendingAccountNavigationRetirements.first {
+            try await invitations?.retireAutomaticOpen(boundTo: session)
+            if pendingAccountNavigationRetirements.first == session {
+                pendingAccountNavigationRetirements.removeFirst()
+            }
+        }
+    }
+
+    private func retireColdAccountInvalidation() async throws {
+        guard pendingColdAccountInvalidation else { return }
+        try await invitations?.retireAutomaticOpenForAllBoundAccounts()
+        pendingColdAccountInvalidation = false
+    }
+
+    private func retireVerifiedAccountNavigation() async throws {
+        guard let session = verifiedAccountIntentRetirement else { return }
+        try await invitations?.retireAutomaticOpen(boundToOtherAccountThan: session)
+        if verifiedAccountIntentRetirement == session {
+            verifiedAccountIntentRetirement = nil
         }
     }
 
@@ -1918,7 +2106,11 @@ final class PersistenceBootstrap: ObservableObject {
                 homeGeneration: homeCoordinator.generation,
                 personalCartService: personalService
             ))
-            if retainedConversionSelectionIntent != nil {
+            if retainedConversionSelectionIntent != nil,
+               let intendedSession = retainedConversionSelectionSession,
+               case .ready(let activeSession) = accountProvider?.state,
+               intendedSession == activeSession,
+               retainedConversionChoiceGeneration == nil {
                 retainedConversionChoiceGeneration = homeCoordinator.generation
             }
             configureInvitations()
@@ -2109,7 +2301,10 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func scheduleAutomaticInvitationOpen() {
-        guard autoJoinInvitations, autoOpeningInvitationID == nil, personalMode,
+        guard autoJoinInvitations, autoOpeningInvitationID == nil,
+              pendingColdAccountInvalidation == false,
+              pendingAccountNavigationRetirements.isEmpty, verifiedAccountIntentRetirement == nil,
+              personalMode,
               case .ready(let ready) = state, ready.presentation.isActive,
               let invitations, let session = try? accountProvider?.currentSession() else { return }
         guard let entry = invitations.entries.last(where: {

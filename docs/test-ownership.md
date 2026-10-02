@@ -1748,3 +1748,48 @@ Catalog, Settings and current My cart, and the static original-home label in
 the saved cart before and after relaunch. Its cart contents and home-switch
 assertions remain in place. This simulator workflow does not prove CloudKit
 delivery or the two-phone acceptance required by SHOPPING-174.
+
+## Account-bound home navigation (SHOPPING-185)
+
+`HomeInvitationInboxTests.testAccountBoundaryDurablyDefersOnlyBoundOldNavigationAndKeepsManualOpen`
+owns the atomic journal boundary: it retires old account automatic Open while
+preserving accepted state, the current account's intent, an unbound native
+delivery, and manual Open after a cold journal read.
+`testPersistedUnknownAccountInvalidationDefersAllBoundButNotFreshUnboundIngress`
+owns the narrower crash recovery rule when the provider has saved only that an
+account changed: all older bound auto Opens retire atomically, while a new
+unbound native delivery remains eligible for verified onboarding.
+`ActiveHomeBootstrapTests.testAccountChangeDefersQueuedNavigationBeforeNewMountAndColdReturnKeepsPriorHome`
+owns the held account verification ordering and restored prior selection across
+A→B, termination, and B→A. `testCachedOtherAccountDefersOldIntentWhenVerifiedBeforeReturning`
+owns the cold cached-B to verified-B boundary; it leaves the old intent intact
+while offline and retires it on verification before returning to A.
+`HomeAdoptionBootstrapTests.testAccountChangeDuringHeldAcceptedOpenDoesNotReviveItAfterColdReturn`
+owns the imported-ready automatic activation path with native verification held,
+a prior selected home, cold return, and a later explicit Open.
+`testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification`
+owns the interrupted provider invalidation before any inbox write, including
+the same account being freshly verified on restart.
+`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityAcrossFastReverificationAndSignOut`
+owns the exact outgoing identity carried by account-change and sign-out events
+even if the provider resolves again before Bootstrap handles the event.
+`testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection`
+owns the separate conversion-command versus navigation-intent result: A's copy
+recovers after B without selecting it over A's saved home. These isolated stores
+and substituted account lookups do not prove live CloudKit propagation.
+
+The first SHOPPING-185 focused attempt (`185-a`) selected the obsolete
+`ShoppingFastTests` target and stopped before building or running tests. The
+corrected `185-b` compiled until an out-of-scope `session` reference in the new
+copy-intent guard; no tests ran. `185-c` ran 74 focused tests: 73 passed, and
+the existing retained-copy test observed durable `.copied` before the later
+home-discovery/selection task completed. Its assertion now awaits that exact
+selected copied home within a bound. The final source and added cases require
+the next exact-tree validation; these earlier runs do not validate them.
+The committed `7b477ab` candidate passed ShoppingFast **649/649** with three
+runtime QoS warnings. Review then found a persisted account invalidation that
+could lose its meaning across a crash, plus delayed provider callbacks that
+could mistake a fresh account for the invalidated one. The successor adds the
+cold-start journal barrier, exact outgoing-session event capture, and a bounded
+drain assertion after releasing held native verification. This later production
+source and its fixture changes require exact-tree validation before integration.

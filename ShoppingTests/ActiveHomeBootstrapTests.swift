@@ -5,10 +5,12 @@ import XCTest
 @MainActor
 final class ActiveHomeBootstrapTests: XCTestCase {
     private func makeBootstrap(homeCount: Int, pendingInvitation: Bool = false,
+                               invitationInbox: Bool = false,
                                accountStatus: @escaping @Sendable () async -> CKAccountStatus = { .available },
                                accountLookup: ShopperSessionProvider.AccountLookup? = nil,
                                notifications: NotificationCenter = NotificationCenter(),
                                observeProvider: (ShopperSessionProvider) -> Void = { _ in },
+                               fixturePrepared: (URL, UserDefaults) -> Void = { _, _ in },
                                discoverHomes: @escaping @Sendable (HomeDiscoveryService) async throws -> HomeDiscovery = { service in
                                    try await Task.detached(priority: .utility) { try service.discover() }.value
                                }) async throws -> PersistenceBootstrap {
@@ -16,6 +18,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let suite = "HomeBootstrap." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        fixturePrepared(root, defaults)
         addTeardownBlock {
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: root)
@@ -29,12 +32,14 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             try persistence.container.persistentStoreCoordinator.remove(store)
         }
         var invitations: HomeInvitationController?
-        if pendingInvitation {
+        if pendingInvitation || invitationInbox {
             let inbox = try HomeInvitationInbox(url: root.appendingPathComponent("invitations.json"),
                 containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development")
-            try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.home-bootstrap",
-                environment: "Development", share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
-                metadataArchive: Data([1]))
+            if pendingInvitation {
+                try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: "iCloud.test.home-bootstrap",
+                    environment: "Development", share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
+                    metadataArchive: Data([1]))
+            }
             invitations = HomeInvitationController(inbox: inbox)
         }
         let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development",
@@ -159,7 +164,12 @@ final class ActiveHomeBootstrapTests: XCTestCase {
     private func waitForFirstHomeDecision(_ bootstrap: PersistenceBootstrap) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while ContinuousClock.now < deadline {
-            if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+            // start() already owns the initial load. Drive only the account
+            // transition that first-home resolution requested, so a second
+            // initial load cannot publish a stale local Create state.
+            if case .loading = bootstrap.state, bootstrap.isResolvingFirstAccount {
+                await bootstrap.runLoadingTransition()
+            }
             if bootstrap.homeEntry.root == .noHomes, !bootstrap.isResolvingFirstAccount { return }
             if case .failed(let error) = bootstrap.state { throw error }
             try await Task.sleep(for: .milliseconds(10))
@@ -522,6 +532,149 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(returned.personalCartService).entries(householdID: scope.graph.householdID,
             listID: scope.graph.listID), entries)
         XCTAssertThrowsError(try cart.checkout(checkout))
+    }
+
+    func testAccountChangeDefersQueuedNavigationBeforeNewMountAndColdReturnKeepsPriorHome() async throws {
+        let center = NotificationCenter()
+        let account = BootstrapMutableAccount()
+        var root: URL?
+        var defaults: UserDefaults?
+        let bootstrap = try await makeBootstrap(homeCount: 1, invitationInbox: true,
+            accountLookup: account.lookup, notifications: center,
+            fixturePrepared: { root = $0; defaults = $1 })
+        let original = try ready(bootstrap)
+        let originalScope = try XCTUnwrap(original.homeScope)
+        let controller = try XCTUnwrap(bootstrap.invitations)
+        let originalSession = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.home-bootstrap",
+            environment: "Development", accountRecordName: "account-A")
+        let entry = try await controller.enqueue(identity: HomeInvitationIdentity(
+            containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development",
+            share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner")),
+            metadataArchive: Data([1]))
+        XCTAssertEqual(entry.session, originalSession)
+        XCTAssertTrue(entry.openRequested)
+
+        let held = expectation(description: "Replacement account verification held")
+        await account.setName("account-B")
+        await account.holdNextRecord { held.fulfill() }
+        addTeardownBlock { await account.releaseRecord() }
+        center.post(name: .CKAccountChanged, object: nil)
+        await waitForRetirement(original)
+        await bootstrap.runLoadingTransition()
+        await fulfillment(of: [held], timeout: 5)
+        XCTAssertFalse(controller.allEntries.first { $0.id == entry.id }?.openRequested == true,
+            "The old intent is committed before the replacement account can mount")
+        await account.releaseRecord()
+        try await waitForReady(bootstrap)
+        XCTAssertNil(try ready(bootstrap).homeScope)
+
+        bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await bootstrap.runLoadingTransition()
+        let relaunchCenter = NotificationCenter()
+        let relaunchRoot = try XCTUnwrap(root)
+        let relaunchDefaults = try XCTUnwrap(defaults)
+        let restoredInbox = try HomeInvitationInbox(url: relaunchRoot.appendingPathComponent("invitations.json"),
+            containerIdentifier: "iCloud.test.home-bootstrap", environment: "Development")
+        XCTAssertFalse(restoredInbox.entries.first { $0.id == entry.id }?.openRequested == true)
+        let restoredProvider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.home-bootstrap",
+            environment: "Development", cacheDirectory: relaunchRoot.appendingPathComponent("Bindings"),
+            lookup: account.lookup, notifications: relaunchCenter)
+        let relaunched = PersistenceBootstrap(
+            configuration: { .local(storeURL: relaunchRoot.appendingPathComponent("Legacy.sqlite")) },
+            defaults: relaunchDefaults, invitations: HomeInvitationController(inbox: restoredInbox),
+            autoResolveFreshAccount: false, autoJoinInvitations: true,
+            makeAccountProvider: { _ in restoredProvider }, accountStoreDirectory: { relaunchRoot },
+            activateAccountStore: { _, session, _, _ in
+                .local(storeURL: session == originalSession
+                    ? relaunchRoot.appendingPathComponent("Account.sqlite")
+                    : relaunchRoot.appendingPathComponent(session.accountBinding + ".sqlite"))
+            }
+        )
+        retireBeforeCleanup(relaunched)
+        relaunched.activatePersonalCarts(importLegacy: false)
+        await relaunched.runLoadingTransition()
+        try await waitForReady(relaunched)
+        XCTAssertNil(try ready(relaunched).homeScope)
+        await account.setName("account-A")
+        let beforeReturn = try ready(relaunched)
+        relaunchCenter.post(name: .CKAccountChanged, object: nil)
+        await waitForRetirement(beforeReturn)
+        await relaunched.runLoadingTransition()
+        try await waitForReady(relaunched)
+        XCTAssertEqual(try ready(relaunched).homeScope, originalScope)
+        XCTAssertFalse(relaunched.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true)
+        try await relaunched.invitations?.requestOpen(entry.id)
+        XCTAssertTrue(relaunched.invitations?.allEntries.first { $0.id == entry.id }?.openRequested == true,
+            "A deliberate Open still owns navigation")
+    }
+
+    func testCachedOtherAccountDefersOldIntentWhenVerifiedBeforeReturning() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let suite = "CachedHomeNavigation." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: "shopping.personalCart.enabled")
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let namespace = "iCloud.test.home-bootstrap"
+        let originalSession = try ShopperSession.authenticated(containerIdentifier: namespace,
+            environment: "Development", accountRecordName: "account-A")
+        let inboxURL = root.appendingPathComponent("invitations.json")
+        let inbox = try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace, environment: "Development")
+        try inbox.setSession(originalSession)
+        let old = try inbox.enqueue(identity: HomeInvitationIdentity(containerIdentifier: namespace,
+            environment: "Development", share: HomeShareIdentity(recordName: "old-share",
+                zoneName: "zone", zoneOwnerName: "owner")), metadataArchive: Data([1]))
+        let controller = HomeInvitationController(inbox: try HomeInvitationInbox(url: inboxURL,
+            containerIdentifier: namespace, environment: "Development"))
+        await controller.prepare()
+        let bindings = root.appendingPathComponent("Bindings")
+        let warming = try ShopperSessionProvider(containerIdentifier: namespace, environment: "Development",
+            cacheDirectory: bindings, lookup: .init(status: { .available }, recordName: { "account-B" }))
+        await warming.refresh()
+        let cachedB = try warming.currentSession()
+        let account = BootstrapMutableAccount()
+        await account.setName("account-B")
+        await account.setStatus(.available, networkUnavailable: true)
+        let center = NotificationCenter()
+        let provider = try ShopperSessionProvider(containerIdentifier: namespace, environment: "Development",
+            cacheDirectory: bindings, lookup: account.lookup, notifications: center)
+        let bootstrap = PersistenceBootstrap(
+            configuration: { .local(storeURL: root.appendingPathComponent("Legacy.sqlite")) },
+            defaults: defaults, invitations: controller, autoResolveFreshAccount: false,
+            autoJoinInvitations: true, makeAccountProvider: { _ in provider }, accountStoreDirectory: { root },
+            activateAccountStore: { _, session, _, _ in
+                .local(storeURL: root.appendingPathComponent(session.accountBinding + ".sqlite"))
+            })
+        retireBeforeCleanup(bootstrap)
+        bootstrap.activatePersonalCarts(importLegacy: false)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        XCTAssertEqual(provider.state, .cached(cachedB))
+        XCTAssertTrue(controller.allEntries.first { $0.id == old.id }?.openRequested == true,
+            "A cached pointer alone must not retire another account's intent")
+
+        await account.setStatus(.available, networkUnavailable: false)
+        bootstrap.applicationDidEnterForeground()
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if case .ready(let session) = provider.state {
+                return session == cachedB
+                    && controller.allEntries.first { $0.id == old.id }?.openRequested == false
+            }
+            return false
+        }, object: nil)], timeout: 5)
+        XCTAssertFalse(try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
+            environment: "Development").entries.first { $0.id == old.id }?.openRequested == true)
+
+        await account.setName("account-A")
+        let previous = try ready(bootstrap)
+        center.post(name: .CKAccountChanged, object: nil)
+        await waitForRetirement(previous)
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        XCTAssertFalse(controller.allEntries.first { $0.id == old.id }?.openRequested == true)
     }
 
     func testAccountStatusNotificationSignOutCannotReopenCachedAccount() async throws {

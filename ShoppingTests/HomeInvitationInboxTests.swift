@@ -142,6 +142,56 @@ final class HomeInvitationInboxTests: XCTestCase {
         XCTAssertFalse(service.entries[0].openRequested)
     }
 
+    func testAccountBoundaryDurablyDefersOnlyBoundOldNavigationAndKeepsManualOpen() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let old = try service.enqueue(identity: identity("old"), metadataArchive: Data([1]))
+        let attempt = try service.beginAcceptance(id: old.id, sharedStoreIdentifier: "shared-store")
+        try service.finishAcceptance(attempt)
+        try service.setSession(otherSession)
+        let current = try service.enqueue(identity: identity("current"), metadataArchive: Data([2]))
+        try service.setSession(nil)
+        let cold = try service.enqueue(identity: identity("cold"), metadataArchive: Data([3]))
+
+        try service.retireAutomaticOpen(boundToOtherAccountThan: otherSession)
+        let restored = try inbox(url)
+        XCTAssertEqual(restored.entries.first { $0.id == old.id }?.state, .loading)
+        XCTAssertFalse(restored.entries.first { $0.id == old.id }?.openRequested == true)
+        XCTAssertTrue(restored.entries.first { $0.id == current.id }?.openRequested == true)
+        XCTAssertTrue(restored.entries.first { $0.id == cold.id }?.openRequested == true,
+            "An unbound native delivery still opens after its account is verified")
+
+        try restored.setSession(originalSession)
+        try restored.requestOpen(id: old.id)
+        XCTAssertTrue(try inbox(url).entries.first { $0.id == old.id }?.openRequested == true)
+        try restored.setSession(nil)
+        try restored.retireAutomaticOpen(boundTo: originalSession)
+        XCTAssertFalse(try inbox(url).entries.first { $0.id == old.id }?.openRequested == true)
+    }
+
+    func testPersistedUnknownAccountInvalidationDefersAllBoundButNotFreshUnboundIngress() throws {
+        let (url, originalSession) = try fixture()
+        let otherSession = try session("account-b")
+        let service = try inbox(url)
+        try service.setSession(originalSession)
+        let original = try service.enqueue(identity: identity("old"), metadataArchive: Data([1]))
+        try service.setSession(otherSession)
+        let other = try service.enqueue(identity: identity("other"), metadataArchive: Data([2]))
+        try service.setSession(nil)
+        let fresh = try service.enqueue(identity: identity("cold"), metadataArchive: Data([3]))
+
+        try service.retireAutomaticOpenForAllBoundAccounts()
+        let relaunched = try inbox(url)
+        XCTAssertFalse(relaunched.entries.first { $0.id == original.id }?.openRequested == true)
+        XCTAssertFalse(relaunched.entries.first { $0.id == other.id }?.openRequested == true)
+        XCTAssertTrue(relaunched.entries.first { $0.id == fresh.id }?.openRequested == true)
+        try relaunched.setSession(originalSession)
+        try relaunched.requestOpen(id: original.id)
+        XCTAssertTrue(try inbox(url).entries.first { $0.id == original.id }?.openRequested == true)
+    }
+
     func testCachedAccountCanDeferOnlyItsOwnNavigationIntent() throws {
         let (url, originalSession) = try fixture()
         let otherSession = try session("account-b")
