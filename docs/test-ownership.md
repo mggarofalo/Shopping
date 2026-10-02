@@ -2093,3 +2093,97 @@ pinned-CI failures passed. One internal QoS warning occurred in unchanged
 warning was reported. Independent correctness and test reviews found no issues
 in readiness predicates or bounded held-read teardown. App/Watch/UI source is
 unchanged from polished candidate `21fb7d8`; exact successor CI remains required.
+
+
+### iPhone store purchase-rule counts (SHOPPING-192)
+
+`StorePurchaseCounts` owns the shared Watch/iPhone value projection: distinct
+outstanding occurrences, active-store availability, archived restrictions and
+unresolved identity handling. The existing `CatalogFilterUnitTests` suite adds
+three focused checks without replacing Watch persistence coverage.
+
+`CatalogFilterTests.testStoreCountsUseUnfilteredOutstandingOccurrencesAndExactHome`
+owns the background iPhone projection across search/selection, legacy cart flags,
+quantity, remembered/one-time demand, archived stores, unresolved identity and
+a foreign home. `PersonalCartServiceTests.testGroceryStoreCountsExcludeOnlyMyCartAndFulfilledDemand`
+owns private cart membership and fulfilled demand after personal-cart activation.
+
+Two isolated `PersonalCartUITests` methods own native store selection, Settings
+order, filter-independent counts and live personal-cart updates, plus readable
+semantic count values and row geometry at actual system Large and accessibility
+XXXL sizes. They retain screenshots; the text-size helper restores Settings.
+All fixture stores are unique and removed after app termination. No coverage
+baseline or CI test selection is changed. Exact-source validation follows below.
+
+Initial candidate `9ac693e` passed focused projection/cart tests **64/64** and
+the two store-picker UI methods **2/2**, with no skips. Raw artifacts are
+`/tmp/shopping-phase25-192-focused` and `-ui` (`.log`, `.xcresult`). Review
+identified an exposed mismatch for a mixed valid/incomplete store restriction:
+the previous iPhone eligibility resolution accepted it while Watch failed closed.
+The existing Watch relationship validation was extracted first into
+`PurchaseRuleIdentity` (`78e66b9`), then applied to count rules only. The new
+`testStoreCountsRejectMixedValidAndUnresolvedStoreRelationships` covers remembered
+foreign-home restrictions and one-time incomplete imports, including Any store
+overrides. Existing filtering behavior is preserved. The UI row helper now awaits
+exactly one matching row before resolving it, and awaits the native title before
+checking hittability; count-value assertions are unchanged. Final evidence follows.
+
+Final behavior candidate `2cb589f` passed ShoppingFast **669/669**, no skips,
+exit 0 (`/tmp/shopping-phase25-192-fast.xcresult`, `.log`, `-summary.json`).
+The final picker-only contrast/separator successor `e8b03cd` passed both affected
+Watch persistence count methods **2/2** on watchOS 26.5 and both focused iPhone
+UI methods **2/2** on iPhone 18 Pro/iOS 27, no skips, exit 0. Artifacts:
+`/tmp/shopping-phase25-192-watch` and `-ui-final` (`.xcresult`, `.log`,
+`-summary.json`); screenshots and actual Settings text-size evidence are retained
+in `-ui-final-attachments`. Inspected Large, accessibility XXXL and selected-store
+after-cart screenshots: semantic colors, aligned separators, visible counts and
+native checkmark are correct. Independent production and test reviewers verified
+the resolution/readiness corrections and found no remaining defect. The final
+integration changes only documentation from `e8b03cd`; exact pushed-source CI is
+still required for oldest pinned compiler/runtime compatibility and coverage.
+
+
+### Committed catalog name observation (SHOPPING-194)
+
+Pinned CI `37061467701` on integration `991dea4` passed Release, Fast
+**669/669** and the unchanged coverage baseline, but Acceptance was **5/6**,
+with no skips. The unchanged catalog Save/Add workflow timed out at its exact
+KVC-based text-value wait before keyboard dismissal. Raw results and video are
+retained in `/tmp/shopping-phase25-ci-failure-37061467701`; summaries are in
+`/tmp/shopping-phase25-ci-summary-37061467701`. Extracted frame
+`/tmp/shopping-phase25-ci-name-failure.png` visibly shows the full requested name.
+Activity evidence contains one property lookup during that predicate; stale
+observation is plausible, but the actual AX value was not captured.
+
+The catalog UI helper first gained explicit ownership of its unique fixture
+directory and termination-before-removal teardown. The workflow types once,
+commits editing through the existing native keyboard Done action, waits for
+keyboard disappearance, then polls a fresh field query with the same exact value
+and three-second bound. The separate exact-name, destination editor and one-need
+assertions remain. A failed wait now retains the accessibility hierarchy. No
+command retry, relaunch, timeout inflation, skip or acceptance selection change
+is introduced. This is test-only; app and Watch source stay at `e8b03cd`.
+
+Independent challenger review caught a fixture fallback collision introduced by
+the new catalog helper's constant SQLite basename. `uiTestStoreURL` maps
+non-writable runner paths into app Application Support using the basename only.
+The helper now preserves its unique directory identity in that filename too.
+The new count test's explicit fixture and shared PersonalCart UI launch helper
+use the same unique-basename rule. This prevents app-side fallback stores from
+sharing state while preserving each test's deliberate relaunch path. Existing
+bootstrap fallback tests own the path mapping; affected catalog/count workflows
+will validate the correction.
+
+Candidate `ecd11e3` passed all five affected catalog UI workflows **5/5**.
+The final fixture successor `8ce6809` passed the corrected catalog workflow,
+both count workflows (actual Large/XXXL and cart refresh), and first-home
+creation/relaunch **4/4**, no skips, on iPhone 18 Pro/iOS27. Raw bundles/logs and
+summaries: `/tmp/shopping-phase25-194-ui` and `-ui-final`. Both runs completed
+all test assertions before Xcode27's diagnostics child stalled. Samples retained
+under `/tmp/shopping-phase25-194-*-sample.txt` show the parent waiting in
+`collectSimulatorDiagnostics` / `simCtlDiagnose` and the child waiting for its
+diagnostic subprocess/group. Only each stalled `simctl diagnose` child was
+terminated; complete bundles and xcodebuild exit0 were preserved. No test or
+runner process was stopped. Independent correctness and test reviews verified
+exact-value proof, unique fallback filenames and stable relaunch paths. Hosted
+pinned iOS18.5 acceptance remains required on the exact integration successor.

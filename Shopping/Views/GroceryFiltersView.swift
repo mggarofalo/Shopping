@@ -59,7 +59,9 @@ struct GroceryScopeControls: View {
     @ObservedObject var navigation: GroceryNavigationState
     let stores: [Store]
     let categories: [Category]
+    let storeCounts: [UUID: StorePurchaseCounts]
     let showFilters: () -> Void
+    @State private var showingStores = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -108,22 +110,12 @@ struct GroceryScopeControls: View {
 
     private var storeMenu: some View {
         HStack(spacing: 0) {
-            Menu {
-                ForEach(stores, id: \.objectID) { store in
-                    Button {
-                        navigation.selectStore(store.id)
-                    } label: {
-                        if navigation.selectedStoreID == store.id {
-                            Label(store.name, systemImage: "checkmark")
-                        } else {
-                            Text(store.name)
-                        }
-                    }
-                }
-            } label: {
+            Button { showingStores = true } label: {
                 ShoppingScopeLabel(title: selectedStoreName, systemImage: "storefront")
             }
-            .menuStyle(.button)
+            .sheet(isPresented: $showingStores) {
+                GroceryStorePicker(navigation: navigation, stores: stores, counts: storeCounts)
+            }
             .accessibilityLabel(selectedStoreName)
             .accessibilityHint("Choose a store")
             .accessibilityIdentifier("shopping.store.menu")

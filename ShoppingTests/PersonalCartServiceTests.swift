@@ -238,6 +238,33 @@ final class PersonalCartServiceTests: XCTestCase {
         try context.performAndWait { XCTAssertNil(try context.fetch(Need.fetchRequest()).first?.quantity) }
     }
 
+    func testGroceryStoreCountsExcludeOnlyMyCartAndFulfilledDemand() throws {
+        let f = try makeFixture()
+        let store = try f.service.createStore(name: "Market", householdID: f.householdID)
+        let bob = PersonalCartService(persistence: f.persistence, sessionProvider: try session("bob"))
+        try bob.cart(needID: f.needID, householdID: f.householdID, listID: f.listID)
+        let context = fixtureLifetime.own(f.persistence.simulationContext())
+        try context.performAndWait {
+            let need = try XCTUnwrap(context.fetch(Need.fetchRequest()).first { $0.id == f.needID })
+            need.carted = true
+            try context.save()
+        }
+        func counts() throws -> StorePurchaseCounts? {
+            let mine = Set(try f.cart.entries(householdID: f.householdID, listID: f.listID).map(\.needID))
+            return try f.service.groceryNeedProjection(householdID: f.householdID, listID: f.listID,
+                filter: GroceryNeedFilter(text: "no matches")).storeCounts(excluding: mine)[store]
+        }
+        XCTAssertEqual(try counts(), StorePurchaseCounts(canBuyCount: 1),
+            "Another shopper's cart and unattributed legacy flags do not hide my remaining grocery")
+        let mine = try add(f)
+        XCTAssertEqual(try counts(), StorePurchaseCounts())
+        try f.cart.uncart(mine.token)
+        XCTAssertEqual(try counts(), StorePurchaseCounts(canBuyCount: 1))
+        let other = try bob.entries(householdID: f.householdID, listID: f.listID)
+        _ = try bob.checkout(bob.prepareCheckout(tokens: other.map(\.token)))
+        XCTAssertEqual(try counts(), StorePurchaseCounts())
+    }
+
     func testOwnQuantityAndCleanupNeverMutateSharedDemandOrOtherOwner() throws {
         let f = try makeFixture()
         let alice = try add(f)

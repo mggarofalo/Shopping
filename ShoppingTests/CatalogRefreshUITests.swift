@@ -49,13 +49,22 @@ final class CatalogRefreshUITests: XCTestCase {
         name.tap()
         XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
         name.typeText("Oat milk")
-        let typedName = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Oat milk"), object: name
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [typedName], timeout: 3), .completed)
-        XCTAssertEqual(name.value as? String, "Oat milk")
         app.buttons["shopping.catalog.keyboardDone"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        let typedName = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                app.textFields["shopping.catalog.name"].value as? String == "Oat milk"
+            }, object: nil
+        )
+        let nameReady = XCTWaiter.wait(for: [typedName], timeout: 3)
+        if nameReady != .completed {
+            let diagnostic = XCTAttachment(string: app.debugDescription)
+            diagnostic.name = "Committed catalog name readiness"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        XCTAssertEqual(nameReady, .completed)
+        XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, "Oat milk")
         let saveAndAdd = app.buttons["shopping.catalog.saveAndAddToList"]
         XCTAssertTrue(saveAndAdd.isEnabled)
         saveAndAdd.tap()
@@ -172,8 +181,15 @@ final class CatalogRefreshUITests: XCTestCase {
 
     private func launchApp(named name: String, fixture: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite").path
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory
+            .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
+        addTeardownBlock {
+            app.terminate()
+            try? FileManager.default.removeItem(at: directory)
+        }
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
         app.launch()
         if fixture == nil { app.createFirstHomeForWorkflow() }

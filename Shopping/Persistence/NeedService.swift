@@ -2143,6 +2143,11 @@ final class NeedService: @unchecked Sendable {
     }
 
     func filteredActiveNeedIDs(householdID: UUID, filter: GroceryNeedFilter) throws -> [UUID] {
+        try groceryNeedProjection(householdID: householdID, filter: filter).matchingNeedIDs
+    }
+
+    func groceryNeedProjection(householdID: UUID, listID: UUID? = nil,
+                               filter: GroceryNeedFilter) throws -> GroceryNeedProjection {
         let signpostID = OSSignpostID(log: ShoppingPerformanceTrace.log)
         os_signpost(.begin, log: ShoppingPerformanceTrace.log, name: "Grocery projection", signpostID: signpostID)
         defer { os_signpost(.end, log: ShoppingPerformanceTrace.log, name: "Grocery projection", signpostID: signpostID) }
@@ -2153,6 +2158,11 @@ final class NeedService: @unchecked Sendable {
                 format: "list.household.id == %@ AND archived == NO",
                 householdID as CVarArg
             )
+            if let listID {
+                request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    request.predicate!, NSPredicate(format: "list.id == %@", listID as CVarArg)
+                ])
+            }
             request.relationshipKeyPathsForPrefetching = [
                 "list", "list.household", "item", "item.household", "item.stores", "item.category",
                 "oneTimeStores", "oneTimeCategory"
@@ -2170,7 +2180,9 @@ final class NeedService: @unchecked Sendable {
                 in: context,
                 identityError: .invalidCatalogIdentity
             )
-            return activeNeeds.filter { need in
+            var matchingNeedIDs: [UUID] = []
+            var storeCountOccurrences: [StorePurchaseCountOccurrence] = []
+            for need in activeNeeds {
                 let item = need.item
                 let isOneTime = need.kind == NeedKind.oneTime.rawValue
                 let resolvedItem = item.flatMap { candidate -> Item? in
@@ -2186,12 +2198,28 @@ final class NeedService: @unchecked Sendable {
                     anyStore: item?.anyStore ?? (isOneTime && need.oneTimeAnyStore),
                     hasResolvedIdentity: resolvedItem != nil || (item == nil && isOneTime)
                 )
-                return filter.purchase.matches(value, activeStoreIDs: activeStores) &&
+                // Legacy cart flags have no ownership after personal-cart activation.
+                if self.persistence.personalCartsEnabled || !need.carted {
+                    let stores = item?.stores ?? (isOneTime ? need.oneTimeStores ?? [] : [])
+                    let countRule = PurchaseRuleValue(
+                        explicitStoreIDs: value.explicitStoreIDs, anyStore: value.anyStore,
+                        hasResolvedIdentity: value.hasResolvedIdentity &&
+                            PurchaseRuleIdentity.storesAreResolved(stores, household: need.list?.household)
+                    )
+                    storeCountOccurrences.append(StorePurchaseCountOccurrence(id: need.id, rule: countRule))
+                }
+                if filter.purchase.matches(value, activeStoreIDs: activeStores) &&
                     CatalogProjection.textMatches(item?.name ?? need.title, query: filter.text) &&
                     (filter.categoryID == nil || (item?.category ?? (isOneTime ? need.oneTimeCategory : nil))?.id == filter.categoryID) &&
                     (filter.carted == nil || need.carted == filter.carted) &&
-                    (filter.urgency == nil || need.urgency == filter.urgency)
-            }.map(\.id).sorted { $0.uuidString < $1.uuidString }
+                    (filter.urgency == nil || need.urgency == filter.urgency) {
+                    matchingNeedIDs.append(need.id)
+                }
+            }
+            return GroceryNeedProjection(
+                matchingNeedIDs: matchingNeedIDs.sorted { $0.uuidString < $1.uuidString },
+                storeCountOccurrences: storeCountOccurrences, activeStoreIDs: activeStores
+            )
         }
     }
 

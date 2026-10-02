@@ -3,6 +3,12 @@ import SwiftUI
 import UIKit
 
 struct GroceriesView: View {
+    private struct StoreCountSnapshot {
+        let scope: PersonalCartScopeSnapshot
+        let presentationID: UUID?
+        let values: [UUID: StorePurchaseCounts]
+    }
+
     @Environment(\.persistencePresentation) private var presentation
     @Environment(\.needService) private var service
     @Environment(\.personalCart) private var personalCart
@@ -20,6 +26,7 @@ struct GroceriesView: View {
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var projectionTask: Task<Void, Never>?
     @State private var projectionRevision = 0
+    @State private var storeCountSnapshot: StoreCountSnapshot?
     @State private var pendingCartActionNeedIDs: Set<UUID> = []
     @State private var pendingNeedQuantityIDs: Set<UUID> = []
     @State private var pendingNeedAgainIDs: Set<UUID> = []
@@ -215,6 +222,8 @@ struct GroceriesView: View {
             .onChange(of: navigation.urgentOnly) { _, _ in refreshProjection() }
             .onChange(of: navigation.categoryID) { _, _ in refreshProjection() }
             .onChange(of: needs.count) { _, _ in refreshProjection() }
+            .onChange(of: personalCart?.cartedNeedIDs) { _, _ in refreshProjection() }
+            .onChange(of: personalCart?.outstandingNeedIDs) { _, _ in refreshProjection() }
             .onChange(of: navigation.pendingNeedFocusID) { _, _ in focusRequestedNeed() }
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
@@ -303,6 +312,7 @@ struct GroceriesView: View {
             navigation: navigation,
             stores: activeStores,
             categories: activeCategories,
+            storeCounts: storeCounts,
             showFilters: { showingFilters = true }
         )
     }
@@ -313,6 +323,15 @@ struct GroceriesView: View {
             Label("In cart (\(cartedCount))", systemImage: "cart.fill")
                 .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
         }
+    }
+
+    private var storeCounts: [UUID: StorePurchaseCounts] {
+        guard let snapshot = storeCountSnapshot,
+              snapshot.scope.householdID == selection.householdID,
+              snapshot.scope.listID == selection.listID,
+              snapshot.presentationID == presentation?.id,
+              presentation?.isActive != false else { return [:] }
+        return snapshot.values
     }
 
     private var selectedStoreName: String {
@@ -596,27 +615,43 @@ struct GroceriesView: View {
         projectionTask?.cancel()
         projectionRevision += 1
         let revision = projectionRevision
-        guard let householdID = selection.householdID, canonicalList != nil, let service else {
+        guard let householdID = selection.householdID, let listID = canonicalList?.id, let service else {
             visibleNeedObjectIDs = []
+            storeCountSnapshot = nil
             return }
         let filter = currentNeedFilter
+        let cartedNeedIDs = personalCart?.cartedNeedIDs ?? []
+        let presentationID = presentation?.id
         projectionTask = Task {
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
             do {
-                let matchingIDs = try await Task.detached(priority: .userInitiated) {
-                    Set(try service.filteredActiveNeedIDs(householdID: householdID, filter: filter))
+                let projected = try await Task.detached(priority: .userInitiated) {
+                    let projection = try service.groceryNeedProjection(
+                        householdID: householdID, listID: listID, filter: filter
+                    )
+                    return (ids: Set(projection.matchingNeedIDs), counts: projection.storeCounts(excluding: cartedNeedIDs))
                 }.value
                 guard !Task.isCancelled, projectionRevision == revision,
-                      selection.householdID == householdID,
+                      selection.householdID == householdID, selection.listID == listID,
+                      presentation?.id == presentationID,
                       presentation?.isActive != false else { return }
+                storeCountSnapshot = StoreCountSnapshot(
+                    scope: PersonalCartScopeSnapshot(householdID: householdID, listID: listID),
+                    presentationID: presentationID, values: projected.counts
+                )
+                let matchingIDs = projected.ids
                 visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(
                     Array(needs), canonicalList: canonicalList
                 ).filter { matchingIDs.contains($0.id) }.map(\.objectID))
             } catch {
-                guard !Task.isCancelled, projectionRevision == revision else { return }
+                guard !Task.isCancelled, projectionRevision == revision,
+                      selection.householdID == householdID, selection.listID == listID,
+                      presentation?.id == presentationID,
+                      presentation?.isActive != false else { return }
                 self.error = error
                 visibleNeedObjectIDs = []
+                storeCountSnapshot = nil
             }
         }
     }
