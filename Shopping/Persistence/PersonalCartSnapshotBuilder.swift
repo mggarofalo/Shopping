@@ -11,7 +11,7 @@ enum PersonalCartSnapshotBuilder {
         let stores = oneTime ? need.oneTimeStores ?? [] : item?.stores ?? []
         var resolved = oneTime || (item != nil && item?.id != PersistenceModel.unsetID
             && item?.household == household && item?.objectID.persistentStore == need.objectID.persistentStore)
-        resolved = resolved && stores.allSatisfy { $0.id != PersistenceModel.unsetID && $0.household == household }
+        resolved = resolved && PurchaseRuleIdentity.storesAreResolved(stores, household: household)
         if !oneTime, let item, let context = need.managedObjectContext {
             let request = Item.fetchRequest()
             request.predicate = NSPredicate(format: "id == %@", item.id as CVarArg)

@@ -112,6 +112,14 @@ final class PersonalCartPresentation {
         isSelected(in: selection) && recovery?.hasEarlierClearedGroceries == true
     }
 
+    var cartedNeedIDs: Set<UUID> {
+        var ids = Set(entries.map(\.needID))
+        for (id, carted) in pendingCartState {
+            if carted { ids.insert(id) } else { ids.remove(id) }
+        }
+        return ids
+    }
+
     func contains(_ needID: UUID) -> Bool {
         pendingCartState[needID] ?? entries.contains { $0.needID == needID }
     }

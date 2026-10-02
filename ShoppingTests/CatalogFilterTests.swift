@@ -259,6 +259,79 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertEqual(try service.allCatalogItemIDs(householdID: local.householdID), [untagged])
     }
 
+    func testStoreCountsUseUnfilteredOutstandingOccurrencesAndExactHome() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let home = try service.createHousehold()
+        let a = try service.createStore(name: "A", householdID: home.householdID)
+        let b = try service.createStore(name: "B", householdID: home.householdID)
+        let closed = try service.createStore(name: "Closed", householdID: home.householdID)
+        let only = try service.createItem(name: "Only A", storeIDs: [a], householdID: home.householdID, anyStore: false)
+        _ = try service.addRememberedNeed(itemID: only, listID: home.listID, quantity: 8)
+        let multi = try service.createItem(name: "Either", storeIDs: [a, b], householdID: home.householdID, anyStore: false)
+        _ = try service.addRememberedNeed(itemID: multi, listID: home.listID)
+        _ = try service.addOneTimeNeed(title: "Anywhere", quantity: 4, listID: home.listID)
+        let restricted = try service.createItem(name: "Closed only", storeIDs: [closed], householdID: home.householdID, anyStore: false)
+        _ = try service.addRememberedNeed(itemID: restricted, listID: home.listID)
+        try service.setStoreArchived(true, storeID: closed, householdID: home.householdID)
+        let legacy = try service.addOneTimeNeed(title: "Legacy cart", storeIDs: [a], anyStore: false, listID: home.listID)
+        try service.setCarted(true, needID: legacy)
+        let unresolved = try service.createItem(name: "Unresolved", storeIDs: [a], householdID: home.householdID, anyStore: false)
+        _ = try service.addRememberedNeed(itemID: unresolved, listID: home.listID)
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            try fetchItem(unresolved, context: context).id = PersistenceModel.unsetID
+            try context.save()
+        }
+        let other = try service.createHousehold(name: "Other")
+        let foreign = try service.createStore(name: "Foreign", householdID: other.householdID)
+        _ = try service.addOneTimeNeed(title: "Foreign demand", listID: other.listID)
+        let narrowed = GroceryNeedFilter(purchase: PurchaseFilter(selectedStoreID: b), text: "Only A")
+        let projection = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID, filter: narrowed)
+        XCTAssertTrue(projection.matchingNeedIDs.isEmpty)
+        XCTAssertEqual(projection.storeCounts(excluding: []), [
+            a: StorePurchaseCounts(mustBuyCount: 1, canBuyCount: 2),
+            b: StorePurchaseCounts(canBuyCount: 2)
+        ])
+        XCTAssertNil(projection.storeCounts(excluding: [])[closed])
+        XCTAssertNil(projection.storeCounts(excluding: [])[foreign])
+        let unfiltered = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID, filter: GroceryNeedFilter())
+        XCTAssertEqual(unfiltered.storeCounts(excluding: []), projection.storeCounts(excluding: []))
+    }
+
+    func testStoreCountsRejectMixedValidAndUnresolvedStoreRelationships() throws {
+        let persistence = try PersistenceController(storeURL: temporaryStoreURL())
+        let service = NeedService(persistence: persistence)
+        let home = try service.createHousehold()
+        let a = try service.createStore(name: "A", householdID: home.householdID)
+        let foreignHome = try service.createHousehold(name: "Other")
+        let foreignID = try service.createStore(name: "Foreign", householdID: foreignHome.householdID)
+        for anyStore in [false, true] {
+            let item = try service.createItem(name: "Remembered \(anyStore)", storeIDs: [a], householdID: home.householdID, anyStore: anyStore)
+            let remembered = try service.addRememberedNeed(itemID: item, listID: home.listID)
+            let oneTime = try service.addOneTimeNeed(title: "One-time \(anyStore)", storeIDs: [a], anyStore: anyStore, listID: home.listID)
+            let context = persistence.simulationContext()
+            try context.performAndWait {
+                let request = Store.fetchRequest()
+                request.predicate = NSPredicate(format: "id IN %@", [a, foreignID])
+                let stores = try context.fetch(request)
+                let local = try XCTUnwrap(stores.first { $0.id == a })
+                let foreign = try XCTUnwrap(stores.first { $0.id == foreignID })
+                let incomplete = Store(context: context)
+                incomplete.name = "Importing"
+                incomplete.household = local.household
+                try fetchItem(item, context: context).stores = [local, foreign]
+                try fetchNeed(oneTime, context: context).oneTimeStores = [local, incomplete]
+                XCTAssertFalse(PurchaseRuleIdentity.storesAreResolved([local, foreign], household: local.household))
+                XCTAssertFalse(PurchaseRuleIdentity.storesAreResolved([local, incomplete], household: local.household))
+                XCTAssertNotNil(try fetchNeed(remembered, context: context).item)
+                try context.save()
+            }
+        }
+        let projection = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID, filter: GroceryNeedFilter())
+        XCTAssertEqual(projection.storeCounts(excluding: []), [a: StorePurchaseCounts()])
+    }
+
     func testUntaggedRulesSurviveRelaunchAndNeverInventLiteralTagsOrOrphanEligibility() throws {
         let url = temporaryStoreURL()
         let persistence = try PersistenceController(storeURL: url)

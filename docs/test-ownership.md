@@ -2093,3 +2093,51 @@ pinned-CI failures passed. One internal QoS warning occurred in unchanged
 warning was reported. Independent correctness and test reviews found no issues
 in readiness predicates or bounded held-read teardown. App/Watch/UI source is
 unchanged from polished candidate `21fb7d8`; exact successor CI remains required.
+
+
+### iPhone store purchase-rule counts (SHOPPING-192)
+
+`StorePurchaseCounts` owns the shared Watch/iPhone value projection: distinct
+outstanding occurrences, active-store availability, archived restrictions and
+unresolved identity handling. The existing `CatalogFilterUnitTests` suite adds
+three focused checks without replacing Watch persistence coverage.
+
+`CatalogFilterTests.testStoreCountsUseUnfilteredOutstandingOccurrencesAndExactHome`
+owns the background iPhone projection across search/selection, legacy cart flags,
+quantity, remembered/one-time demand, archived stores, unresolved identity and
+a foreign home. `PersonalCartServiceTests.testGroceryStoreCountsExcludeOnlyMyCartAndFulfilledDemand`
+owns private cart membership and fulfilled demand after personal-cart activation.
+
+Two isolated `PersonalCartUITests` methods own native store selection, Settings
+order, filter-independent counts and live personal-cart updates, plus readable
+semantic count values and row geometry at actual system Large and accessibility
+XXXL sizes. They retain screenshots; the text-size helper restores Settings.
+All fixture stores are unique and removed after app termination. No coverage
+baseline or CI test selection is changed. Exact-source validation follows below.
+
+Initial candidate `9ac693e` passed focused projection/cart tests **64/64** and
+the two store-picker UI methods **2/2**, with no skips. Raw artifacts are
+`/tmp/shopping-phase25-192-focused` and `-ui` (`.log`, `.xcresult`). Review
+identified an exposed mismatch for a mixed valid/incomplete store restriction:
+the previous iPhone eligibility resolution accepted it while Watch failed closed.
+The existing Watch relationship validation was extracted first into
+`PurchaseRuleIdentity` (`78e66b9`), then applied to count rules only. The new
+`testStoreCountsRejectMixedValidAndUnresolvedStoreRelationships` covers remembered
+foreign-home restrictions and one-time incomplete imports, including Any store
+overrides. Existing filtering behavior is preserved. The UI row helper now awaits
+exactly one matching row before resolving it, and awaits the native title before
+checking hittability; count-value assertions are unchanged. Final evidence follows.
+
+Final behavior candidate `2cb589f` passed ShoppingFast **669/669**, no skips,
+exit 0 (`/tmp/shopping-phase25-192-fast.xcresult`, `.log`, `-summary.json`).
+The final picker-only contrast/separator successor `e8b03cd` passed both affected
+Watch persistence count methods **2/2** on watchOS 26.5 and both focused iPhone
+UI methods **2/2** on iPhone 18 Pro/iOS 27, no skips, exit 0. Artifacts:
+`/tmp/shopping-phase25-192-watch` and `-ui-final` (`.xcresult`, `.log`,
+`-summary.json`); screenshots and actual Settings text-size evidence are retained
+in `-ui-final-attachments`. Inspected Large, accessibility XXXL and selected-store
+after-cart screenshots: semantic colors, aligned separators, visible counts and
+native checkmark are correct. Independent production and test reviewers verified
+the resolution/readiness corrections and found no remaining defect. The final
+integration changes only documentation from `e8b03cd`; exact pushed-source CI is
+still required for oldest pinned compiler/runtime compatibility and coverage.

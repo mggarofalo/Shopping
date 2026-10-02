@@ -64,6 +64,7 @@ struct CartedGroceriesView: View {
                     navigation: navigation,
                     stores: activeStores,
                     categories: activeCategories,
+                    storeCounts: [:],
                     showFilters: { showingFilters = true }
                 )
                 .buttonStyle(.borderless)

@@ -104,6 +104,67 @@ struct CatalogFilterUnitTests {
         #expect(!PurchaseFilter(requiresAnyStore: false).matches(untagged, activeStoreIDs: [a, b]))
     }
 
+    @Test("Store counts classify every active store using purchase rules")
+    func storeCountsCoverEligibilityAndArchivedRestrictions() {
+        let a = UUID()
+        let b = UUID()
+        let c = UUID()
+        let archived = UUID()
+        let occurrences = [
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [a], anyStore: false)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [a, b], anyStore: false)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [], anyStore: true)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [a], anyStore: true)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [], anyStore: false)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [a, archived], anyStore: false)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(explicitStoreIDs: [archived], anyStore: false)),
+            StorePurchaseCountOccurrence(id: UUID(), rule: .init(
+                explicitStoreIDs: [a], anyStore: true, hasResolvedIdentity: false
+            ))
+        ]
+
+        let counts = StorePurchaseCounts.summarize(occurrences, activeStoreIDs: [a, b, c])
+
+        #expect(counts[a] == StorePurchaseCounts(mustBuyCount: 2, canBuyCount: 4))
+        #expect(counts[b] == StorePurchaseCounts(canBuyCount: 4))
+        #expect(counts[c] == StorePurchaseCounts(canBuyCount: 3))
+        #expect(counts[archived] == nil)
+    }
+
+    @Test("Store counts count distinct occurrences once and reject conflicting identities")
+    func storeCountsDeduplicateOccurrencesAndFailClosedOnConflicts() {
+        let a = UUID()
+        let b = UUID()
+        let rule = PurchaseRuleValue(explicitStoreIDs: [a], anyStore: false)
+        let occurrence = StorePurchaseCountOccurrence(id: UUID(), rule: rule)
+        let conflictingID = UUID()
+        let counts = StorePurchaseCounts.summarize([
+            occurrence, occurrence,
+            StorePurchaseCountOccurrence(id: UUID(), rule: rule),
+            StorePurchaseCountOccurrence(id: conflictingID, rule: rule),
+            StorePurchaseCountOccurrence(id: conflictingID, rule: .init(explicitStoreIDs: [b], anyStore: false)),
+            StorePurchaseCountOccurrence(id: conflictingID, rule: rule)
+        ], activeStoreIDs: [a, b])
+
+        #expect(counts[a] == StorePurchaseCounts(mustBuyCount: 2))
+        #expect(counts[b] == StorePurchaseCounts())
+    }
+
+    @Test("Store counts include zero values and unresolved conflicts remain excluded")
+    func storeCountsIncludeZeroAndRejectResolvedUnresolvedDuplicates() {
+        let a = UUID()
+        let id = UUID()
+        let resolved = StorePurchaseCountOccurrence(id: id, rule: .init(explicitStoreIDs: [], anyStore: true))
+        let unresolved = StorePurchaseCountOccurrence(id: id, rule: .init(
+            explicitStoreIDs: [], anyStore: true, hasResolvedIdentity: false
+        ))
+
+        #expect(StorePurchaseCounts.summarize([], activeStoreIDs: [a]) == [a: StorePurchaseCounts()])
+        #expect(StorePurchaseCounts.summarize([resolved, unresolved], activeStoreIDs: [a]) == [a: StorePurchaseCounts()])
+        #expect(StorePurchaseCounts.summarize([unresolved, resolved], activeStoreIDs: [a]) == [a: StorePurchaseCounts()])
+        #expect(StorePurchaseCounts.summarize([resolved], activeStoreIDs: []).isEmpty)
+    }
+
     @Test("Filter sanitization drops inactive scope")
     func groceryFilterSanitizationDropsInactiveScopeAndPreservesOtherCriteria() {
         let activeStore = UUID()

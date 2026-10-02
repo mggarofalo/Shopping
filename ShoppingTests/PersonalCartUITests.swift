@@ -1,6 +1,104 @@
 import XCTest
 
 final class PersonalCartUITests: XCTestCase {
+    func testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting() {
+        let app = launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
+        app.buttons["shopping.store.menu"].tap()
+        assertStoreCount("Costco", must: 2, can: 2, app: app)
+        assertStoreCount("Publix", must: 2, can: 1, app: app)
+        assertStoreCount("Walmart", must: 0, can: 2, app: app)
+        XCTAssertLessThan(storeChoice("Costco", app: app).frame.minY, storeChoice("Publix", app: app).frame.minY)
+        XCTAssertLessThan(storeChoice("Publix", app: app).frame.minY, storeChoice("Walmart", app: app).frame.minY)
+        storeChoice("Costco", app: app).tap()
+        XCTAssertTrue(app.navigationBars["Stores"].waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Costco")
+        let search = app.searchFields["Search groceries"]
+        search.tap()
+        search.typeText("Bananas")
+        app.buttons["shopping.store.menu"].tap()
+        assertStoreCount("Costco", must: 2, can: 2, selected: true, app: app)
+        assertStoreCount("Publix", must: 2, can: 1, app: app)
+        app.navigationBars["Stores"].buttons["Done"].tap()
+        let bananas = groceryRow("Bananas", app: app)
+        XCTAssertTrue(bananas.waitForExistence(timeout: 5))
+        let needID = String(bananas.identifier.dropFirst("shopping.grocery.row.".count))
+        bananas.swipeLeft()
+        let cart = app.buttons["shopping.checklist.cart.\(needID)"]
+        XCTAssertTrue(cart.waitForExistence(timeout: 3))
+        cart.tap()
+        XCTAssertTrue(bananas.waitForNonExistence(timeout: 5))
+        app.buttons["shopping.store.menu"].tap()
+        assertStoreCount("Costco", must: 2, can: 1, selected: true, app: app)
+        assertStoreCount("Publix", must: 2, can: 0, app: app)
+        assertStoreCount("Walmart", must: 0, can: 1, app: app)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Store counts after personal cart update"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        storeChoice("Publix", app: app).tap()
+        XCTAssertTrue(app.navigationBars["Stores"].waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Publix")
+        app.buttons["shopping.store.clear"].tap()
+        XCTAssertEqual(app.buttons["shopping.store.menu"].label, "Choose store")
+    }
+
+    func testStorePickerCountsAtSystemLargeAndAccessibilityXXXL() throws {
+        let app = XCUIApplication()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            app.terminate()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
+        SystemTextSizeSettings.configure(app)
+        app.launch()
+        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        for size in [SystemTextSizeSettings.Size.large, .accessibilityXXXL] {
+            try textSize.set(size)
+            let picker = app.buttons["shopping.store.menu"]
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            picker.tap()
+            let title = app.navigationBars["Stores"].staticTexts["Stores"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            XCTAssertTrue(title.isHittable)
+            assertStoreCount("Costco", must: 2, can: 2, app: app)
+            assertStoreCount("Publix", must: 2, can: 1, app: app)
+            assertStoreCount("Walmart", must: 0, can: 2, app: app)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Store picker · \(size)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.navigationBars["Stores"].buttons["Done"].tap()
+        }
+    }
+
+    private func storeChoice(_ name: String, app: XCUIApplication) -> XCUIElement {
+        let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.store.choice.", name))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            choices.count == 1
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        XCTAssertEqual(choices.count, 1)
+        return choices.element(boundBy: 0)
+    }
+
+    private func assertStoreCount(_ name: String, must: Int, can: Int, selected: Bool = false,
+                                  app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let choice = storeChoice(name, app: app)
+        let expected = "\(selected ? "Selected. " : "")\(must) only buy here, \(can) can buy here"
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            choice.exists && choice.value as? String == expected
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed, file: file, line: line)
+        XCTAssertTrue(choice.isHittable, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(choice.frame.height, 44, file: file, line: line)
+    }
+
     /// A short Settings list must start below a visible native title, including
     /// after scrolling. Only Groceries offers the home-switch action.
     func testTabHeadersStayVisibleAndSettingsStartAtTop() throws {

@@ -184,19 +184,18 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         }
         let ownIDs = Set(own.map(\.needID))
         // Store choices summarize all remaining occurrences, independent of the selected store.
-        let pending = projection.needs.filter { $0.purchaseRulesResolved && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) }
+        let pending = projection.needs.filter { outstanding.contains($0.needID) && !ownIDs.contains($0.needID) }
+        let counts = StorePurchaseCounts.summarize(pending.map { entry in
+            StorePurchaseCountOccurrence(id: entry.needID, rule: PurchaseRuleValue(
+                explicitStoreIDs: entry.storeIDs, anyStore: entry.anyStore,
+                hasResolvedIdentity: entry.purchaseRulesResolved
+            ))
+        }, activeStoreIDs: activeStores)
         let stores = projection.stores.map { store in
             var value = store
-            var counted: Set<UUID> = []
-            for entry in pending where counted.insert(entry.needID).inserted {
-                let rule = PurchaseRuleValue(explicitStoreIDs: entry.storeIDs, anyStore: entry.anyStore,
-                    hasResolvedIdentity: entry.purchaseRulesResolved)
-                switch filter.availability(of: rule, selectedStoreID: store.id, activeStoreIDs: activeStores) {
-                case .mustBuyHere: value.mustBuyCount += 1
-                case .flexibleHere: value.canBuyCount += 1
-                default: break
-                }
-            }
+            let count = counts[store.id] ?? StorePurchaseCounts()
+            value.mustBuyCount = count.mustBuyCount
+            value.canBuyCount = count.canBuyCount
             return value
         }
         let grocery = projection.needs.filter { writable && outstanding.contains($0.needID) && !ownIDs.contains($0.needID) && eligible($0) }
