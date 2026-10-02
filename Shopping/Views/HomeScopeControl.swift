@@ -11,6 +11,7 @@ private struct PresentInvitationKey: EnvironmentKey {
 struct HomeScopeDisplay: Equatable {
     let name: String
     let isLocal: Bool
+    var showsContext = false
 }
 
 private struct HomeScopeDisplayKey: EnvironmentKey {
@@ -34,56 +35,57 @@ extension EnvironmentValues {
     }
 }
 
-/// Keeps the selected home visible without competing with each screen's toolbar.
+/// Home content belongs to the screen's native scroll layout, not its safe area.
 struct HomeScopeControl: View {
+    var allowsSwitching = true
     @Environment(\.homeScopeDisplay) private var scope
     @Environment(\.presentHomes) private var presentHomes
 
     var body: some View {
-        if let scope {
-            Button(action: presentHomes) {
-                HStack(spacing: 7) {
-                    Image(systemName: scope.isLocal ? "iphone" : "house")
-                    Text(scope.name)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                    Spacer(minLength: 0)
+        if let scope, allowsSwitching || scope.showsContext {
+            if allowsSwitching {
+                Button(action: presentHomes) {
+                    HStack(spacing: 7) {
+                        homeLabel(scope)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.groceryAccent)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.horizontal, 16)
-                .contentShape(Rectangle())
+                .accessibilityLabel("Choose home")
+                .accessibilityValue(scope.name
+                    + (scope.isLocal && !scope.name.hasSuffix("On This iPhone") ? ", On This iPhone" : "")
+                    + ", Selected")
+                .accessibilityIdentifier("shopping.home.scope")
+            } else {
+                homeLabel(scope)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Home")
+                    .accessibilityValue(scope.name)
+                    .accessibilityIdentifier("shopping.home.context")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Choose home")
-            .accessibilityValue(scope.name
-                + (scope.isLocal && !scope.name.hasSuffix("On This iPhone") ? ", On This iPhone" : "")
-                + ", Selected")
-            .accessibilityIdentifier("shopping.home.scope")
-            .background(Color(uiColor: .systemBackground))
-            Divider()
         }
     }
-}
 
-private struct HomeScopeInset: ViewModifier {
-    func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .top, spacing: 0) { HomeScopeControl() }
+    private func homeLabel(_ scope: HomeScopeDisplay) -> some View {
+        Label(scope.name, systemImage: scope.isLocal ? "iphone" : "house")
+            .fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.leading)
     }
-}
-
-extension View {
-    func homeScopeControl() -> some View { modifier(HomeScopeInset()) }
 }
 
 #Preview {
     NavigationStack {
-        List { Text("Apples") }
+        List { HomeScopeControl(); Text("Apples") }
             .navigationTitle("Groceries")
-            .homeScopeControl()
+            .navigationBarTitleDisplayMode(.inline)
     }
     .environment(\.homeScopeDisplay, HomeScopeDisplay(name: "My Home", isLocal: true))
 }

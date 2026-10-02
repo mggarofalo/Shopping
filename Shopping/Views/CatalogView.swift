@@ -132,6 +132,9 @@ struct CatalogView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List(selection: $selectedIDs) {
+                    HomeScopeControl(allowsSwitching: false)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     catalogListRows
                 }
                 .listStyle(.insetGrouped)
@@ -143,7 +146,6 @@ struct CatalogView: View {
             .environment(\.editMode, $editMode)
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
-            .homeScopeControl()
             .searchable(text: $searchText, prompt: "Search catalog")
             .toolbar {
                 ShoppingCollectionToolbar(

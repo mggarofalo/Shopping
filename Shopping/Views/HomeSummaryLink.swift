@@ -9,7 +9,10 @@ struct HomeSummaryLink: View {
         NavigationLink {
             HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
         } label: {
-            LabeledContent("Home", value: name)
+            LabeledContent("Home") {
+                Text(bootstrap.homeEntry.currentHomeDisplayName ?? name)
+                    .accessibilityIdentifier("shopping.home.context")
+            }
         }
         .accessibilityIdentifier("shopping.settings.homeDetails")
     }

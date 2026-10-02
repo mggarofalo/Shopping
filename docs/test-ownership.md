@@ -1973,3 +1973,51 @@ fixture was supplied, and waits for Groceries. The populated-fixture path and
 all catalog save/add, duplicate, Recently added, navigation, and one-time
 assertions remain unchanged. Focused catalog UI and exact-source pinned
 Acceptance validation are pending.
+
+### Native home scope layout (SHOPPING-190)
+
+`PersonalCartUITests.testTabHeadersStayVisibleAndSettingsStartAtTop` owns visible,
+top-aligned Groceries/Catalog/Settings titles, a short Settings list beginning in
+the upper half, and title visibility after scrolling. It uses actual system Large
+and accessibility XXXL sizes and restores the original setting before app/store
+cleanup through ordered XCTest teardown blocks. Screenshots retain all three tabs
+at both sizes. Only Groceries presents a home switch action. The existing
+`testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch` also checks the onboarding
+title placement. Cross-home selection, private/saved carts, and relaunch remain
+owned by `testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch`; its
+helper now returns through the native Groceries back stack before switching,
+while the other tabs assert the same home through passive labels.
+
+Initial candidate `31b98ed` passed native invitation cancellation, contributor
+removal/cancel, and automatic accepted-invitation UI **3/3**, but two additional
+UI scenarios failed: a switch helper assumed reselecting a tab reset its retained
+cart navigation stack, and the new layout fixture omitted the active-home fixture
+flag. Those setup assumptions were corrected without removing outcomes.
+`f86ef6e` then passed both affected Catalog workflows, retained-home copy, and
+cross-home/cart/relaunch **4/4**. The layout body passed all six normal/XXXL tab
+screens and scrolling assertions, but failed its restoration guard because Swift
+`defer` stopped the app before the text-size helper's XCTest teardown. Cleanup is
+now registered first as a teardown block, so restoration executes while the app
+and metadata are available. Failed runs remain at
+`/tmp/shopping-phase24-190-layout-ui{,-b}.xcresult` and corresponding logs.
+These are focused selections, not ShoppingFull attestation. Final candidate,
+Fast, Watch identity, and pinned CI validation remain pending.
+
+Final local candidate `155e7dd` passed ShoppingFast **663/663**, no skips;
+header/onboarding/actual-size/restoration UI **2/2**, no skips; Watch duplicate-home
+selection/reload **1/1**, no skips; and the four Catalog/copy/switch/cart/relaunch
+UI scenarios **4/4**, no skips. Bundles/logs use prefixes
+`shopping-phase24-190-final-fast`, `shopping-phase24-190-layout-ui-c`,
+`shopping-phase24-188-watch-identity`, and `shopping-phase24-190-navigation-final`
+under `/tmp`. All six Large/XXXL tab screenshots were inspected. No Thread
+Performance Checker or runtime warning was reported in these runs.
+
+The earlier `-b` run's simulator-diagnostic collection never finalized its bundle;
+the post-test build process was stopped with exit 143 after its logged outcomes.
+It is not a successful validation run. The final navigation run also waited in
+simulator diagnostic collection after all four tests passed. A process sample
+(`/tmp/shopping-phase24-190-result-writer-sample.txt`) identified
+`XCTHProcessInvocation.simCtlDiagnose`. Stopping only that diagnostic child
+allowed xcodebuild to close a readable 4/4 bundle and exit 0. The sample, completed
+bundle and full log preserve this intervention. Pinned CI remains required; no
+remote ShoppingFull was dispatched and no local Full attestation is claimed.

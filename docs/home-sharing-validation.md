@@ -69,7 +69,7 @@ meet these paths; the mockup does not establish native routing or cloud delivery
 | First home | Create Home from the first screen. | Exact durable creation IDs; no automatic replacement after deletion. |
 | Accepted invitation | Native link acceptance opens the exact home when import is ready, without an additional app Join action. | Original home and private carts; newer explicit selection wins. |
 | Deferred invitation | Home control → Open on the invitation. | Durable Not Now decision; independently recoverable invitations. |
-| Switch | Home control → home row. | Selected scope shown in Groceries, Catalog, My cart and Settings. |
+| Switch | Groceries home control → home row. | Groceries names the home; Catalog and My cart show passive context for multiple/retained-local homes; Settings names it in the existing Home row. |
 | Saved cart from another home | Saved carts → cart. | A static label names that cart's exact home; the application selector must not identify its contents as belonging to the current home. |
 | Local home → iCloud | Use iCloud in Home Settings. | A distinct owned copy and selectable exact local source; no cart attribution or merge into a joined home. |
 | Delete | Home Settings → Delete Home → named confirmation. | Private history and unrelated homes; pending recovery stays reachable after the root disappears. |
@@ -194,3 +194,40 @@ Record failures and identities retained versus replaced in SHOPPING-30. An expor
 event does not prove a peer received data; local denial does not prove server
 authorization. Production schema verification (SHOPPING-8), final onboarding
 (SHOPPING-7), and physical Watch acceptance remain their own evidence gates.
+
+## October 2 review corrections
+
+Candidate `155e7dd` adds stable context for identically named homes without
+renaming their saved household records, shorter native removal alerts, explicit
+first-home Catalog test setup, and native header/layout corrections. Groceries
+has the sole home switch row. Other tabs use passive home context when needed;
+Settings uses its existing Home details row. Saved carts always name their
+captured home. Native entry and Settings titles remain inline. Home rows no
+longer consume top safe-area insets or emit standalone divider siblings. The
+conditional invitation-ready notice remains globally reachable.
+
+| Local evidence | Result | Environment |
+| --- | --- | --- |
+| ShoppingFast | 663/663, no skips | iPhone 17 Pro, iOS 26.5 |
+| Onboarding and tab headers, scrolling, actual Large/XXXL and restoration | 2/2, no skips | iPhone 18 Pro, iOS 27.0 |
+| Catalog creation/save-and-add, retained copy, home switch/cart/relaunch | 4/4, no skips | iPhone 18 Pro, iOS 27.0 |
+| Watch duplicate-name selection/reload | 1/1, no skips | Watch Series 11, watchOS 26.5 |
+
+Results are `/tmp/shopping-phase24-190-final-fast.xcresult`,
+`/tmp/shopping-phase24-190-layout-ui-c.xcresult`,
+`/tmp/shopping-phase24-190-navigation-final.xcresult`, and
+`/tmp/shopping-phase24-188-watch-identity.xcresult`, with corresponding logs.
+All six tab screenshots at Large/XXXL were inspected. The earlier candidate's
+native contributor removal/cancel, invitation cancellation and automatic
+accepted-invitation checks also passed; their implementation is unchanged.
+The navigation run completed all assertions but Xcode waited more than five
+minutes collecting simulator diagnostics. A process sample located the wait in
+`XCTHProcessInvocation.simCtlDiagnose`; stopping only that diagnostic child let
+Xcode finish with exit 0 and its complete 4/4 result bundle. No test process,
+assertion, selection, deadline or coverage gate was changed. Earlier failures
+remain in the ownership ledger.
+
+These are focused selections, not local Full attestation. Pinned CI on the
+integrated candidate remains required. SHOPPING-174 still owns candidate
+validation on both physical phones and the responsiveness trace; the previously
+reported installed-app join/import does not substitute for that proof.

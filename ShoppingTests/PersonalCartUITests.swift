@@ -1,6 +1,53 @@
 import XCTest
 
 final class PersonalCartUITests: XCTestCase {
+    /// A short Settings list must start below a visible native title, including
+    /// after scrolling. Only Groceries offers the home-switch action.
+    func testTabHeadersStayVisibleAndSettingsStartAtTop() throws {
+        let app = XCUIApplication()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            app.terminate()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = directory.appendingPathComponent("Shopping.sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
+        SystemTextSizeSettings.configure(app)
+        app.launch()
+        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        for size in [SystemTextSizeSettings.Size.large, .accessibilityXXXL] {
+            try textSize.set(size)
+            for title in ["Groceries", "Catalog", "Settings"] {
+                app.tabBars.buttons[title].tap()
+                let bar = app.navigationBars[title]
+                XCTAssertTrue(bar.existsOrAppears(timeout: 5))
+                XCTAssertTrue(bar.staticTexts[title].isHittable, "The title must be visible without scrolling")
+                XCTAssertLessThan(bar.frame.maxY, app.frame.height / 3)
+                if title == "Groceries" {
+                    XCTAssertTrue(app.buttons["shopping.home.scope"].isHittable)
+                } else {
+                    XCTAssertFalse(app.buttons["shopping.home.scope"].exists)
+                }
+                if title == "Settings" {
+                    let stores = app.buttons["Stores"]
+                    XCTAssertTrue(stores.isHittable)
+                    XCTAssertLessThan(stores.frame.minY, app.frame.height / 2,
+                        "Short Settings content must start at the top")
+                    app.swipeUp()
+                    XCTAssertTrue(bar.staticTexts[title].isHittable)
+                    app.swipeDown()
+                    XCTAssertTrue(bar.staticTexts[title].isHittable)
+                }
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "\(title) native header · \(size)"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+            }
+        }
+    }
+
     func testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch() {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -11,6 +58,9 @@ final class PersonalCartUITests: XCTestCase {
         app.launch()
         let create = app.buttons["shopping.home.createFirst"]
         XCTAssertTrue(create.existsOrAppears(timeout: 8))
+        let title = app.navigationBars["Shopping"]
+        XCTAssertTrue(title.staticTexts["Shopping"].isHittable)
+        XCTAssertLessThan(title.frame.maxY, app.frame.height / 3)
         create.tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let scope = app.buttons["shopping.home.scope"]
@@ -517,6 +567,15 @@ final class PersonalCartUITests: XCTestCase {
     }
 
     private func openManageHomes(_ app: XCUIApplication) {
+        app.tabBars.buttons["Groceries"].tap()
+        for _ in 0..<4 {
+            if app.navigationBars["Groceries"].exists { break }
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.existsOrAppears(timeout: 3))
+            XCTAssertTrue(back.isHittable)
+            back.tap()
+        }
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
         let scope = app.buttons["shopping.home.scope"]
         XCTAssertTrue(scope.existsOrAppears(timeout: 5))
         XCTAssertTrue(scope.isHittable)
@@ -528,15 +587,20 @@ final class PersonalCartUITests: XCTestCase {
                                   file: StaticString = #filePath, line: UInt = #line) {
         let destination = app.navigationBars[title]
         XCTAssertTrue(destination.existsOrAppears(timeout: 5), file: file, line: line)
-        let controls = app.buttons.matching(identifier: "shopping.home.scope")
+        let identifier = title == "Groceries" ? "shopping.home.scope" : "shopping.home.context"
+        let controls = app.descendants(matching: .any).matching(identifier: identifier)
         let unique = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             destination.exists && controls.count == 1
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [unique], timeout: 5), .completed,
-            "Expected one home control on \(title)", file: file, line: line)
+            "Expected one home label on \(title)", file: file, line: line)
         let scope = controls.element(boundBy: 0)
         XCTAssertTrue(scope.isHittable, file: file, line: line)
-        XCTAssertTrue((scope.value as? String)?.contains(name) == true, file: file, line: line)
+        XCTAssertTrue((scope.value as? String)?.contains(name) == true || scope.label.contains(name),
+            file: file, line: line)
+        if title != "Groceries" {
+            XCTAssertFalse(app.buttons["shopping.home.scope"].exists, file: file, line: line)
+        }
     }
 
     private func homeChoice(_ name: String, app: XCUIApplication) -> XCUIElement {

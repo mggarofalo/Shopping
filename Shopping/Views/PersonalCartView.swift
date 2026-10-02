@@ -43,6 +43,15 @@ struct PersonalCartView: View {
 
     var body: some View {
         List {
+            if let savedHome {
+                SavedCartHomeHeader(home: savedHome)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
+                HomeScopeControl(allowsSwitching: false)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             if cart.isSelected(in: selection), !cart.pendingLegacyReview.isEmpty {
                 NavigationLink("Review old cart entries") { LegacyCartReviewView(cart: cart) }
                     .accessibilityIdentifier("shopping.personalCart.legacyReview")
@@ -89,10 +98,7 @@ struct PersonalCartView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
         .navigationTitle("My cart")
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if let savedHome { SavedCartHomeHeader(home: savedHome) }
-            else { HomeScopeControl() }
-        }
+        .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)
@@ -167,13 +173,10 @@ private struct SavedCartHomeHeader: View {
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.horizontal, 16)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Saved cart home")
         .accessibilityValue(home.displayName)
         .accessibilityIdentifier("shopping.personalCart.savedHome")
-        .background(Color(uiColor: .systemBackground))
-        Divider()
     }
 }
 

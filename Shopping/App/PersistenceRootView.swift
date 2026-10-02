@@ -84,7 +84,12 @@ struct PersistenceRootView: View {
         guard let name = entry.currentHomeDisplayName ??
             (entry.isShowingRetainedLocalHome ? entry.retainedLocalHomeName : nil) else { return nil }
         return HomeScopeDisplay(name: name,
-            isLocal: entry.isLocalStore || entry.isShowingRetainedLocalHome)
+            isLocal: entry.isLocalStore || entry.isShowingRetainedLocalHome,
+            // Account discovery is suspended while the retained local store is
+            // mounted. Keep its context visible without treating an empty
+            // mounted roster as proof that this is the user's only home.
+            showsContext: entry.isShowingRetainedLocalHome ||
+                entry.homes.count + (entry.retainedLocalHomeName != nil ? 1 : 0) > 1)
     }
 
     @ViewBuilder
@@ -149,6 +154,7 @@ struct PersistenceRootView: View {
                 savedCartsLink
             }
             .navigationTitle("Shopping")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -167,6 +173,7 @@ struct PersistenceRootView: View {
                 savedCartsLink
             }
             .navigationTitle("Shopping")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -180,6 +187,7 @@ struct PersistenceRootView: View {
                 savedCartsLink
             }
             .navigationTitle("Shopping")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -213,6 +221,7 @@ struct PersistenceRootView: View {
                 }
             }
             .navigationTitle("Shopping")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 

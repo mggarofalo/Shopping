@@ -90,7 +90,6 @@ struct GroceriesView: View {
         NavigationStack {
             groceryContent
             .navigationTitle("Groceries")
-            .homeScopeControl()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -233,11 +232,18 @@ struct GroceriesView: View {
         Group {
             if visibleNeeds.isEmpty {
                 ScrollView {
-                    VStack(spacing: 16) { scopeControls; emptyState }
+                    VStack(alignment: .leading, spacing: 16) {
+                        homeControls.padding(.horizontal, 16)
+                        scopeControls
+                        emptyState.frame(maxWidth: .infinity)
+                    }
                 }
             } else {
                 List {
                     Section {
+                        homeControls
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         scopeControls
                             .buttonStyle(.borderless)
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -258,6 +264,10 @@ struct GroceriesView: View {
                 )
             }
         }
+    }
+
+    private var homeControls: some View {
+        HomeScopeControl()
     }
 
     private var emptyState: some View {
