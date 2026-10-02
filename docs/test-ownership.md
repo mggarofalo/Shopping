@@ -258,6 +258,12 @@ per-home filters and draft lease isolation. Draft lease cases retain the origina
 scope, prevent late completion from deleting a reopened draft, and prevent parent
 completion from resurrecting nested drafts.
 
+SHOPPING-171 adds value-only home entry coverage here: unknown and incomplete
+discovery cannot appear as confirmed empty; the snapshot preserves exact invitation
+and graph identity without carrying archived metadata; scoped forgetting cannot
+erase a newer selection or another account, and reconciles the remaining homes.
+`ActiveHomeBootstrapTests` retains the actual store and account wiring proof.
+
 `ActiveHomeBootstrapTests` owns actual startup, explicit owned-home creation,
 selection retirement and the committed-creation/discovery race using isolated
 SQLite and an injected account provider/store opener. Its creation checkpoint

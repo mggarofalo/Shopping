@@ -26,6 +26,100 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.reconcile(HomeDiscovery(homes: homes, hasIncompleteRoots: incomplete), request: request))
     }
 
+    func testEntrySnapshotDistinguishesUnknownIncompleteAndConfirmedEmptyDiscovery() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        coordinator.bind(try session())
+        func snapshot(failed: Bool = false) -> HomeEntrySnapshot {
+            HomeEntrySnapshot(store: .account, readiness: coordinator.readiness,
+                discovery: coordinator.discoveryState, homes: coordinator.homes,
+                currentHomeName: nil, retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+                invitations: [], hasPendingInvitation: false, hasVerifiedInvitationAccount: true,
+                invitationProblem: nil, importProblems: [:], isCreatingHome: false,
+                homeDiscoveryFailed: failed)
+        }
+        XCTAssertEqual(snapshot().root, .waitingForHomes)
+        try discover([], using: coordinator, incomplete: true)
+        XCTAssertEqual(snapshot().root, .waitingForHomes)
+        try discover([], using: coordinator)
+        XCTAssertEqual(snapshot().root, .noHomes)
+        XCTAssertEqual(snapshot(failed: true).root, .waitingForHomes)
+        coordinator.setInvitationPending(true)
+        XCTAssertEqual(snapshot().root, .noHomes)
+        let held = HomeEntrySnapshot(store: .account, readiness: coordinator.readiness,
+            discovery: coordinator.discoveryState, homes: coordinator.homes,
+            currentHomeName: nil, retainedLocalHomeName: nil, isShowingRetainedLocalHome: false,
+            invitations: [], hasPendingInvitation: true, hasVerifiedInvitationAccount: true,
+            invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        XCTAssertEqual(held.root, .waitingForHomes)
+    }
+
+    func testEntrySnapshotKeepsExactInvitationIdentityWithoutArchivedMetadata() throws {
+        let session = try session()
+        let invited = home("Shared", store: "shared")
+        let identity = HomeInvitationIdentity(containerIdentifier: session.containerIdentifier,
+            environment: session.environment,
+            share: HomeShareIdentity(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"))
+        var entry = HomeInvitationInbox.Entry(id: UUID(), identity: identity,
+            metadataArchive: Data(repeating: 8, count: 100_000), session: session)
+        entry.state = .ready(invited.graph)
+        entry.acceptanceAttempted = true
+        let scope = ActiveHomeScope(session: session, graph: invited.graph)
+        let snapshot = HomeEntrySnapshot(store: .account, readiness: .ready(scope),
+            discovery: .complete, homes: [invited], currentHomeName: invited.name,
+            retainedLocalHomeName: "Old home", isShowingRetainedLocalHome: false,
+            invitations: [entry], hasPendingInvitation: true, hasVerifiedInvitationAccount: true,
+            invitationProblem: nil, importProblems: [:], isCreatingHome: false, homeDiscoveryFailed: false)
+        XCTAssertEqual(snapshot.root, .activeHome(scope))
+        XCTAssertEqual(snapshot.homes.first?.id, invited.graph)
+        XCTAssertTrue(snapshot.homes.first?.isSelected == true)
+        XCTAssertEqual(snapshot.invitations.first?.id, entry.id)
+        XCTAssertEqual(snapshot.invitations.first?.identity, identity)
+        XCTAssertEqual(snapshot.invitations.first?.accountBinding, session.accountBinding)
+        XCTAssertEqual(snapshot.invitations.first?.state, .ready(invited.graph))
+        XCTAssertTrue(snapshot.invitations.first?.acceptanceAttempted == true)
+    }
+
+    func testForgettingCapturedSelectionKeepsNewerChoiceAndReconcilesRemainingHome() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = home("First"), second = home("Second"), third = home("Third")
+        coordinator.bind(try session())
+        try discover([first, second, third], using: coordinator)
+        try coordinator.select(first.graph)
+        let staleScope = try XCTUnwrap(coordinator.activeScope)
+        let staleGeneration = coordinator.generation
+        try coordinator.select(second.graph)
+        XCTAssertFalse(coordinator.forgetSelectedHome(staleScope, generation: staleGeneration))
+        XCTAssertEqual(coordinator.activeScope?.graph, second.graph)
+        let selectedScope = try XCTUnwrap(coordinator.activeScope)
+        let selectedGeneration = coordinator.generation
+        XCTAssertTrue(coordinator.forgetSelectedHome(selectedScope, generation: selectedGeneration))
+        XCTAssertEqual(coordinator.readiness, .choiceRequired)
+        XCTAssertEqual(Set(coordinator.homes.map(\.graph)), [first.graph, third.graph])
+        try coordinator.select(third.graph)
+        let reopened = ActiveHomeCoordinator(defaults: defaults)
+        reopened.bind(try session())
+        try discover([first, third], using: reopened)
+        XCTAssertEqual(reopened.activeScope?.graph, third.graph)
+    }
+
+    func testForgettingSelectedHomeChoosesOnlyRemainingCompleteHomeWithinSameAccount() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = home("First"), second = home("Second")
+        coordinator.bind(try session())
+        try discover([first, second], using: coordinator)
+        try coordinator.select(first.graph)
+        let scope = try XCTUnwrap(coordinator.activeScope), generation = coordinator.generation
+        XCTAssertTrue(coordinator.forgetSelectedHome(scope, generation: generation))
+        XCTAssertEqual(coordinator.activeScope?.graph, second.graph)
+        let secondScope = try XCTUnwrap(coordinator.activeScope), secondGeneration = coordinator.generation
+        coordinator.bind(try session("B"))
+        XCTAssertFalse(coordinator.forgetSelectedHome(secondScope, generation: secondGeneration))
+        XCTAssertNil(coordinator.activeScope)
+    }
+
     func testNotNowWithoutCurrentHomePreventsAutomaticSelectionAfterRelaunch() throws {
         let (coordinator, defaults, suite) = fixture()
         defer { defaults.removePersistentDomain(forName: suite) }

@@ -46,7 +46,19 @@ required sequence: clean commit → local full runner → push that unchanged co
 → remote dispatch helper. No failure, missing selection, skip or coverage change
 is waived by this matrix.
 
-## Required live assertions — all remain unverified here
+## Reported physical join and initial import
+
+On October 2, 2026, Michael reported accepting the home invitation on his wife's
+iPhone and successfully downloading the home's data. This is real two-account
+join and initial-import evidence for the installed app, recorded in SHOPPING-30.
+The report did not include exact device, OS, build, source SHA, timing, or conflict
+and membership-change results. It establishes that the existing transport works
+for this journey; it does not validate the later Phase 24 rewrite.
+
+Phase 24 preserves this working transport while replacing home entry and
+navigation. SHOPPING-174 records validation of the rewritten journeys.
+
+## Required live assertions
 
 | Live case | Evidence required on the sharing candidate |
 | --- | --- |

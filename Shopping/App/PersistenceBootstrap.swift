@@ -235,6 +235,27 @@ final class PersistenceBootstrap: ObservableObject {
         }
         return ready.householdID == nil ? nil : localHomeName
     }
+
+    /// One read-only presentation value for home entry. All persistence and
+    /// invitation work stays with the existing command owners.
+    var homeEntry: HomeEntrySnapshot {
+        let store: HomeEntrySnapshot.Store
+        switch state {
+        case .loading: store = .opening
+        case .failed: store = .failed
+        case .ready(let ready): store = personalMode ? .account : .local(hasHome: ready.householdID != nil)
+        }
+        return HomeEntrySnapshot(store: store, readiness: homeCoordinator.readiness,
+            discovery: homeCoordinator.discoveryState, homes: homeCoordinator.homes,
+            currentHomeName: currentHomeName, retainedLocalHomeName: retainedLocalHomeName,
+            isShowingRetainedLocalHome: isShowingRetainedLocalHome,
+            invitations: invitations?.entries ?? [], hasPendingInvitation: invitations?.hasPendingActivation ?? false,
+            hasVerifiedInvitationAccount: invitations?.hasVerifiedAccount ?? false,
+            invitationProblem: invitations?.problem, importProblems: invitations?.importProblems ?? [:],
+            isCreatingHome: isCreatingHome, homeDiscoveryFailed: homeDiscoveryError != nil)
+    }
+
+    var homeEntryCommands: HomeEntryCommands { HomeEntryCommands(bootstrap: self) }
 #if DEBUG
     private var personalFixture = false
     private var personalNoticeFixture = false
@@ -1018,6 +1039,13 @@ final class PersistenceBootstrap: ObservableObject {
             accountLoadInProgress = false
             throw error
         }
+    }
+
+    /// Joining keeps legacy groceries on this device under the existing durable
+    /// adoption journal. A separate migration remains an explicit later action.
+    func connectForJoiningKeepingLocalHome() async throws {
+        let choice = try await prepareInvitationSetup()
+        try await confirmInvitationSetup(choice, copyLocal: false)
     }
 
     private func openPersonalStore(expectedSession: ShopperSession? = nil) {
