@@ -7,32 +7,33 @@ import XCTest
 final class HomeAdoptionBootstrapTests: XCTestCase {
     private actor CopyDiscoveryGate {
         private var firstCopyDiscoveryHeld = false
-        private var nextAccessRefresh = false
-        private var releaseContinuation: CheckedContinuation<Void, Never>?
+        private var released = false
+        private var releaseContinuations: [CheckedContinuation<Void, Never>] = []
 
-        func discover(_ service: HomeDiscoveryService, onHold: @Sendable () -> Void) async throws -> HomeDiscovery {
+        func discover(_ service: HomeDiscoveryService, accessChange: Bool,
+                      onHold: @Sendable () -> Void) async throws -> HomeDiscovery {
             let snapshot = try await Task.detached(priority: .utility) { try service.discover() }.value
             guard snapshot.homes.count == 2 else { return snapshot }
-            if nextAccessRefresh {
-                nextAccessRefresh = false
+            if accessChange {
                 let account = snapshot.homes.filter { $0.name == "Account home" }.map {
                     HomeCandidate(graph: $0.graph, name: $0.name, access: .restricted)
                 }
                 return HomeDiscovery(homes: account, hasIncompleteRoots: false)
             }
-            guard !firstCopyDiscoveryHeld else { return snapshot }
-            firstCopyDiscoveryHeld = true
-            onHold()
-            await withCheckedContinuation { releaseContinuation = $0 }
+            guard !released else { return snapshot }
+            if !firstCopyDiscoveryHeld {
+                firstCopyDiscoveryHeld = true
+                onHold()
+            }
+            await withCheckedContinuation { releaseContinuations.append($0) }
             return snapshot
         }
 
         func release() {
-            releaseContinuation?.resume()
-            releaseContinuation = nil
+            released = true
+            for continuation in releaseContinuations { continuation.resume() }
+            releaseContinuations.removeAll()
         }
-
-        func showAccessChangeOnNextRefresh() { nextAccessRefresh = true }
     }
 
     private actor CopyProviderRefreshGate {
@@ -416,7 +417,8 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let gate = CopyDiscoveryGate()
         let held = expectation(description: "Copied graph discovery held after durable write")
         let bootstrap = bootstrap(fixture, discoverHomes: { service in
-            try await gate.discover(service, onHold: { held.fulfill() })
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
         })
         addTeardownBlock {
             await gate.release()
@@ -438,8 +440,9 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
 
         let choiceRevision = bootstrap.homeCoordinator.choiceRevision
         let writeGeneration = bootstrap.homeCoordinator.generation
-        await gate.showAccessChangeOnNextRefresh()
-        try await bootstrap.refreshHomes()
+        try await CopyDiscoveryRequest.$accessChange.withValue(true) {
+            try await bootstrap.refreshHomes()
+        }
         XCTAssertNotEqual(bootstrap.homeCoordinator.generation, writeGeneration)
         XCTAssertEqual(bootstrap.homeCoordinator.choiceRevision, choiceRevision)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
@@ -465,7 +468,8 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let gate = CopyDiscoveryGate()
         let held = expectation(description: "Copied graph discovery held after durable write")
         let bootstrap = bootstrap(fixture, discoverHomes: { service in
-            try await gate.discover(service, onHold: { held.fulfill() })
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
         })
         addTeardownBlock {
             await gate.release()
@@ -513,7 +517,8 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let gate = CopyDiscoveryGate()
         let held = expectation(description: "Copied graph discovery held before invitation ingress")
         let bootstrap = bootstrap(fixture, invitations: invitations, discoverHomes: { service in
-            try await gate.discover(service, onHold: { held.fulfill() })
+            try await gate.discover(service, accessChange: CopyDiscoveryRequest.accessChange,
+                onHold: { held.fulfill() })
         })
         addTeardownBlock {
             await gate.release()
@@ -1844,6 +1849,10 @@ private actor RejoinVerificationProbe {
         await withCheckedContinuation { continuation = $0; started() }
     }
     func release() { released = true; continuation?.resume(); continuation = nil }
+}
+
+private enum CopyDiscoveryRequest {
+    @TaskLocal static var accessChange = false
 }
 
 private enum OpenDiscoveryRequest {

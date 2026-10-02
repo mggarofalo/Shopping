@@ -1911,3 +1911,28 @@ predates the account-preparation follow-up. `9d5773b` passed affected suites
 Fast/Acceptance/Release/coverage result must be recorded against the pushed SHA
 in PR 68 and Plane. No Full attestation, physical CloudKit proof, or device trace
 is claimed by these focused local runs.
+
+Pinned CI `37036719461` built the Release app and passed coverage (app
+**51.70%**, domain **96.30%**), but Fast passed **656/658**. All three original
+copy-selection regressions passed. Two new held-order methods failed: the
+discovery gate allowed a competing two-home refresh to escape before its
+synthetic access observation, and the copy consumer handle could be replaced by
+a later account load while the original resume task still owned the write.
+The gate now holds every real two-home result until release and identifies the
+synthetic access refresh with a task-local request value. Bootstrap serializes
+retained-copy resume tasks under one owned completion chain; a later task waits
+for its predecessor, and tests drain the actual chain. A distinct approval ID
+keeps an older failed resume or awaited fulfillment from clearing a newer
+explicit approval that happens to reuse an idempotent conversion command.
+The copied-home count and selected-home assertions remain unchanged. This
+successor requires exact-source validation; the earlier CI result does not
+validate it.
+
+Committed ownership follow-up `55180bf` passed six affected suites **119/119**,
+no skips and one QoS warning (`/tmp/shopping-phase24-187-ownership-focused.xcresult`
+and `.log`). The same source passed retained-copy and switch/relaunch native UI
+**2/2**, no skips or runtime warnings
+(`/tmp/shopping-phase24-187-ownership-ui.xcresult` and `.log`). Both production
+reviewers and test review verified task ownership, approval guards, all-discovery
+holding, explicit task-local access tagging, and bounded cleanup. Complete pinned
+Fast/Acceptance/Release/coverage remains required on the next exact pushed SHA.

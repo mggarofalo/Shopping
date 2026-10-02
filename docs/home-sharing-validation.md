@@ -97,7 +97,7 @@ The core implementation was integrated at `d1feb35` on `milestone/phase-24`.
 SHOPPING-186 splits the native Homes list into smaller compiler expressions;
 SHOPPING-187 separates an explicit copy-opening choice from discovery/write
 authority and retires it on newer navigation or account invalidation. The final
-implementation candidate is `71d86d2`. The PR checks and SHOPPING-174 comment
+implementation candidate is `55180bf`. The PR checks and SHOPPING-174 comment
 record the final pushed SHA and pinned CI run; local simulator passes do not
 establish that CI result.
 
@@ -109,11 +109,12 @@ establish that CI result.
 | `ac5512b` → integrated `d1feb35` | Fast **652/652**; focused native UI **5/5** | Account changes, cached verification, cold invalidation, delayed events, invitation intent and copy selection; first home, direct invitation, Not Now, retained copy and switching UI. |
 | `8e0039c` → integrated `a8f10c0` | Unsigned Release archive; native picker UI **2/2** | Local Xcode 27 compiler decomposition, flat selection and saved-cart scope. |
 | `3146c2c` | Fast **657/657** | Copy choice versus discovery authority, held late discovery and newer invitation ingress. Predates the final account-preparation follow-up. |
-| `71d86d2` | Affected suites **119/119**; native UI **4/4** | Final account-preparation invalidation policy, invitation intent and recovery; direct invitation, Not Now, local copy and switching/relaunch. |
+| `71d86d2` | Affected suites **119/119**; native UI **4/4** | Account-preparation invalidation policy, invitation intent and recovery; direct invitation, Not Now, local copy and switching/relaunch. |
+| `55180bf` | Affected suites **119/119**; copy and switch/relaunch UI **2/2** | Conversion consumer ownership, distinct navigation approvals and deterministic held-discovery ordering. |
 
 The iPhone runs used Xcode 27.0, an iPhone 17 Pro simulator with iOS 26.5, and
 Core Data concurrency debugging. The Watch run used a Series 11 simulator with
-watchOS 26.5. The final four-flow iPhone UI bundle reported no runtime warnings;
+watchOS 26.5. The final two-flow iPhone UI bundle reported no runtime warnings;
 the final affected-suite run reported one QoS priority-inversion warning. Earlier
 185 and 187 full Fast runs reported three QoS warnings. A navigation-update
 warning also appeared in the 185 Fast log during presentation-retirement coverage.
@@ -125,8 +126,10 @@ and `/tmp/shopping-phase24-185-final-ui.xcresult`. Earlier combined proof is in
 `/tmp/shopping-phase24-184-fast-b.xcresult` and
 `/tmp/shopping-phase24-184-ui-b.xcresult`. Intermediate failures, corrections and
 proof owners are retained in the [test ownership ledger](test-ownership.md).
-Final 187 proof is `/tmp/shopping-phase24-187-final-focused.xcresult` and
-`/tmp/shopping-phase24-187-final-ui.xcresult`; the full 657-test source is in
+Account-preparation proof is `/tmp/shopping-phase24-187-final-focused.xcresult`
+and `/tmp/shopping-phase24-187-final-ui.xcresult`. Final ownership proof is
+`/tmp/shopping-phase24-187-ownership-focused.xcresult` and
+`/tmp/shopping-phase24-187-ownership-ui.xcresult`; the full 657-test source is in
 `/tmp/shopping-phase24-187-final-fast.xcresult`.
 The focused UI commands used ShoppingFull with an explicit selection; they are
 not an exhaustive Full run or an exact-SHA Full attestation. No remote Full run
@@ -138,6 +141,13 @@ Fast **649/652**: three retained-copy tests committed their copies but did not
 select them. Coverage passed; Acceptance was skipped. SHOPPING-186 addresses
 the compiler expression and SHOPPING-187 the selection policy. The subsequent
 exact-source CI result belongs in the PR and Plane execution comment.
+
+The second pinned [CI run 37036719461](https://github.com/mggarofalo/Shopping/actions/runs/37036719461)
+on `7b509db` passed Release and the three original copy-selection methods, but
+Fast was **656/658**: competing discovery bypassed one new test's hold, and
+conversion completion could await a redundant consumer. Coverage passed and
+Acceptance was skipped. The ownership follow-up retains those failures as
+diagnostic evidence; its complete pinned result belongs in the PR and Plane.
 
 ### App interactions
 
