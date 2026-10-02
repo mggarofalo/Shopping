@@ -291,6 +291,32 @@ final class ActiveHomeCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isCurrent(scope: scope, generation: generation))
     }
 
+    func testDiscoveryAuthorityDoesNotReplaceExplicitHomeChoice() throws {
+        let (coordinator, defaults, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = home("Account"), copied = home("Copy")
+        coordinator.bind(try session())
+        try discover([account], using: coordinator)
+        let approvedChoice = coordinator.choiceRevision
+        let writeGeneration = coordinator.generation
+
+        // Same-account discovery can change the active home's access and command
+        // authority while an approved copy is being written.
+        try discover([HomeCandidate(graph: account.graph, name: account.name, access: .restricted)],
+            using: coordinator)
+        XCTAssertNotEqual(coordinator.generation, writeGeneration)
+        XCTAssertEqual(coordinator.choiceRevision, approvedChoice)
+        try discover([account, copied], using: coordinator)
+        XCTAssertEqual(coordinator.choiceRevision, approvedChoice)
+
+        try coordinator.select(account.graph)
+        XCTAssertNotEqual(coordinator.choiceRevision, approvedChoice,
+            "Reaffirming the same home is a newer explicit choice")
+        let reaffirmedChoice = coordinator.choiceRevision
+        coordinator.deferSelection()
+        XCTAssertNotEqual(coordinator.choiceRevision, reaffirmedChoice)
+    }
+
     func testIncompleteDuplicateRootAndOrphanListPreventAmbiguousSelection() throws {
         let persistence = try PersistenceController(inMemory: true)
         let selected = try NeedService(persistence: persistence).createHousehold()

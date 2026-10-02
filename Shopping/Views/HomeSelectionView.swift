@@ -198,7 +198,6 @@ struct HomeSelectionView: View {
 
     private func select(_ home: HomeEntrySnapshot.Home) {
         guard !isSelecting else { return }
-        if home.isSelected { dismiss(); return }
         isSelecting = true
         Task {
             defer { isSelecting = false }

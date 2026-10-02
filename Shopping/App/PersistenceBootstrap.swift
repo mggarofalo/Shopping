@@ -243,10 +243,27 @@ final class PersistenceBootstrap: ObservableObject {
     @Published private(set) var retainedLocalHomeName: String?
     @Published private(set) var isShowingRetainedLocalHome = false
     @Published private(set) var retainedLocalCopyState: HomeEntrySnapshot.RetainedLocalCopyState = .unavailable
-    private var retainedConversionSelectionIntent: UUID?
-    private var retainedConversionSelectionSession: ShopperSession?
-    private var retainedConversionChoiceGeneration: UInt64?
+    private struct RetainedCopySelectionIntent {
+        struct Destination {
+            let storeIdentifier: String
+            let householdID: UUID
+            let listID: UUID
+        }
+
+        let commandID: UUID
+        let session: ShopperSession
+        let choiceRevision: UInt64
+        var destination: Destination?
+    }
+    private var retainedCopySelection: RetainedCopySelectionIntent?
+    private var fulfillingRetainedCopyID: UUID?
     private var retainedConversionResumingID: UUID?
+    private var retainedConversionTask: Task<Void, Never>?
+    private struct CopyPreparation {
+        let id: UUID
+        let session: ShopperSession?
+    }
+    private var copyPreparation: CopyPreparation?
 
     struct InvitationSetupChoice {
         fileprivate let proposal: HomeAdoptionJournal.Proposal
@@ -379,6 +396,12 @@ final class PersistenceBootstrap: ObservableObject {
             for entry in self.invitations?.allEntries ?? [] where entry.identity == identity {
                 self.autoOpenFailures.remove(entry.id)
             }
+        }
+        invitations?.onAcceptedIngress = { [weak self] in
+            guard let self else { return }
+            self.homeCoordinator.recordExplicitChoice()
+            self.copyPreparation = nil
+            self.retainedCopySelection = nil
         }
         invitations?.onChange = { [weak self] in
             guard let self else { return }
@@ -1328,10 +1351,8 @@ final class PersistenceBootstrap: ObservableObject {
                 }
                 if let mountedAccountSession, mountedAccountSession != session {
                     markAccountNavigationBoundary(for: mountedAccountSession)
-                    if retainedConversionSelectionSession == mountedAccountSession {
-                        retainedConversionSelectionIntent = nil
-                        retainedConversionSelectionSession = nil
-                        retainedConversionChoiceGeneration = nil
+                    if retainedCopySelection?.session == mountedAccountSession {
+                        retainedCopySelection = nil
                     }
                 }
                 // An invalidation may arrive during refresh, after the first
@@ -1457,8 +1478,7 @@ final class PersistenceBootstrap: ObservableObject {
         retainedLocalConfiguration = .local(storeURL: source)
         personalConfiguration = nil
         preferredAdoptedHome = nil
-        retainedConversionSelectionIntent = nil
-        retainedConversionChoiceGeneration = nil
+        retainedCopySelection = nil
         personalMode = false
         isShowingRetainedLocalHome = true
         retainedLocalCopyState = savedConversion?.0.copied == true && savedConversion?.1 == false
@@ -1616,11 +1636,21 @@ final class PersistenceBootstrap: ObservableObject {
                   && expectedHome?.listID == listID && expectedHome?.storeIdentifier == storeIdentifier) else {
             throw HomeAdoptionJournal.Failure.staleProposal
         }
+        let requestedChoiceRevision = homeCoordinator.choiceRevision
+        let preparation = CopyPreparation(id: UUID(),
+            session: expectedHome?.session ?? (try? accountProvider?.currentSession()))
+        copyPreparation = preparation
+        defer {
+            if copyPreparation?.id == preparation.id { copyPreparation = nil }
+        }
         let capturedGeneration = generation
         let base = try await resolvedAccountDirectory()
         let provider = try await resolvedAccountProvider(base: base)
         await provider.refresh()
         let session = try verifiedSession(provider)
+        if copyPreparation?.id == preparation.id, copyPreparation?.session == nil {
+            copyPreparation = CopyPreparation(id: preparation.id, session: session)
+        }
         if let expectedHome { guard session == expectedHome.session else { throw ShopperSessionError.accountChanged } }
         let source = RetiringStore(persistence: ready.persistence)
         let selectedSource = try await selectedLocalSource(ready, session: session)
@@ -1659,9 +1689,10 @@ final class PersistenceBootstrap: ObservableObject {
         }
         homeSetupError = nil
         retainedLocalCopyState = command.copied ? .copied : .copying
-        retainedConversionSelectionIntent = command.copied ? nil : command.id
-        retainedConversionSelectionSession = command.copied ? nil : session
-        retainedConversionChoiceGeneration = nil
+        retainedCopySelection = command.copied || copyPreparation?.id != preparation.id
+            || homeCoordinator.choiceRevision != requestedChoiceRevision
+            ? nil : RetainedCopySelectionIntent(commandID: command.id, session: session,
+                choiceRevision: requestedChoiceRevision)
         accountLoadInProgress = true
         personalMode = true
         defaults.set(true, forKey: Self.personalModeKey)
@@ -1676,6 +1707,7 @@ final class PersistenceBootstrap: ObservableObject {
         do { base = try await resolvedAccountDirectory() }
         catch { homeSetupError = error; return }
         let journal = RetainedHomeConversionJournal(baseDirectory: base, session: session)
+        var attemptedCommandID: UUID?
         do {
             let saved = try await Task.detached(priority: .userInitiated) {
                 try Self.conversion(for: retained, base: base)
@@ -1684,6 +1716,7 @@ final class PersistenceBootstrap: ObservableObject {
                 retainedLocalCopyState = .available
                 return
             }
+            attemptedCommandID = pending.id
             guard pending.retainedRecordID == retained.adoptionRecordID,
                   pending.sourceURL == retained.sourceURL,
                   pending.sourceStoreIdentifier == retained.storeIdentifier,
@@ -1700,6 +1733,12 @@ final class PersistenceBootstrap: ObservableObject {
             }
             if pending.copied {
                 retainedLocalCopyState = .copied
+                if retainedCopySelection?.commandID == pending.id,
+                   let destination = pending.targetStoreIdentifier {
+                    retainedCopySelection?.destination = .init(storeIdentifier: destination,
+                        householdID: pending.graph.householdID, listID: pending.graph.listID)
+                    await fulfillRetainedCopySelection()
+                }
                 return
             }
             guard retainedConversionResumingID == nil,
@@ -1711,8 +1750,6 @@ final class PersistenceBootstrap: ObservableObject {
             retainedConversionResumingID = pending.id
             defer { retainedConversionResumingID = nil }
             retainedLocalCopyState = .copying
-            let choiceGeneration = retainedConversionChoiceGeneration
-            let capturedPresentationID = ready.presentation.id
             let target = RetiringStore(persistence: persistence)
             let bound = try await Task.detached(priority: .userInitiated) {
                 try Self.validateDeviceLocalHome(retained, base: base)
@@ -1721,38 +1758,74 @@ final class PersistenceBootstrap: ObservableObject {
                 try journal.markCopied(bound)
                 return bound
             }.value
+            if retainedCopySelection?.commandID == bound.id,
+               retainedCopySelection?.session == session {
+                retainedCopySelection?.destination = .init(storeIdentifier: storeIdentifier,
+                    householdID: bound.graph.householdID, listID: bound.graph.listID)
+            }
             retainedLocalCopyState = .copied
             homeSetupError = nil
-            guard case .ready(let current) = state,
-                  current.presentation.id == capturedPresentationID,
-                  current.presentation.isActive,
+            guard case .ready(let current) = state, current.presentation.isActive,
+                  current.persistence.primaryStore?.identifier == storeIdentifier,
                   try provider.currentSession() == session else { return }
             do {
                 try await refreshHomes()
-                if retainedConversionSelectionIntent == bound.id,
-                   choiceGeneration != nil,
-                   homeCoordinator.generation == choiceGeneration,
-                   let copied = homeCoordinator.homes.first(where: {
-                       $0.graph.householdID == bound.graph.householdID
-                           && $0.graph.listID == bound.graph.listID && $0.access == .owner
-                           && $0.graph.storeIdentifier == storeIdentifier
-                   }) {
-                    try await selectHome(copied.graph)
-                }
             } catch {
-                // The atomic copy is complete; normal home discovery can recover its row.
+                // Keep the selection intent for later discovery of the committed copy.
             }
-            retainedConversionSelectionIntent = nil
-            retainedConversionSelectionSession = nil
-            retainedConversionChoiceGeneration = nil
         } catch {
             retainedLocalCopyState = .available
-            retainedConversionSelectionIntent = nil
-            retainedConversionSelectionSession = nil
-            retainedConversionChoiceGeneration = nil
+            if retainedCopySelection?.commandID == attemptedCommandID {
+                retainedCopySelection = nil
+            }
             homeSetupError = error
         }
     }
+
+    /// A completed copy may become visible after the write finishes. Keep its
+    /// approved navigation choice until exact same-account discovery can open it.
+    private func fulfillRetainedCopySelection() async {
+        guard let intent = retainedCopySelection, let destination = intent.destination else { return }
+        guard intent.choiceRevision == homeCoordinator.choiceRevision else {
+            retainedCopySelection = nil
+            return
+        }
+        guard fulfillingRetainedCopyID != intent.commandID,
+              case .ready(let ready) = state, ready.presentation.isActive,
+              ready.persistence.primaryStore?.identifier == destination.storeIdentifier,
+              let provider = accountProvider,
+              (try? provider.currentSession()) == intent.session,
+              let copied = homeCoordinator.homes.first(where: {
+                  $0.graph.storeIdentifier == destination.storeIdentifier
+                      && $0.graph.householdID == destination.householdID
+                      && $0.graph.listID == destination.listID && $0.access == .owner
+              }) else { return }
+        fulfillingRetainedCopyID = intent.commandID
+        defer { fulfillingRetainedCopyID = nil }
+        do {
+            try await deferAutomaticInvitationOpens(for: intent.session)
+            guard retainedCopySelection?.commandID == intent.commandID,
+                  retainedCopySelection?.session == intent.session,
+                  homeCoordinator.choiceRevision == intent.choiceRevision,
+                  case .ready(let current) = state, current.presentation.isActive,
+                  current.persistence.primaryStore?.identifier == destination.storeIdentifier,
+                  (try? provider.currentSession()) == intent.session,
+                  homeCoordinator.homes.contains(where: { $0.graph == copied.graph && $0.access == .owner })
+            else { return }
+            try homeCoordinator.select(copied.graph)
+            applyHomeSelection(to: current)
+            retainedCopySelection = nil
+        } catch {
+            // The copied graph remains selectable; keep this approval for a later refresh.
+        }
+    }
+
+    /// Await the actual copy consumer, including its discovery and navigation decision.
+    func awaitRetainedConversionCompletion() async {
+        await retainedConversionTask?.value
+    }
+
+    var hasPendingLocalCopyPreparation: Bool { copyPreparation != nil }
 
     private func accountStateChanged(announcedState: ShopperSessionState,
                                      invalidatedSession: ShopperSession?) {
@@ -1767,6 +1840,22 @@ final class PersistenceBootstrap: ObservableObject {
         let boundaryState: ShopperSessionState
         if announcedInvalidation, invalidatedSession != nil { boundaryState = announcedState }
         else { boundaryState = accountProvider?.state ?? announcedState }
+        if let preparation = copyPreparation {
+            if announcedInvalidation {
+                if invalidatedSession == nil || preparation.session == nil
+                    || preparation.session == invalidatedSession {
+                    copyPreparation = nil
+                }
+            } else {
+                switch boundaryState {
+                case .ready(let verified), .cached(let verified):
+                    if let preparedSession = preparation.session, preparedSession != verified {
+                        copyPreparation = nil
+                    }
+                default: break
+                }
+            }
+        }
         let identityChanged = accountProvider.map {
             noteAccountNavigationBoundary(using: $0, announcedState: boundaryState,
                 invalidatedSession: invalidatedSession)
@@ -1830,7 +1919,7 @@ final class PersistenceBootstrap: ObservableObject {
             identityChanged = true
         case .ready(let session), .cached(let session):
             identityChanged = mountedAccountSession.map { $0 != session } ?? false
-                || retainedConversionSelectionSession.map { $0 != session } == true
+                || retainedCopySelection.map { $0.session != session } == true
         case .unresolved, .temporarilyUnavailable, .setupRequired:
             identityChanged = false
         }
@@ -1843,17 +1932,15 @@ final class PersistenceBootstrap: ObservableObject {
         let copySelectionInvalidated: Bool
         switch state {
         case .ready(let session), .cached(let session):
-            copySelectionInvalidated = retainedConversionSelectionSession.map { $0 != session } ?? false
+            copySelectionInvalidated = retainedCopySelection.map { $0.session != session } ?? false
         case .accountChanged, .setupRequired(.noAccount), .setupRequired(.restricted):
             copySelectionInvalidated = invalidatedSession == nil
-                || retainedConversionSelectionSession == invalidatedSession
+                || retainedCopySelection?.session == invalidatedSession
         case .unresolved, .temporarilyUnavailable, .setupRequired:
             copySelectionInvalidated = false
         }
         if copySelectionInvalidated {
-            retainedConversionSelectionIntent = nil
-            retainedConversionSelectionSession = nil
-            retainedConversionChoiceGeneration = nil
+            retainedCopySelection = nil
         }
         return true
     }
@@ -1990,7 +2077,7 @@ final class PersistenceBootstrap: ObservableObject {
                        let home = prepared.homeDiscovery.homes.first(where: {
                            $0.graph.householdID == preferred.householdID && $0.graph.listID == preferred.listID
                        }) {
-                        try homeCoordinator.select(home.graph)
+                        try homeCoordinator.select(home.graph, recordingChoice: false)
                     }
                     preferredAdoptedHome = nil
                 }
@@ -2106,16 +2193,9 @@ final class PersistenceBootstrap: ObservableObject {
                 homeGeneration: homeCoordinator.generation,
                 personalCartService: personalService
             ))
-            if retainedConversionSelectionIntent != nil,
-               let intendedSession = retainedConversionSelectionSession,
-               case .ready(let activeSession) = accountProvider?.state,
-               intendedSession == activeSession,
-               retainedConversionChoiceGeneration == nil {
-                retainedConversionChoiceGeneration = homeCoordinator.generation
-            }
             configureInvitations()
             if personalMode, let retained = deviceLocalHome {
-                Task { await resumeRetainedLocalConversion(retained, in: persistence) }
+                retainedConversionTask = Task { await resumeRetainedLocalConversion(retained, in: persistence) }
             }
             scheduleAutomaticJoinConnection()
             scheduleLocalReturnAfterDismiss()
@@ -2222,7 +2302,10 @@ final class PersistenceBootstrap: ObservableObject {
               homeCoordinator.isCurrent(request),
               try accountProvider?.currentSession() == request.sessionForValidation else { return }
         homeDiscoveryError = nil
-        if homeCoordinator.reconcile(snapshot, request: request) { applyHomeSelection(to: ready) }
+        if homeCoordinator.reconcile(snapshot, request: request) {
+            applyHomeSelection(to: ready)
+            if retainedCopySelection?.destination != nil { await fulfillRetainedCopySelection() }
+        }
         configureInvitations()
     }
 
@@ -2326,7 +2409,7 @@ final class PersistenceBootstrap: ObservableObject {
                     throw HomeInvitationInbox.Error.invalidState
                 }
                 try await activateInvitedHome(entryID: entry.id, graph: graph,
-                    expectedSelectionGeneration: selectionGeneration)
+                    expectedSelectionGeneration: selectionGeneration, userInitiated: false)
                 joinError = nil
             } catch {
                 if invitations.allEntries.first(where: { $0.id == entry.id })?.openRequested == true,
@@ -2351,6 +2434,9 @@ final class PersistenceBootstrap: ObservableObject {
         guard let invitations, let entry = invitations.entries.first(where: { $0.id == id }) else {
             throw HomeInvitationInbox.Error.invalidState
         }
+        homeCoordinator.recordExplicitChoice()
+        copyPreparation = nil
+        retainedCopySelection = nil
         joinError = nil
         let wasFailed: Bool
         if case .failed = entry.state { wasFailed = true }
@@ -2420,7 +2506,13 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func activateInvitedHome(entryID: UUID, graph: HomeGraphIdentity,
-                             expectedSelectionGeneration: UInt64? = nil) async throws {
+                             expectedSelectionGeneration: UInt64? = nil,
+                             userInitiated: Bool = true) async throws {
+        if userInitiated {
+            homeCoordinator.recordExplicitChoice()
+            copyPreparation = nil
+            retainedCopySelection = nil
+        }
         let (ready, invitationController) = try validateInvitationChoice(entryID, graph: graph)
         guard !invitationActivations.values.contains(where: { $0.presentationID == ready.presentation.id }),
               let cart = ready.personalCartService,
@@ -2498,7 +2590,11 @@ final class PersistenceBootstrap: ObservableObject {
         let (ready, invitationController) = try validateInvitationChoice(entryID, graph: nil)
         let capturedGeneration = generation
         let returnToLocal = homeCoordinator.activeScope == nil && deviceLocalHome != nil
-        if homeCoordinator.activeScope == nil { homeCoordinator.deferSelection() }
+        if homeCoordinator.activeScope == nil {
+            homeCoordinator.deferSelection()
+        } else {
+            homeCoordinator.recordExplicitChoice()
+        }
         try await invitationController.resolveActivation(entryID)
         if returnToLocal {
             guard generation == capturedGeneration, ready.presentation.isActive else { throw ShopperSessionError.accountChanged }

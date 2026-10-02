@@ -1839,7 +1839,75 @@ UI workflows **5/5**; its tracked tree equals integrated `d1feb35`. Fast retaine
 three QoS warnings; UI none. A navigation-update warning appeared in the Fast
 log during presentation retirement. No physical responsiveness result is claimed.
 
+## Retained-copy home selection (SHOPPING-187)
+
+Pinned CI run `37029619808` on the pre-fix milestone source passed **649/652**
+Fast tests. Three `HomeAdoptionBootstrapTests` methods found that the explicit
+Use iCloud copy committed while ordinary same-account discovery left the
+existing account home selected: initial retained copy, deletion followed by
+recopy, and deletion of the retained source followed by copying a fresh local
+home. The original graph, home-count, name, and selected-row assertions remain.
+`ActiveHomeCoordinatorTests.testDiscoveryAuthorityDoesNotReplaceExplicitHomeChoice`
+owns the distinction between access/discovery command authority and an explicit
+home choice, including same-home reaffirmation and Not Now. The two held-copy
+Bootstrap tests own a same-account access refresh with delayed copied-graph
+discovery and a newer reaffirmed home choice during that delay. The exact copy
+destination must be discovered in the verified account before automatic Open;
+an unavailable first observation keeps the in-memory intent for a later refresh.
+`testAcceptedInvitationDuringHeldCopyKeepsNewerNavigationIntent` owns a native
+invitation ingress while copied discovery is held; it drains the actual copy
+consumer before asserting that the accepted invitation stays open and the
+existing account home stays selected. The Homes picker sends a checked-row tap
+through the same selection command so reaffirmation is recorded.
+`testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
+holds account verification before the copy journal is prepared, accepts a newer
+invitation, then drains the copy consumer. The copy may commit, but its older
+navigation choice must not be installed after the newer invitation arrives.
+`testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+holds that same lookup across an exact CloudKit account invalidation and a fresh
+verification of the same account. It waits for the actual in-flight approval to
+retire before releasing the old lookup; a committed copy must leave the prior
+account home selected. The preparation task and copy consumer have bounded
+completion checks before fixture cleanup.
+The existing account-change copy test continues to own the different-account
+deferral rule. CI coverage passed its app and domain gates; no baseline changed.
+The fix awaits exact-source local and pinned-CI validation.
+The first focused source passed **62/62**, and its successor passed Fast
+**656/656** with no failures or skips. Both precede the held account-lookup
+ordering fix and do not validate that final source.
+The next candidate passed Fast **657/657** with no failures or skips. Review
+then found an account-invalidation window before the copy intent was installed;
+the exact-session preparation fence and held-lookup regression were added
+after that run and need final validation.
+
 The [home-sharing execution record](home-sharing-validation.md) records source,
 local bundles, app-menu counts and remaining physical acceptance. Pinned CI and
 its final pushed SHA belong in the phase PR and SHOPPING-174 comment. These
 focused UI selections are not ShoppingFull attestation.
+
+The first combined SHOPPING-187 Fast attempt (`187-fast-a`) stopped before tests
+at an optional Boolean assertion in the new invitation-ingress regression. The
+assertion now explicitly requires `true`. Review also bounded the owned copy
+consumer completion and teardown expectations; selection assertions remain intact.
+The earlier focused `187-focused-a` run passed **62/62** before the invitation
+ordering and completion follow-ups. Final combined validation is still pending.
+
+Final SHOPPING-187 production candidate `71d86d2` passed the six affected
+account/invitation/recovery suites **119/119**, with no skips and one QoS warning
+(`/tmp/shopping-phase24-187-final-focused.xcresult` and `.log`). The same committed
+source passed four native UI workflows **4/4**, no skips or runtime warnings
+(`/tmp/shopping-phase24-187-final-ui.xcresult` and `.log`): automatic accepted
+invitation Open, durable Not Now, retained local Use iCloud, and switching with
+saved-cart scope across relaunch. The ordinary preparation callback now shares
+185's current-provider authority; exact invalidation retains outgoing identity.
+Both independent production reviewers verified the final fixes; test review
+verified bounded preparation/consumer cleanup and fixture isolation.
+
+Earlier committed `3146c2c` passed full local Fast **657/657**, no skips and three
+QoS warnings (`/tmp/shopping-phase24-187-final-fast.xcresult` and `.log`). This
+predates the account-preparation follow-up. `9d5773b` passed affected suites
+**119/119**, one QoS warning, before the ordinary-callback correction
+(`/tmp/shopping-phase24-187-account-focused.xcresult`). The final complete pinned
+Fast/Acceptance/Release/coverage result must be recorded against the pushed SHA
+in PR 68 and Plane. No Full attestation, physical CloudKit proof, or device trace
+is claimed by these focused local runs.

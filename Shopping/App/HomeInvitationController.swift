@@ -27,6 +27,7 @@ final class HomeInvitationController: ObservableObject {
     /// Retire an outstanding Open choice at ingress, before the journal worker
     /// can publish its replacement entry. The callback performs no file work.
     var onChoiceInvalidated: ((HomeInvitationIdentity) -> Void)?
+    var onAcceptedIngress: (() -> Void)?
     private(set) var allEntries: [HomeInvitationInbox.Entry] = []
     private let worker: HomeInvitationWorker
     private var session: ShopperSession?
@@ -85,6 +86,7 @@ final class HomeInvitationController: ObservableObject {
         let environment = Bundle.main.object(forInfoDictionaryKey: "ShoppingCloudKitEnvironment") as? String ?? ""
         let identity = HomeInvitationIdentity(containerIdentifier: metadata.containerIdentifier, environment: environment,
             share: HomeShareIdentity(recordName: id.recordName, zoneName: id.zoneID.zoneName, zoneOwnerName: id.zoneID.ownerName))
+        onAcceptedIngress?()
         let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
@@ -110,6 +112,7 @@ final class HomeInvitationController: ObservableObject {
     func enqueue(identity: HomeInvitationIdentity, metadataArchive: Data,
                  displayName: String? = nil,
                  participantPending: Bool = false) async throws -> HomeInvitationInbox.Entry {
+        onAcceptedIngress?()
         let change = beginChoiceChange(identity)
         pendingIngress += 1
         publish()
