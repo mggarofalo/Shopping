@@ -215,3 +215,25 @@ the checked-out SHA must equal the dispatched `main` SHA, even if `main` moves
 while the run is queued. Workflow runs identify releases by that SHA.
 `CFBundleVersion` remains a positive numeric upload value for Apple distribution;
 it is not the app's source identifier. Continue choosing an unused upload number.
+
+## Inspecting the existing external audience
+
+The established upload/verify path checks only Garofalo Home inherited from
+baseline build 6. Build 29 therefore reached internal IN_BETA_TESTING while its
+external state stayed READY_FOR_BETA_SUBMISSION. It did not submit external beta
+review or promise availability to an external tester.
+
+The protected **TestFlight audience audit** is manual, main-only, serialized with
+release jobs, and GET-only. It uses the existing App Store Connect credential;
+it receives no signing assets and has no additional GitHub permissions. For the
+requested existing version/build it reports group IDs/names, member counts and
+opaque tester IDs, Michael/Beka first-name matches, membership of prior external
+build 1.3.5 (26), target membership and beta-review state. It does not print emails,
+review contacts, demo credentials, public-link URLs or authentication material.
+It creates no group, invitation, build assignment or review submission.
+
+The approved follow-up is to verify the existing groups serving Michael and Beka,
+make those verified audiences the normal publication default, and retain an
+explicit private/internal-only release option. Required Apple beta review and
+automatic availability after approval must be separate from upload success.
+Audience defaults remain unchanged until real membership has been verified.
