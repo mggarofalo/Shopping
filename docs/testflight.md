@@ -109,6 +109,9 @@ After the workflow reaches `main`:
 
 1. Open **Actions → Upload to TestFlight → Run workflow** and select `main`.
    Select exactly one of `preflight_only`, `confirm_upload`, or `verify_only`.
+   Audience defaults to `all_testers`: the verified existing groups serving
+   Michael and Beka. Select `internal_only` for an explicitly private build;
+   that mode never submits external review or assigns an external group.
    All modes use the protected `testflight` environment and are serialized.
 2. For `preflight_only`, leave the build number blank to inspect the inventory
    and select the next integer greater than all existing iOS build numbers, or
@@ -116,6 +119,10 @@ After the workflow reaches `main`:
    This mode uses only App Store Connect GET requests and receives no signing
    secrets. It checks the existing Garofalo Home audience against baseline
    build 6. It does not reserve a build number or distribute anything.
+   For `all_testers`, it also verifies the recorded group identities and exact
+   tester membership, disables publication if public-link access is enabled,
+   and checks that existing Apple review metadata is complete. It never fills
+   in new review contact, demo-account, description or compliance answers.
 3. For `confirm_upload`, source marketing versions must match across all four
    iPhone/Watch configurations. Leave the build number blank to allocate it
    inside the serialized upload job, or enter an explicit unused number. The
@@ -141,10 +148,16 @@ After the workflow reaches `main`:
    disambiguate that baseline without changing the audience.
 6. If Missing Compliance is reported, the script copies exempt encryption only
    from the confirmed exempt baseline. Changes in encryption use require review.
-   The workflow reports internal and external beta states. Group assignment alone
-   is insufficient: testers must have a ready beta state. External beta review
-   and production App Store submission are not automated here. Retry verify-only
-   if processing or group availability is slow, without another upload.
+   With `all_testers`, the workflow enables automatic external notification,
+   submits the exact processed build to beta review when needed, and assigns it
+   to Beka's verified existing external group. Existing pending or approved
+   submissions are reused on retry. Rejected review, incomplete established
+   metadata, changed membership, or changed group identity stops distribution.
+   The receipt distinguishes group assignment and pending Apple review from
+   external availability. Apple review may delay Beka's access; automatic
+   notification delivers the update when Apple permits it. Production App Store
+   submission remains separate. Retry verify-only after a partial distribution
+   failure without uploading another build.
 
 The exit trap removes newly installed profiles and all temporary key/certificate,
 keychain, archive and export files on success or failure, restores the original
