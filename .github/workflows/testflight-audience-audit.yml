@@ -1,0 +1,47 @@
+name: TestFlight audience audit
+run-name: TestFlight audience audit ${{ github.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      marketing_version:
+        description: Exact existing iOS marketing version
+        required: true
+        default: '1.5.0'
+        type: string
+      build_number:
+        description: Exact existing build number
+        required: true
+        default: '29'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: shopping-testflight
+  cancel-in-progress: false
+jobs:
+  intent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        env:
+          REF: ${{ github.ref }}
+        run: '[[ "$REF" == refs/heads/main ]]'
+  audit:
+    name: Read-only audience audit
+    needs: intent
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: macos-15
+    timeout-minutes: 10
+    environment: testflight
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check clean exact source
+        run: .github/scripts/validate-release-source.sh
+      - name: Inspect existing groups, tester associations, and review state (GET only)
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+        run: ruby .github/scripts/audit-testflight-audience.rb
