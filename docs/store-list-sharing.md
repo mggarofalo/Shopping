@@ -28,8 +28,8 @@ presence does not hide their items from this shopper's list.
 - `ChecklistUITests/testStoreListShareCanCancelAndReopenWithoutChangingGroceries`
   owns opening, cancelling and reopening the native sheet without changing items
   or cart state. It never selects a recipient or activity.
-- `ChecklistUITests/testStoreListSharingIgnoresEmptySearchAndDisablesWhenAllItemsAreCarted`
-  owns sharing from a search with no matching rows and disabling the action after
+- `ChecklistUITests/testStoreListSharingIgnoresEmptyFilteredViewAndDisablesWhenAllItemsAreCarted`
+  owns sharing from a category/urgency filter with no matching rows and disabling the action after
   carting every outstanding item in the selected store.
 
 ## Validation status

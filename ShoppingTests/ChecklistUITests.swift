@@ -29,15 +29,23 @@ final class ChecklistUITests: XCTestCase {
         }
     }
 
-    func testStoreListSharingIgnoresEmptySearchAndDisablesWhenAllItemsAreCarted() {
+    func testStoreListSharingIgnoresEmptyFilteredViewAndDisablesWhenAllItemsAreCarted() {
         let app = launchApp(fixture: "populated")
         selectStore("Costco", app: app)
         let share = app.buttons["shopping.grocery.shareStore"]
         XCTAssertTrue(share.existsOrAppears(timeout: 3))
-        let search = app.searchFields["Search groceries"]
-        search.tap()
-        search.typeText("No matching grocery")
+        // Native active search hides the toolbar. Search independence is owned
+        // by GroceryNavigationStateTests; this UI boundary uses category/urgency.
+        app.buttons["shopping.filters"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].existsOrAppears(timeout: 3))
+        setSwitch(app.switches["Urgent only"], on: true, app: app)
+        app.buttons["Produce"].tap()
+        app.navigationBars["Filters"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Filters"].waitForNonExistence(timeout: 3))
         XCTAssertTrue(row("Bananas", app: app).waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row("Granola", app: app).waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No matching groceries"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(share.existsOrAppears(timeout: 3))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: share)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
         XCTAssertTrue(share.isHittable)
@@ -46,9 +54,8 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(close.existsOrAppears(timeout: 5))
         close.tap()
         XCTAssertTrue(close.waitForNonExistence(timeout: 5))
-        let cancelSearch = app.buttons["Cancel"]
-        XCTAssertTrue(cancelSearch.existsOrAppears(timeout: 3))
-        cancelSearch.tap()
+        app.buttons["Remove Urgent filter"].tap()
+        app.buttons["Remove Produce filter"].tap()
         XCTAssertTrue(row("Bananas", app: app).existsOrAppears(timeout: 5))
         cart("Bananas", app: app)
         cart("Granola", app: app)
