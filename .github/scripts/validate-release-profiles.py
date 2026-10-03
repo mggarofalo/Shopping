@@ -15,6 +15,8 @@ def validate(profile, bundle, fingerprints, now=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
     if not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", profile.get("UUID", "")):
         raise ValueError("Invalid profile UUID")
+    if profile.get("IsXcodeManaged") is True:
+        raise ValueError("Manual signing requires a manually managed App Store profile; Xcode-managed profiles cannot be used")
     ent = profile.get("Entitlements", {})
     if profile.get("TeamIdentifier") != [TEAM] or ent.get("com.apple.developer.team-identifier") != TEAM:
         raise ValueError("Profile must belong to the established release team")

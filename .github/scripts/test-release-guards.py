@@ -41,7 +41,7 @@ class ProfileTests(unittest.TestCase):
         self.pair["watch"]["Entitlements"]["com.apple.developer.icloud-services"] = "*"
         profiles.configuration(self.pair, {FINGERPRINT})
     def test_wrong_bundle_team_expiration_or_app_store_shape(self):
-        changes = [("UUID", "bad"), ("TeamIdentifier", ["wrong"]), ("ExpirationDate", datetime.datetime(2020, 1, 1)), ("ProvisionedDevices", []), ("ProvisionsAllDevices", True)]
+        changes = [("UUID", "bad"), ("TeamIdentifier", ["wrong"]), ("ExpirationDate", datetime.datetime(2020, 1, 1)), ("ProvisionedDevices", []), ("ProvisionsAllDevices", True), ("IsXcodeManaged", True)]
         for key, value in changes:
             with self.subTest(key=key):
                 pair = copy.deepcopy(self.pair); pair["watch"][key] = value

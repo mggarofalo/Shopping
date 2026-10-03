@@ -61,7 +61,7 @@ and observed device result are recorded under SHOPPING-10.
 The workflow requires:
 
 - an Apple Distribution certificate exported with its private key as a password-protected `.p12` file;
-- separate App Store Connect distribution provisioning profiles for `com.mggarofalo.shopping` and `com.mggarofalo.shopping.watchkitapp`, both granting production push, the existing CloudKit container, and `InProcessOneTimeLinks` sharing;
+- separate manually managed App Store Connect distribution provisioning profiles for `com.mggarofalo.shopping` and `com.mggarofalo.shopping.watchkitapp`, both granting production push, the existing CloudKit container, and `InProcessOneTimeLinks` sharing;
 - an App Store Connect API key with the minimum access needed to upload builds, including its key ID, issuer ID, and original `.p8` private key; and
 - an App Store Connect app record whose bundle ID is `com.mggarofalo.shopping`.
 
@@ -94,9 +94,13 @@ Base64 is transport encoding, not encryption. Keep all seven values in the prote
 ## Manual upload
 
 SHOPPING-132 adds separate profile validation, target-specific archive settings,
-and a two-bundle export mapping. The old iPhone secret must be replaced with a
-capability-correct profile and the Watch profile secret must be configured before
-using the hosted upload. Generating new credentials, changing protected secrets
+and a two-bundle export mapping. Create two **manually managed** App Store profiles against the existing
+distribution certificate and established bundle IDs/capabilities. Replace the
+old iPhone secret with its new profile and add the Watch profile secret before
+using hosted upload. Xcode-managed profiles from the local automatic-signing
+fallback are rejected early: Xcode refuses them under manual signing. A local
+manual archive of this change confirmed that refusal for both build 27 profiles;
+their production capabilities and certificate compatibility alone are insufficient. Generating new credentials, changing protected secrets
 or access, or accepting a new Apple agreement requires explicit approval. Local
 fixtures and local signing compatibility do not prove hosted signing. Retain the
 fallback until an approved hosted archive/export succeeds with these assets.
