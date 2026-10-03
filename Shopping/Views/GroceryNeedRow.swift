@@ -49,7 +49,7 @@ struct GroceryNeedRow: View {
                 } label: {
                     Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
-                .tint((personalCarted ?? need.carted) ? .orange : .blue)
+                .tint((personalCarted ?? need.carted) ? .orange : .groceryAccent)
                 .disabled(!cartActionAvailable)
                 .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
             }

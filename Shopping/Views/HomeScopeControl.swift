@@ -35,6 +35,7 @@ extension EnvironmentValues {
     }
 }
 
+/// Settings owns home switching; shopping screens show conditional read-only context.
 /// Home content belongs to the screen's native scroll layout, not its safe area.
 struct HomeScopeControl: View {
     var allowsSwitching = true
@@ -83,8 +84,8 @@ struct HomeScopeControl: View {
 
 #Preview {
     NavigationStack {
-        List { HomeScopeControl(); Text("Apples") }
-            .navigationTitle("Groceries")
+        List { HomeScopeControl() }
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
     }
     .environment(\.homeScopeDisplay, HomeScopeDisplay(name: "My Home", isLocal: true))

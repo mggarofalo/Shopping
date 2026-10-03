@@ -7,6 +7,9 @@ struct GroceriesView: View {
         let scope: PersonalCartScopeSnapshot
         let presentationID: UUID?
         let values: [UUID: StorePurchaseCounts]
+        let selectedStoreID: UUID?
+        let shareableNeedIDs: Set<UUID>
+        let revision: Int
     }
 
     @Environment(\.persistencePresentation) private var presentation
@@ -31,6 +34,7 @@ struct GroceriesView: View {
     @State private var pendingNeedQuantityIDs: Set<UUID> = []
     @State private var pendingNeedAgainIDs: Set<UUID> = []
     @State private var showingFilters = false
+    @State private var storeShare: GroceryStoreShare?
     @State private var showingCategoryFill = false
     @State private var addPickerScope: GroceryAddScope?
     @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
@@ -69,6 +73,26 @@ struct GroceriesView: View {
         guard presentation?.isActive != false else { return [] }
         return GroceryCollectionProjection.sections(
             needs: visibleNeeds,
+            selectedStoreID: navigation.selectedStoreID,
+            activeStores: activeStores,
+            categories: Array(categories),
+            household: canonicalList?.household
+        )
+    }
+
+    private var storeShareText: String {
+        guard let snapshot = storeCountSnapshot,
+              snapshot.scope.householdID == selection.householdID,
+              snapshot.scope.listID == selection.listID,
+              snapshot.presentationID == presentation?.id,
+              snapshot.selectedStoreID == navigation.selectedStoreID,
+              snapshot.revision == projectionRevision,
+              presentation?.isActive != false else { return "" }
+        let outstanding = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).filter {
+            snapshot.shareableNeedIDs.contains($0.id) && isOutstanding($0) && !isInMyCart($0)
+        }
+        return GroceryStoreShareText.text(
+            outstandingNeeds: outstanding,
             selectedStoreID: navigation.selectedStoreID,
             activeStores: activeStores,
             categories: Array(categories),
@@ -123,6 +147,23 @@ struct GroceriesView: View {
                         .accessibilityIdentifier("shopping.category.fill")
                     }
                 }
+                if navigation.selectedStoreID != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        let text = storeShareText
+                        Button {
+                            let currentText = storeShareText
+                            guard !currentText.isEmpty else { return }
+                            storeShare = GroceryStoreShare(text: currentText)
+                        } label: {
+                            Label("Share store list", systemImage: "square.and.arrow.up")
+                                .labelStyle(.iconOnly)
+                        }
+                        .disabled(text.isEmpty)
+                        .accessibilityLabel("Share store list for \(selectedStoreName)")
+                        .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
+                        .accessibilityIdentifier("shopping.grocery.shareStore")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
                         .disabled(canonicalList == nil)
@@ -152,6 +193,9 @@ struct GroceriesView: View {
                     if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
                     else { RecentlyClearedView() }
                 }
+            }
+            .sheet(item: $storeShare) { share in
+                GroceryStoreActivityView(share: share)
             }
             .sheet(isPresented: $showingFilters) {
                 GroceryFiltersView(
@@ -276,7 +320,7 @@ struct GroceriesView: View {
     }
 
     private var homeControls: some View {
-        HomeScopeControl()
+        HomeScopeControl(allowsSwitching: false)
     }
 
     private var emptyState: some View {
@@ -630,7 +674,11 @@ struct GroceriesView: View {
                     let projection = try service.groceryNeedProjection(
                         householdID: householdID, listID: listID, filter: filter
                     )
-                    return (ids: Set(projection.matchingNeedIDs), counts: projection.storeCounts(excluding: cartedNeedIDs))
+                    return (
+                        ids: Set(projection.matchingNeedIDs),
+                        counts: projection.storeCounts(excluding: cartedNeedIDs),
+                        shareIDs: projection.shareableNeedIDs(for: filter.purchase.selectedStoreID, excluding: cartedNeedIDs)
+                    )
                 }.value
                 guard !Task.isCancelled, projectionRevision == revision,
                       selection.householdID == householdID, selection.listID == listID,
@@ -638,7 +686,8 @@ struct GroceriesView: View {
                       presentation?.isActive != false else { return }
                 storeCountSnapshot = StoreCountSnapshot(
                     scope: PersonalCartScopeSnapshot(householdID: householdID, listID: listID),
-                    presentationID: presentationID, values: projected.counts
+                    presentationID: presentationID, values: projected.counts,
+                    selectedStoreID: filter.purchase.selectedStoreID, shareableNeedIDs: projected.shareIDs, revision: revision
                 )
                 let matchingIDs = projected.ids
                 visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(

@@ -13,11 +13,9 @@ extension Color {
             : UIColor(red: 0.60, green: 0.20, blue: 0.07, alpha: 1)
     })
 
-    static let groceryAccent = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.35, green: 0.72, blue: 0.55, alpha: 1)
-            : UIColor(red: 0.10, green: 0.32, blue: 0.23, alpha: 1)
-    })
+    // The app's global accent and explicit selection styling share this
+    // adaptive asset so native controls never fall back to a separate blue.
+    static let groceryAccent = Color("AccentColor")
 }
 
 private struct AddGroceryPreview: View {
