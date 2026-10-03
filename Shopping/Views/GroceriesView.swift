@@ -151,8 +151,9 @@ struct GroceriesView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         let text = storeShareText
                         Button {
-                            guard !text.isEmpty else { return }
-                            storeShare = GroceryStoreShare(text: text)
+                            let currentText = storeShareText
+                            guard !currentText.isEmpty else { return }
+                            storeShare = GroceryStoreShare(text: currentText)
                         } label: {
                             Label("Share store list", systemImage: "square.and.arrow.up")
                                 .labelStyle(.iconOnly)
