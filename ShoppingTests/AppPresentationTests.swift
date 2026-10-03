@@ -84,6 +84,33 @@ final class AppPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testSuccessActionHasTimeToReadAndNavigateBeforeAutomaticDismissal() async throws {
+        let scheduled = expectation(description: "Action dismissal scheduled")
+        let release = AsyncGate()
+        var scheduledDelay: TimeInterval?
+        var navigated = false
+        let center = ShoppingToastCenter { delay in
+            scheduledDelay = delay
+            scheduled.fulfill()
+            await release.wait()
+        }
+        center.show("Added 1.", duration: .success, action: ShoppingToastAction(
+            title: "View", accessibilityIdentifier: "view"
+        ) {
+            navigated = true
+            return true
+        })
+        await fulfillment(of: [scheduled], timeout: 1)
+        XCTAssertEqual(scheduledDelay, 10)
+        let toast = try XCTUnwrap(center.toasts.first)
+        XCTAssertEqual(toast.message, "Added 1.")
+        center.performAction(for: toast)
+        XCTAssertTrue(navigated)
+        XCTAssertTrue(center.toasts.isEmpty)
+        await release.open()
+    }
+
+    @MainActor
     func testToastActionDismissesOnlyAfterSuccess() throws {
         var succeeds = false
         let center = ShoppingToastCenter { _ in
@@ -107,5 +134,19 @@ final class AppPresentationTests: XCTestCase {
         succeeds = true
         center.performAction(for: toast)
         XCTAssertTrue(center.toasts.isEmpty)
+    }
+}
+
+private actor AsyncGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    func wait() async {
+        guard !opened else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func open() {
+        opened = true
+        continuation?.resume()
+        continuation = nil
     }
 }

@@ -7,14 +7,18 @@ import XCTest
 final class HomeAdoptionBootstrapTests: XCTestCase {
     private actor CopyDiscoveryGate {
         private var firstCopyDiscoveryHeld = false
+        private var accessChanged = false
         private var released = false
         private var releaseContinuations: [CheckedContinuation<Void, Never>] = []
 
         func discover(_ service: HomeDiscoveryService, accessChange: Bool,
                       onHold: @Sendable () -> Void) async throws -> HomeDiscovery {
+            // A simulated access change belongs to the source, including newer
+            // history refreshes that supersede the requesting refresh.
+            if accessChange { accessChanged = true }
             let snapshot = try await Task.detached(priority: .utility) { try service.discover() }.value
             guard snapshot.homes.count == 2 else { return snapshot }
-            if accessChange {
+            if accessChanged {
                 let account = snapshot.homes.filter { $0.name == "Account home" }.map {
                     HomeCandidate(graph: $0.graph, name: $0.name, access: .restricted)
                 }
@@ -31,6 +35,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
 
         func release() {
             released = true
+            accessChanged = false
             for continuation in releaseContinuations { continuation.resume() }
             releaseContinuations.removeAll()
         }
@@ -452,7 +457,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         try await CopyDiscoveryRequest.$accessChange.withValue(true) {
             try await bootstrap.refreshHomes()
         }
+        // The requested read may be superseded by an automatic history refresh.
+        // Wait for the changed source access to be published by the current read.
+        let accessDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.generation == writeGeneration,
+              ContinuousClock.now < accessDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertNotEqual(bootstrap.homeCoordinator.generation, writeGeneration)
+        XCTAssertEqual(bootstrap.homeCoordinator.homes.first { $0.name == "Account home" }?.access, .restricted)
         XCTAssertEqual(bootstrap.homeCoordinator.choiceRevision, choiceRevision)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
 

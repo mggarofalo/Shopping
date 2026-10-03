@@ -46,9 +46,12 @@ final class ShoppingToastCenter: ObservableObject {
             action: action
         )
         toasts.append(toast)
+        // Actionable feedback needs time to read and act, including while an
+        // editor is dismissing. Use the same bounded window as Undo.
+        let delay = action == nil ? duration.rawValue : max(duration.rawValue, ShoppingToastDuration.undo.rawValue)
         dismissalTasks[toast.id] = Task { [weak self, sleeper] in
             do {
-                try await sleeper(duration.rawValue)
+                try await sleeper(delay)
             } catch {
                 return
             }
