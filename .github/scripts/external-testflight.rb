@@ -16,7 +16,8 @@ module TestFlight
         raise "Approved tester group is missing or ambiguous" unless matches.length == 1
         group = matches.first
         attributes = group.fetch("attributes")
-        unless attributes["name"] == expected.fetch("name") && attributes["isInternalGroup"] == expected.fetch("internal") && attributes["publicLinkEnabled"] != true
+        private_access = expected.fetch("internal") ? attributes["publicLinkEnabled"] != true : attributes["publicLinkEnabled"] == false
+        unless attributes["name"] == expected.fetch("name") && attributes["isInternalGroup"] == expected.fetch("internal") && private_access
           raise "Approved tester group identity or public-link access changed"
         end
         members = @client.list("/v1/betaGroups/#{group.fetch('id')}/betaTesters?limit=200").map { |member| member.fetch("id") }.sort

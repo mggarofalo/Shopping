@@ -81,7 +81,7 @@ class ExternalDistributionTests < Minitest::Test
     assert_empty @api.writes
   end
   def test_audience_drift_public_access_and_identity_fail_before_any_write
-    changes = [-> { @api.members["external"] << "someone-else" }, -> { @api.groups.last["attributes"]["publicLinkEnabled"] = true }, -> { @api.groups.last["attributes"]["name"] = "Renamed" }, -> { @api.groups.last["attributes"]["isInternalGroup"] = true }, -> { @api.groups.pop }]
+    changes = [-> { @api.members["external"] << "someone-else" }, -> { @api.groups.last["attributes"]["publicLinkEnabled"] = true }, -> { @api.groups.last["attributes"]["publicLinkEnabled"] = nil }, -> { @api.groups.last["attributes"]["name"] = "Renamed" }, -> { @api.groups.last["attributes"]["isInternalGroup"] = true }, -> { @api.groups.pop }]
     changes.each do |change|
       setup
       change.call
