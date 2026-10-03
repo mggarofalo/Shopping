@@ -34,6 +34,7 @@ struct GroceriesView: View {
     @State private var pendingNeedQuantityIDs: Set<UUID> = []
     @State private var pendingNeedAgainIDs: Set<UUID> = []
     @State private var showingFilters = false
+    @State private var storeShare: GroceryStoreShare?
     @State private var showingCategoryFill = false
     @State private var addPickerScope: GroceryAddScope?
     @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
@@ -149,7 +150,10 @@ struct GroceriesView: View {
                 if navigation.selectedStoreID != nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         let text = storeShareText
-                        ShareLink(item: text) {
+                        Button {
+                            guard !text.isEmpty else { return }
+                            storeShare = GroceryStoreShare(text: text)
+                        } label: {
                             Label("Share store list", systemImage: "square.and.arrow.up")
                                 .labelStyle(.iconOnly)
                         }
@@ -188,6 +192,9 @@ struct GroceriesView: View {
                     if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
                     else { RecentlyClearedView() }
                 }
+            }
+            .sheet(item: $storeShare) { share in
+                GroceryStoreActivityView(share: share)
             }
             .sheet(isPresented: $showingFilters) {
                 GroceryFiltersView(

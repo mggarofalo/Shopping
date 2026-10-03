@@ -52,6 +52,7 @@ final class ChecklistUITests: XCTestCase {
         XCTAssertTrue(row("Bananas", app: app).existsOrAppears(timeout: 5))
         cart("Bananas", app: app)
         cart("Granola", app: app)
+        cart("Dinner rolls", app: app)
         let empty = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: share)
         XCTAssertEqual(XCTWaiter.wait(for: [empty], timeout: 5), .completed)
         XCTAssertTrue(share.exists)
