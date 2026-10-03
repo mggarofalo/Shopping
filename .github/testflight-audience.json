@@ -1,0 +1,21 @@
+{
+  "verified_by": "https://github.com/mggarofalo/Shopping/actions/runs/37162031315",
+  "groups": [
+    {
+      "id": "6dde8581-9ab0-447c-a2fd-d3fc01b8603e",
+      "name": "Garofalo Home",
+      "internal": true,
+      "tester_ids": [
+        "e1fbeed8-db3a-4932-9495-31901af6ac81"
+      ]
+    },
+    {
+      "id": "dca88660-47a5-42ed-b23d-c2de4c3a3269",
+      "name": "Household Testers",
+      "internal": false,
+      "tester_ids": [
+        "375233c3-6763-485e-829c-2fbd904498c3"
+      ]
+    }
+  ]
+}

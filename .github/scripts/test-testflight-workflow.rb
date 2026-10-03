@@ -21,12 +21,12 @@ end
 intent = jobs.fetch("intent").fetch("steps").first.fetch("run")
 [false, true].repeated_permutation(3).each do |modes|
   ["refs/heads/main", "refs/heads/feature"].each do |ref|
-    env = { "REF" => ref, "UPLOAD" => modes[0].to_s, "VERIFY" => modes[1].to_s, "PREFLIGHT" => modes[2].to_s, "BUILD" => "28" }
+    env = { "REF" => ref, "UPLOAD" => modes[0].to_s, "VERIFY" => modes[1].to_s, "PREFLIGHT" => modes[2].to_s, "BUILD" => "28", "AUDIENCE" => "all_testers" }
     _out, _err, status = Open3.capture3(env, "bash", "-c", intent)
     check(status.success? == (ref == "refs/heads/main" && modes.count(true) == 1), "executed mode/ref truth table")
   end
 end
-_out, _err, status = Open3.capture3({ "REF" => "refs/heads/main", "UPLOAD" => "false", "VERIFY" => "true", "PREFLIGHT" => "false", "BUILD" => "" }, "bash", "-c", intent)
+_out, _err, status = Open3.capture3({ "REF" => "refs/heads/main", "UPLOAD" => "false", "VERIFY" => "true", "PREFLIGHT" => "false", "BUILD" => "", "AUDIENCE" => "all_testers" }, "bash", "-c", intent)
 check(!status.success?, "verify needs explicit build")
 check(jobs["upload"]["permissions"] == { "contents" => "read", "actions" => "read" }, "upload can read required CI only")
 upload = jobs["upload"]["steps"].find { |step| step["name"] == "Archive, validate, and upload" }
@@ -34,7 +34,7 @@ check(upload.fetch("env").fetch("BUILD_NUMBER") == "${{ steps.preflight.outputs.
 check(upload.fetch("env").fetch("MARKETING_VERSION") == "${{ steps.preflight.outputs.marketing_version }}", "selected version used for upload")
 secrets = %w[APP_STORE_CONNECT_API_ISSUER_ID APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 APP_STORE_PROVISIONING_PROFILE_BASE64 APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64 APPLE_DISTRIBUTION_CERTIFICATE_BASE64 APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD]
 secrets.each { |name| check(upload.fetch("env")[name] == "${{ secrets.#{name} }}", "protected secret #{name}") }
-preflight = jobs["preflight"]["steps"].last
+preflight = jobs["preflight"]["steps"].find { |step| step["run"] == "ruby .github/scripts/preflight-testflight.rb" }
 check(preflight["run"] == "ruby .github/scripts/preflight-testflight.rb", "preflight entrypoint")
 check(preflight["env"].keys.grep(/CERTIFICATE|PROVISIONING/).empty?, "preflight receives no signing assets")
 check(jobs["upload"]["steps"].any? { |step| step["run"] == "sudo xcode-select -s /Applications/Xcode_26.3.app" }, "release SDK pin")
@@ -55,3 +55,19 @@ values = secrets.map { |key| "#{key}=fixture" } + ["BUILD_NUMBER=0", "MARKETING_
 output, status = Open3.capture2e("env", "-i", "PATH=#{ENV.fetch('PATH')}", *values, "bash", upload_path)
 check(!status.success? && output.include?("BUILD_NUMBER must be a positive integer"), "invalid build rejection")
 puts "Workflow intent, protection, signing and upload gate contracts passed."
+
+inputs = (workflow["on"] || workflow.fetch(true)).fetch("workflow_dispatch").fetch("inputs")
+check(inputs.fetch("audience") == { "description" => "Existing Michael and Beka groups, or an explicitly private internal release", "required" => true, "default" => "all_testers", "type" => "choice", "options" => %w[all_testers internal_only] }, "existing testers default, explicit private choice")
+%w[upload verify].each do |name|
+  steps = jobs.fetch(name).fetch("steps")
+  external = steps.find { |step| step["run"] == "ruby .github/scripts/external-testflight.rb" }
+  check(external && external["if"] == "${{ inputs.audience == 'all_testers' }}", "private #{name} cannot submit or assign external build")
+  check(external["env"].keys.grep(/CERTIFICATE|PROVISIONING|GH_TOKEN/).empty?, "external distribution receives no signing or GitHub credentials")
+end
+steps = jobs.fetch("upload").fetch("steps")
+check(steps.index { |step| step["run"] == "ruby .github/scripts/external-testflight.rb --preflight" } < steps.index { |step| step["name"] == "Archive, validate, and upload" }, "existing audience and review metadata before upload")
+%w[internal_only unapproved].each do |audience|
+  _out, _err, status = Open3.capture3({ "REF" => "refs/heads/main", "UPLOAD" => "false", "VERIFY" => "true", "PREFLIGHT" => "false", "BUILD" => "29", "AUDIENCE" => audience }, "bash", "-c", intent)
+  check(status.success? == (audience == "internal_only"), "audience intent validation")
+end
+puts "Existing external audience and private-release contracts passed."

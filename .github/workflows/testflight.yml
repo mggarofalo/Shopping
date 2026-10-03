@@ -3,6 +3,14 @@ run-name: TestFlight ${{ github.sha }}
 on:
   workflow_dispatch:
     inputs:
+      audience:
+        description: Existing Michael and Beka groups, or an explicitly private internal release
+        required: true
+        default: all_testers
+        type: choice
+        options:
+          - all_testers
+          - internal_only
       build_number:
         description: Positive build number; leave blank to select the next unused number
         required: false
@@ -43,8 +51,10 @@ jobs:
           VERIFY: ${{ inputs.verify_only }}
           PREFLIGHT: ${{ inputs.preflight_only }}
           BUILD: ${{ inputs.build_number }}
+          AUDIENCE: ${{ inputs.audience }}
         run: |
           [[ "$REF" == refs/heads/main ]] || { echo 'Release modes require main.' >&2; exit 1; }
+          [[ "$AUDIENCE" == all_testers || "$AUDIENCE" == internal_only ]] || { echo 'Select a supported tester audience.' >&2; exit 1; }
           modes=0
           for mode in "$UPLOAD" "$VERIFY" "$PREFLIGHT"; do
             if [[ "$mode" == true ]]; then modes=$((modes + 1)); fi
@@ -72,6 +82,13 @@ jobs:
           BUILD_NUMBER: ${{ inputs.build_number }}
           MARKETING_VERSION: ${{ inputs.marketing_version }}
         run: ruby .github/scripts/preflight-testflight.rb
+      - name: Verify existing external audience and review metadata (GET only)
+        if: ${{ inputs.audience == 'all_testers' }}
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+        run: ruby .github/scripts/external-testflight.rb --preflight
   upload:
     name: Archive & Upload
     needs: intent
@@ -102,6 +119,13 @@ jobs:
           MARKETING_VERSION: ${{ inputs.marketing_version }}
           RELEASE_MODE: upload
         run: ruby .github/scripts/preflight-testflight.rb
+      - name: Verify existing external audience and review metadata (GET only)
+        if: ${{ inputs.audience == 'all_testers' }}
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+        run: ruby .github/scripts/external-testflight.rb --preflight
       - name: Archive, validate, and upload
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,6 +148,15 @@ jobs:
           MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
           DISTRIBUTE_FROM_BUILD: '6'
         run: ruby .github/scripts/distribute-testflight.rb
+      - name: Submit external beta review and assign existing Beka group
+        if: ${{ inputs.audience == 'all_testers' }}
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ steps.preflight.outputs.build_number }}
+          MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
+        run: ruby .github/scripts/external-testflight.rb
   verify:
     name: Verify existing build
     needs: intent
@@ -144,3 +177,12 @@ jobs:
           MARKETING_VERSION: ${{ inputs.marketing_version }}
           DISTRIBUTE_FROM_BUILD: '6'
         run: ruby .github/scripts/distribute-testflight.rb
+      - name: Submit external beta review and assign existing Beka group
+        if: ${{ inputs.audience == 'all_testers' }}
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+        run: ruby .github/scripts/external-testflight.rb
