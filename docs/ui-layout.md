@@ -14,6 +14,15 @@ Catalog is the reference for item rows. Stores is the reference for selection an
 
 Use `ShoppingScopeLabel` for both Choose store and Filters, including menus. It owns the font, symbol scale, multiline fitting and minimum label height. Keep the store picker left and Filters right in the scrolling list header; stack them at accessibility sizes. Keep the X to clear store scope. Do not add a redundant All control.
 
+## Home selection
+
+Settings owns the home picker, placed at the start of its native scrolling list.
+Keep the current home name, local-device distinction, and accessible selection
+value on that control. Groceries, Catalog and carts show only read-only home
+context when multiple homes or a retained local home make it useful. Keep the
+onboarding, unavailable-home and invitation routes in `PersistenceRootView` so
+home selection remains reachable before the tab interface is available.
+
 ## Select and Add controls
 
 Use `ShoppingCollectionToolbar` for Catalog, Stores, Categories and People. It owns the native toolbar placements and shared normal/selection states:
@@ -25,6 +34,21 @@ Use `ShoppingCollectionToolbar` for Catalog, Stores, Categories and People. It o
 Use `ShoppingAddButton` for navigation creation controls, including the grocery plus. It owns the symbol font and scale, icon-only presentation and full accessible action label. Do not substitute an `EditButton` or a checkmark-only Select control on individual Settings screens.
 
 Selected commands capture IDs/revisions and run through the background management worker. Deletion previews must retain referenced records, skip newer changes and preserve the promised disposition. A changed assignment must not escalate a preview from archive to permanent deletion.
+
+## Accent and semantic colors
+
+Use `Color.groceryAccent` or the inherited tint for affirmative actions and selected
+states. The adaptive `AccentColor` asset is also configured as the iPhone app's
+global accent, so native controls and `Color.accentColor` use the same palette.
+Apply tint above the persistence root so onboarding, home sheets and recovery
+share the tab UI's accent. Preserve urgent-item styling (`groceryUrgent`), orange
+warning/removal-from-cart/archive actions and red destructive actions.
+
+`AppPresentationTests/testGroceryAccentSharesTheGlobalAdaptivePalette` checks the
+global asset and explicit accent resolve to the same light and dark colors.
+Appearance screenshot review must still verify native controls, selections,
+quantity buttons and swipe actions; the palette test alone cannot prove rendered
+color consistency or contrast.
 
 ## Verification
 

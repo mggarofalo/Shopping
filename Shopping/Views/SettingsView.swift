@@ -8,6 +8,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HomeScopeControl()
+                        .shoppingListRowInsets()
+                }
                 NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
                     .shoppingListRowInsets()
                 NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }

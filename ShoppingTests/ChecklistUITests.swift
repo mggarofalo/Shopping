@@ -3,6 +3,62 @@ import XCTest
 final class ChecklistUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testStoreListShareCanCancelAndReopenWithoutChangingGroceries() {
+        let app = launchApp(fixture: "populated")
+        let share = app.buttons["shopping.grocery.shareStore"]
+        XCTAssertFalse(share.exists, "Choose a store before sharing its list")
+        selectStore("Costco", app: app)
+        XCTAssertTrue(share.existsOrAppears(timeout: 3))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: share)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        XCTAssertTrue(share.isEnabled)
+        XCTAssertTrue(share.label.contains("Costco"))
+        for _ in 0..<2 {
+            XCTAssertTrue(share.isHittable)
+            share.tap()
+            let close = app.buttons["Close"]
+            XCTAssertTrue(close.existsOrAppears(timeout: 5))
+            XCTAssertTrue(close.isHittable)
+            attachScreenshot("Store list native share sheet", app: app)
+            close.tap()
+            XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
+            XCTAssertTrue(row("Bananas", app: app).exists)
+            XCTAssertTrue(row("Granola", app: app).exists)
+            XCTAssertTrue(cartedLink(count: 1, app: app).exists)
+        }
+    }
+
+    func testStoreListSharingIgnoresEmptySearchAndDisablesWhenAllItemsAreCarted() {
+        let app = launchApp(fixture: "populated")
+        selectStore("Costco", app: app)
+        let share = app.buttons["shopping.grocery.shareStore"]
+        XCTAssertTrue(share.existsOrAppears(timeout: 3))
+        let search = app.searchFields["Search groceries"]
+        search.tap()
+        search.typeText("No matching grocery")
+        XCTAssertTrue(row("Bananas", app: app).waitForNonExistence(timeout: 5))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: share)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        XCTAssertTrue(share.isHittable)
+        share.tap()
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.existsOrAppears(timeout: 5))
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
+        let cancelSearch = app.buttons["Cancel"]
+        XCTAssertTrue(cancelSearch.existsOrAppears(timeout: 3))
+        cancelSearch.tap()
+        XCTAssertTrue(row("Bananas", app: app).existsOrAppears(timeout: 5))
+        cart("Bananas", app: app)
+        cart("Granola", app: app)
+        let empty = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: share)
+        XCTAssertEqual(XCTWaiter.wait(for: [empty], timeout: 5), .completed)
+        XCTAssertTrue(share.exists)
+        XCTAssertFalse(share.isEnabled)
+        attachScreenshot("Empty store list sharing disabled", app: app)
+    }
+
     func testSwipeRemovalSupportsUndoAndRelaunchRecoveryWithoutConfirmation() {
         let app = launchApp(fixture: "populated")
         let grocery = row("Granola", app: app)

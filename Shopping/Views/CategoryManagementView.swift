@@ -223,7 +223,7 @@ struct CategoryManagementView: View {
             Button { setArchived(category, !category.isArchived) } label: {
                 Label(category.isArchived ? "Restore" : "Archive", systemImage: category.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
             }
-            .tint(category.isArchived ? .green : .orange)
+            .tint(category.isArchived ? .groceryAccent : .orange)
             .disabled(!selectionAvailable)
             .accessibilityIdentifier("shopping.categories.archive.\(category.id.uuidString)")
             if categoryHasReferences(category) {

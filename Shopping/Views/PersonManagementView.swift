@@ -161,7 +161,7 @@ struct PersonManagementView: View {
                 Label(person.isArchived ? "Restore" : "Archive", systemImage: person.isArchived ? "arrow.uturn.backward" : "archivebox")
                     .labelStyle(.iconOnly)
             }
-            .tint(person.isArchived ? .green : .orange)
+            .tint(person.isArchived ? .groceryAccent : .orange)
             .accessibilityIdentifier("shopping.people.archive.\(person.id.uuidString)")
             Button(role: .destructive) { beginRemoval(person) } label: {
                 Label("Delete", systemImage: "trash").labelStyle(.iconOnly)

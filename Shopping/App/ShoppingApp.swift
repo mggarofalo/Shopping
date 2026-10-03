@@ -54,6 +54,7 @@ struct ShoppingApp: App {
     var body: some Scene {
         WindowGroup {
             PersistenceRootView(bootstrap: bootstrap)
+                .tint(.groceryAccent)
                 .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
         }
     }

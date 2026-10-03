@@ -4,6 +4,53 @@ import CoreData
 
 @MainActor
 final class GroceryNavigationStateTests: XCTestCase {
+    func testStoreShareTextNormalizesNewlinesWithoutAddingHeadingsOrDeduplicatingOccurrences() {
+        XCTAssertEqual(GroceryStoreShareText.lines(names: ["Milk", "Bananas"]), "Milk\nBananas")
+        XCTAssertEqual(GroceryStoreShareText.lines(names: [" Café\r\n au lait ", "Bread\u{2028}rolls", "🍎 Apples", "Milk", "Milk"]),
+                       "Café au lait\nBread rolls\n🍎 Apples\nMilk\nMilk")
+        XCTAssertEqual(GroceryStoreShareText.lines(names: ["", " ", "\n"]), "")
+        XCTAssertEqual(GroceryStoreShareText.lines(names: []), "")
+    }
+
+    func testStoreShareIncludesAllEligibleOutstandingNamesDespiteSearchAndCategoryFilters() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let service = NeedService(persistence: persistence)
+        let home = try service.createHousehold()
+        let costco = try service.createStore(name: "Costco", householdID: home.householdID)
+        let other = try service.createStore(name: "Other", householdID: home.householdID)
+        let category = try service.createCategory(name: "Dairy", householdID: home.householdID)
+        let milk = try service.createItem(name: "Milk", categoryID: category, storeIDs: [costco],
+                                          householdID: home.householdID, anyStore: false)
+        let milkNeed = try service.addRememberedNeed(itemID: milk, listID: home.listID, quantity: 2, notes: "Do not share notes")
+        _ = try service.addOneTimeNeed(title: "Bananas", listID: home.listID)
+        _ = try service.addOneTimeNeed(title: "Other store only", storeIDs: [other], anyStore: false, listID: home.listID)
+        let narrowed = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID,
+            filter: GroceryNeedFilter(purchase: PurchaseFilter(selectedStoreID: costco), text: "Milk", categoryID: category))
+        XCTAssertEqual(narrowed.matchingNeedIDs, [milkNeed])
+
+        let context = persistence.simulationContext()
+        try context.performAndWait {
+            let needs = try context.fetch(Need.fetchRequest())
+            let stores = try context.fetch(Store.fetchRequest())
+            let categories = try context.fetch(Shopping.Category.fetchRequest())
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let eligible = narrowed.shareableNeedIDs(for: costco, excluding: [])
+            let text = GroceryStoreShareText.text(outstandingNeeds: needs.filter { eligible.contains($0.id) }, selectedStoreID: costco,
+                activeStores: stores, categories: categories, household: household)
+            XCTAssertEqual(text, "Milk\nBananas", "Keep category order without category headings; ignore narrower view filters")
+            XCTAssertEqual(GroceryStoreShareText.text(outstandingNeeds: needs, selectedStoreID: nil,
+                activeStores: stores, categories: categories, household: household), "")
+            XCTAssertEqual(GroceryStoreShareText.text(outstandingNeeds: needs, selectedStoreID: UUID(),
+                activeStores: stores, categories: categories, household: household), "")
+            XCTAssertEqual(GroceryStoreShareText.text(outstandingNeeds: [], selectedStoreID: costco,
+                activeStores: stores, categories: categories, household: household), "")
+            let selectedStore = try XCTUnwrap(stores.first { $0.id == costco })
+            selectedStore.isArchived = true
+            XCTAssertEqual(GroceryStoreShareText.text(outstandingNeeds: needs, selectedStoreID: costco,
+                activeStores: stores, categories: categories, household: household), "")
+        }
+    }
+
     func testNavigationFetchRequestRemainsEntitySafeWithTwoRetainedModels() throws {
         let firstPersistence = try PersistenceController(inMemory: true)
         let secondPersistence = try PersistenceController(inMemory: true)

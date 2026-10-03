@@ -297,6 +297,14 @@ final class CatalogFilterTests: XCTestCase {
         XCTAssertNil(projection.storeCounts(excluding: [])[foreign])
         let unfiltered = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID, filter: GroceryNeedFilter())
         XCTAssertEqual(unfiltered.storeCounts(excluding: []), projection.storeCounts(excluding: []))
+        XCTAssertEqual(projection.shareableNeedIDs(for: a, excluding: []).count, 3,
+            "Sharing ignores narrowed search and selected-store filters but rejects archived, foreign and unresolved needs")
+        XCTAssertEqual(projection.shareableNeedIDs(for: b, excluding: []).count, 2)
+        XCTAssertTrue(projection.shareableNeedIDs(for: closed, excluding: []).isEmpty)
+        XCTAssertTrue(projection.shareableNeedIDs(for: foreign, excluding: []).isEmpty)
+        let eligible = projection.shareableNeedIDs(for: a, excluding: [])
+        XCTAssertTrue(projection.shareableNeedIDs(for: a, excluding: eligible).isEmpty,
+            "The shopper's personal cart is excluded independently of legacy cart flags")
     }
 
     func testStoreCountsRejectMixedValidAndUnresolvedStoreRelationships() throws {
@@ -330,6 +338,8 @@ final class CatalogFilterTests: XCTestCase {
         }
         let projection = try service.groceryNeedProjection(householdID: home.householdID, listID: home.listID, filter: GroceryNeedFilter())
         XCTAssertEqual(projection.storeCounts(excluding: []), [a: StorePurchaseCounts()])
+        XCTAssertTrue(projection.shareableNeedIDs(for: a, excluding: []).isEmpty,
+            "Malformed remembered and one-time purchase identities must never leak into a shared list")
     }
 
     func testUntaggedRulesSurviveRelaunchAndNeverInventLiteralTagsOrOrphanEligibility() throws {

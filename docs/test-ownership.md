@@ -2187,3 +2187,37 @@ terminated; complete bundles and xcodebuild exit0 were preserved. No test or
 runner process was stopped. Independent correctness and test reviews verified
 exact-value proof, unique fallback filenames and stable relaunch paths. Hosted
 pinned iOS18.5 acceptance remains required on the exact integration successor.
+
+
+## Home picker placement in Settings
+
+The picker now belongs to Settings; this supersedes the Groceries-only placement
+recorded in the historical SHOPPING-190 evidence above. Its existing
+`HomeSelectionView` and root-level onboarding/invitation presentation are unchanged.
+
+- `PersonalCartUITests.testSettingsHomePickerDismissalKeepsSelectedHomeAndGroceries`
+  owns the new interaction boundary: a single-home fixture has no switcher on
+  Groceries or Catalog, opens Homes from Settings, dismisses and reopens it twice,
+  remains on Settings with the same selected home, and returns to the unchanged
+  grocery occurrence identities. The fixture supplies a selected home, not a
+  completed dismissal or switching outcome.
+- `testTabHeadersStayVisibleAndSettingsStartAtTop` retains native title, Settings
+  placement, scrolling, actual Large/XXXL system-size and screenshot proof, and
+  now asserts Settings is the only tab with an actionable home picker.
+- `testSwitchExistingHomesPreservesOriginalGroceriesAfterRelaunch` retains
+  cross-home selection, groceries, private/saved carts and selected-home relaunch
+  proof. The helper now uses the Settings back stack. Groceries, Catalog and
+  carts assert their home context is read-only; Settings checks its active picker.
+- `testFirstHomeCreatesInOneTapAndRestoresAfterRelaunch`,
+  `testLocalHomeDeleteCanCancelThenRecreateAfterRelaunch`,
+  `testAcceptedInvitationOpensExactHomeWithoutAppJoinTap`,
+  `testLocalHomeRemainsAvailableInHomesPicker`,
+  `testRetainedLocalUseICloudCopiesHomeAndKeepsSourceSelectable`, and
+  `HomeDetailsUITests.testOwnerDeleteRequiresExactHomeConfirmationAndCanRecreateAfterRelaunch`
+  retain their creation, invitation, retained-local, deletion and recovery
+  boundaries. Selected-home checks and picker entry use Settings; the accepted
+  invitation still proves automatic opening through passive Groceries context.
+
+The new UI method belongs to ShoppingFull's existing whole-target selection.
+ShoppingAcceptance's six-method selection is unchanged. Simulator execution of
+these updated UI workflows remains required; static inspection is not UI proof.

@@ -426,14 +426,14 @@ struct CatalogView: View {
                     Button { prepareIndividualAdd(item, source: source) } label: {
                         Label("Add to list", systemImage: "note.text.badge.plus").labelStyle(.iconOnly)
                     }
-                    .tint(.green)
+                    .tint(.groceryAccent)
                     .accessibilityIdentifier("shopping.catalog.addToList.\(item.id.uuidString)")
                 }
             }
             Button { prepareArchive(item) } label: {
                 Label(item.isArchived ? "Restore" : "Archive", systemImage: item.isArchived ? "arrow.uturn.backward" : "archivebox").labelStyle(.iconOnly)
             }
-            .tint(item.isArchived ? .green : .orange)
+            .tint(item.isArchived ? .groceryAccent : .orange)
             .accessibilityLabel(item.isArchived ? "Restore" : "Archive")
             .accessibilityIdentifier("shopping.catalog.swipeArchive.\(item.id.uuidString)")
             Button(role: .destructive) { prepareRemoval(item) } label: {

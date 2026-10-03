@@ -33,7 +33,11 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists)
         app.buttons["shopping.home.createFirst"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
-        XCTAssertTrue((app.buttons["shopping.home.scope"].value as? String)?.contains("My Home") == true)
+        XCTAssertFalse(app.buttons["shopping.home.scope"].exists)
+        app.tabBars.buttons["Settings"].tap()
+        let scope = app.buttons["shopping.home.scope"]
+        XCTAssertTrue(scope.existsOrAppears(timeout: 3))
+        XCTAssertTrue((scope.value as? String)?.contains("My Home") == true)
     }
 
     /// A suspended read proves the cloud navigation stays interactive and that

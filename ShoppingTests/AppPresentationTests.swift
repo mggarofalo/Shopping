@@ -1,7 +1,33 @@
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Shopping
 
 final class AppPresentationTests: XCTestCase {
+    @MainActor
+    func testGroceryAccentSharesTheGlobalAdaptivePalette() throws {
+        let palettes: [(UIUserInterfaceStyle, CGFloat, CGFloat, CGFloat)] = [
+            (.light, 0.10, 0.32, 0.23),
+            (.dark, 0.35, 0.72, 0.55)
+        ]
+        for (style, expectedRed, expectedGreen, expectedBlue) in palettes {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let globalAccent = try XCTUnwrap(UIColor(named: "AccentColor", in: .main, compatibleWith: traits))
+            let explicitAccent = UIColor(Color.groceryAccent)
+            for color in [globalAccent, explicitAccent] {
+                var red: CGFloat = 0
+                var green: CGFloat = 0
+                var blue: CGFloat = 0
+                var alpha: CGFloat = 0
+                XCTAssertTrue(color.resolvedColor(with: traits).getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+                XCTAssertEqual(red, expectedRed, accuracy: 0.001)
+                XCTAssertEqual(green, expectedGreen, accuracy: 0.001)
+                XCTAssertEqual(blue, expectedBlue, accuracy: 0.001)
+                XCTAssertEqual(alpha, 1, accuracy: 0.001)
+            }
+        }
+    }
+
     func testAppVersionUsesSourceCommitInsteadOfBuildNumber() {
         let commit = "0123456789abcdef0123456789abcdef01234567"
         let version = AppVersion(infoDictionary: [

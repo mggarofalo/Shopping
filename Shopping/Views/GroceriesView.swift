@@ -7,6 +7,9 @@ struct GroceriesView: View {
         let scope: PersonalCartScopeSnapshot
         let presentationID: UUID?
         let values: [UUID: StorePurchaseCounts]
+        let selectedStoreID: UUID?
+        let shareableNeedIDs: Set<UUID>
+        let revision: Int
     }
 
     @Environment(\.persistencePresentation) private var presentation
@@ -76,6 +79,26 @@ struct GroceriesView: View {
         )
     }
 
+    private var storeShareText: String {
+        guard let snapshot = storeCountSnapshot,
+              snapshot.scope.householdID == selection.householdID,
+              snapshot.scope.listID == selection.listID,
+              snapshot.presentationID == presentation?.id,
+              snapshot.selectedStoreID == navigation.selectedStoreID,
+              snapshot.revision == projectionRevision,
+              presentation?.isActive != false else { return "" }
+        let outstanding = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).filter {
+            snapshot.shareableNeedIDs.contains($0.id) && isOutstanding($0) && !isInMyCart($0)
+        }
+        return GroceryStoreShareText.text(
+            outstandingNeeds: outstanding,
+            selectedStoreID: navigation.selectedStoreID,
+            activeStores: activeStores,
+            categories: Array(categories),
+            household: canonicalList?.household
+        )
+    }
+
     private var hasActiveUncartedNeeds: Bool {
         guard presentation?.isActive != false else { return false }
         return GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).contains {
@@ -121,6 +144,19 @@ struct GroceriesView: View {
                         }
                         .accessibilityHint("Choose saved items to add to this category")
                         .accessibilityIdentifier("shopping.category.fill")
+                    }
+                }
+                if navigation.selectedStoreID != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        let text = storeShareText
+                        ShareLink(item: text) {
+                            Label("Share store list", systemImage: "square.and.arrow.up")
+                                .labelStyle(.iconOnly)
+                        }
+                        .disabled(text.isEmpty)
+                        .accessibilityLabel("Share store list for \(selectedStoreName)")
+                        .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
+                        .accessibilityIdentifier("shopping.grocery.shareStore")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -276,7 +312,7 @@ struct GroceriesView: View {
     }
 
     private var homeControls: some View {
-        HomeScopeControl()
+        HomeScopeControl(allowsSwitching: false)
     }
 
     private var emptyState: some View {
@@ -630,7 +666,11 @@ struct GroceriesView: View {
                     let projection = try service.groceryNeedProjection(
                         householdID: householdID, listID: listID, filter: filter
                     )
-                    return (ids: Set(projection.matchingNeedIDs), counts: projection.storeCounts(excluding: cartedNeedIDs))
+                    return (
+                        ids: Set(projection.matchingNeedIDs),
+                        counts: projection.storeCounts(excluding: cartedNeedIDs),
+                        shareIDs: projection.shareableNeedIDs(for: filter.purchase.selectedStoreID, excluding: cartedNeedIDs)
+                    )
                 }.value
                 guard !Task.isCancelled, projectionRevision == revision,
                       selection.householdID == householdID, selection.listID == listID,
@@ -638,7 +678,8 @@ struct GroceriesView: View {
                       presentation?.isActive != false else { return }
                 storeCountSnapshot = StoreCountSnapshot(
                     scope: PersonalCartScopeSnapshot(householdID: householdID, listID: listID),
-                    presentationID: presentationID, values: projected.counts
+                    presentationID: presentationID, values: projected.counts,
+                    selectedStoreID: filter.purchase.selectedStoreID, shareableNeedIDs: projected.shareIDs, revision: revision
                 )
                 let matchingIDs = projected.ids
                 visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(

@@ -290,7 +290,7 @@ struct StoreManagementView: View {
                 Label(store.isArchived ? "Restore" : "Archive", systemImage: store.isArchived ? "arrow.uturn.backward" : "archivebox")
                     .labelStyle(.iconOnly)
             }
-            .tint(store.isArchived ? .green : .orange)
+            .tint(store.isArchived ? .groceryAccent : .orange)
             .disabled(!selectionAvailable)
             .accessibilityIdentifier("shopping.stores.archive.\(store.id.uuidString)")
             Button(role: .destructive) { beginDeletion(store) } label: {
