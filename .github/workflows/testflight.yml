@@ -1,13 +1,15 @@
 name: Upload to TestFlight
-
 run-name: TestFlight ${{ github.sha }}
-
 on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: App Store Connect build number (must be a positive integer)
-        required: true
+        description: Positive build number; leave blank to select the next unused number
+        required: false
+        type: string
+      marketing_version:
+        description: Optional marketing version for preflight or verify-only (defaults to source version)
+        required: false
         type: string
       confirm_upload:
         description: Archive, validate, and upload this commit to TestFlight
@@ -15,65 +17,130 @@ on:
         default: false
         type: boolean
       verify_only:
-        description: Verify and distribute an already uploaded build without uploading again
+        description: Verify and distribute an existing version/build without uploading again
         required: true
         default: false
         type: boolean
-
+      preflight_only:
+        description: Read-only App Store Connect inventory and unused build-number check
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
-
 concurrency:
   group: shopping-testflight
   cancel-in-progress: false
-
 jobs:
-  upload:
-    name: Archive & Upload
-    if: ${{ inputs.confirm_upload && github.ref == 'refs/heads/main' }}
-    runs-on: macos-15
-    timeout-minutes: 45
-    environment: testflight
-
+  intent:
+    name: Validate release intent
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app
-
-      - name: Archive, validate, and upload
+      - name: Require main and exactly one mode
         env:
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
-          APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}
-          APPLE_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
-          APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
-        run: .github/scripts/upload-testflight.sh
-
-      - name: Confirm processing and tester distribution
-        env:
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
-          DISTRIBUTE_FROM_BUILD: '6'
-        run: ruby .github/scripts/distribute-testflight.rb
-
-  verify:
-    name: Verify existing build
-    if: ${{ inputs.verify_only && !inputs.confirm_upload }}
+          REF: ${{ github.ref }}
+          UPLOAD: ${{ inputs.confirm_upload }}
+          VERIFY: ${{ inputs.verify_only }}
+          PREFLIGHT: ${{ inputs.preflight_only }}
+          BUILD: ${{ inputs.build_number }}
+        run: |
+          [[ "$REF" == refs/heads/main ]] || { echo 'Release modes require main.' >&2; exit 1; }
+          modes=0
+          for mode in "$UPLOAD" "$VERIFY" "$PREFLIGHT"; do
+            if [[ "$mode" == true ]]; then modes=$((modes + 1)); fi
+          done
+          [[ "$modes" -eq 1 ]] || { echo 'Select exactly one release mode.' >&2; exit 1; }
+          if [[ "$VERIFY" == true && ! "$BUILD" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'Verify-only requires an explicit positive build number.' >&2; exit 1
+          fi
+  preflight:
+    name: Read-only preflight
+    needs: intent
+    if: ${{ inputs.preflight_only && !inputs.confirm_upload && !inputs.verify_only && github.ref == 'refs/heads/main' }}
     runs-on: macos-15
     timeout-minutes: 20
     environment: testflight
     steps:
       - uses: actions/checkout@v5
+      - name: Check clean exact source
+        run: .github/scripts/validate-release-source.sh
+      - name: Inspect build inventory and approved audience (GET only)
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+        run: ruby .github/scripts/preflight-testflight.rb
+  upload:
+    name: Archive & Upload
+    needs: intent
+    if: ${{ inputs.confirm_upload && !inputs.verify_only && !inputs.preflight_only && github.ref == 'refs/heads/main' }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: testflight
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check clean exact source and required CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/validate-release-source.sh
+          python3 .github/scripts/require-release-ci.py
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      - name: Choose unused build number (GET only)
+        id: preflight
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          RELEASE_MODE: upload
+        run: ruby .github/scripts/preflight-testflight.rb
+      - name: Archive, validate, and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}
+          APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          BUILD_NUMBER: ${{ steps.preflight.outputs.build_number }}
+          MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
+        run: .github/scripts/upload-testflight.sh
+      - name: Confirm processing and tester distribution
+        env:
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          BUILD_NUMBER: ${{ steps.preflight.outputs.build_number }}
+          MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
+          DISTRIBUTE_FROM_BUILD: '6'
+        run: ruby .github/scripts/distribute-testflight.rb
+  verify:
+    name: Verify existing build
+    needs: intent
+    if: ${{ inputs.verify_only && !inputs.confirm_upload && !inputs.preflight_only && github.ref == 'refs/heads/main' }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    environment: testflight
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check clean exact source
+        run: .github/scripts/validate-release-source.sh
       - name: Confirm processing and tester distribution
         env:
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
           BUILD_NUMBER: ${{ inputs.build_number }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
           DISTRIBUTE_FROM_BUILD: '6'
         run: ruby .github/scripts/distribute-testflight.rb
