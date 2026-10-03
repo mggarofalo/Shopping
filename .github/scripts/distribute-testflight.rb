@@ -1,151 +1,67 @@
 #!/usr/bin/env ruby
-
-require "base64"
-require "json"
-require "net/http"
-require "openssl"
-require "uri"
+require_relative "testflight-common"
 
 $stdout.sync = true
 
-class AppStoreConnect
-  def initialize
-    key_data = Base64.decode64(ENV.fetch("APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64"))
-    @key = OpenSSL::PKey.read(key_data)
-    @key_id = ENV.fetch("APP_STORE_CONNECT_API_KEY_ID")
-    @issuer_id = ENV.fetch("APP_STORE_CONNECT_API_ISSUER_ID")
+def distribute_testflight(client, env = ENV, sleep_for: ->(seconds) { sleep seconds })
+  marketing_version = env.fetch("MARKETING_VERSION", "")
+  marketing_version = marketing_version.empty? ? TestFlight.project_version : TestFlight.version(marketing_version)
+  target_number = TestFlight.number(env.fetch("BUILD_NUMBER"))
+  source_number = TestFlight.number(env.fetch("DISTRIBUTE_FROM_BUILD", "6"))
+  catalog = TestFlight::Catalog.new(client)
+  source = catalog.source_build(source_number, env["DISTRIBUTE_FROM_VERSION"])
+  groups = catalog.source_groups(source)
+  puts "Source tester groups: #{groups.map { |group| group.dig('attributes', 'name') }.join(', ')}"
+  groups.each { |group| puts "#{group.dig('attributes', 'name')} automatically receives all builds" if group.dig("attributes", "hasAccessToAllBuilds") }
+  target = nil
+  24.times do |attempt|
+    target = catalog.find_build(marketing_version: marketing_version, number: target_number)
+    state = target&.dig("attributes", "processingState")
+    puts "Build #{marketing_version} (#{target_number}): #{state || 'not yet visible'}"
+    break if state == "VALID"
+    raise "Build #{marketing_version} (#{target_number}) failed processing: #{state}" if %w[FAILED INVALID].include?(state)
+    sleep_for.call(30) unless attempt == 23
   end
-
-  def request(path, method: :get, body: nil)
-    uri = URI.join("https://api.appstoreconnect.apple.com", path)
-    request = case method
-              when :post then Net::HTTP::Post.new(uri)
-              when :patch then Net::HTTP::Patch.new(uri)
-              else Net::HTTP::Get.new(uri)
-              end
-    request["Authorization"] = "Bearer #{token}"
-    request["Content-Type"] = "application/json"
-    request.body = JSON.generate(body) if body
-    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
-    unless response.is_a?(Net::HTTPSuccess)
-      raise "App Store Connect #{method.upcase} #{uri.path} failed (#{response.code}): #{response.body}"
+  raise "Build #{marketing_version} (#{target_number}) was not processed within 12 minutes" unless target&.dig("attributes", "processingState") == "VALID"
+  target_id = target.fetch("id")
+  initial = client.request("/v1/builds/#{target_id}/buildBetaDetail").fetch("data").fetch("attributes")
+  if initial["internalBuildState"] == "MISSING_EXPORT_COMPLIANCE"
+    raise "Export-compliance review required" unless source.dig("attributes", "usesNonExemptEncryption") == false
+    client.request("/v1/builds/#{target_id}", method: :patch, body: { data: { type: "builds", id: target_id, attributes: { usesNonExemptEncryption: false } } })
+    puts "Copied exempt encryption classification from build #{source_number}"
+  elsif %w[PROCESSING_EXCEPTION EXPIRED].include?(initial["internalBuildState"])
+    raise "Target build cannot reach testers: #{initial['internalBuildState']}"
+  end
+  groups.each do |group|
+    id = group.fetch("id")
+    next if catalog.group_build_ids(id).include?(target_id)
+    next if group.dig("attributes", "hasAccessToAllBuilds")
+    client.request("/v1/betaGroups/#{id}/relationships/builds", method: :post, body: { data: [{ type: "builds", id: target_id }] })
+    puts "Added #{marketing_version} (#{target_number}) to #{group.dig('attributes', 'name')}"
+  end
+  detail = nil
+  12.times do |attempt|
+    missing = groups.reject { |group| catalog.group_build_ids(group.fetch("id")).include?(target_id) }
+    detail = client.request("/v1/builds/#{target_id}/buildBetaDetail").fetch("data").fetch("attributes")
+    states = groups.map { |group| detail.fetch(group.dig("attributes", "isInternalGroup") ? "internalBuildState" : "externalBuildState") }
+    break if missing.empty? && states.all? { |state| TestFlight::READY_STATES.include?(state) }
+    raise "Target build cannot reach testers: #{states.join(', ')}" if states.any? { |state| %w[PROCESSING_EXCEPTION EXPIRED].include?(state) }
+    if attempt == 11
+      raise "Target build is not yet available to the approved tester group: #{states.join(', ')}; retry verify-only"
     end
-    response.body.to_s.empty? ? {} : JSON.parse(response.body)
+    sleep_for.call(30)
   end
+  puts "Build #{marketing_version} (#{target_number}) internal state: #{detail['internalBuildState']}"
+  puts "Build #{marketing_version} (#{target_number}) external state: #{detail['externalBuildState']}"
+  puts "Build #{marketing_version} (#{target_number}) is processed and available to the approved tester groups."
+  { marketing_version: marketing_version, build_number: target_number, processing: "VALID", tester_groups: groups.map { |group| group.dig("attributes", "name") }, internal_state: detail["internalBuildState"], external_state: detail["externalBuildState"] }
+end
 
-  def list(path)
-    results = []
-    while path
-      response = request(path)
-      results.concat(response.fetch("data"))
-      path = response.dig("links", "next")
-    end
-    results
-  end
-
-  private
-
-  def token
-    header = { alg: "ES256", kid: @key_id, typ: "JWT" }
-    now = Time.now.to_i
-    claims = { iss: @issuer_id, iat: now, exp: now + 600, aud: "appstoreconnect-v1" }
-    message = [header, claims].map { |part| Base64.urlsafe_encode64(JSON.generate(part), padding: false) }.join(".")
-    signature = @key.dsa_sign_asn1(OpenSSL::Digest::SHA256.digest(message))
-    pair = OpenSSL::ASN1.decode(signature).value
-    raw_signature = pair.map { |integer| integer.value.to_s(2).rjust(32, "\0") }.join
-    "#{message}.#{Base64.urlsafe_encode64(raw_signature, padding: false)}"
+if $PROGRAM_NAME == __FILE__
+  begin
+    puts JSON.pretty_generate(distribute_testflight(AppStoreConnect.new))
+  rescue StandardError => error
+    warn "TestFlight distribution failed: #{error.message}"
+    exit 1
   end
 end
-
-def path_with_query(path, query)
-  "#{path}?#{URI.encode_www_form(query)}"
-end
-
-def find_build(client, app_id, number)
-  query = { "filter[app]" => app_id, "filter[version]" => number, "limit" => 10 }
-  client.list(path_with_query("/v1/builds", query)).find { |build| build.dig("attributes", "version") == number }
-end
-
-def group_build_ids(client, group_id)
-  client.list("/v1/betaGroups/#{group_id}/relationships/builds?limit=200").map { |build| build.fetch("id") }
-end
-
-client = AppStoreConnect.new
-bundle_id = ENV.fetch("BUNDLE_IDENTIFIER", "com.mggarofalo.shopping")
-target_number = ENV.fetch("BUILD_NUMBER")
-source_number = ENV.fetch("DISTRIBUTE_FROM_BUILD")
-apps = client.list(path_with_query("/v1/apps", "filter[bundleId]" => bundle_id, "limit" => 10))
-app = apps.find { |entry| entry.dig("attributes", "bundleId") == bundle_id }
-raise "App #{bundle_id} was not found in App Store Connect" unless app
-app_id = app.fetch("id")
-source = find_build(client, app_id, source_number)
-raise "Source build #{source_number} was not found" unless source
-puts "Source build #{source_number}: #{source.dig('attributes', 'processingState')}"
-source_encryption = source.dig("attributes", "usesNonExemptEncryption")
-puts "Source build #{source_number} uses non-exempt encryption: #{source_encryption.inspect}"
-
-groups = client.list("/v1/apps/#{app_id}/betaGroups?limit=200")
-source_groups = groups.select do |group|
-  group_build_ids(client, group.fetch("id")).include?(source.fetch("id"))
-end
-raise "Source build #{source_number} has no tester groups to copy" if source_groups.empty?
-puts "Source tester groups: #{source_groups.map { |group| group.dig('attributes', 'name') }.join(', ')}"
-source_groups.each do |group|
-  puts "#{group.dig('attributes', 'name')} automatically receives all builds" if group.dig("attributes", "hasAccessToAllBuilds")
-end
-
-target = nil
-24.times do
-  target = find_build(client, app_id, target_number)
-  state = target&.dig("attributes", "processingState")
-  puts "Build #{target_number}: #{state || 'not yet visible'}"
-  break if state == "VALID"
-  raise "Build #{target_number} failed processing: #{state}" if %w[FAILED INVALID].include?(state)
-  sleep 30
-end
-raise "Build #{target_number} was not processed within 12 minutes" unless target&.dig("attributes", "processingState") == "VALID"
-initial_detail = client.request("/v1/builds/#{target.fetch('id')}/buildBetaDetail").fetch("data")
-initial_internal_state = initial_detail.dig("attributes", "internalBuildState")
-puts "Build #{target_number} initial internal state: #{initial_internal_state}"
-if initial_internal_state == "MISSING_EXPORT_COMPLIANCE"
-  unless source_encryption == false
-    raise "Build #{target_number} needs export-compliance review; source build #{source_number} is not classified as exempt"
-  end
-  body = { data: { type: "builds", id: target.fetch("id"), attributes: { usesNonExemptEncryption: false } } }
-  client.request("/v1/builds/#{target.fetch('id')}", method: :patch, body: body)
-  puts "Copied exempt encryption classification from build #{source_number} to build #{target_number}"
-elsif %w[PROCESSING_EXCEPTION EXPIRED].include?(initial_internal_state)
-  raise "Build #{target_number} cannot reach internal testers: #{initial_internal_state}"
-end
-
-source_groups.each do |group|
-  group_id = group.fetch("id")
-  next if group_build_ids(client, group_id).include?(target.fetch("id"))
-  next if group.dig("attributes", "hasAccessToAllBuilds")
-  body = { data: [{ type: "builds", id: target.fetch("id") }] }
-  client.request("/v1/betaGroups/#{group_id}/relationships/builds", method: :post, body: body)
-  puts "Added build #{target_number} to #{group.dig('attributes', 'name')}"
-end
-
-24.times do |attempt|
-  missing = source_groups.reject do |group|
-    group_build_ids(client, group.fetch("id")).include?(target.fetch("id"))
-  end
-  break if missing.empty?
-  raise "Build #{target_number} is absent from #{missing.map { |group| group.dig('attributes', 'name') }.join(', ')} after 12 minutes" if attempt == 23
-  puts "Waiting for build #{target_number} in #{missing.map { |group| group.dig('attributes', 'name') }.join(', ')}"
-  sleep 30
-end
-beta_detail = client.request("/v1/builds/#{target.fetch('id')}/buildBetaDetail").fetch("data")
-internal_state = beta_detail.dig("attributes", "internalBuildState")
-external_state = beta_detail.dig("attributes", "externalBuildState")
-puts "Build #{target_number} internal state: #{internal_state}"
-puts "Build #{target_number} external state: #{external_state}"
-ready_states = %w[READY_FOR_BETA_TESTING IN_BETA_TESTING]
-if source_groups.any? { |group| group.dig("attributes", "isInternalGroup") } && !ready_states.include?(internal_state)
-  raise "Build #{target_number} is assigned but not available to internal testers: #{internal_state}"
-end
-if source_groups.any? { |group| !group.dig("attributes", "isInternalGroup") } && !ready_states.include?(external_state)
-  raise "Build #{target_number} is assigned but not available to external testers: #{external_state}"
-end
-puts "Build #{target_number} is processed and assigned to the source build's tester groups."

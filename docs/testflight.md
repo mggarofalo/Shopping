@@ -61,11 +61,11 @@ and observed device result are recorded under SHOPPING-10.
 The workflow requires:
 
 - an Apple Distribution certificate exported with its private key as a password-protected `.p12` file;
-- an App Store Connect distribution provisioning profile for `com.mggarofalo.shopping`;
+- separate App Store Connect distribution provisioning profiles for `com.mggarofalo.shopping` and `com.mggarofalo.shopping.watchkitapp`, both granting production push, the existing CloudKit container, and `InProcessOneTimeLinks` sharing;
 - an App Store Connect API key with the minimum access needed to upload builds, including its key ID, issuer ID, and original `.p8` private key; and
 - an App Store Connect app record whose bundle ID is `com.mggarofalo.shopping`.
 
-The upload script rejects a provisioning profile for another bundle or team. It also rejects profiles containing registered device identifiers, because those are Ad Hoc rather than App Store Connect profiles.
+The upload script validates both profiles against the established team `649367BDD4`, their exact bundle IDs, expiration, App Store distribution shape, required capabilities, and a shared valid certificate imported from the protected `.p12`. It binds the profiles per target and includes both bundle IDs in the manual export mapping. The signed export must match the intended version/build and clean source SHA before Apple validation/upload.
 
 ## GitHub environment
 
@@ -75,7 +75,8 @@ In repository **Settings → Environments**, create an environment named `testfl
 | --- | --- |
 | `APPLE_DISTRIBUTION_CERTIFICATE_BASE64` | Base64 contents of the exported `.p12` file. |
 | `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` file. |
-| `APP_STORE_PROVISIONING_PROFILE_BASE64` | Base64 contents of the App Store Connect `.mobileprovision` file. |
+| `APP_STORE_PROVISIONING_PROFILE_BASE64` | Base64 contents of the capability-correct iPhone App Store Connect `.mobileprovision` file. |
+| `APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64` | Base64 contents of the capability-correct Watch App Store Connect `.mobileprovision` file. |
 | `APP_STORE_CONNECT_API_KEY_ID` | App Store Connect API key ID. |
 | `APP_STORE_CONNECT_API_ISSUER_ID` | App Store Connect API issuer ID. |
 | `APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64` | Base64 contents of the API key `.p8` file. |
@@ -88,41 +89,64 @@ base64 -i Shopping_App_Store.mobileprovision | pbcopy
 base64 -i AuthKey_KEYID.p8 | pbcopy
 ```
 
-Base64 is transport encoding, not encryption. Keep all six values in the protected GitHub environment; never commit them, attach them to a GitHub release, or paste them into workflow inputs or logs.
+Base64 is transport encoding, not encryption. Keep all seven values in the protected GitHub environment; never commit them, attach them to a GitHub release, or paste them into workflow inputs or logs.
 
 ## Manual upload
 
-SHOPPING-132 tracks the hosted upload's two-profile signing repair. The current
-script installs one old iPhone App Store profile and applies it globally. It
-cannot sign the embedded Watch app, and the profile lacks CloudKit and push
-entitlements. A hosted archive failure before Apple validation/upload does not
-consume the requested build number. Inspect the run stage before retrying.
-Do not call the hosted path repaired until an archive with separate,
-capability-correct iPhone and Watch App Store profiles succeeds.
+SHOPPING-132 adds separate profile validation, target-specific archive settings,
+and a two-bundle export mapping. The old iPhone secret must be replaced with a
+capability-correct profile and the Watch profile secret must be configured before
+using the hosted upload. Generating new credentials, changing protected secrets
+or access, or accepting a new Apple agreement requires explicit approval. Local
+fixtures and local signing compatibility do not prove hosted signing. Retain the
+fallback until an approved hosted archive/export succeeds with these assets.
 
-After the workflow reaches the repository's default branch:
+After the workflow reaches `main`:
 
-1. Open **Actions → Upload to TestFlight → Run workflow**.
-2. Select `main`. Releases from other branches or tags are rejected.
-3. Enter a positive build number that has never been uploaded for the current marketing version.
-4. Select the upload confirmation checkbox and run the workflow. The workflow
-   waits for App Store Connect processing, then copies the tester groups from
-   known available build 6 before reporting success. Update
-   `DISTRIBUTE_FROM_BUILD` if the intended tester groups change.
-   For a build that already uploaded, run the workflow with `confirm_upload`
-   cleared and `verify_only` selected. This retries the distribution check
-   without spending another build number.
-   When a processed build is marked Missing Compliance, the check copies the
-   exempt encryption classification only if known available build 6 has the
-   same classification. The app also declares this classification in its
-   generated Info.plist for future uploads. Any change in encryption use
-   requires a fresh export-compliance review before distribution.
-5. Approve the `testflight` environment deployment when GitHub requests it.
-6. Confirm any required export-compliance or external beta review in App Store
-   Connect. The workflow reports the internal and external beta states after
-   adding the build to the same tester groups as the confirmed build.
+1. Open **Actions → Upload to TestFlight → Run workflow** and select `main`.
+   Select exactly one of `preflight_only`, `confirm_upload`, or `verify_only`.
+   All modes use the protected `testflight` environment and are serialized.
+2. For `preflight_only`, leave the build number blank to inspect the inventory
+   and select the next integer greater than all existing iOS build numbers, or
+   enter a number to check that the marketing-version/build pair is unused.
+   This mode uses only App Store Connect GET requests and receives no signing
+   secrets. It checks the existing Garofalo Home audience against baseline
+   build 6. It does not reserve a build number or distribute anything.
+3. For `confirm_upload`, source marketing versions must match across all four
+   iPhone/Watch configurations. Leave the build number blank to allocate it
+   inside the serialized upload job, or enter an explicit unused number. The
+   latest push-to-main Swift CI run for the exact dispatched SHA must have
+   successful **Release SDK Build** and **Build & Test** jobs. The upload job
+   uses GitHub `actions: read` only to inspect those results; this proposed
+   permission addition must be approved before deployment. A failing or pending
+   newer run cannot be replaced by an older success.
+4. Approve the protected environment when requested. The script validates both
+   profiles and their certificate, archives, exports, checks signed capabilities
+   and metadata, and asks Apple to validate the IPA. It repeats the GET-only
+   unused-pair check immediately before the single upload. Other upload clients
+   are outside this workflow's lock, so the check is not a reservation. Diagnose
+   any upload error before retrying; never blindly upload again after a timeout.
+5. For an already uploaded build, use `verify_only` with its explicit number.
+   The optional `marketing_version` defaults to the checked-out source version;
+   specify it when verifying an older release. Verification looks up the exact
+   iOS marketing-version/build pair, waits for `VALID` processing, and verifies
+   membership and availability in **Garofalo Home**. It assigns only that
+   existing group when needed, never creates groups or invites testers. A source
+   build 6 group mismatch or ambiguous source version fails before mutation.
+   A future baseline change must be reviewed; `DISTRIBUTE_FROM_VERSION` can
+   disambiguate that baseline without changing the audience.
+6. If Missing Compliance is reported, the script copies exempt encryption only
+   from the confirmed exempt baseline. Changes in encryption use require review.
+   The workflow reports internal and external beta states. Group assignment alone
+   is insufficient: testers must have a ready beta state. External beta review
+   and production App Store submission are not automated here. Retry verify-only
+   if processing or group availability is slow, without another upload.
 
-The workflow is manual-only, grants the GitHub token read-only repository access, serializes uploads, and never cancels an upload in progress. It creates a random temporary keychain and temporary signing directory on the hosted runner. Its exit trap removes the installed profile, keychain, certificate, private key, archive, and exported IPA whether the job succeeds or fails.
+The exit trap removes newly installed profiles and all temporary key/certificate,
+keychain, archive and export files on success or failure, restores the original
+keychain search list, preserves identical pre-existing profiles, and refuses to
+overwrite conflicting profiles. Signing secrets are available only to the
+protected upload step; the API key is also used by protected preflight/verification.
 
 ## Local automatic-signing fallback
 
@@ -171,7 +195,7 @@ Run the static contract locally:
 .github/scripts/test-testflight-workflow.sh
 ```
 
-The check parses the YAML, syntax-checks the upload script, verifies the manual/environment/permission guards, verifies all secret references, and checks the validate/upload and cleanup paths. The normal Swift CI workflow runs the same check. A live archive or upload is intentionally out of scope until SHOPPING-10 is complete.
+The check executes the release-mode truth table and tests profile capabilities, expiry and certificate compatibility, exact version/build collision detection, GET-only preflight and pagination, required exact-source CI jobs, approved audience and tester availability, exported metadata, and shell cleanup after signing/archive failure. Existing build-identity and source-sharing checks remain included. Normal Swift CI runs the same checks. Fixture tests do not prove authenticated App Store Connect behavior, protected secret correctness, or hosted signing; an approved hosted archive and subsequent real release remain separate evidence.
 
 ## Build identity
 
