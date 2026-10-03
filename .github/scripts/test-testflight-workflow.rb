@@ -9,6 +9,7 @@ end
 check((workflow["on"] || workflow.fetch(true)).keys == ["workflow_dispatch"], "manual-only trigger")
 check(workflow["permissions"] == { "contents" => "read" }, "default read-only permissions")
 check(workflow["concurrency"] == { "group" => "shopping-testflight", "cancel-in-progress" => false }, "serialized release, no cancellation")
+check(File.executable?("#{root}/.github/scripts/validate-release-source.sh"), "source-validation entrypoint is executable for direct workflow invocation")
 jobs = workflow.fetch("jobs")
 %w[upload verify preflight].each do |name|
   job = jobs.fetch(name)
