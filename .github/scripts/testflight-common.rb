@@ -7,6 +7,34 @@ require "uri"
 # Only the protected release jobs construct this client. Preflight additionally
 # refuses every mutation, even if a caller accidentally asks for one.
 class AppStoreConnect
+  class RequestError < StandardError
+    attr_reader :status, :apple_codes
+
+    def initialize(method, path, response)
+      @status = response.code
+      @apple_codes = AppStoreConnect.error_codes(response.body)
+      suffix = apple_codes.empty? ? "" : "; Apple error codes: #{apple_codes.join(', ')}"
+      super("App Store Connect #{method.upcase} #{path} failed (#{status})#{suffix}")
+    end
+  end
+
+  # Retain machine-readable diagnostics only. Apple's free-text detail, title,
+  # metadata and response headers may contain private values and stay unlogged.
+  def self.error_codes(body)
+    return [] unless body.is_a?(String) && body.bytesize <= 262_144
+    payload = JSON.parse(body)
+    return [] unless payload.is_a?(Hash) && payload["errors"].is_a?(Array)
+    protected_values = ENV.values_at("APP_STORE_CONNECT_API_KEY_ID", "APP_STORE_CONNECT_API_ISSUER_ID", "APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64").compact.reject(&:empty?)
+    payload["errors"].first(5).map do |error|
+      code = error.is_a?(Hash) && error["code"]
+      next unless code.is_a?(String) && /\A[A-Z][A-Z0-9_.-]{0,119}\z/.match?(code)
+      next if protected_values.any? { |value| code.include?(value) }
+      code
+    end.compact.uniq
+  rescue JSON::ParserError
+    []
+  end
+
   def initialize(read_only: false)
     @read_only = read_only
     @key = OpenSSL::PKey.read(Base64.strict_decode64(ENV.fetch("APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64").gsub(/\s/, "")))
@@ -32,8 +60,7 @@ class AppStoreConnect
     request.body = JSON.generate(body) if body
     response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 20, read_timeout: 60) { |http| http.request(request) }
     unless response.is_a?(Net::HTTPSuccess)
-      # Never print response bodies, JWTs, or key material in a failed release.
-      raise "App Store Connect #{method.upcase} #{uri.path} failed (#{response.code}); inspect the protected account for permissions or agreements"
+      raise RequestError.new(method, uri.path, response)
     end
     response.body.to_s.empty? ? {} : JSON.parse(response.body)
   end
@@ -125,6 +152,17 @@ module TestFlight
 
     def group_build_ids(id)
       client.list("/v1/betaGroups/#{id}/relationships/builds?limit=200").map { |build| build.fetch("id") }
+    end
+
+    def pending_beta_reviews(marketing_version:, except_build_id:)
+      builds(marketing_version: marketing_version).reject { |build| build.fetch("id") == except_build_id }.flat_map do |build|
+        reviews = client.list(TestFlight.query("/v1/betaAppReviewSubmissions", "filter[build]" => build.fetch("id"), "limit" => 200))
+        reviews.map do |review|
+          state = review.dig("attributes", "betaReviewState")
+          next unless %w[WAITING_FOR_REVIEW IN_REVIEW].include?(state)
+          { build_number: TestFlight.number(build.dig("attributes", "version")), build_id: build.fetch("id"), review_id: review.fetch("id"), state: state }
+        end.compact
+      end
     end
 
     def source_groups(source)

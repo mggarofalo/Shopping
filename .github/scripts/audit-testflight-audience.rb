@@ -31,6 +31,7 @@ def audit_testflight_audience(client, env = ENV)
     external_state: detail.dig("attributes", "externalBuildState"), beta_detail_id: detail.fetch("id"),
     auto_notify_enabled: detail.dig("attributes", "autoNotifyEnabled"),
     reviews: submissions.map { |review| { id: review.fetch("id"), state: review.dig("attributes", "betaReviewState") } },
+    same_version_pending_reviews: catalog.pending_beta_reviews(marketing_version: version, except_build_id: target.fetch("id")),
     groups: groups, read_only: true }
 end
 

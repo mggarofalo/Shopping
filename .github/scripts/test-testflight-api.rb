@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 require "minitest/autorun"
+require "minitest/mock"
 require_relative "preflight-testflight"
 require_relative "distribute-testflight"
 
@@ -129,5 +130,36 @@ class APITests < Minitest::Test
     assert_equal [1, 2], client.list("/one")
     pages["/two"]["links"]["next"] = "/one"
     assert_raises(RuntimeError) { client.list("/one") }
+  end
+  def test_http_error_retains_status_and_apple_code_without_private_response_fields
+    response = Net::HTTPUnprocessableEntity.new("1.1", "422", "Unprocessable Entity")
+    response.define_singleton_method(:body) do
+      JSON.generate(errors: [{ code: "STATE_ERROR.BETA_REVIEW", title: "Private contact", detail: "private@example.invalid", meta: { token: "private-jwt" } }])
+    end
+    http = Object.new
+    http.define_singleton_method(:request) { |_| response }
+    client = AppStoreConnect.allocate
+    client.define_singleton_method(:token) { "fixture-token" }
+    Net::HTTP.stub(:start, ->(*_args, **_options, &block) { block.call(http) }) do
+      error = assert_raises(AppStoreConnect::RequestError) { client.request("/v1/betaAppReviewSubmissions?private=value", method: :post, body: { private: "fixture-body" }) }
+      assert_equal "422", error.status
+      assert_equal ["STATE_ERROR.BETA_REVIEW"], error.apple_codes
+      assert_includes error.message, "POST /v1/betaAppReviewSubmissions failed (422)"
+      %w[private@example.invalid Private private-jwt fixture-token fixture-body private=value permissions agreements].each { |value| refute_includes error.message, value }
+    end
+  end
+  def test_error_code_parser_rejects_malformed_or_unbounded_response_content
+    ["not-json", "null", "[]", '{"errors":{}}', '{"errors":[null,1,"text",{}]}', "x" * 262_145].each do |body|
+      assert_empty AppStoreConnect.error_codes(body)
+    end
+    assert_equal ["STATE_ERROR", "ENTITY_ERROR.ATTRIBUTE.INVALID"], AppStoreConnect.error_codes(JSON.generate(errors: [{ code: "STATE_ERROR" }, { code: "STATE_ERROR" }, { code: "ENTITY_ERROR.ATTRIBUTE.INVALID" }, { code: "secret@example.invalid" }, { code: "::warning::injected" }]))
+  end
+  def test_error_code_parser_never_prints_configured_credential_values
+    name = "APP_STORE_CONNECT_API_KEY_ID"
+    previous = ENV[name]
+    ENV[name] = "FIXTUREKEYID"
+    assert_empty AppStoreConnect.error_codes(JSON.generate(errors: [{ code: "FIXTUREKEYID" }, { code: "STATE_ERROR.FIXTUREKEYID" }]))
+  ensure
+    ENV[name] = previous
   end
 end

@@ -17,8 +17,11 @@ class AudienceAuditFixture
     when "/v1/apps"
       [{ "id" => "shopping", "attributes" => { "bundleId" => TestFlight::BUNDLE_ID } }]
     when "/v1/builds"
-      number = query.fetch("filter[version]")
-      [{ "id" => "build-#{number}", "attributes" => { "version" => number, "processingState" => "VALID" } }]
+      assert_version = query["filter[preReleaseVersion.version]"]
+      raise "Missing iOS scope" unless query["filter[preReleaseVersion.platform]"] == "IOS"
+      numbers = query["filter[version]"] ? [query["filter[version]"]] : ["28", "29"]
+      raise "Missing version scope" unless assert_version
+      numbers.map { |number| { "id" => "build-#{number}", "attributes" => { "version" => number, "processingState" => "VALID" } } }
     when "/v1/apps/shopping/betaGroups"
       [{ "id" => "external", "attributes" => { "name" => "Existing external fixture", "isInternalGroup" => false } }]
     when "/v1/betaGroups/external/betaTesters"
@@ -26,7 +29,7 @@ class AudienceAuditFixture
     when "/v1/betaGroups/external/relationships/builds"
       [{ "id" => "build-26" }]
     when "/v1/betaAppReviewSubmissions"
-      []
+      query["filter[build]"] == "build-28" ? [{ "id" => "pending-review", "attributes" => { "betaReviewState" => "WAITING_FOR_REVIEW" } }] : []
     else
       raise "Unexpected GET #{path}"
     end
@@ -47,6 +50,7 @@ class AudienceAuditTests < Minitest::Test
     assert_equal [{ id: "beka", first_name: "Beka", state: "INSTALLED" }], receipt[:groups].first[:known_testers]
     refute_includes JSON.generate(receipt), "private@example.invalid"
     assert client.requests.all? { |method, _| method == :get }
+    assert_equal [{ build_number: "28", build_id: "build-28", review_id: "pending-review", state: "WAITING_FOR_REVIEW" }], receipt[:same_version_pending_reviews]
   end
   def test_protected_main_only_workflow_and_no_signing_or_extra_permissions
     workflow = YAML.safe_load(File.read(File.expand_path("../workflows/testflight-audience-audit.yml", __dir__)), aliases: true)

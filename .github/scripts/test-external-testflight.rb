@@ -3,12 +3,13 @@ require "minitest/autorun"
 require_relative "external-testflight"
 
 class ExternalFixture
-  attr_accessor :groups, :members, :reviews, :state, :notify, :assigned, :metadata, :description, :processing
+  attr_accessor :groups, :members, :reviews, :state, :notify, :assigned, :metadata, :description, :processing, :sibling_reviews, :sibling_version
   attr_reader :writes
   def initialize
     @groups = [group("home", "Garofalo Home", true), group("external", "Fixture Beka group", false)]
     @members = { "home" => ["michael"], "external" => ["beka"] }
     @reviews, @writes = [], []
+    @sibling_reviews, @sibling_version = [], "1.5.0"
     @state, @notify, @assigned, @processing = "READY_FOR_BETA_SUBMISSION", false, false, "VALID"
     @metadata = { "contactFirstName" => "Existing", "contactLastName" => "Contact", "contactPhone" => "existing", "contactEmail" => "existing", "demoAccountRequired" => false }
     @description = "Existing approved beta app description"
@@ -24,9 +25,13 @@ class ExternalFixture
     when %r{\A/v1/betaGroups/([^/]+)/betaTesters\z} then @members.fetch($1).map { |id| { "id" => id } }
     when "/v1/builds"
       query = URI.decode_www_form(uri.query).to_h
-      raise "Wrong build identity" unless query["filter[version]"] == "29" && query["filter[preReleaseVersion.version]"] == "1.5.0" && query["filter[preReleaseVersion.platform]"] == "IOS"
-      [{ "id" => "target", "attributes" => { "version" => "29", "processingState" => @processing, "usesNonExemptEncryption" => false } }]
-    when "/v1/betaAppReviewSubmissions" then @reviews
+      raise "Wrong build identity" unless [nil, "29"].include?(query["filter[version]"]) && query["filter[preReleaseVersion.version]"] == "1.5.0" && query["filter[preReleaseVersion.platform]"] == "IOS"
+      target = { "id" => "target", "attributes" => { "version" => "29", "processingState" => @processing, "usesNonExemptEncryption" => false } }
+      return [target] if query["filter[version]"] || @sibling_version != query["filter[preReleaseVersion.version]"]
+      [target, { "id" => "sibling", "attributes" => { "version" => "28" } }]
+    when "/v1/betaAppReviewSubmissions"
+      build_id = URI.decode_www_form(uri.query).to_h.fetch("filter[build]")
+      build_id == "target" ? @reviews : @sibling_reviews
     when "/v1/apps/shopping/betaAppLocalizations" then [{ "attributes" => { "description" => @description } }]
     when "/v1/betaGroups/external/relationships/builds" then @assigned ? [{ "id" => "target" }] : []
     else raise "Unexpected GET #{path}"
@@ -79,6 +84,38 @@ class ExternalDistributionTests < Minitest::Test
     @api.state, @api.notify, @api.assigned = "IN_BETA_TESTING", true, true
     assert distribute[:available]
     assert_empty @api.writes
+  end
+  def test_pending_same_version_review_blocks_before_any_write_and_preserves_submission
+    %w[WAITING_FOR_REVIEW IN_REVIEW].each do |state|
+      setup
+      @api.sibling_reviews = [{ "id" => "existing-review", "attributes" => { "betaReviewState" => state } }]
+      existing = Marshal.dump(@api.sibling_reviews)
+      message = assert_raises(RuntimeError) { distribute }.message
+      assert_includes message, "1.5.0 (28): #{state}"
+      assert_includes message, "retry verify-only for 1.5.0 (29)"
+      assert_empty @api.writes
+      assert_equal existing, Marshal.dump(@api.sibling_reviews)
+      refute @api.assigned
+    end
+  end
+  def test_completed_sibling_review_allows_new_submission
+    @api.sibling_reviews = [{ "id" => "existing-review", "attributes" => { "betaReviewState" => "APPROVED" } }]
+    assert distribute[:assigned]
+    assert_equal "APPROVED", @api.sibling_reviews.first.dig("attributes", "betaReviewState")
+  end
+  def test_pending_review_for_another_version_does_not_block
+    @api.sibling_version = "1.4.9"
+    @api.sibling_reviews = [{ "id" => "other-version-review", "attributes" => { "betaReviewState" => "WAITING_FOR_REVIEW" } }]
+    assert distribute[:assigned]
+  end
+  def test_existing_target_review_is_reused_without_resubmitting
+    @api.state, @api.notify = "WAITING_FOR_BETA_REVIEW", true
+    @api.reviews = [{ "id" => "target-review", "attributes" => { "betaReviewState" => "WAITING_FOR_REVIEW" } }]
+    @api.sibling_reviews = [{ "id" => "sibling-review", "attributes" => { "betaReviewState" => "WAITING_FOR_REVIEW" } }]
+    receipt = distribute
+    assert receipt[:assigned]
+    refute receipt[:available]
+    assert_equal [[:post, "/v1/betaGroups/external/relationships/builds"]], @api.writes.map { |write| write.first(2) }
   end
   def test_audience_drift_public_access_and_identity_fail_before_any_write
     changes = [-> { @api.members["external"] << "someone-else" }, -> { @api.groups.last["attributes"]["publicLinkEnabled"] = true }, -> { @api.groups.last["attributes"]["publicLinkEnabled"] = nil }, -> { @api.groups.last["attributes"]["name"] = "Renamed" }, -> { @api.groups.last["attributes"]["isInternalGroup"] = true }, -> { @api.groups.pop }]

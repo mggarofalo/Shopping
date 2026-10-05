@@ -159,6 +159,22 @@ After the workflow reaches `main`:
    submission remains separate. Retry verify-only after a partial distribution
    failure without uploading another build.
 
+   Apple permits only one build of a marketing version in beta review at a time.
+   Before a new submission, verification checks other iOS builds of that exact
+   version for `WAITING_FOR_REVIEW` or `IN_REVIEW`. If one is pending, it stops
+   before notification changes, review submission, or external assignment and
+   identifies the blocking build. Preserve the existing review, then rerun
+   `verify_only` for the already uploaded newer build after the review completes;
+   the newer build is not queued or available merely because it uploaded.
+   The GET-only audience audit reports these same-version pending reviews too.
+   See [Apple's external testing guidance](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers/).
+
+   Failed API requests report HTTP status and validated Apple machine error codes.
+   Free-text response titles/details, metadata, headers, credential values, and
+   raw response bodies stay out of logs. An earlier run that discarded its error
+   body cannot supply that body's exact code retroactively. Diagnose using the
+   current GET-only audit before considering an authorized verification retry.
+
 The exit trap removes newly installed profiles and all temporary key/certificate,
 keychain, archive and export files on success or failure, restores the original
 keychain search list, preserves identical pre-existing profiles, and refuses to
