@@ -2271,3 +2271,28 @@ reported testing duration). This is a focused selection, not Full attestation.
 Two independent read-only correctness reviewers found no confirmed defects,
 including the final error-cause and preparation-recovery changes. Exact-source
 pinned CI and signed-device invitation creation remain separate checks.
+
+## Cloud application contracts (SHOPPING-198/199/200)
+
+The [cloud application testing model](cloud-application-testing.md) separates
+unit contracts, mock semantics and cross-boundary application evidence. New
+stateful service doubles replace external observations and writes while the real
+SQLite stores, validators, transports, coordinators, journals and presentation
+rules remain in the execution path. Tests do not require a live iCloud account.
+
+| Owner | Retained proof |
+| --- | --- |
+| `HomeSharingBackendContractTests` | Expected-version writes, membership lifecycle, offline behavior, lost completion and duplicate-create rejection in the sharing fake. |
+| `HomeSharingApplicationContractTests` | Invite across equivalent physical event replicas; graph/private-record rejection; validation at the submission boundary; durable offline preparation, pending links and uncertain create/save recovery; accepted membership; account, authority and permission changes. |
+| `HomeAdoptionBootstrapTests.testReopenedAcceptedInvitationAfterRelaunchHonorsNewerChoiceThenOpensWithoutAcceptance` | Reopened accepted ingress renews Open after cold reconstruction, respects a newer home choice, later activates without accepting again, and preserves both homes and the original private cart. |
+| `PersonalCartReducerContractTests` | Transitive ancestry rejection, account/scope isolation and restore evidence input/output contracts. |
+| `ReplicaApplicationContractTests` | Independent SQLite replicas, out-of-order and repeated delivery, conflicting physical payloads, checkout/undo, urgency, archived restrictions and private-cart isolation. |
+| `AccountCloudApplicationContractTests` | Latest-refresh authority, durable cache namespaces, sign-out/account-switch command authorization, persisted permission restoration and independent local-write/import/export status. |
+
+No existing test, acceptance selection, coverage baseline, retry rule or skip
+policy was removed or weakened. Focused source identities and all implementation
+failures are retained in the issue evidence records under `docs/testing/`.
+Restoring the pre-fix blanket duplicate-event-ID rejection made the real Invite
+integration regression fail; restoring the fix made the same test pass. The
+negative run is deliberate mutation evidence, not an expected-failure test in
+the maintained suite.
