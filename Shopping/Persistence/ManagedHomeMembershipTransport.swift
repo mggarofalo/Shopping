@@ -99,7 +99,7 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
             guard share.publicPermission == .none else { throw HomeMembershipError.unsupportedAccess }
             _ = try environment(scope)
         } catch {
-            throw HomeMembershipNotSubmitted(reason: error as? HomeMembershipError ?? .shareUnavailable)
+            throw HomeMembershipNotSubmitted(reason: error)
         }
         let saved: CKShare = try await withCheckedThrowingContinuation { continuation in
             cloud.persistUpdatedShare(share, in: store) { saved, error in
@@ -189,7 +189,7 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
             for target in targets { share.removeParticipant(target) }
             _ = try environment(scope)
         } catch {
-            throw HomeMembershipNotSubmitted(reason: error as? HomeMembershipError ?? .shareUnavailable)
+            throw HomeMembershipNotSubmitted(reason: error)
         }
         let saved: CKShare = try await withCheckedThrowingContinuation { continuation in
             cloud.persistUpdatedShare(share, in: store) { saved, error in

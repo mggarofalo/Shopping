@@ -101,5 +101,5 @@ enum HomeMembershipError: Error, LocalizedError, Equatable {
 /// Only this error guarantees that the adapter never invoked a native membership write.
 /// Native callback errors must remain uncertain, even if their wording sounds retryable.
 struct HomeMembershipNotSubmitted: Error, Sendable {
-    let reason: HomeMembershipError
+    let reason: Error
 }

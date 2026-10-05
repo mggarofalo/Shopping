@@ -42,6 +42,40 @@ final class HomeShareGraphTests: XCTestCase {
         }
     }
 
+    func testReplicatedEventIdentityDoesNotPreventSharingOrDiscardEvidence() throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let home = try NeedService(persistence: persistence).createHousehold()
+        let context = persistence.container.viewContext
+        try context.performAndWait {
+            let root = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let id = UUID(), shopper = UUID(), need = UUID(), generation = UUID()
+            let evidence: Set<UUID> = [UUID(), UUID()]
+            let event = HouseholdPresenceEvent(id: id, shopperID: shopper, householdID: home.householdID,
+                listID: home.listID, needID: need, quantity: nil, generation: generation, evidence: evidence, removed: false)
+            var records: [HouseholdCartRecord] = []
+            for _ in 0..<2 {
+                let record = NSEntityDescription.insertNewObject(forEntityName: "HouseholdCartRecord", into: context) as! HouseholdCartRecord
+                record.id = id; record.kind = "presence"; record.household = root
+                record.payload = try PersonalCartCoding.encode(event)
+                records.append(record)
+            }
+            try context.save()
+            let graph = try HomeShareGraphValidator.objects(root: root, listID: home.listID, in: context)
+            XCTAssertTrue(records.allSatisfy { graph.contains($0) })
+            XCTAssertEqual(try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self,
+                kind: "presence", householdID: home.householdID, in: context), [id: event])
+            // Sharing has no authority to erase or resolve conflicting event evidence either.
+            records[1].payload = try PersonalCartCoding.encode(HouseholdPresenceEvent(id: id, shopperID: shopper,
+                householdID: home.householdID, listID: home.listID, needID: need, quantity: nil,
+                generation: generation, evidence: [], removed: true))
+            try context.save()
+            let retained = try HomeShareGraphValidator.objects(root: root, listID: home.listID, in: context)
+            XCTAssertTrue(records.allSatisfy { retained.contains($0) })
+            XCTAssertThrowsError(try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self,
+                kind: "presence", householdID: home.householdID, in: context))
+        }
+    }
+
     func testCrossHomePurchaseRuleFailsBeforeSharingEitherGraph() throws {
         let persistence = try PersistenceController(inMemory: true)
         let service = NeedService(persistence: persistence)

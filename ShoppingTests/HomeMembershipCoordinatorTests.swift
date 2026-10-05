@@ -1,3 +1,4 @@
+import CloudKit
 import XCTest
 @testable import Shopping
 
@@ -56,6 +57,22 @@ final class HomeMembershipCoordinatorTests: XCTestCase {
             "A delayed presentation acknowledgement must not erase the next invitation.")
     }
 
+    func testRefreshRetiresAcceptedAndPreviouslyAppliedMissingInvitations() async throws {
+        for accepted in [false, true] {
+            let (url, scope, transport) = try fixture()
+            let intent = try saved(url, scope: scope, phase: accepted ? .submitted : .applied)
+            if accepted { await transport.include(intent.material.participantID, acceptance: .accepted) }
+            let coordinator = HomeMembershipCoordinator()
+            _ = try await coordinator.refresh(scope: scope, journalURL: url, transport: transport)
+            let pending = try await coordinator.pending(scope: scope, journalURL: url)
+            XCTAssertNil(pending)
+            let next = try await coordinator.invite(scope: scope, journalURL: url, transport: transport)
+            XCTAssertNotEqual(next.participantID, intent.material.participantID)
+            let counts = await transport.counts()
+            XCTAssertEqual(counts.added, 1)
+        }
+    }
+
     func testRestartSubmittedPresentRecoversExactParticipantWithoutAnotherAdd() async throws {
         let (url, scope, transport) = try fixture()
         let intent = try saved(url, scope: scope, phase: .submitted)
@@ -109,6 +126,24 @@ final class HomeMembershipCoordinatorTests: XCTestCase {
         let counts = await transport.counts()
         XCTAssertEqual(counts.added, 1)
         XCTAssertEqual(counts.created, 1)
+    }
+
+    func testNotSubmittedCloudFailurePreservesCauseAndSameInvitationForRetry() async throws {
+        let (url, scope, transport) = try fixture()
+        await transport.setPreflightFailure(CKError(.networkUnavailable))
+        let coordinator = HomeMembershipCoordinator()
+        do {
+            _ = try await coordinator.invite(scope: scope, journalURL: url, transport: transport)
+            XCTFail("Expected preflight failure")
+        } catch {
+            XCTAssertEqual((error as? CKError)?.code, .networkUnavailable)
+        }
+        let intent = try XCTUnwrap(HomeInviteJournal(url: url).load(scope: scope))
+        XCTAssertEqual(intent.phase, .prepared)
+        await transport.setPreflightFailure(nil)
+        let delivery = try await coordinator.invite(scope: scope, journalURL: url, transport: transport)
+        XCTAssertEqual(delivery.id, intent.id)
+        XCTAssertEqual(delivery.participantID, intent.material.participantID)
     }
 
     func testKnownNotSubmittedAllowsExplicitRetryUsingArchivedMaterialAndFreshTag() async throws {
@@ -279,6 +314,7 @@ actor MembershipTransportDouble: HomeMembershipTransport {
     private var removals: [UUID: HomeMembershipRemoval] = [:]
     private var removalMode = Mode.succeed
     private var failRetention = false
+    private var preflightFailure: Error?
     private(set) var removedParticipants: [Set<String>] = []
     private(set) var submittedMaterials: [HomeInviteMaterial] = []
     private(set) var journalAtSubmission: [HomeInviteJournal.Intent] = []
@@ -287,6 +323,7 @@ actor MembershipTransportDouble: HomeMembershipTransport {
 
     init(scope: ActiveHomeScope, journalURL: URL) { self.scope = scope; self.journalURL = journalURL }
     func setMode(_ value: Mode) { mode = value }
+    func setPreflightFailure(_ error: Error?) { preflightFailure = error }
     func setTag(_ value: String) { tag = value }
     func setOwner(_ value: Bool) { owner = value }
     func setURLFailure(_ value: Bool) { failURL = value }
@@ -326,7 +363,8 @@ actor MembershipTransportDouble: HomeMembershipTransport {
         added += 1
         submittedMaterials.append(material)
         if let intent = try HomeInviteJournal(url: journalURL).load(scope: scope) { journalAtSubmission.append(intent) }
-        if mode == .notSubmitted { throw HomeMembershipNotSubmitted(reason: .membershipChanged) }
+        if let preflightFailure { throw HomeMembershipNotSubmitted(reason: preflightFailure) }
+        if mode == .notSubmitted { throw HomeMembershipNotSubmitted(reason: HomeMembershipError.membershipChanged) }
         if mode == .fail { throw HomeMembershipError.shareUnavailable }
         if mode == .hold { await withCheckedContinuation { held = $0 } }
         include(material.participantID, acceptance: .pending)

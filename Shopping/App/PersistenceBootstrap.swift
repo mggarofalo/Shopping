@@ -2859,7 +2859,11 @@ final class PersistenceBootstrap: ObservableObject {
             invite: { [self] retry in
                 guard #available(iOS 18.0, *) else { throw HomeMembershipError.unsupportedVersion }
                 let (ready, url, transport) = try membershipContext(scope)
-                _ = try await prepareSelectedHomeShare(retryInterrupted: retry)
+                do { _ = try await prepareSelectedHomeShare(retryInterrupted: retry) }
+                catch {
+                    HomeSharingErrorPresentation.record(error, operation: "Prepare home share")
+                    throw error
+                }
                 try validateMembershipPresentation(ready, scope: scope)
                 let result = try await homeMembershipCoordinator.invite(scope: scope, journalURL: url, transport: transport)
                 try validateMembershipPresentation(ready, scope: scope)
@@ -2907,7 +2911,18 @@ final class PersistenceBootstrap: ObservableObject {
                 }), leave: HomeDetailsLeaveActions(
                     prepare: { [self] in try await prepareHomeLeave(scope: scope) },
                     confirm: { [self] command in try await confirmHomeLeave(command, scope: scope) }),
-                deletion: homeDeletionActions(scope: scope))
+                deletion: homeDeletionActions(scope: scope),
+                preparationNeedsRetry: { [self] in
+                    let (ready, _, _) = try membershipContext(scope)
+                    guard let storeURL = ready.persistence.primaryStore?.url else { throw HomeSharingError.unavailable }
+                    let journalURL = HomeShareProvisioningJournal.location(storeURL: storeURL, scope: scope)
+                    let needsRetry = try await Task.detached(priority: .utility) {
+                        let intent = try HomeShareProvisioningJournal(url: journalURL).existingIntent(scope: scope)
+                        return intent?.attempted == true && intent?.identity == nil
+                    }.value
+                    try validateMembershipPresentation(ready, scope: scope)
+                    return needsRetry
+                })
 #if DEBUG
         if var fixture = homeDetailsFixtures[scope] { fixture.deletion = actions.deletion; return fixture }
         if var fixture = HomeDetailsUITestFixture.make(scope: scope,

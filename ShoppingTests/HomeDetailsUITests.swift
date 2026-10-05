@@ -191,6 +191,26 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(invite.isEnabled)
     }
 
+    func testInviteFailureShowsActualProblemWithoutInventingPendingInvitationOrCloudFailure() {
+        let app = launch(role: "owner", inviteFailure: true)
+        openHomeDetails(app)
+        let invite = app.buttons["shopping.home.invite"]
+        reveal(invite, in: app)
+        XCTAssertTrue(invite.isEnabled)
+        invite.tap()
+        let error = app.staticTexts["shopping.home.error"]
+        reveal(error, in: app)
+        XCTAssertEqual(error.label, "This home’s saved identities conflict. Sharing is unavailable; your groceries are retained.")
+        XCTAssertFalse(app.staticTexts["shopping.home.pendingInvitation"].exists)
+        XCTAssertFalse(app.buttons["Close"].exists)
+        XCTAssertNotEqual(app.buttons["shopping.home.sharingStatus"].value as? String, "Needs attention")
+        reveal(invite, in: app, towardTop: true)
+        XCTAssertTrue(invite.isEnabled)
+        invite.tap()
+        reveal(error, in: app)
+        XCTAssertEqual(error.label, "This home’s saved identities conflict. Sharing is unavailable; your groceries are retained.")
+    }
+
     /// Invitation delivery opens the system sheet directly. Cancelling delivery
     /// retains the pending member, who can be removed without changing groceries.
     func testOwnerInviteAndCancelPendingInvitationPreservesGroceries() throws {
@@ -388,7 +408,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["shopping.home.memberCounts"].exists)
     }
 
-    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false, delayedRefresh: Bool = false) -> XCUIApplication {
+    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false, delayedRefresh: Bool = false, inviteFailure: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -397,6 +417,7 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
+        if inviteFailure { app.launchEnvironment["SHOPPING_UI_TEST_HOME_INVITE_FAILURE"] = "1" }
         if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
         if systemTextSize { SystemTextSizeSettings.configure(app) }

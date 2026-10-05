@@ -1,39 +1,6 @@
 import Foundation
 import SwiftUI
 
-@MainActor
-struct HomeDetailsActions {
-    let refresh: () async throws -> HomeMembershipSnapshot
-    let pending: () async throws -> HomeMembershipCoordinator.Pending?
-    let invite: (_ retryPreparation: Bool) async throws -> HomeInvitationDelivery
-    let resend: (String) async throws -> HomeInvitationDelivery
-    let acknowledge: (HomeInvitationDelivery) async throws -> Void
-    let rename: (String) async throws -> Void
-    var removals: HomeDetailsRemovalActions? = nil
-    var leave: HomeDetailsLeaveActions? = nil
-    var deletion: HomeDetailsDeletionActions? = nil
-}
-
-@MainActor
-struct HomeDetailsRemovalActions {
-    let prepare: (HomeMembershipRemoval.Purpose, String?) async throws -> HomeMembershipRemovalConfirmation
-    let confirm: (HomeMembershipRemovalConfirmation) async throws -> HomeMembershipSnapshot
-    let retry: () async throws -> HomeMembershipSnapshot
-}
-
-@MainActor
-struct HomeDetailsLeaveActions {
-    let prepare: () async throws -> HomeLeaveCommand
-    let confirm: (HomeLeaveCommand) async throws -> HomeLeaveStatus
-}
-
-@MainActor
-struct HomeDetailsDeletionActions {
-    let prepare: () async throws -> HomeDeletionCommand
-    let confirm: (HomeDeletionCommand) async throws -> HomeDeletionStatus
-    let reconcile: (HomeDeletionCommand) async throws -> HomeDeletionStatus
-}
-
 /// UI state contains values only. Every action revalidates the captured home before
 /// execution; a retired presentation cannot publish a link into its replacement.
 @MainActor
@@ -102,19 +69,39 @@ final class HomeDetailsModel: ObservableObject {
         let request = generation
         busy = true
         defer { if request == generation { busy = false } }
+        error = nil
+        await refreshState(request: request)
+    }
+
+    /// Durable recovery is useful even when membership cannot be fetched from iCloud.
+    private func refreshState(request: Int) async {
+        do {
+            let pending = try await actions.pending()
+            let preparation = try await actions.preparationNeedsRetry?()
+            guard active, generation == request else { return }
+            self.pending = pending
+            if let preparation { needsPreparationRetry = preparation }
+        } catch {
+            guard active, generation == request else { return }
+            isCurrent = false
+            if self.error == nil { self.error = HomeSharingErrorPresentation.message(error) }
+            HomeSharingErrorPresentation.record(error, operation: "Read invitation recovery")
+            return
+        }
         do {
             let result = try await actions.refresh()
+            // Membership reconciliation may retire an already accepted invitation.
             let pending = try await actions.pending()
             guard active, generation == request else { return }
             guard result.scope == scope else { throw HomeMembershipError.scopeChanged }
             snapshot = result
             self.pending = pending
             isCurrent = true
-            error = nil
         } catch {
             guard active, generation == request else { return }
             isCurrent = false
-            self.error = Self.message(error)
+            if self.error == nil { self.error = HomeSharingErrorPresentation.message(error) }
+            HomeSharingErrorPresentation.record(error, operation: "Refresh members")
         }
     }
 
@@ -144,7 +131,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -162,7 +149,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -183,7 +170,7 @@ final class HomeDetailsModel: ObservableObject {
             let status = try? await deletion.reconcile(command)
             guard active, generation == request else { return }
             deletionStatus = status ?? HomeDeletionStatus(command: command, submitted: false, completed: false)
-            self.error = Self.message(operationError)
+            self.error = HomeSharingErrorPresentation.message(operationError)
         }
     }
 
@@ -200,7 +187,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -222,7 +209,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -256,7 +243,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -289,7 +276,7 @@ final class HomeDetailsModel: ObservableObject {
             error = nil
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
             // The durable intent may already exist even if iCloud did not finish.
             // Refresh exposes that retained state without repeating its mutation.
             do {
@@ -320,25 +307,14 @@ final class HomeDetailsModel: ObservableObject {
             delivery = result
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
+            HomeSharingErrorPresentation.record(error, operation: "Deliver invitation")
             if case HomeSharingError.retryRequired = error { needsPreparationRetry = true }
         }
         guard active, generation == request else { return }
-        busy = false
-        // Do not clear a delivery or its operation error if this follow-up read fails.
-        do {
-            let result = try await actions.refresh()
-            let pending = try await actions.pending()
-            guard active, generation == request else { return }
-            guard result.scope == scope else { throw HomeMembershipError.scopeChanged }
-            snapshot = result
-            self.pending = pending
-            isCurrent = true
-        } catch {
-            guard active, generation == request else { return }
-            isCurrent = false
-            if self.error == nil { self.error = Self.message(error) }
-        }
+        // Keep conflicting actions disabled until recovery and membership are reconciled.
+        await refreshState(request: request)
+        if active, generation == request { busy = false }
     }
 
     func presented(_ delivery: HomeInvitationDelivery) async {
@@ -350,7 +326,7 @@ final class HomeDetailsModel: ObservableObject {
             if pending?.id == delivery.id { pending = nil }
         } catch {
             guard active, generation == request else { return }
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
         }
     }
 
@@ -369,16 +345,9 @@ final class HomeDetailsModel: ObservableObject {
         } catch {
             guard active, generation == request else { return false }
             busy = false
-            self.error = Self.message(error)
+            self.error = HomeSharingErrorPresentation.message(error)
             return false
         }
     }
 
-    private static func message(_ error: Error) -> String {
-        if let error = error as? HomeMembershipError { return error.localizedDescription }
-        if let error = error as? HomeSharingError { return error.localizedDescription }
-        if let error = error as? HomeDeletionError { return error.localizedDescription }
-        if let error = error as? ManagedHomeLeaveTransport.Failure { return error.localizedDescription }
-        return "Couldn’t verify this home with iCloud. Your groceries and invitation have been retained. Check again when you’re connected."
-    }
 }
