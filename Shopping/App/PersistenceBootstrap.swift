@@ -2423,7 +2423,8 @@ final class PersistenceBootstrap: ObservableObject {
               let invitations, let session = try? accountProvider?.currentSession() else { return }
         guard let entry = invitations.entries.last(where: {
             $0.openRequested && !$0.activationResolved && $0.session == session
-        }), !autoOpenFailures.contains(entry.id), case .ready(let graph) = entry.state,
+        }), !invitations.hasPendingChoiceChange(for: entry.identity),
+              !autoOpenFailures.contains(entry.id), case .ready(let graph) = entry.state,
               homeCoordinator.homes.contains(where: { $0.graph == graph }) else { return }
         let selectionGeneration = homeCoordinator.generation
         autoOpeningInvitationID = entry.id
@@ -2528,10 +2529,10 @@ final class PersistenceBootstrap: ObservableObject {
                     throw pendingChoice
                 }
             }
-            try await deferAutomaticInvitationOpens(for: session)
-            guard generation == capturedGeneration, ready.presentation.isActive,
-                  try accountProvider?.currentSession() == session else { throw ShopperSessionError.accountChanged }
         }
+        try await deferAutomaticInvitationOpens(for: session)
+        guard generation == capturedGeneration, ready.presentation.isActive,
+              try accountProvider?.currentSession() == session else { throw ShopperSessionError.accountChanged }
         try homeCoordinator.select(graph)
         applyHomeSelection(to: ready)
     }
@@ -2859,15 +2860,10 @@ final class PersistenceBootstrap: ObservableObject {
             invite: { [self] retry in
                 guard #available(iOS 18.0, *) else { throw HomeMembershipError.unsupportedVersion }
                 let (ready, url, transport) = try membershipContext(scope)
-                do { _ = try await prepareSelectedHomeShare(retryInterrupted: retry) }
-                catch {
-                    HomeSharingErrorPresentation.record(error, operation: "Prepare home share")
-                    throw error
-                }
-                try validateMembershipPresentation(ready, scope: scope)
-                let result = try await homeMembershipCoordinator.invite(scope: scope, journalURL: url, transport: transport)
-                try validateMembershipPresentation(ready, scope: scope)
-                return result
+                return try await HomeInvitationWorkflow.invite(scope: scope, journalURL: url,
+                    coordinator: homeMembershipCoordinator, transport: transport,
+                    prepare: { try await self.prepareSelectedHomeShare(retryInterrupted: retry) },
+                    validatePresentation: { try self.validateMembershipPresentation(ready, scope: scope) })
             },
             resend: { [self] participantID in
                 let (ready, url, transport) = try membershipContext(scope)

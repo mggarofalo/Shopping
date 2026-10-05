@@ -39,6 +39,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 24: Home Experience Rewrite | `9a1bf46d-f1f4-44f2-94a0-ce8821d68153` | SHOPPING-170/171/172/173/174/183/184/185/186/187/188/189/190/191: [design proposal](docs/design/home-experience.md), native home creation, invitations, switching, deletion, retained-local conversion, account-bound navigation intent, visible iPhone/Watch scope, distinct same-name home labels, exact saved-cart home names, pinned-compiler picker compatibility, copy selection recovery, explicit first-home catalog UI setup, native header and home-scope polish, published bootstrap readiness, and separate physical validation. |
 | Phase 25: iPhone Store Picker Counts | `6668dc28-385a-4325-92b5-2bf3f147434e` | SHOPPING-192/194: shared iPhone/Watch purchase-rule occurrence counts, native grocery store selection, and catalog acceptance readiness. |
 | Phase 26: Home Sharing Recovery | `ad8f18cc-125f-4c64-aea2-afc52392b1e4` | SHOPPING-196/197: replicated-event sharing repair, truthful invitation errors, durable recovery and patch delivery. |
+| Phase 27: Cloud Application Contracts | `3536cc9b-a77f-4a0c-8d1d-a539318cdce0` | SHOPPING-198/199/200: stateful external-service mocks, unit contracts, and integration coverage for sharing, replicated grocery/catalog/cart data, accounts, permissions, and sync status. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
