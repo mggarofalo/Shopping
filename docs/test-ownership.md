@@ -2296,3 +2296,22 @@ Restoring the pre-fix blanket duplicate-event-ID rejection made the real Invite
 integration regression fail; restoring the fix made the same test pass. The
 negative run is deliberate mutation evidence, not an expected-failure test in
 the maintained suite.
+
+Integrated clean source `81a7b0a8c62ab55a1da097ceb5f452da0f2714af` passed
+**715/715 Fast tests** (677 XCTest and 38 Swift Testing), with no failures or
+skips, on Xcode 27.0 (27A266a), iPhone 17 Pro iOS 26.5, serial execution.
+`/tmp/shopping-phase27-fast-source.json` records the empty dirty state;
+`/tmp/shopping-phase27-fast.xcresult`, `.log`, `-phases.jsonl` and `-report.json`
+retain execution and per-test evidence. Core Data multiple-model warnings remain
+visible; this is not a warning-free claim.
+
+The affected UI selection is Home Details' truthful Invite failure, successful
+Invite/cancel with retained groceries, direct-share cancellation/resend, and
+interactive cloud toolbar during refresh/return. Its exact source and artifacts
+use the corresponding `/tmp/shopping-phase27-ui-*` metadata/report paths and
+`/tmp/shopping-phase27-ui.xcresult` / `.log`. Final UI and hosted CI receipts are
+recorded in [PR 78](https://github.com/mggarofalo/Shopping/pull/78). Hosted CI
+retains the independent Fast coverage gate and six routine acceptance workflows.
+Two independent production reviewers and an independent test reviewer checked
+the final implementation and target registration. The behavior-bearing source
+matches the focused review; this ledger follow-up changes documentation only.
