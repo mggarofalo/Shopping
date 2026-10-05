@@ -162,24 +162,26 @@ final class AccountCloudApplicationContractTests: XCTestCase {
         let f = try fixture(directory, provider: provider)
         // A real CloudKit-capable container over the same isolated SQLite graph, with
         // no CloudKit options: engine observations are the only external seam.
-        let cloud = NSPersistentCloudKitContainer(name: "ContractMonitor",
+        let cloud = AccountContractCloudContainer(name: "ContractMonitor",
             managedObjectModel: f.persistence.container.managedObjectModel)
         cloud.persistentStoreDescriptions = PersistenceConfiguration.local(
             storeURL: directory.appendingPathComponent("Store.sqlite")).makeDescriptions()
-        var loadError: Error?
-        cloud.loadPersistentStores { _, error in loadError = error }
-        if let loadError { throw loadError }
         defer {
+            cloud.drainBackgroundContexts()
             cloud.viewContext.performAndWait { cloud.viewContext.reset() }
             for store in cloud.persistentStoreCoordinator.persistentStores {
                 do { try cloud.persistentStoreCoordinator.remove(store) }
                 catch { XCTFail("Test monitor store teardown failed: \(error)") }
             }
         }
+        var loadError: Error?
+        cloud.loadPersistentStores { _, error in loadError = error }
+        if let loadError { throw loadError }
         XCTAssertTrue(cloud.persistentStoreDescriptions.allSatisfy { $0.cloudKitContainerOptions == nil })
         let monitor = CloudSyncEventMonitor()
         monitor.attach(to: cloud)
         defer { monitor.reset() }
+        XCTAssertEqual(cloud.backgroundContextCount, 1, "The real monitor history read must be owned by the fixture")
         try f.service.setNeedQuantity(needID: f.needID, householdID: f.homeID, listID: f.listID, quantity: 3)
         XCTAssertNil(monitor.status.lastUpload)
         XCTAssertNil(monitor.status.lastDownload)
@@ -273,5 +275,36 @@ private actor SuspendedFirstIdentity {
         terminal = result
         first?.resume(with: result)
         first = nil
+    }
+}
+
+/// Captures the actual monitor history contexts so teardown can join their queued work.
+/// The monitor uses its production fetch and publication code without a test bypass.
+private final class AccountContractCloudContainer: NSPersistentCloudKitContainer {
+    private let contextLock = NSLock()
+    private var backgroundContexts: [NSManagedObjectContext] = []
+
+    override func newBackgroundContext() -> NSManagedObjectContext {
+        let context = super.newBackgroundContext()
+        contextLock.withLock { backgroundContexts.append(context) }
+        return context
+    }
+
+    var backgroundContextCount: Int {
+        contextLock.withLock { backgroundContexts.count }
+    }
+
+    func drainBackgroundContexts() {
+        let contexts = contextLock.withLock { backgroundContexts }
+        for context in contexts {
+            // This barrier runs after the monitor's context.perform history fetch.
+            context.performAndWait {
+                context.automaticallyMergesChangesFromParent = false
+                context.reset()
+                XCTAssertFalse(context.hasChanges)
+                XCTAssertTrue(context.registeredObjects.isEmpty)
+            }
+        }
+        contextLock.withLock { backgroundContexts.removeAll() }
     }
 }
