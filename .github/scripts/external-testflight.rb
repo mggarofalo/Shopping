@@ -63,7 +63,14 @@ def distribute_external_testflight(client, env = ENV, policy: nil)
   unless (TestFlight::READY_STATES + %w[READY_FOR_BETA_SUBMISSION WAITING_FOR_BETA_REVIEW IN_BETA_REVIEW BETA_APPROVED]).include?(state)
     raise "Build cannot be externally distributed in state #{state}"
   end
-  audience.review_metadata if state == "READY_FOR_BETA_SUBMISSION" && reviews.empty?
+  if state == "READY_FOR_BETA_SUBMISSION" && reviews.empty?
+    blockers = catalog.pending_beta_reviews(marketing_version: version, except_build_id: id)
+    unless blockers.empty?
+      waiting = blockers.map { |review| "#{version} (#{review.fetch(:build_number)}): #{review.fetch(:state)}" }.join(", ")
+      raise "External beta review blocked by existing review #{waiting}. Apple allows one build per version in review. Preserve that submission; retry verify-only for #{version} (#{number}) after its review completes. This build has not been submitted or assigned externally."
+    end
+    audience.review_metadata
+  end
   if detail.dig("attributes", "autoNotifyEnabled") != true
     client.request("/v1/buildBetaDetails/#{detail.fetch('id')}", method: :patch,
       body: { data: { type: "buildBetaDetails", id: detail.fetch("id"), attributes: { autoNotifyEnabled: true } } })
