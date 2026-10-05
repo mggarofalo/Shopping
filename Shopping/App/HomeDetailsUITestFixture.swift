@@ -22,7 +22,12 @@ final class HomeDetailsUITestFixture {
                 return fixture.snapshot
             },
             pending: { fixture.pending },
-            invite: { _ in try fixture.invite() },
+            invite: { _ in
+                if environment["SHOPPING_UI_TEST_HOME_INVITE_FAILURE"] == "1" {
+                    throw HomeShareGraphValidator.Failure.ambiguousIdentity
+                }
+                return try fixture.invite()
+            },
             resend: { try fixture.resend($0) },
             acknowledge: { delivery in
                 guard delivery.scope == scope else { throw HomeMembershipError.scopeChanged }

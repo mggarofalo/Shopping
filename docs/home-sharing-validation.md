@@ -231,3 +231,46 @@ These are focused selections, not local Full attestation. Pinned CI on the
 integrated candidate remains required. SHOPPING-174 still owns candidate
 validation on both physical phones and the responsiveness trace; the previously
 reported installed-app join/import does not substitute for that proof.
+
+## Build 29 invitation repair (SHOPPING-196)
+
+Michael reported an immediate Invite failure on TestFlight 1.5.0 (29), source
+`ddc46bf`. Read-only inspection of the paired phone's copied private store found
+two `HouseholdCartRecord` presence replicas with the same event ID and equivalent
+typed payloads; their JSON evidence arrays differed only in ordering. The graph
+validator rejected repeated event IDs before invitation creation. Its error was
+then replaced with a generic iCloud/connectivity message claiming an invitation
+had been retained. The phone's journals held an existing share and no outgoing
+invitation intent. No installed data was changed by this investigation.
+
+Sharing traversal owns structural integrity: one home, one list, correctly scoped
+relationships, allowed entities, and private-record exclusion. Event readers own
+payload equivalence and causal interpretation. Sharing must retain all physical
+event replicas; duplicate event IDs do not make the home structurally ambiguous.
+Duplicate addressable domain objects still fail validation. Conflicting event
+payloads still fail their existing semantic reader; sharing neither repairs nor
+discards them. This changes no Core Data model or CloudKit schema.
+
+### Journey contract
+
+| Journey | Expected behavior | Implementation / proof owner |
+| --- | --- | --- |
+| Owner Invite | Reuse/create the managed share, then create one saved participant and present its URL. | `HomeShareProvisioner`, `HomeMembershipCoordinator`, managed transports |
+| Preparation failure | Show the actual structural, account, cloud or local-storage cause; never invent a retained invitation. | `HomeSharingErrorPresentation`, `HomeDetailsModelTests`, `HomeDetailsUITests` |
+| Offline/relaunch recovery | Read the local invitation and preparation checkpoints before fetching membership; show recovery even without a server snapshot. | `HomeDetailsModel`, `HomeShareProvisioningJournal` |
+| Pending invitation | Continue/resend the same participant; cancellation removes only the captured grant. Share-sheet presentation is not acceptance. | `HomeInviteJournal`, `HomeMembershipCoordinatorTests` |
+| Accepted/removed outgoing attempt | Retire the matching local delivery intent on fresh server evidence so Invite is available again. Uncertain absent submissions remain retained. | `HomeMembershipCoordinatorTests` |
+| Cold/warm accepted link | Persist metadata, accept if necessary, wait for the exact imported home, then honor current Open intent. | Scene delegate, inbox/controller, bootstrap |
+| Reopen accepted link | Restore Open intent for the same imported home without another acceptance. Not Now and account/newer-choice fences still apply. | `HomeInvitationInboxTests`, existing bootstrap tests |
+| Local home / conversion | Create deliberately; copy to iCloud explicitly and retain the exact local source and private history. | Existing creation/conversion tests |
+| Switch / account change | Preserve each home's data; retired callbacks cannot change a replacement home/account. | Existing active-home and adoption tests |
+| Remove / leave / delete / rejoin | Confirm exact scope, persist intent, reconcile uncertainty and preserve private history. | Existing membership, leave, deletion and rejoin suites |
+| Sharing status | The cloud symbol represents cloud/account observations. Action failures stay in Home Settings instead of producing an unexplained cloud warning. | `HomeDetailsView`, status suites |
+
+Diagnostics record operation, error category and numeric code only. They never
+log native error descriptions/userInfo, invitation URLs, accounts or record data.
+Native pre-submission errors retain their original cause while keeping the explicit
+not-submitted marker used by safe retry. Simulator fixtures prove presentation and
+recovery policy; signed-device creation and two-account receipt remain separate
+live assertions. The prior installed share is not proof of this candidate's next
+invitation succeeding on the server.

@@ -31,6 +31,31 @@ final class HomeInvitationInboxTests: XCTestCase {
             householdID: UUID(), listID: UUID())
     }
 
+    func testReopeningAcceptedLinkRestoresOpenIntentWithoutRepeatingAcceptance() throws {
+        let (url, session) = try fixture()
+        let service = try inbox(url)
+        try service.setSession(session)
+        let entry = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        let acceptance = try service.beginAcceptance(id: entry.id, sharedStoreIdentifier: "shared-store")
+        try service.finishAcceptance(acceptance)
+        let imported = try service.beginImportResolution(id: entry.id, sharedStoreIdentifier: "shared-store")
+        let home = graph()
+        try service.markReady(imported, graph: home)
+        try service.resolveActivation(id: entry.id)
+        let reopened = try service.enqueue(identity: identity(), metadataArchive: Data([1]))
+        XCTAssertEqual(reopened.id, entry.id)
+        XCTAssertEqual(reopened.state, .ready(home))
+        XCTAssertFalse(reopened.activationResolved)
+        XCTAssertTrue(reopened.openRequested)
+        XCTAssertFalse(reopened.requiresNativeAcceptance)
+        XCTAssertTrue(service.hasPendingActivation)
+        let relaunched = try inbox(url)
+        try relaunched.setSession(session)
+        XCTAssertEqual(relaunched.entries, [reopened])
+        try relaunched.deferOpen(id: entry.id)
+        XCTAssertFalse(relaunched.entries[0].openRequested)
+    }
+
     func testColdAndWarmIngressDeduplicateAndPersistBeforeAccountIsReady() throws {
         let (url, session) = try fixture()
         let first = try inbox(url)
@@ -457,7 +482,8 @@ final class HomeInvitationInboxTests: XCTestCase {
         let ordinary = try service.enqueue(identity: identity(), metadataArchive: Data([2]))
         XCTAssertEqual(ordinary.state, .ready(originalGraph))
         XCTAssertFalse(ordinary.requiresNativeAcceptance)
-        XCTAssertFalse(service.hasPendingActivation)
+        XCTAssertTrue(ordinary.openRequested)
+        XCTAssertTrue(service.hasPendingActivation, "Reopening an accepted link requests navigation, not another acceptance")
         let reinvited = try service.enqueue(identity: identity(), metadataArchive: Data([3]), participantPending: true)
         XCTAssertEqual(reinvited.id, original.id)
         XCTAssertEqual(reinvited.state, .queued)

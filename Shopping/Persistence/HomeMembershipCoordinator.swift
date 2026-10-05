@@ -24,10 +24,17 @@ actor HomeMembershipCoordinator {
             let snapshot = try await Self.refreshMembership(scope: scope, journal: journal, transport: transport)
             let intent = try journal.load(scope: scope)
             try Self.validate(snapshot, scope: scope, share: intent?.share)
-            if var intent, let member = try Self.member(intent.material.participantID, in: snapshot),
-               member.acceptance == .pending || member.acceptance == .accepted {
-                intent.phase = .applied
-                try journal.update(intent)
+            if var intent {
+                let member = try Self.member(intent.material.participantID, in: snapshot)
+                if member?.acceptance == .accepted || (member == nil && intent.phase == .applied) {
+                    // Acceptance or observed removal completes local delivery recovery.
+                    intent.phase = .applied
+                    try journal.update(intent)
+                    try journal.acknowledge(id: intent.id, participantID: intent.material.participantID, scope: scope)
+                } else if member?.acceptance == .pending {
+                    intent.phase = .applied
+                    try journal.update(intent)
+                }
             }
             return snapshot
         }

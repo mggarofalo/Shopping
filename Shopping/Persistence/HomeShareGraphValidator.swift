@@ -47,8 +47,12 @@ enum HomeShareGraphValidator {
                   ShareAssociationScope.household(for: object) == root else { throw Failure.foreignObject }
             if let candidate = object as? GroceryList, candidate != list { throw Failure.foreignObject }
             if let need = object as? Need, need.list != list { throw Failure.foreignObject }
-            guard let id = object.value(forKey: "id") as? UUID, id != zero,
-                  identities[entity, default: []].insert(id).inserted else { throw Failure.ambiguousIdentity }
+            guard let id = object.value(forKey: "id") as? UUID, id != zero else { throw Failure.ambiguousIdentity }
+            // Event replicas may retain several physical records for one logical event.
+            // Sharing preserves every record; their domain readers validate payloads.
+            // Only addressable domain objects require a unique logical identity here.
+            if !(object is HouseholdCartRecord),
+               !identities[entity, default: []].insert(id).inserted { throw Failure.ambiguousIdentity }
             for relationship in object.entity.relationshipsByName.values {
                 if relationship.isToMany {
                     if let values = object.value(forKey: relationship.name) as? Set<NSManagedObject> {

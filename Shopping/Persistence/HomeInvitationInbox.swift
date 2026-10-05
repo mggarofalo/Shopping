@@ -411,7 +411,11 @@ final class HomeInvitationInbox {
             entry.state = .queued
             entry.activationResolved = false
             entry.requiresNativeAcceptance = true
-        case .loading, .ready: break
+        case .ready:
+            // A fresh system link is a new Open choice, even after an earlier Open.
+            // The accepted membership and imported graph need no second acceptance.
+            entry.activationResolved = false
+        case .loading: break
         }
     }
 

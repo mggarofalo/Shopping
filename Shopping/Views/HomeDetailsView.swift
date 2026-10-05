@@ -16,7 +16,7 @@ struct HomeDetailsView: View {
 
     private var homeName: String { model.snapshot?.homeName ?? initialName }
     private var cloudNeedsAttention: Bool {
-        model.error != nil || bootstrap.homeSharingStatus.activity.notices.contains { $0.id != .invitation }
+        bootstrap.homeSharingStatus.activity.notices.contains { $0.id != .invitation }
     }
     private var cloudIsWorking: Bool {
         model.busy || bootstrap.isCheckingSharingStatus || bootstrap.cloudStatus.isWorking
@@ -50,15 +50,15 @@ struct HomeDetailsView: View {
                             memberActions(member, in: snapshot)
                         }
                     }
-                    if let pending = model.pending,
-                       !snapshot.members.contains(where: { $0.id == pending.participantID }) {
-                        pendingInvitationRow(participantID: pending.participantID)
-                    } else if model.needsPreparationRetry && model.pending == nil {
-                        pendingInvitationRow(participantID: "preparing")
-                    }
                     if !model.isCurrent && !model.busy && !snapshot.removals.contains(where: { $0.absentObservedAt == nil }) {
                         Button("Check members again") { Task { await model.refresh() } }
                     }
+                }
+                if let pending = model.pending,
+                   model.snapshot?.members.contains(where: { $0.id == pending.participantID }) != true {
+                    pendingInvitationRow(participantID: pending.participantID)
+                } else if model.needsPreparationRetry && model.pending == nil {
+                    pendingInvitationRow(participantID: "preparing")
                 }
             } header: {
                 Text("Members").accessibilityIdentifier("shopping.home.membersHeading")
@@ -250,7 +250,7 @@ struct HomeDetailsView: View {
 
     private func pendingInvitationRow(participantID: String) -> some View {
         HStack {
-            Text(model.needsPreparationRetry ? "Invitation needs attention" : "Invitation pending")
+            Text(model.needsPreparationRetry ? "Sharing preparation interrupted" : "Invitation pending")
                 .accessibilityIdentifier("shopping.home.pendingInvitation")
             Spacer()
             Menu {
@@ -265,14 +265,17 @@ struct HomeDetailsView: View {
     }
 
     private var continueInvitationButton: some View {
-        Button(model.needsPreparationRetry ? "Retry invitation" : "Continue invitation") {
+        Button(!model.isCurrent ? "Check members again" : model.needsPreparationRetry ? "Retry sharing preparation" : "Continue invitation") {
             guard supportsLinks else {
                 showingInviteRequirement = true
                 return
             }
-            Task { await model.invite(retryPreparation: model.needsPreparationRetry) }
+            Task {
+                if model.isCurrent { await model.invite(retryPreparation: model.needsPreparationRetry) }
+                else { await model.refresh() }
+            }
         }
-        .disabled(!model.canInvite)
+        .disabled(model.busy)
         .accessibilityIdentifier("shopping.home.continueInvitation")
     }
 

@@ -1,3 +1,4 @@
+import CloudKit
 import XCTest
 @testable import Shopping
 
@@ -103,6 +104,50 @@ final class HomeDetailsModelTests: XCTestCase {
                 if let failure = self.renameFailure { throw failure }
             }, removals: removalActions, leave: leaveActions)
         }
+    }
+
+    func testRecoveryIsVisibleBeforeNetworkRefreshAndAfterReopeningOffline() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        actions.pending = .init(id: UUID(), participantID: "retained", phase: .submitted)
+        actions.refreshOperation = { throw CKError(.networkUnavailable) }
+        for _ in 0..<2 {
+            let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+            await model.refresh()
+            XCTAssertEqual(model.pending, actions.pending)
+            XCTAssertFalse(model.isCurrent)
+            XCTAssertFalse(model.canInvite)
+            XCTAssertNil(model.snapshot)
+            XCTAssertEqual(model.error, "iCloud couldn’t be reached. Check your connection and try again.")
+        }
+        var recoveredActions = actions.actions
+        recoveredActions.preparationNeedsRetry = { true }
+        let preparing = HomeDetailsModel(scope: scope, actions: recoveredActions)
+        await preparing.refresh()
+        XCTAssertTrue(preparing.needsPreparationRetry)
+    }
+
+    func testInviteFailurePreservesGraphReasonWithoutInventingAnInvitation() async throws {
+        let scope = try scope()
+        let actions = Actions(value: snapshot(scope: scope))
+        actions.inviteOperation = { throw HomeShareGraphValidator.Failure.ambiguousIdentity }
+        let model = HomeDetailsModel(scope: scope, actions: actions.actions)
+        await model.refresh()
+        await model.invite()
+        XCTAssertNil(model.pending)
+        XCTAssertNil(model.delivery)
+        XCTAssertEqual(model.error, HomeShareGraphValidator.Failure.ambiguousIdentity.localizedDescription)
+        XCTAssertTrue(model.canInvite)
+        XCTAssertFalse(model.busy)
+    }
+
+    func testSharingFailuresDistinguishConnectionAccountStorageAndUnknownErrors() {
+        XCTAssertTrue(HomeSharingErrorPresentation.message(CKError(.notAuthenticated)).contains("Sign in"))
+        XCTAssertTrue(HomeSharingErrorPresentation.message(CKError(.quotaExceeded)).contains("storage is full"))
+        XCTAssertTrue(HomeSharingErrorPresentation.message(CKError(.invalidArguments)).contains("error 12"))
+        let disk = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)
+        XCTAssertTrue(HomeSharingErrorPresentation.message(disk).contains("saved sharing information"))
+        XCTAssertFalse(HomeSharingErrorPresentation.message(disk).contains("invitation have been retained"))
     }
 
     private func scope() throws -> ActiveHomeScope {

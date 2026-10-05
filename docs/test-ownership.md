@@ -2227,3 +2227,47 @@ these updated UI workflows remains required; static inspection is not UI proof.
 Feature merge CI `37128993131` failed the retained-copy access-refresh generation assertion; its tree matched the passing feature PR. The test's task-local access override applied to one asynchronous discovery, while a newer automatic history discovery could supersede that request. The fixture now treats the simulated restriction as source state until its held copy discovery is released, so newer refreshes observe the same access. The test waits boundedly for publication and retains the generation-change, unchanged choice revision, Account home, and final copied Original home assertions; it also asserts the published restricted access. Production request fences are unchanged.
 
 Version PR CI `37129034743` passed Fast 672/672, coverage and Release SDK, but Catalog Save and add failed the View tap. Its result activities place the save event at 14:28:42.147 and View lookup at 14:28:46.252, already beyond the three-second success window. The recording shows Added 1 and View during editor dismissal before expiry. Actionable feedback now uses at least the existing ten-second Undo window, giving a person time to read and act while preserving automatic dismissal. Plain success and attention notices retain their existing durations. `AppPresentationTests.testSuccessActionHasTimeToReadAndNavigateBeforeAutomaticDismissal` owns the action's scheduled deadline and navigation/dismissal; the existing test owns normal expiry and unsuccessful-action retention. The Catalog UI method is unchanged and still owns Added 1, View navigation, exact Oat milk editor content, and both duplicate checks. There are no test-only timers, retries, removed assertions or selection/coverage changes. Focused local and exact-head CI results belong in release PR #74 and the release receipt.
+
+
+## Build 29 sharing recovery (SHOPPING-196)
+
+`HomeShareGraphTests.testReplicatedEventIdentityDoesNotPreventSharingOrDiscardEvidence`
+owns the observed preflight blocker: equal logical event replicas remain in the
+physical share graph, decode to one semantic event, and conflicting payloads still
+fail the domain reader. Existing duplicate-domain-identity, foreign-home and
+private-graph tests retain their rejection boundaries. No stored device records
+or identifiers are included in fixtures.
+
+`HomeDetailsModelTests` owns local recovery before an unavailable server read,
+preparation-state restoration, truthful structural/CloudKit/Cocoa errors, and
+retry eligibility. `HomeMembershipCoordinatorTests` owns accepted/removed intent
+retirement and preserving the original definitely-not-submitted CloudKit cause
+with the same retry identity. `HomeInvitationInboxTests` owns fresh Open intent
+for a previously accepted link, persistence and deferral without reacceptance;
+the renewed-grant test still requires native acceptance and an explicit choice.
+
+The new `HomeDetailsUITests` failure workflow injects only an operation failure
+through the existing isolated DEBUG fixture. It drives Invite and verifies the
+specific inline error, no invented pending invitation or cloud warning, and a
+second explicit attempt. Existing native share-sheet cancellation, cancellation
+of a pending grant, and automatic accepted-home opening own delivery/navigation.
+The acceptance plan, fixtures, timeouts, coverage baseline and retry policy are
+unchanged.
+
+Validation on Xcode 27 / iPhone 17 Pro / iOS 26.5: focused persistence selection
+passed 66/66; final Fast passed 680/680 (645 XCTest + 35 Swift Testing), no skips.
+Results are `/tmp/shopping-196-focused-c.xcresult` and
+`/tmp/shopping-196-fast-final.xcresult`, with corresponding logs. The first focused
+invocation selected the wrong target and stopped before building. The corrected
+selection exposed the old inbox assertion that reopening an accepted link had no
+Open intent; it was changed to assert the intended fresh intent, preserving all
+renewed-grant acceptance assertions. That failure is retained in
+`/tmp/shopping-196-focused-b.xcresult`. Existing Core Data multi-model warnings and
+AppIntents extraction notices remain; no warning was suppressed.
+
+All four selected native UI workflows passed, no skips, in
+`/tmp/shopping-196-ui-a.xcresult` (80.9 seconds test execution, 97.9 seconds Xcode
+reported testing duration). This is a focused selection, not Full attestation.
+Two independent read-only correctness reviewers found no confirmed defects,
+including the final error-cause and preparation-recovery changes. Exact-source
+pinned CI and signed-device invitation creation remain separate checks.
