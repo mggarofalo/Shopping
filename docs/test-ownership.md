@@ -2315,3 +2315,12 @@ retains the independent Fast coverage gate and six routine acceptance workflows.
 Two independent production reviewers and an independent test reviewer checked
 the final implementation and target registration. The behavior-bearing source
 matches the focused review; this ledger follow-up changes documentation only.
+
+A subsequent compiler-log audit found new fixture capture warnings.
+`f58e8ba` captures store identity as a value and captures writer/view contexts on
+the fixture's actor before resetting them on their queues. Independent test
+review found no lifetime or contract change. All 16 sharing contracts passed on
+that clean source (`/tmp/shopping-phase27-fixture-source.json`, `.xcresult` and
+`.log`); the new capture warnings are absent. Application source is unchanged
+from the 715-test/four-UI-workflow candidate above. Final Fast and hosted receipts
+for this test-only follow-up are recorded in PR 78.
