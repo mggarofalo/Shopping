@@ -71,6 +71,7 @@ final class StatefulHomeSharingBackend: HomeSharingBackend, @unchecked Sendable 
 
     func create(store: NSPersistentStore, authorize: @escaping @Sendable () throws -> Void,
         prepareGraph: @escaping @Sendable (NSManagedObjectContext) throws -> HomeBackendCreation) async throws -> HomeBackendShare {
+        let expectedStore = ObjectIdentifier(store)
         let boundary = lock.withLock { beforeCreate }
         if let boundary { try await boundary() }
         let context = lock.withLock { persistence.container.newBackgroundContext() }
@@ -82,7 +83,7 @@ final class StatefulHomeSharingBackend: HomeSharingBackend, @unchecked Sendable 
             return try self.lock.withLock {
                 self.creates += 1
                 if self.offline { throw CKError(.networkUnavailable) }
-                guard self.graphURIs.contains(prepared.rootID.uriRepresentation()), store === self.store else { throw CKError(.invalidArguments) }
+                guard self.graphURIs.contains(prepared.rootID.uriRepresentation()), expectedStore == ObjectIdentifier(self.store) else { throw CKError(.invalidArguments) }
                 guard self.persisted == nil else { throw Failure.alreadyShared }
                 let outcome = self.nextCreate
                 self.nextCreate = .succeed

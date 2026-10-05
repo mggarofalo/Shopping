@@ -103,8 +103,10 @@ final class HomeSharingContractFixture {
 
     func reopen() throws {
         authority.retire()
-        persistence.writer.performAndWait { persistence.writer.reset() }
-        persistence.container.viewContext.performAndWait { persistence.container.viewContext.reset() }
+        let writer = persistence.writer
+        let viewContext = persistence.container.viewContext
+        writer.performAndWait { writer.reset() }
+        viewContext.performAndWait { viewContext.reset() }
         for store in persistence.container.persistentStoreCoordinator.persistentStores {
             try persistence.container.persistentStoreCoordinator.remove(store)
         }
