@@ -280,7 +280,8 @@ private actor SuspendedFirstIdentity {
 
 /// Captures the actual monitor history contexts so teardown can join their queued work.
 /// The monitor uses its production fetch and publication code without a test bypass.
-private final class AccountContractCloudContainer: NSPersistentCloudKitContainer {
+// Added context ownership is lock-protected; this restates the base container contract.
+private final class AccountContractCloudContainer: NSPersistentCloudKitContainer, @unchecked Sendable {
     private let contextLock = NSLock()
     private var backgroundContexts: [NSManagedObjectContext] = []
 
