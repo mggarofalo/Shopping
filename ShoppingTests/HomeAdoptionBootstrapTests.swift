@@ -1232,6 +1232,107 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertTrue(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
     }
 
+    func testReopenedAcceptedInvitationAfterRelaunchHonorsNewerChoiceThenOpensWithoutAcceptance() async throws {
+        let fixture = try await importedInvitation()
+        let original = try XCTUnwrap(fixture.original)
+        let first = try await openImportedFixture(fixture)
+        try await first.activateInvitedHome(entryID: fixture.entryID, graph: fixture.invited)
+        let initialEntry = try XCTUnwrap(first.invitations?.allEntries.first { $0.id == fixture.entryID })
+        XCTAssertTrue(initialEntry.activationResolved)
+        XCTAssertEqual(initialEntry.state, .ready(fixture.invited))
+        try await first.selectHome(original)
+        let originalReady = try await waitForReady(first)
+        let originalCart = try XCTUnwrap(originalReady.personalCartService).entries(
+            householdID: original.householdID, listID: original.listID)
+        XCTAssertEqual(originalCart.map(\.needID), [try XCTUnwrap(fixture.originalNeedID)])
+        first.retireAndFail(ShopperSessionError.temporarilyUnavailable)
+        await first.runLoadingTransition()
+
+        // A cold process has a new provider. Sharing the first provider would
+        // notify the retired bootstrap when this process refreshes its account,
+        // letting two bootstrap instances compete over one invitation journal.
+        let session = try fixture.provider.currentSession()
+        let relaunchedProvider = try ShopperSessionProvider(containerIdentifier: session.containerIdentifier,
+            environment: session.environment, cacheDirectory: fixture.directory.appendingPathComponent("Bindings"),
+            lookup: .init(status: { .available }, recordName: { "account-A" }),
+            notifications: NotificationCenter())
+        let held = RejoinVerificationProbe()
+        let verifying = expectation(description: "Reopened accepted invitation reaches membership verification")
+        let reopened = try await openImportedFixture(fixture, autoJoinInvitations: true,
+            accountProvider: relaunchedProvider,
+            verifyMembership: { await held.hold($0) { verifying.fulfill() } })
+        addTeardownBlock { await held.release() }
+        XCTAssertEqual(reopened.homeCoordinator.activeScope?.graph, original)
+        let controller = try XCTUnwrap(reopened.invitations)
+        let saved = try XCTUnwrap(controller.allEntries.first { $0.id == fixture.entryID })
+        XCTAssertTrue(saved.activationResolved)
+        XCTAssertFalse(saved.openRequested)
+        let transport = AcceptedInvitationIngressProbe()
+        controller.configure(session: try relaunchedProvider.currentSession(),
+            sharedStoreIdentifier: fixture.invited.storeIdentifier, transport: transport)
+        let fresh = try await controller.enqueue(identity: saved.identity,
+            metadataArchive: Data([3]), participantPending: false)
+        XCTAssertEqual(fresh.id, initialEntry.id)
+        XCTAssertEqual(fresh.identity, initialEntry.identity)
+        XCTAssertEqual(fresh.state, .ready(fixture.invited))
+        XCTAssertTrue(fresh.openRequested)
+        XCTAssertFalse(fresh.activationResolved)
+        XCTAssertFalse(fresh.requiresNativeAcceptance)
+        await fulfillment(of: [verifying], timeout: 5)
+
+        // A later explicit choice retires this new Open without discarding the
+        // already accepted invitation or changing either persisted home.
+        try await reopened.selectHome(original)
+        await held.release()
+        let retiredDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while reopened.autoOpeningInvitationID != nil, ContinuousClock.now < retiredDeadline {
+            await Task.yield()
+        }
+        XCTAssertNil(reopened.autoOpeningInvitationID)
+        XCTAssertEqual(reopened.homeCoordinator.activeScope?.graph, original)
+        let deferred = try XCTUnwrap(controller.allEntries.first { $0.id == fixture.entryID })
+        XCTAssertEqual(deferred.state, .ready(fixture.invited))
+        XCTAssertFalse(deferred.openRequested)
+        XCTAssertFalse(deferred.activationResolved)
+        let deferredReady = try await waitForReady(reopened)
+        XCTAssertEqual(try XCTUnwrap(deferredReady.personalCartService).entries(
+            householdID: original.householdID, listID: original.listID), originalCart)
+
+        let opened = expectation(description: "Another fresh accepted ingress opens the imported home")
+        let previousChange = controller.onChange
+        var fulfilled = false
+        controller.onChange = {
+            previousChange?()
+            if !fulfilled, !controller.hasPendingChoiceChange(for: saved.identity),
+               reopened.homeCoordinator.activeScope?.graph == fixture.invited,
+               controller.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved == true {
+                fulfilled = true
+                opened.fulfill()
+            }
+        }
+        defer { controller.onChange = previousChange }
+        let secondIngress = try await controller.enqueue(identity: saved.identity,
+            metadataArchive: Data([4]), participantPending: false)
+        XCTAssertEqual(secondIngress.id, initialEntry.id)
+        XCTAssertEqual(secondIngress.state, .ready(fixture.invited))
+        await fulfillment(of: [opened], timeout: 5)
+        let invitedReady = try await waitForReady(reopened)
+        XCTAssertEqual(invitedReady.homeScope?.graph, fixture.invited)
+        XCTAssertEqual(Set(reopened.homeCoordinator.homes.map(\.graph)), [original, fixture.invited])
+        XCTAssertEqual(controller.allEntries.count, 1)
+        XCTAssertTrue(try XCTUnwrap(controller.allEntries.first).activationResolved)
+        XCTAssertFalse(try XCTUnwrap(controller.allEntries.first).openRequested)
+        let acceptanceCalls = await transport.acceptanceCalls
+        XCTAssertEqual(acceptanceCalls, 0)
+        XCTAssertTrue(try XCTUnwrap(invitedReady.personalCartService).entries(
+            householdID: fixture.invited.householdID, listID: fixture.invited.listID).isEmpty)
+        try await reopened.selectHome(original)
+        let returned = try await waitForReady(reopened)
+        XCTAssertEqual(returned.homeScope?.graph, original)
+        XCTAssertEqual(try XCTUnwrap(returned.personalCartService).entries(
+            householdID: original.householdID, listID: original.listID), originalCart)
+    }
+
     func testAccountChangeDuringHeldAcceptedOpenDoesNotReviveItAfterColdReturn() async throws {
         let fixture = try await importedInvitation()
         let original = try saveOriginalHomeSelection(fixture)
@@ -1849,6 +1950,19 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         } catch ManagedHomeInvitationError.accountUnavailable { }
     }
 
+}
+
+private actor AcceptedInvitationIngressProbe: HomeInvitationTransport {
+    private(set) var acceptanceCalls = 0
+
+    func existingShare(identity: HomeShareIdentity) async throws -> Bool { false }
+
+    func accept(metadataArchive: Data, identity: HomeShareIdentity) async throws {
+        acceptanceCalls += 1
+        throw ManagedHomeInvitationError.invalidMetadata
+    }
+
+    func importedHome(identity: HomeShareIdentity) async throws -> HomeGraphIdentity? { nil }
 }
 
 private actor FirstRejoinFailure {

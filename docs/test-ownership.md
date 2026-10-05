@@ -2271,3 +2271,56 @@ reported testing duration). This is a focused selection, not Full attestation.
 Two independent read-only correctness reviewers found no confirmed defects,
 including the final error-cause and preparation-recovery changes. Exact-source
 pinned CI and signed-device invitation creation remain separate checks.
+
+## Cloud application contracts (SHOPPING-198/199/200)
+
+The [cloud application testing model](cloud-application-testing.md) separates
+unit contracts, mock semantics and cross-boundary application evidence. New
+stateful service doubles replace external observations and writes while the real
+SQLite stores, validators, transports, coordinators, journals and presentation
+rules remain in the execution path. Tests do not require a live iCloud account.
+
+| Owner | Retained proof |
+| --- | --- |
+| `HomeSharingBackendContractTests` | Expected-version writes, membership lifecycle, offline behavior, lost completion and duplicate-create rejection in the sharing fake. |
+| `HomeSharingApplicationContractTests` | Invite across equivalent physical event replicas; graph/private-record rejection; validation at the submission boundary; durable offline preparation, pending links and uncertain create/save recovery; accepted membership; account, authority and permission changes. |
+| `HomeAdoptionBootstrapTests.testReopenedAcceptedInvitationAfterRelaunchHonorsNewerChoiceThenOpensWithoutAcceptance` | Reopened accepted ingress renews Open after cold reconstruction, respects a newer home choice, later activates without accepting again, and preserves both homes and the original private cart. |
+| `PersonalCartReducerContractTests` | Transitive ancestry rejection, account/scope isolation and restore evidence input/output contracts. |
+| `ReplicaApplicationContractTests` | Independent SQLite replicas, out-of-order and repeated delivery, conflicting physical payloads, checkout/undo, urgency, archived restrictions and private-cart isolation. |
+| `AccountCloudApplicationContractTests` | Latest-refresh authority, durable cache namespaces, sign-out/account-switch command authorization, persisted permission restoration and independent local-write/import/export status. |
+
+No existing test, acceptance selection, coverage baseline, retry rule or skip
+policy was removed or weakened. Focused source identities and all implementation
+failures are retained in the issue evidence records under `docs/testing/`.
+Restoring the pre-fix blanket duplicate-event-ID rejection made the real Invite
+integration regression fail; restoring the fix made the same test pass. The
+negative run is deliberate mutation evidence, not an expected-failure test in
+the maintained suite.
+
+Integrated clean source `81a7b0a8c62ab55a1da097ceb5f452da0f2714af` passed
+**715/715 Fast tests** (677 XCTest and 38 Swift Testing), with no failures or
+skips, on Xcode 27.0 (27A266a), iPhone 17 Pro iOS 26.5, serial execution.
+`/tmp/shopping-phase27-fast-source.json` records the empty dirty state;
+`/tmp/shopping-phase27-fast.xcresult`, `.log`, `-phases.jsonl` and `-report.json`
+retain execution and per-test evidence. Core Data multiple-model warnings remain
+visible; this is not a warning-free claim.
+
+The affected UI selection is Home Details' truthful Invite failure, successful
+Invite/cancel with retained groceries, direct-share cancellation/resend, and
+interactive cloud toolbar during refresh/return. Its exact source and artifacts
+use the corresponding `/tmp/shopping-phase27-ui-*` metadata/report paths and
+`/tmp/shopping-phase27-ui.xcresult` / `.log`. Final UI and hosted CI receipts are
+recorded in [PR 78](https://github.com/mggarofalo/Shopping/pull/78). Hosted CI
+retains the independent Fast coverage gate and six routine acceptance workflows.
+Two independent production reviewers and an independent test reviewer checked
+the final implementation and target registration. The behavior-bearing source
+matches the focused review; this ledger follow-up changes documentation only.
+
+A subsequent compiler-log audit found new fixture capture warnings.
+`f58e8ba` captures store identity as a value and captures writer/view contexts on
+the fixture's actor before resetting them on their queues. Independent test
+review found no lifetime or contract change. All 16 sharing contracts passed on
+that clean source (`/tmp/shopping-phase27-fixture-source.json`, `.xcresult` and
+`.log`); the new capture warnings are absent. Application source is unchanged
+from the 715-test/four-UI-workflow candidate above. Final Fast and hosted receipts
+for this test-only follow-up are recorded in PR 78.
