@@ -14,6 +14,20 @@ The repository has one owner for each kind of evidence. `ShoppingFast` owns dete
 
 Swift Testing tags add a second, semantic view across source suites. The `.critical` tag selects release-sensitive unit and persistence checks in `ShoppingCritical`. The migrated filter suite also carries `.unit`. The optional-quantity suite carries `.integration` and `.persistence`. XCTest UI automation stays in XCTest because it depends on `XCUIApplication`, accessibility audits, screenshots, and performance metrics.
 
+## Cloud application contracts
+
+Both unit contracts and cross-boundary integration tests are required. Unit tests
+verify inputs, outputs and state transitions; integration tests run production
+services and composition over isolated stores while controlling external service
+observations. Stateful mocks have their own contract tests and must preserve
+physical replica identity, uncertain outcomes and account boundaries.
+
+The [cloud application testing model](cloud-application-testing.md) maps these
+boundaries to their owners. New cloud-related defects should gain a local
+application regression whenever the failure can be expressed under the service
+contract. Live configuration validation remains separate evidence, not a reason
+to omit deterministic application coverage.
+
 ## Source inventory
 
 The September 23 SHOPPING-108 inventory, based independently on `main`, has 215 fast tests and 67 non-performance UI tests: 282 in `ShoppingFull`. Its pre-commit fast validation passed all 215 tests. Phase 17's separate 284-test inventory is not part of this branch; its open PR remains independent. SHOPPING-119 adds three fixture tests (218 Fast tests) and consolidates the rendered ordering scenarios; the [ownership ledger](test-ownership.md) accounts for the changed UI inventory and the [redesign report](test-redesign.md) records the measured comparisons.
