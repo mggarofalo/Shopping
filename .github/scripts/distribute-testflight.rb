@@ -59,7 +59,11 @@ end
 
 if $PROGRAM_NAME == __FILE__
   begin
-    puts JSON.pretty_generate(distribute_testflight(AppStoreConnect.new))
+    result = distribute_testflight(AppStoreConnect.new)
+    puts JSON.pretty_generate(result)
+    if ENV["GITHUB_OUTPUT"]
+      File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts "marketing_version=#{result.fetch(:marketing_version)}" }
+    end
   rescue StandardError => error
     warn "TestFlight distribution failed: #{error.message}"
     exit 1
