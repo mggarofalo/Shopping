@@ -31,7 +31,8 @@ def desired_ruleset(current, policy):
         checks_rule = matches[0]
     else:
         checks_rule = {'type': 'required_status_checks', 'parameters': {
-            'strict_required_status_checks_policy': True, 'required_status_checks': []}}
+            'strict_required_status_checks_policy': True, 'do_not_enforce_on_create': False,
+            'required_status_checks': []}}
         rules.append(checks_rule)
     parameters = checks_rule['parameters']
     parameters['strict_required_status_checks_policy'] = True

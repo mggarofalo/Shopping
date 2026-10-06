@@ -30,6 +30,7 @@ class RulesetTests(unittest.TestCase):
         self.assertNotIn('id', desired)
         self.assertEqual(desired['rules'][-1]['parameters']['required_status_checks'], self.policy['required_status_checks'])
         self.assertTrue(desired['rules'][-1]['parameters']['strict_required_status_checks_policy'])
+        self.assertFalse(desired['rules'][-1]['parameters']['do_not_enforce_on_create'])
         self.assertEqual(module.desired_ruleset(desired, self.policy), desired)
 
     def test_preserves_other_checks_and_binds_our_checks_to_actions(self):
