@@ -41,6 +41,8 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 26: Home Sharing Recovery | `ad8f18cc-125f-4c64-aea2-afc52392b1e4` | SHOPPING-196/197: replicated-event sharing repair, truthful invitation errors, durable recovery and patch delivery. |
 | Phase 27: Cloud Application Contracts | `3536cc9b-a77f-4a0c-8d1d-a539318cdce0` | SHOPPING-198/199/200: stateful external-service mocks, unit contracts, and integration coverage for sharing, replicated grocery/catalog/cart data, accounts, permissions, and sync status. |
 
+| Phase 28: Named Invitations and Responsive Home Settings | `a5894e86-4ff2-4b48-a784-5ef31d8315f3` | SHOPPING-202/203/204/205: [interaction contract](docs/design/home-sharing-interactions.md), independent background refresh and command progress, owner-private named invitations, native invitation journeys, and separate physical-device proof. |
+
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States
