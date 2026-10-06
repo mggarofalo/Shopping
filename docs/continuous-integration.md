@@ -100,7 +100,7 @@ Run the signed physical-device plan by replacing the placeholder with the connec
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingDevice -destination 'platform=iOS,id=<DEVICE-UDID>'
 ```
 
-CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job creates one iPhone 16 Pro/iOS 18.5 simulator and overlaps its boot with one `build-for-testing -testPlan ShoppingAcceptance`. Both must succeed before it reuses that `DerivedData` for two `test-without-building` commands:
+CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job boots one iPhone 16 Pro/iOS 18.5 simulator, uses `build-for-testing -testPlan ShoppingAcceptance` once, and reuses that `DerivedData` for two `test-without-building` commands:
 
 1. `-testPlan ShoppingFast` writes `FastResults.xcresult`; only this bundle feeds the existing coverage gate.
 2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
@@ -142,4 +142,4 @@ The JSON report uses `schema_version: 1`. `phases[].wall_seconds` is monotonic e
 
 External Actions use full commit SHAs, with readable version comments. Weekly Dependabot PRs propose GitHub Actions updates; they receive the same required CI and independent review. `ruby .github/scripts/check-action-pins.rb` rejects mutable references across every workflow. Never automatically merge dependency updates solely because a newer version exists.
 
-The [CI startup experiment](cicd-startup.md) records the serial baseline and overlap candidate. Simulator and build phase times overlap; use their combined elapsed interval rather than adding them when comparing startup cost.
+The [CI startup experiment](cicd-startup.md) records why the overlap candidate was rejected: its combined startup/build interval took 9m 35s versus 7m 26s for the fresh serial baseline. Routine CI retains serial setup and compilation.

@@ -1,68 +1,53 @@
 # Routine CI startup measurement (SHOPPING-207)
 
-The simulator's readiness and the acceptance compilation have separate owners in
-`prepare-ci-tests.py`. After creating one pinned simulator, the coordinator runs
-the existing timing wrapper for each concurrently. Tests begin only after both
-succeed. Simulator readiness retains a five-minute bound; the preparation step
-has a 16-minute bound inside the unchanged 30-minute job. Failures and cancellation
-stop remaining child process groups. Separate temporary phase files are merged
-into `FastPhases.jsonl`, including failures, without concurrent file writes.
-The simulator log and unmerged records join the existing failure artifact.
+Keep simulator boot and compilation serial. The hosted overlap experiment did not
+show an elapsed-time improvement, so the candidate coordinator and its dedicated
+unit tests were removed. App tests, plans, coverage and acceptance assertions did
+not change. No cache was added.
 
-The shared build still targets the same simulator UDID, `ShoppingAcceptance`, and
-`DerivedData`. Fast and the six selected acceptance UI tests still run separately;
-the existing built/result selection checks and Fast-only coverage gate are unchanged.
-The build command may internally wait for simulator readiness; only hosted evidence
-can establish how much useful overlap Xcode actually performs.
+## Hosted comparison, October 6, 2026
 
-## Baseline
+| Run | Source | Simulator/build scheduling | Startup and build elapsed |
+| --- | --- | --- | ---: |
+| [Fresh baseline 37452316585](https://github.com/mggarofalo/Shopping/actions/runs/37452316585) | `9b5007b5279615c96d5268c8da42894ce0ec5b07` | Serial: 2m 29s boot, 4m 57s build | **7m 26s** |
+| [Candidate 37452503258](https://github.com/mggarofalo/Shopping/actions/runs/37452503258) | `179d0b0` | Boot and build started together; both required to succeed | **9m 35s** |
 
-[Successful run 37334150448](https://github.com/mggarofalo/Shopping/actions/runs/37334150448),
-October 5, 2026, used commit `9b5007b5279615c96d5268c8da42894ce0ec5b07`.
-GitHub job/step timestamps give:
+GitHub Actions step timestamps give these wall times, rounded to seconds. The
+baseline interval was 10:49:44–10:57:10 UTC; the candidate preparation interval
+was 10:51:36–11:01:11 UTC. The candidate was 2m 09s slower in this sample. The
+candidate interval includes runtime listing and simulator creation. Use the
+combined elapsed interval, not the sum of overlapping phase durations.
 
-| Measurement | Wall time |
-| --- | ---: |
-| Build & Test job | 18m 14s |
-| Simulator startup | 3m 20s |
-| Acceptance compilation | 6m 24s |
-| Startup plus compilation (serial) | 9m 44s |
-| Fast tests | 2m 20s |
-| Acceptance UI | 5m 03s |
+Both runs used macOS 15, Xcode 16.4, an iPhone 16 Pro/iOS 18.5 simulator, cold
+DerivedData, one acceptance build, independent Fast coverage and the same six
+acceptance UI methods. App source, project and test-plan inventory were unchanged.
+The candidate also had additional script checks and immutable Action refs; those
+checks execute outside the measured preparation interval. Hosted machine
+variation remains a limitation: this single pair does not establish a general
+causal slowdown. It does establish that the proposed optimization lacked the
+positive evidence required to retain its extra concurrency and cleanup logic.
+A second candidate PR run was already in progress when this result became
+available; it is not used as a completed comparison. The final PR validates the
+retained serial approach.
 
-These are Actions timestamps, rounded to seconds, not the finer phase records.
-The pinned environment is macOS 15, Xcode 16.4, iOS 18.5, iPhone 16 Pro, with a fresh
-simulator and no DerivedData cache. This historical run is context, not a controlled
-before/after experiment if application source or hosted images differ.
+The earlier [October 5 run 37334150448](https://github.com/mggarofalo/Shopping/actions/runs/37334150448)
+used 9m 44s for serial startup/build and 18m 14s for the whole job. That variation
+reinforces why the fresh comparison matters and why neither one sample nor the
+historical difference should be presented as a reliable speedup.
 
-## Candidate experiment
+## Evidence and future decisions
 
-Run ordinary Swift CI on the committed candidate, preserving its exact SHA, run URL,
-run attempt, job timestamps, and `fast-summary-*` artifact. Do not dispatch
-`ShoppingFull` for this experiment. No shared local simulator is needed.
+The linked runs retain `fast-summary-*` artifacts with exact toolchain metadata,
+phase records, result counts, test identifiers and coverage. The PR records final
+conclusions and post-merge validation. Failed or canceled runs remain visible;
+no test retries or reduced assertions were introduced.
 
-For a controlled comparison, use a second commit that changes only the coordinator
-to wait for simulator readiness before launching the same build command, then run
-ordinary Swift CI under the same pinned environment. Compare the same application
-source and test inventory; retain failed runs as well as successful ones. Compare
-job wall time and the startup/build interval from earliest `started_at` to latest
-`finished_at`; overlapping phase durations must not be added. Keep Fast and UI
-execution times separate so their variance cannot masquerade as startup savings.
-Check exact passing acceptance identifiers, Fast inventory and coverage, and both
-phase exit codes. A further repeat is justified if observed savings are smaller
-than run-to-run variation. Retain overlap only if it improves elapsed time without
-new failures. Record the final hosted result here before merge.
+Build caching remains a separate measured hypothesis. A correct DerivedData
+cache would need keys covering toolchain, SDK, architecture, build settings and
+source/dependencies, plus measurements of restore/save cost. This investigation
+provides no evidence that this added complexity would improve feedback time.
 
-Caching is deferred until this measurement identifies remaining build cost.
-DerivedData caching would require measured restore/save cost and a correctness key
-covering toolchain, SDK, architecture, build settings and source/dependencies. There
-is no evidence yet that its added complexity buys a reliable improvement.
-
-## Local validation
-
-The preparation unit tests substitute temporary executables for `xcrun` and
-`xcodebuild`. They require both branches to start before either can finish, check
-exact build arguments, preserve build and boot failures, and bound hung startup.
-The existing acceptance contract and timing reporter tests also pass. These tests
-exercise orchestration only; they do not prove real Xcode overlap or simulator
-readiness. No local simulator or compiler was used for this change.
+This phase changes CI/release tooling rather than app behavior. Focused fake-tool
+tests and hosted ordinary CI validate the relevant boundaries; no local or hosted
+ShoppingFull dispatch was used for this experiment. The existing exact-commit
+ShoppingFull attestation gate remains unchanged.

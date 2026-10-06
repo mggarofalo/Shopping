@@ -64,8 +64,8 @@ class AcceptanceContractTests(unittest.TestCase):
         self.assertEqual(build["timeout-minutes"], 30)
         steps = {step.get("name"): step for step in build["steps"]}
         commands = [step.get("run", "") for step in build["steps"]]
-        self.assertEqual(sum("prepare-ci-tests.py" in command for command in commands), 1)
-        self.assertEqual(sum("build-for-testing" in command for command in commands), 0)
+        self.assertEqual(sum("xcodebuild build-for-testing" in command for command in commands), 1)
+        self.assertIn("-testPlan ShoppingAcceptance", steps["Build acceptance test products"]["run"])
         fast = steps["Run fast deterministic tests"]["run"]
         ui = steps["Run acceptance UI workflows"]["run"]
         self.assertIn("-testPlan ShoppingFast", fast)
@@ -73,7 +73,7 @@ class AcceptanceContractTests(unittest.TestCase):
         self.assertIn("-testPlan ShoppingAcceptance", ui)
         self.assertIn("-only-testing:ShoppingTests", ui)
         self.assertIn("-parallel-testing-enabled NO", ui)
-        for command in (fast, ui):
+        for command in (fast, ui, steps["Build acceptance test products"]["run"]):
             self.assertIn("-derivedDataPath DerivedData", command)
             self.assertIn("steps.simulator.outputs.udid", command)
         coverage = steps["Enforce coverage baseline"]["run"]

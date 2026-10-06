@@ -41,7 +41,7 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 26: Home Sharing Recovery | `ad8f18cc-125f-4c64-aea2-afc52392b1e4` | SHOPPING-196/197: replicated-event sharing repair, truthful invitation errors, durable recovery and patch delivery. |
 | Phase 27: Cloud Application Contracts | `3536cc9b-a77f-4a0c-8d1d-a539318cdce0` | SHOPPING-198/199/200: stateful external-service mocks, unit contracts, and integration coverage for sharing, replicated grocery/catalog/cart data, accounts, permissions, and sync status. |
 
-| Phase 29: CI/CD Reliability and Feedback | `ea4974a6-d371-49e9-b6d9-1eb7ab3580c5` | SHOPPING-206/207/208/209/210: required merge checks, measured simulator/build overlap, TestFlight review preflight, retained release evidence, and immutable Actions updates. |
+| Phase 29: CI/CD Reliability and Feedback | `ea4974a6-d371-49e9-b6d9-1eb7ab3580c5` | SHOPPING-206/207/208/209/210: required merge checks, measured CI startup investigation, TestFlight review preflight, retained release evidence, and immutable Actions updates. |
 
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
