@@ -90,24 +90,7 @@ struct HomeDetailsView: View {
                         }
                     }
                 }
-                if snapshot.access != .owner && snapshot.source == .server {
-                    Section {
-                        Button("Leave Home", role: .destructive) {
-                            Task { await model.prepareLeave() }
-                        }
-                        .disabled(!model.canLeave || invitations.busy)
-                        .accessibilityIdentifier("shopping.home.leave")
-                    }
-                }
-                if snapshot.access == .owner && model.hasDeletionAction {
-                    Section {
-                        Button("Delete Home", role: .destructive) {
-                            Task { await model.prepareDeletion() }
-                        }
-                        .disabled(!model.canDelete || invitations.busy)
-                        .accessibilityIdentifier("shopping.home.delete")
-                    }
-                }
+
             }
             if let status = model.leaveStatus, !status.completed {
                 Text("Leaving home is still being confirmed.")
@@ -136,6 +119,26 @@ struct HomeDetailsView: View {
                 }
                 if invitations.busy, let operation = invitations.operation {
                     ProgressView(operation).accessibilityIdentifier("shopping.home.invitation.progress")
+                }
+            }
+            if let snapshot = model.snapshot {
+                if snapshot.access != .owner && snapshot.source == .server {
+                    Section {
+                        Button("Leave Home", role: .destructive) {
+                            Task { await model.prepareLeave() }
+                        }
+                        .disabled(!model.canLeave || invitations.busy)
+                        .accessibilityIdentifier("shopping.home.leave")
+                    }
+                }
+                if snapshot.access == .owner && model.hasDeletionAction {
+                    Section {
+                        Button("Delete Home", role: .destructive) {
+                            Task { await model.prepareDeletion() }
+                        }
+                        .disabled(!model.canDelete || invitations.busy)
+                        .accessibilityIdentifier("shopping.home.delete")
+                    }
                 }
             }
             if let error = model.error {

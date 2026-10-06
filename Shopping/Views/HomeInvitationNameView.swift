@@ -28,6 +28,9 @@ struct HomeInvitationNameView: View {
                         .disabled(invitations.busy)
                         .accessibilityIdentifier("shopping.home.invitation.name")
                 } header: { Text("Who are you inviting?") } footer: {
+                    if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Enter a name to continue.")
+                    }
                     Text("Give this invitation a name so you can find it later. This name doesn’t restrict who can use the link.")
                 }
                 if !matches.isEmpty {
@@ -53,7 +56,7 @@ struct HomeInvitationNameView: View {
             .navigationTitle(record == nil && participantID == nil ? "Invite someone" : "Invitation name")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { visible = false; dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(record == nil && participantID == nil ? "Create invitation" : "Save", action: save)
