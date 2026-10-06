@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Release evidence is an allowlist, never a copy of the signing workspace."""
 import base64
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -97,7 +98,8 @@ def run(stage, raw_path, command):
     code = result.returncode if result.returncode >= 0 else 128 - result.returncode
     try:
         secrets = secret_values(command)
-        diagnostics = []
+        errors = deque(maxlen=200)
+        warnings = deque(maxlen=200)
         in_pem = False
         with open(raw_path, errors="replace") as raw:
             for line in raw:
@@ -111,8 +113,13 @@ def run(stage, raw_path, command):
                 for name, pattern in DIAGNOSTICS.items():
                     if pattern.search(line):
                         counts[name] += 1
-                if len(line) <= 65536 and len(diagnostics) < 200 and DIAGNOSTIC_TEXT.search(line):
-                    diagnostics.append(sanitize(line, secrets))
+                if len(line) <= 65536 and DIAGNOSTIC_TEXT.search(line):
+                    # Keep the failure tail even after a noisy compiler emits
+                    # hundreds of warnings; errors take the bounded budget first.
+                    target = warnings if re.search(r"\bwarning:", line, re.I) and not re.search(r"\berror:", line, re.I) else errors
+                    target.append(sanitize(line, secrets))
+        diagnostics = list(warnings)[-(200 - len(errors)):] if len(errors) < 200 else []
+        diagnostics.extend(errors)
         record = {"stage": stage, "exit_code": code, "diagnostic_counts": counts,
                   "diagnostics": diagnostics,
                   "note": "At most 200 redacted error/warning lines; commands and raw output excluded."}

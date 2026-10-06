@@ -83,6 +83,19 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(len(diagnostics), 200)
         self.assertTrue(all(len(line) <= 2000 for line in diagnostics))
 
+    def test_warning_flood_does_not_discard_redacted_fatal_reason(self):
+        with patch.dict(os.environ, APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD="fatal-secret-canary"):
+            code = evidence.run("archive", self.root / "raw", [sys.executable, "-c",
+                "print('warning: unused declaration\\n' * 250); "
+                "print('error: Required module ShoppingDomain missing; password=fatal-secret-canary'); "
+                "raise SystemExit(65)"])
+        self.assertEqual(code, 65)
+        log = (self.output / "archive.log").read_text()
+        diagnostics = json.loads(log)["diagnostics"]
+        self.assertEqual(len(diagnostics), 200)
+        self.assertIn("Required module ShoppingDomain missing", diagnostics[-1])
+        self.assertNotIn("fatal-secret-canary", log)
+
     def test_success_and_failed_distribution_preserve_uploaded_identity(self):
         evidence.write_manifest({"source_sha": "b" * 40, "marketing_version": "1.3.0",
                                  "build_number": "27", "upload": "succeeded"})
