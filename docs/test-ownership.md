@@ -2324,3 +2324,31 @@ that clean source (`/tmp/shopping-phase27-fixture-source.json`, `.xcresult` and
 `.log`); the new capture warnings are absent. Application source is unchanged
 from the 715-test/four-UI-workflow candidate above. Final Fast and hosted receipts
 for this test-only follow-up are recorded in PR 78.
+
+
+## Phase 28 — named Home invitations (SHOPPING-202…205)
+
+`HomeDetailsModelTests` owns independent command/refresh progress, stale-read
+suppression, coalescing, retained authority during ordinary refresh failures, and
+blocked-writer responsiveness. `HomeNamedInvitationsModelTests` owns private
+record loading, scope retirement, draft recovery, normalized-name reuse, and
+share-sheet callbacks racing another command or a local load.
+
+`HomeNamedInvitationTests` owns durable preparation before capability submission,
+link reuse, uncertain binding recovery, legacy naming, individual cancellation of
+concurrent links, draft removal, and accepted/cancelled history projection.
+`HomeSharingApplicationContractTests` exercises the managed named-action factory
+against the stateful sharing backend, SQLite reopen, owner-local share association,
+and cached-account history without granting cached membership authority.
+
+`HomeDetailsUITests` retains all ten existing workflows. Invitation workflows now
+name the invitation, inspect its detail, retry a real injected failure, dismiss the
+native share sheet repeatedly, reuse a normalized name, and verify the same record
+after relaunch. Cancellation still asserts exact grocery identity preservation.
+The fixture persists value-only events in its test-owned store directory; it never
+contacts a recipient. Delete/leave, contributor removal, large text, rename, and
+sharing-status navigation assertions remain in place.
+
+These are simulator and stateful backend tests. SHOPPING-205 separately owns real
+owner-device synchronization, recipient acceptance, VoiceOver and physical
+Animation Hitches evidence. No simulator timing establishes that device gate.

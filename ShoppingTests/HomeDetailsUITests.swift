@@ -41,7 +41,7 @@ final class HomeDetailsUITests: XCTestCase {
     }
 
     /// A suspended read proves the cloud navigation stays interactive and that
-    /// refresh activity never inserts a list row, both on entry and return.
+    /// background activity retains useful navigation, both on entry and return.
     func testCloudToolbarStaysInteractiveDuringHomeRefreshAndReturn() {
         let app = launch(role: "owner", delayedRefresh: true)
         openHomeDetails(app)
@@ -50,7 +50,6 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(cloud.isEnabled)
         XCTAssertTrue(cloud.isHittable)
         XCTAssertEqual(cloud.value as? String, "Checking home")
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
         cloud.tap()
         XCTAssertTrue(app.navigationBars["Sharing status"].existsOrAppears(timeout: 3))
         let back = app.navigationBars["Sharing status"].buttons.element
@@ -67,7 +66,6 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertEqual(cloud.frame.origin.x, checkingFrame.origin.x, accuracy: 1)
         XCTAssertEqual(cloud.frame.size.width, checkingFrame.size.width, accuracy: 1)
         XCTAssertEqual(cloud.frame.size.height, checkingFrame.size.height, accuracy: 1)
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
         XCTAssertFalse(app.buttons["shopping.home.manageHomes"].exists)
         XCTAssertFalse(app.buttons["shopping.home.create"].exists)
         XCTAssertTrue(app.buttons["shopping.home.rename"].isHittable)
@@ -194,25 +192,27 @@ final class HomeDetailsUITests: XCTestCase {
     func testInviteFailureShowsActualProblemWithoutInventingPendingInvitationOrCloudFailure() {
         let app = launch(role: "owner", inviteFailure: true)
         openHomeDetails(app)
-        let invite = app.buttons["shopping.home.invite"]
-        reveal(invite, in: app)
-        XCTAssertTrue(invite.isEnabled)
-        invite.tap()
-        let error = app.staticTexts["shopping.home.error"]
+        nameInvitation("Beka", app: app)
+        let error = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "shopping.home.invitation.error.")).element
         reveal(error, in: app)
         XCTAssertEqual(error.label, "This home’s saved identities conflict. Sharing is unavailable; your groceries are retained.")
-        XCTAssertFalse(app.staticTexts["shopping.home.pendingInvitation"].exists)
+        XCTAssertTrue(app.navigationBars["Beka"].exists)
+        XCTAssertFalse(app.staticTexts["shopping.home.member.fixture-invitation-1"].exists)
         XCTAssertFalse(app.buttons["Close"].exists)
+        let retry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "shopping.home.invitation.retry.")).element
+        reveal(retry, in: app)
+        retry.tap()
+        XCTAssertTrue(error.waitForNonExistence(timeout: 5))
+        assertReadyInvitation(app)
+        returnToHomeDetails(app)
         XCTAssertNotEqual(app.buttons["shopping.home.sharingStatus"].value as? String, "Needs attention")
-        reveal(invite, in: app, towardTop: true)
-        XCTAssertTrue(invite.isEnabled)
-        invite.tap()
-        reveal(error, in: app)
-        XCTAssertEqual(error.label, "This home’s saved identities conflict. Sharing is unavailable; your groceries are retained.")
+        assertMembership(app, contributor: true, invitation: true)
     }
 
-    /// Invitation delivery opens the system sheet directly. Cancelling delivery
-    /// retains the pending member, who can be removed without changing groceries.
+    /// Named invitation creation, explicit delivery and cancellation preserve the
+    /// grocery identities and require confirmation before removing the invitee.
     func testOwnerInviteAndCancelPendingInvitationPreservesGroceries() throws {
         let app = launch(role: "owner")
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
@@ -221,27 +221,34 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 8), .completed)
         let savedGroceries = Set(rows.allElementsBoundByIndex.map(\.identifier))
         openHomeDetails(app)
-        let invite = app.buttons["shopping.home.invite"]
-        reveal(invite, in: app)
-        invite.tap()
+        attachScreenshot("Home Settings before invitation", app: app)
+        nameInvitation("Beka", app: app, capture: true)
+        assertReadyInvitation(app)
+        attachScreenshot("Named invitation ready to share", app: app)
+        shareInvitation(app)
+        XCTAssertTrue(app.buttons["Close"].existsOrAppears(timeout: 5))
+        attachScreenshot("System invitation share sheet", app: app)
         dismissSystemShareSheet(app)
-        assertMembership(app, contributor: true, invitation: true)
-        let remove = app.buttons["shopping.home.remove.fixture-invitation-1"]
-        openMemberMenu("fixture-invitation-1", app: app)
-        XCTAssertTrue(remove.existsOrAppears(timeout: 3))
+        assertReadyInvitation(app)
+        let remove = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "shopping.home.invitation.cancel.")).element
+        reveal(remove, in: app)
         remove.tap()
-        let alert = app.alerts["Cancel invitation?"]
+        let alert = app.alerts["Cancel invitation to “Beka”?"]
         XCTAssertTrue(alert.existsOrAppears(timeout: 3))
+        attachScreenshot("Named invitation cancellation confirmation", app: app)
         let confirm = try alertAction("Cancel Invitation", id: "shopping.home.confirmRemoval", in: alert)
         XCTAssertTrue(confirm.isHittable)
-        try alertAction("Cancel", id: "shopping.home.cancelRemoval", in: alert).tap()
+        try alertAction("Keep Invitation", id: "shopping.home.cancelRemoval", in: alert).tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
-        assertMembership(app, contributor: true, invitation: true)
-        openMemberMenu("fixture-invitation-1", app: app)
+        assertReadyInvitation(app)
+        reveal(remove, in: app)
         remove.tap()
         XCTAssertTrue(alert.existsOrAppears(timeout: 3))
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+        returnToHomeDetails(app)
         assertMembership(app, contributor: true, invitation: false)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
         app.tabBars.buttons["Groceries"].tap()
@@ -255,18 +262,35 @@ final class HomeDetailsUITests: XCTestCase {
         let app = launch(role: "owner")
         openHomeDetails(app)
         assertMembership(app, contributor: true, invitation: false)
-        let invite = app.buttons["shopping.home.invite"]
-        reveal(invite, in: app)
+        nameInvitation("Beka", app: app)
         XCTAssertTrue(app.staticTexts["Anyone with this link can join. One person per link."].exists)
-        invite.tap()
+        shareInvitation(app)
         dismissSystemShareSheet(app)
+        assertReadyInvitation(app)
+        returnToHomeDetails(app)
         assertMembership(app, contributor: true, invitation: true)
-        let resend = app.buttons["shopping.home.resend.fixture-invitation-1"]
-        openMemberMenu("fixture-invitation-1", app: app)
-        XCTAssertTrue(resend.existsOrAppears(timeout: 3))
-        resend.tap()
+        let originalID = invitationRow(app).identifier
+        nameInvitation("  beka  ", app: app, reusingExisting: true)
+        assertReadyInvitation(app)
+        shareInvitation(app)
         dismissSystemShareSheet(app)
-        assertMembership(app, contributor: true, invitation: true)
+        assertReadyInvitation(app)
+        returnToHomeDetails(app)
+        XCTAssertEqual(invitationRow(app).identifier, originalID, "Normalized duplicate names must reuse the same invitation")
+        XCTAssertFalse(app.staticTexts["shopping.home.member.fixture-invitation-2"].exists)
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        openHomeDetails(app)
+        let restored = invitationRow(app)
+        reveal(restored, in: app)
+        XCTAssertEqual(restored.identifier, originalID)
+        XCTAssertTrue(restored.label.contains("Beka"))
+        restored.tap()
+        assertReadyInvitation(app)
+        shareInvitation(app)
+        dismissSystemShareSheet(app)
+        assertReadyInvitation(app)
     }
 
     func testContributorCanRenameHomeButCannotInviteAndNameSurvivesRelaunch() {
@@ -358,7 +382,6 @@ final class HomeDetailsUITests: XCTestCase {
             app.buttons["shopping.home.sharingStatus"].value as? String != "Checking home"
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [idle], timeout: 8), .completed)
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "shopping.home.checking").element.exists)
         XCTAssertFalse(app.staticTexts["shopping.home.error"].exists)
         XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         reveal(home, in: app, towardTop: true)
@@ -369,6 +392,67 @@ final class HomeDetailsUITests: XCTestCase {
             XCTAssertEqual(frame.height, baseline[role]!.height, accuracy: 2, "\(role) must return to its original rendered size")
             XCTAssertEqual(frame.width, baseline[role]!.width, accuracy: 2)
         }
+    }
+
+    private func attachScreenshot(_ name: String, app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func nameInvitation(_ name: String, app: XCUIApplication, reusingExisting: Bool = false, capture: Bool = false) {
+        let invite = app.buttons["shopping.home.invite"]
+        reveal(invite, in: app)
+        XCTAssertTrue(invite.isEnabled)
+        invite.tap()
+        let field = app.textFields["shopping.home.invitation.name"]
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        field.tap()
+        let previous = field.value as? String ?? ""
+        let content = previous == "Name" ? "" : previous
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: content.count) + name)
+        XCTAssertEqual(field.value as? String, name)
+        if capture { attachScreenshot("Invitation name form", app: app) }
+        let create = app.buttons["shopping.home.invitation.create"]
+        if reusingExisting {
+            XCTAssertFalse(create.isEnabled, "An existing named invitation is continued rather than created again")
+            let existing = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+                "shopping.home.invitation.existing.")).element
+            XCTAssertTrue(existing.existsOrAppears(timeout: 3))
+            XCTAssertTrue(existing.isHittable)
+            existing.tap()
+        } else {
+            XCTAssertTrue(create.isEnabled)
+            create.tap()
+        }
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5))
+    }
+
+    private func invitationRow(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.home.invitation.row.")).element
+    }
+
+    private func assertReadyInvitation(_ app: XCUIApplication) {
+        let status = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "shopping.home.invitation.status.")).element
+        XCTAssertTrue(status.existsOrAppears(timeout: 5))
+        XCTAssertEqual(status.label, "Ready to share")
+    }
+
+    private func shareInvitation(_ app: XCUIApplication) {
+        let share = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "shopping.home.invitation.share.")).element
+        reveal(share, in: app)
+        XCTAssertTrue(share.isEnabled)
+        share.tap()
+    }
+
+    private func returnToHomeDetails(_ app: XCUIApplication) {
+        if !app.navigationBars["Home Settings"].exists {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
     }
 
     private func openMemberMenu(_ id: String, app: XCUIApplication) {
@@ -398,10 +482,10 @@ final class HomeDetailsUITests: XCTestCase {
         } else {
             XCTAssertTrue(member.waitForNonExistence(timeout: 5))
         }
-        let pending = app.staticTexts["shopping.home.member.fixture-invitation-1"]
+        let pending = invitationRow(app)
         if invitation {
             reveal(pending, in: app)
-            XCTAssertEqual(pending.label, "Invitation pending")
+            XCTAssertTrue(pending.label.contains("Beka"))
         } else {
             XCTAssertTrue(pending.waitForNonExistence(timeout: 5))
         }

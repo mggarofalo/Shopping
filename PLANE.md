@@ -42,6 +42,8 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 27: Cloud Application Contracts | `3536cc9b-a77f-4a0c-8d1d-a539318cdce0` | SHOPPING-198/199/200: stateful external-service mocks, unit contracts, and integration coverage for sharing, replicated grocery/catalog/cart data, accounts, permissions, and sync status. |
 | Phase 29: CI/CD Reliability and Feedback | `ea4974a6-d371-49e9-b6d9-1eb7ab3580c5` | SHOPPING-206/207/208/209/210: required merge checks, measured CI startup investigation, TestFlight review preflight, retained release evidence, and immutable Actions updates. |
 
+| Phase 28: Named Invitations and Responsive Home Settings | `a5894e86-4ff2-4b48-a784-5ef31d8315f3` | SHOPPING-202/203/204/205: [interaction contract](docs/design/home-sharing-interactions.md), independent background refresh and command progress, owner-private named invitations, native invitation journeys, and separate physical-device proof. |
+
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States

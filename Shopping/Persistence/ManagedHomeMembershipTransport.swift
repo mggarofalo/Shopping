@@ -4,7 +4,7 @@ import Foundation
 
 /// Reads only the known managed share through CloudKit. All membership writes use
 /// Core Data's managed share API; domain records never go through raw CloudKit APIs.
-final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked Sendable {
+final class ManagedHomeMembershipTransport: HomeInvitationTrackingTransport, @unchecked Sendable {
     private struct Graph: Sendable {
         let name: String
         let share: HomeShareIdentity?
@@ -20,6 +20,13 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         self.authority = authority
         self.privateRecords = privateRecords
         self.backend = backend ?? NativeHomeSharingBackend(persistence: persistence, privateRecords: privateRecords)
+    }
+
+    /// Local association lookup for owner-private invitation history; no server read.
+    func localInvitationShare(scope: ActiveHomeScope) async throws -> HomeShareIdentity? {
+        let (store, role) = try environment(scope, requiresVerifiedAccount: false)
+        guard role == .ownerPrivate else { throw HomeMembershipError.ownerRequired }
+        return try await graph(scope, store: store, requiresVerifiedAccount: false).share
     }
 
     func refresh(scope: ActiveHomeScope) async throws -> HomeMembershipSnapshot {
@@ -134,14 +141,37 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         return url
     }
 
+    func invitationEvents(scope: ActiveHomeScope) async throws -> [HomeInvitationEvent] {
+        let (_, role) = try environment(scope, requiresVerifiedAccount: false)
+        guard role == .ownerPrivate, let privateRecords else { return [] }
+        let result = try await Task.detached(priority: .utility) {
+            try privateRecords.retainedHomeInvitationEvents(scope: scope)
+        }.value
+        _ = try environment(scope, requiresVerifiedAccount: false)
+        return result
+    }
+
+    func retainInvitationEvent(_ event: HomeInvitationEvent, scope: ActiveHomeScope) async throws {
+        let (store, role) = try environment(scope, requiresVerifiedAccount: false)
+        guard role == .ownerPrivate, let privateRecords, event.matches(scope: scope) else {
+            throw HomeMembershipError.ownerRequired
+        }
+        if let share = event.share {
+            let current = try await graph(scope, store: store, requiresVerifiedAccount: false)
+            guard current.share == share else { throw HomeMembershipError.scopeChanged }
+        }
+        try await Task.detached(priority: .userInitiated) { try privateRecords.retainHomeInvitationEvent(event) }.value
+        _ = try environment(scope, requiresVerifiedAccount: false)
+    }
+
     func retainedRemovals(scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> [HomeMembershipRemoval] {
-        let (_, role) = try environment(scope)
+        let (_, role) = try environment(scope, requiresVerifiedAccount: false)
         guard role == .ownerPrivate else { return [] }
         guard let privateRecords else { throw HomeMembershipError.shareUnavailable }
         let result = try await Task.detached(priority: .utility) {
             try privateRecords.retainedHomeMemberRemovals(scope: scope, share: share)
         }.value
-        _ = try environment(scope)
+        _ = try environment(scope, requiresVerifiedAccount: false)
         return result
     }
 
@@ -194,15 +224,17 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         return result
     }
 
-    private func environment(_ scope: ActiveHomeScope) throws -> (NSPersistentStore, PersistenceStoreRole) {
+    private func environment(_ scope: ActiveHomeScope, requiresVerifiedAccount: Bool = true) throws -> (NSPersistentStore, PersistenceStoreRole) {
         try authority.validate()
         guard let provider = persistence.personalCartSessionProvider as? ShopperSessionProvider,
-              case .ready(let session) = provider.state,
-              try provider.currentSession() == session,
+              let session = try? provider.currentSession(),
               session.accountBinding == scope.accountBinding,
               session.containerIdentifier == scope.containerIdentifier,
               session.environment == scope.environment,
               persistence.personalCartInitialBinding == scope.accountBinding else { throw HomeMembershipError.scopeChanged }
+        if requiresVerifiedAccount {
+            guard case .ready = provider.state else { throw CKError(.networkUnavailable) }
+        }
         let (store, role) = try backend.environment(scope: scope)
         guard role == .ownerPrivate || role == .participantShared,
               store.identifier == scope.graph.storeIdentifier,
@@ -212,10 +244,10 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         return (store, role)
     }
 
-    private func graph(_ scope: ActiveHomeScope, store: NSPersistentStore) async throws -> Graph {
+    private func graph(_ scope: ActiveHomeScope, store: NSPersistentStore, requiresVerifiedAccount: Bool = true) async throws -> Graph {
         let context = persistence.container.newBackgroundContext()
         return try await context.perform {
-            _ = try self.environment(scope)
+            _ = try self.environment(scope, requiresVerifiedAccount: requiresVerifiedAccount)
             guard let uri = URL(string: scope.graph.rootURI),
                   let id = self.persistence.container.persistentStoreCoordinator.managedObjectID(forURIRepresentation: uri),
                   id.persistentStore === store,
@@ -229,7 +261,7 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
             let shares = try self.backend.associatedShares([root.objectID, list.objectID])
             let rootShare = shares[root.objectID], listShare = shares[list.objectID]
             guard rootShare.map(Self.identity) == listShare.map(Self.identity) else { throw HomeMembershipError.shareUnavailable }
-            _ = try self.environment(scope)
+            _ = try self.environment(scope, requiresVerifiedAccount: requiresVerifiedAccount)
             return Graph(name: root.name, share: rootShare.map(Self.identity),
                 canEdit: self.backend.canUpdate(root.objectID))
         }

@@ -5,6 +5,61 @@ import XCTest
 
 @MainActor
 final class HomeSharingApplicationContractTests: XCTestCase {
+    func testManagedNamedActionsUseOwnerLocalAssociationAndRetainLinkAcrossReopen() async throws {
+        let f = try await HomeSharingContractFixture.make(self)
+        func actions() -> HomeNamedInvitationActions {
+            HomeNamedInvitationActions.managed(scope: f.scope, coordinator: f.coordinator, context: {
+                let transport = f.membership
+                let share = try await transport.localInvitationShare(scope: f.scope)
+                return .init(journalURL: f.journalURL, transport: transport, share: share,
+                    validate: { try f.authority.validate() })
+            }, prepareShare: { retry in
+                _ = try await f.provisioner.prepare(scope: f.scope, journalURL: f.provisionURL,
+                    transport: f.sharing, retryInterrupted: retry)
+            })
+        }
+        let initial = try await actions().load()
+        XCTAssertTrue(initial.isEmpty)
+        let draft = try await actions().prepare("Beka")
+        let saved = try await actions().load()
+        XCTAssertEqual(saved.first?.id, draft.id)
+        XCTAssertEqual(f.backend.counts.creates, 0)
+        let delivery = try await actions().create(draft.id, false)
+        XCTAssertNil(try HomeInviteJournal(url: f.journalURL).load(scope: f.scope))
+        try f.reopen()
+        let loaded = try await actions().load()
+        XCTAssertEqual(loaded.first?.participantID, delivery.participantID)
+        let reused = try await actions().create(draft.id, false)
+        XCTAssertEqual(reused.participantID, delivery.participantID)
+        XCTAssertEqual(f.backend.counts.saves, 1)
+    }
+
+    func testCachedOwnerCanReadAndEditInvitationHistoryWithoutMembershipAuthority() async throws {
+        let f = try await HomeSharingContractFixture.make(self)
+        _ = try await f.provisioner.prepare(scope: f.scope, journalURL: f.provisionURL, transport: f.sharing)
+        let share = try await f.membership.localInvitationShare(scope: f.scope)
+        let draft = try await f.coordinator.prepareInvitation(name: "Beka", scope: f.scope, share: share, transport: f.membership)
+        let offline = try ShopperSessionProvider(containerIdentifier: f.scope.containerIdentifier,
+            environment: f.scope.environment, cacheDirectory: f.directory.appendingPathComponent("account"),
+            lookup: .init(status: { throw CKError(.networkUnavailable) }, recordName: { "unused" }),
+            notifications: NotificationCenter())
+        await offline.refresh()
+        XCTAssertEqual(offline.state, .cached(try f.provider.currentSession()))
+        let cart = PersonalCartService(persistence: f.persistence, sessionProvider: offline)
+        let transport = ManagedHomeMembershipTransport(persistence: f.persistence, authority: f.authority,
+            privateRecords: cart, backend: f.backend)
+        let cachedShare = try await transport.localInvitationShare(scope: f.scope)
+        XCTAssertEqual(cachedShare, share)
+        try await f.coordinator.renameInvitation(recordID: draft.id, name: "Beka Smith", scope: f.scope,
+            share: share, transport: transport)
+        let records = try await f.coordinator.invitationRecords(scope: f.scope, share: share, transport: transport)
+        XCTAssertEqual(records.first?.name, "Beka Smith")
+        do {
+            _ = try await transport.refresh(scope: f.scope)
+            XCTFail("Cached history authority cannot authorize online membership")
+        } catch { XCTAssertEqual((error as? CKError)?.code, .networkUnavailable) }
+    }
+
     func testOwnerInviteTraversesPersistedEquivalentReplicasBeforePresentingDelivery() async throws {
         let f = try await HomeSharingContractFixture.make(self, replicatedEvents: true)
         let model = f.model()

@@ -73,6 +73,87 @@ final class HomeMembershipPrivateLedgerTests: XCTestCase {
         }
     }
 
+    func testNamedInvitationPrivateHistorySurvivesReopenAndAccountIsolation() throws {
+        let lifetime = SQLiteTestFixtureLifetime()
+        addTeardownBlock { try lifetime.cleanup() }
+        let directory = try lifetime.makeDirectory()
+        let url = directory.appendingPathComponent("Private.sqlite")
+        let persistence = lifetime.own(try PersistenceController(storeURL: url))
+        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.named-ledger",
+            environment: "Development", accountRecordName: "owner")
+        _ = try NeedService(persistence: persistence).createHousehold(name: "Home")
+        let home = try XCTUnwrap(HomeDiscoveryService(persistence: persistence).discover().homes.first)
+        let scope = ActiveHomeScope(session: session, graph: home.graph)
+        let cart = PersonalCartService(persistence: persistence, sessionProvider: Provider(session: session))
+        let id = UUID()
+        let event = HomeInvitationEvent(id: id, invitationID: id, origin: scope, share: nil,
+            name: "Beka", kind: .named, participantID: nil, createdAt: Date())
+        try cart.retainHomeInvitationEvent(event)
+        try cart.retainHomeInvitationEvent(event)
+        XCTAssertEqual(try cart.retainedHomeInvitationEvents(scope: scope), [event])
+        let context = lifetime.own(persistence.simulationContext())
+        try context.performAndWait {
+            let records = try context.fetch(NSFetchRequest<PersonalCartRecord>(entityName: "PersonalCartRecord"))
+                .filter { $0.kind == "homeInvitation" }
+            XCTAssertEqual(records.count, 1)
+            XCTAssertTrue(records.allSatisfy { $0.entity.relationshipsByName.isEmpty })
+            XCTAssertTrue(records.allSatisfy { ShareAssociationScope.household(for: $0) == nil })
+            XCTAssertTrue(records.allSatisfy { $0.objectID.persistentStore == persistence.primaryStore })
+        }
+        try close(persistence)
+        let reopened = lifetime.own(try PersistenceController(storeURL: url))
+        let restored = PersonalCartService(persistence: reopened, sessionProvider: Provider(session: session))
+        XCTAssertEqual(try restored.retainedHomeInvitationEvents(scope: scope), [event])
+        let other = try ShopperSession.authenticated(containerIdentifier: session.containerIdentifier,
+            environment: session.environment, accountRecordName: "other")
+        let otherCart = PersonalCartService(persistence: reopened, sessionProvider: Provider(session: other))
+        XCTAssertThrowsError(try otherCart.retainedHomeInvitationEvents(scope: scope))
+        XCTAssertThrowsError(try otherCart.retainHomeInvitationEvent(event))
+    }
+
+    func testNamedInvitationEventsConvergeAcrossIndependentPrivateStoresWithoutMergingNames() throws {
+        let lifetime = SQLiteTestFixtureLifetime()
+        addTeardownBlock { try lifetime.cleanup() }
+        let directory = try lifetime.makeDirectory()
+        let first = lifetime.own(try PersistenceController(storeURL: directory.appendingPathComponent("One.sqlite")))
+        let second = lifetime.own(try PersistenceController(storeURL: directory.appendingPathComponent("Two.sqlite")))
+        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.named-replicas",
+            environment: "Development", accountRecordName: "owner")
+        let graph = HomeGraphIdentity(storeIdentifier: "one", rootURI: "x-coredata://one/root", householdID: UUID(), listID: UUID())
+        let scope = ActiveHomeScope(session: session, graph: graph)
+        let otherScope = ActiveHomeScope(session: session, graph: HomeGraphIdentity(storeIdentifier: "two",
+            rootURI: "x-coredata://two/root", householdID: graph.householdID, listID: graph.listID))
+        let one = PersonalCartService(persistence: first, sessionProvider: Provider(session: session))
+        let two = PersonalCartService(persistence: second, sessionProvider: Provider(session: session))
+        let firstID = UUID(), secondID = UUID()
+        let namedOne = HomeInvitationEvent(id: firstID, invitationID: firstID, origin: scope, share: nil,
+            name: "Beka", kind: .named, participantID: nil, createdAt: Date())
+        let namedTwo = HomeInvitationEvent(id: secondID, invitationID: secondID, origin: otherScope, share: nil,
+            name: "BEKA", kind: .named, participantID: nil, createdAt: Date())
+        let bound = HomeInvitationEvent(id: UUID(), invitationID: firstID, origin: scope,
+            share: MembershipTransportDouble.share, name: "Beka", kind: .bound, participantID: "first-link", createdAt: Date())
+        try one.retainHomeInvitationEvent(namedOne)
+        try one.retainHomeInvitationEvent(bound)
+        try two.retainHomeInvitationEvent(namedTwo)
+        // Deliver the child before its parent, and repeat delivery. No fabricated label or capability is exposed.
+        try two.retainHomeInvitationEvent(bound)
+        let beforeParent = try HomeInvitationRecord.project(two.retainedHomeInvitationEvents(scope: otherScope),
+            scope: otherScope, share: MembershipTransportDouble.share)
+        XCTAssertEqual(beforeParent.map(\.id), [secondID])
+        try two.retainHomeInvitationEvent(namedOne)
+        try two.retainHomeInvitationEvent(bound)
+        try one.retainHomeInvitationEvent(namedTwo)
+        let projectedOne = try HomeInvitationRecord.project(one.retainedHomeInvitationEvents(scope: scope),
+            scope: scope, share: MembershipTransportDouble.share)
+        let projectedTwo = try HomeInvitationRecord.project(two.retainedHomeInvitationEvents(scope: otherScope),
+            scope: otherScope, share: MembershipTransportDouble.share)
+        XCTAssertEqual(projectedOne, projectedTwo)
+        XCTAssertEqual(projectedOne.count, 2)
+        XCTAssertTrue(projectedOne.allSatisfy(\.hasConflictingName))
+        XCTAssertEqual(projectedOne.first { $0.id == firstID }?.participantID, "first-link")
+        XCTAssertNil(projectedOne.first { $0.id == secondID }?.participantID)
+    }
+
     @MainActor
     func testStopSharingReopensDurableTargetsAndRequiresExplicitRetryAfterFailedSubmission() async throws {
         let lifetime = SQLiteTestFixtureLifetime()

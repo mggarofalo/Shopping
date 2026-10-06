@@ -12,6 +12,7 @@ struct HomeDetailsActions {
     var leave: HomeDetailsLeaveActions? = nil
     var deletion: HomeDetailsDeletionActions? = nil
     var preparationNeedsRetry: (() async throws -> Bool)? = nil
+    var namedInvitations: HomeNamedInvitationActions? = nil
 }
 
 @MainActor
@@ -33,4 +34,3 @@ struct HomeDetailsDeletionActions {
     let confirm: (HomeDeletionCommand) async throws -> HomeDeletionStatus
     let reconcile: (HomeDeletionCommand) async throws -> HomeDeletionStatus
 }
-

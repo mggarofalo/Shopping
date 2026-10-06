@@ -7,9 +7,34 @@ import SwiftUI
 final class HomeDetailsModel: ObservableObject {
     let scope: ActiveHomeScope
     private let actions: HomeDetailsActions
+    private let initialAccess: HomeCandidate.Access?
     @Published private(set) var snapshot: HomeMembershipSnapshot?
     @Published private(set) var pending: HomeMembershipCoordinator.Pending?
-    @Published private(set) var busy = false
+    enum Operation: Equatable {
+        case renaming, inviting, resending(participantID: String)
+        case preparingRemoval, removing, preparingLeave, leaving
+        case preparingDeletion, deleting, checkingDeletion
+
+        var label: String {
+            switch self {
+            case .renaming: return "Saving name…"
+            case .inviting: return "Creating invitation…"
+            case .resending: return "Preparing invitation…"
+            case .preparingRemoval: return "Checking membership…"
+            case .removing: return "Updating membership…"
+            case .preparingLeave: return "Preparing to leave…"
+            case .leaving: return "Leaving home…"
+            case .preparingDeletion: return "Preparing to delete…"
+            case .deleting: return "Deleting home…"
+            case .checkingDeletion: return "Checking deletion…"
+            }
+        }
+    }
+
+    @Published private(set) var operation: Operation?
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var refreshError: String?
+    var busy: Bool { operation != nil }
     @Published private(set) var isCurrent = false
     @Published private(set) var error: String?
     @Published private(set) var needsPreparationRetry = false
@@ -21,22 +46,28 @@ final class HomeDetailsModel: ObservableObject {
     @Published private(set) var deletionStatus: HomeDeletionStatus?
     private var generation = 0
     private var active = true
+    private var authorityRevoked = false
+    private var refreshTask: Task<Void, Never>?
+    private var refreshID: UUID?
+    private var refreshGeneration: Int?
+    private var refreshRequested = false
 
-    init(scope: ActiveHomeScope, actions: HomeDetailsActions) {
+    init(scope: ActiveHomeScope, actions: HomeDetailsActions, initialAccess: HomeCandidate.Access? = nil) {
         self.scope = scope
         self.actions = actions
+        self.initialAccess = initialAccess
     }
 
-    var canInvite: Bool { active && isCurrent && !busy && snapshot?.canInvite == true }
-    var canRename: Bool { active && isCurrent && !busy && snapshot?.canEditName == true }
+    var canInvite: Bool { active && !authorityRevoked && !busy && (snapshot?.canInvite ?? (initialAccess == .owner)) }
+    var canRename: Bool { active && !authorityRevoked && !busy && (snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor)) }
     var canManageMembers: Bool { canInvite && snapshot?.source == .server && actions.removals != nil }
 
     var canLeave: Bool {
-        active && isCurrent && !busy && actions.leave != nil && leaveStatus == nil && acceptedParticipant != nil
+        active && !authorityRevoked && !busy && actions.leave != nil && leaveStatus == nil && acceptedParticipant != nil
     }
 
     var canDelete: Bool {
-        active && isCurrent && !busy && snapshot?.access == .owner && actions.deletion != nil && deletionStatus == nil
+        active && !authorityRevoked && !busy && snapshot?.access == .owner && actions.deletion != nil && deletionStatus == nil
     }
     var hasDeletionAction: Bool { actions.deletion != nil }
 
@@ -56,21 +87,72 @@ final class HomeDetailsModel: ObservableObject {
         active = false
         generation += 1
         isCurrent = false
-        busy = false
+        operation = nil
+        isRefreshing = false
+        refreshRequested = false
         delivery = nil
         removalConfirmation = nil
         leaveConfirmation = nil
         deletionConfirmation = nil
     }
 
+    /// Concurrent appearance/import requests share one read. A command invalidates
+    /// its publication generation without cancelling durable coordinator work.
     func refresh() async {
-        guard active, !busy else { return }
-        generation += 1
+        guard active else { return }
+        guard !busy else {
+            refreshRequested = true
+            return
+        }
+        if let refreshTask {
+            if refreshGeneration != generation { refreshRequested = true }
+            await refreshTask.value
+            return
+        }
         let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let id = UUID()
+        refreshID = id
+        refreshGeneration = request
+        isRefreshing = true
+        refreshError = nil
+        let task = Task { [self] in
+            await refreshState(request: request)
+            guard refreshID == id else { return }
+            refreshTask = nil
+            refreshID = nil
+            refreshGeneration = nil
+            isRefreshing = false
+            if refreshRequested, active, !busy {
+                refreshRequested = false
+                await refresh()
+            }
+        }
+        refreshTask = task
+        await task.value
+    }
+
+    private func begin(_ operation: Operation) -> Int {
+        generation += 1
+        self.operation = operation
         error = nil
-        await refreshState(request: request)
+        return generation
+    }
+
+    private func finish(_ request: Int) {
+        guard active, generation == request else { return }
+        operation = nil
+        if refreshRequested, refreshTask == nil {
+            refreshRequested = false
+            Task { await refresh() }
+        }
+    }
+
+    private func recordRefreshFailure(_ failure: Error) {
+        isCurrent = false
+        refreshError = HomeSharingErrorPresentation.message(failure)
+        if failure as? HomeMembershipError == .scopeChanged {
+            authorityRevoked = true
+        }
     }
 
     /// Durable recovery is useful even when membership cannot be fetched from iCloud.
@@ -83,8 +165,7 @@ final class HomeDetailsModel: ObservableObject {
             if let preparation { needsPreparationRetry = preparation }
         } catch {
             guard active, generation == request else { return }
-            isCurrent = false
-            if self.error == nil { self.error = HomeSharingErrorPresentation.message(error) }
+            recordRefreshFailure(error)
             HomeSharingErrorPresentation.record(error, operation: "Read invitation recovery")
             return
         }
@@ -97,31 +178,30 @@ final class HomeDetailsModel: ObservableObject {
             snapshot = result
             self.pending = pending
             isCurrent = true
+            authorityRevoked = false
+            refreshError = nil
         } catch {
             guard active, generation == request else { return }
-            isCurrent = false
-            if self.error == nil { self.error = HomeSharingErrorPresentation.message(error) }
+            recordRefreshFailure(error)
             HomeSharingErrorPresentation.record(error, operation: "Refresh members")
         }
     }
 
     func invite(retryPreparation: Bool = false) async {
         guard canInvite else { return }
-        await deliver { try await self.actions.invite(retryPreparation) }
+        await deliver(operation: .inviting) { try await self.actions.invite(retryPreparation) }
     }
 
     func resend(_ participantID: String) async {
         guard canInvite else { return }
-        await deliver { try await self.actions.resend(participantID) }
+        await deliver(operation: .resending(participantID: participantID)) { try await self.actions.resend(participantID) }
     }
 
     func prepareLeave() async {
         guard canLeave, let actions = actions.leave else { return }
-        generation += 1
-        let request = generation
-        busy = true
+        let request = begin(.preparingLeave)
         leaveConfirmation = nil
-        defer { if request == generation { busy = false } }
+        defer { finish(request) }
         do {
             let command = try await actions.prepare()
             guard active, generation == request else { return }
@@ -137,10 +217,8 @@ final class HomeDetailsModel: ObservableObject {
 
     func prepareDeletion() async {
         guard canDelete, let deletion = actions.deletion else { return }
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.preparingDeletion)
+        defer { finish(request) }
         do {
             let command = try await deletion.prepare()
             guard active, generation == request else { return }
@@ -156,10 +234,8 @@ final class HomeDetailsModel: ObservableObject {
     func confirmDeletion(_ command: HomeDeletionCommand) async {
         guard canDelete, deletionConfirmation == command, command.scope == scope, let deletion = actions.deletion else { return }
         deletionConfirmation = nil
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.deleting)
+        defer { finish(request) }
         do {
             let status = try await deletion.confirm(command)
             guard active, generation == request else { return }
@@ -176,10 +252,8 @@ final class HomeDetailsModel: ObservableObject {
 
     func retryDeletion() async {
         guard active, !busy, let status = deletionStatus, let deletion = actions.deletion else { return }
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.checkingDeletion)
+        defer { finish(request) }
         do {
             let refreshed = try await deletion.reconcile(status.command)
             guard active, generation == request else { return }
@@ -197,10 +271,8 @@ final class HomeDetailsModel: ObservableObject {
         // Consume this exact confirmation before the first suspension. A repeated
         // tap cannot submit it again, even if its native outcome is uncertain.
         leaveConfirmation = nil
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.leaving)
+        defer { finish(request) }
         do {
             let status = try await actions.confirm(command)
             guard active, generation == request else { return }
@@ -231,10 +303,8 @@ final class HomeDetailsModel: ObservableObject {
 
     func prepareRemoval(_ purpose: HomeMembershipRemoval.Purpose, participantID: String? = nil) async {
         guard canManageMembers, let actions = actions.removals else { return }
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.preparingRemoval)
+        defer { finish(request) }
         do {
             let confirmation = try await actions.prepare(purpose, participantID)
             guard active, generation == request else { return }
@@ -261,10 +331,8 @@ final class HomeDetailsModel: ObservableObject {
     }
 
     private func updateRemoval(_ operation: () async throws -> HomeMembershipSnapshot) async {
-        generation += 1
-        let request = generation
-        busy = true
-        defer { if request == generation { busy = false } }
+        let request = begin(.removing)
+        defer { finish(request) }
         do {
             let result = try await operation()
             let pending = try await actions.pending()
@@ -280,6 +348,8 @@ final class HomeDetailsModel: ObservableObject {
             // The durable intent may already exist even if iCloud did not finish.
             // Refresh exposes that retained state without repeating its mutation.
             do {
+                await refreshTask?.value
+                guard active, generation == request else { return }
                 let result = try await actions.refresh()
                 let pending = try await actions.pending()
                 guard active, generation == request else { return }
@@ -294,14 +364,12 @@ final class HomeDetailsModel: ObservableObject {
         }
     }
 
-    private func deliver(_ operation: () async throws -> HomeInvitationDelivery) async {
-        generation += 1
-        let request = generation
-        busy = true
-        error = nil
+    private func deliver(operation: Operation, action: () async throws -> HomeInvitationDelivery) async {
+        let request = begin(operation)
+        defer { finish(request) }
         needsPreparationRetry = false
         do {
-            let result = try await operation()
+            let result = try await action()
             guard active, generation == request else { return }
             guard result.scope == scope else { throw HomeMembershipError.scopeChanged }
             delivery = result
@@ -312,9 +380,11 @@ final class HomeDetailsModel: ObservableObject {
             if case HomeSharingError.retryRequired = error { needsPreparationRetry = true }
         }
         guard active, generation == request else { return }
-        // Keep conflicting actions disabled until recovery and membership are reconciled.
+        // Drain an older passive read before reconciling the command result.
+        // Its generation cannot overwrite the command's presentation.
+        await refreshTask?.value
+        guard active, generation == request else { return }
         await refreshState(request: request)
-        if active, generation == request { busy = false }
     }
 
     func presented(_ delivery: HomeInvitationDelivery) async {
@@ -333,18 +403,21 @@ final class HomeDetailsModel: ObservableObject {
     /// A failure leaves the editor and draft intact.
     func rename(_ name: String) async -> Bool {
         guard canRename else { return false }
-        generation += 1
-        let request = generation
-        busy = true
+        let request = begin(.renaming)
+        defer { finish(request) }
         do {
             try await actions.rename(name)
             guard active, generation == request else { return false }
-            busy = false
-            await refresh()
+            if let old = snapshot {
+                snapshot = HomeMembershipSnapshot(scope: old.scope, share: old.share,
+                    homeName: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    access: old.access, currentParticipantID: old.currentParticipantID,
+                    members: old.members, changeTag: old.changeTag, observedAt: old.observedAt,
+                    source: old.source, removals: old.removals)
+            }
             return true
         } catch {
             guard active, generation == request else { return false }
-            busy = false
             self.error = HomeSharingErrorPresentation.message(error)
             return false
         }

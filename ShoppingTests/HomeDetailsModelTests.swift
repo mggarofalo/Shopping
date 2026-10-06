@@ -1,4 +1,5 @@
 import CloudKit
+import CoreData
 import XCTest
 @testable import Shopping
 
@@ -118,7 +119,7 @@ final class HomeDetailsModelTests: XCTestCase {
             XCTAssertFalse(model.isCurrent)
             XCTAssertFalse(model.canInvite)
             XCTAssertNil(model.snapshot)
-            XCTAssertEqual(model.error, "iCloud couldn’t be reached. Check your connection and try again.")
+            XCTAssertEqual(model.refreshError, "iCloud couldn’t be reached. Check your connection and try again.")
         }
         var recoveredActions = actions.actions
         recoveredActions.preparationNeedsRetry = { true }
@@ -469,7 +470,8 @@ final class HomeDetailsModelTests: XCTestCase {
         actions.refreshOperation = { try await gate.wait() }
         let model = HomeDetailsModel(scope: scope, actions: actions.actions)
         try await withGateTask(gate, operation: { await model.refresh() }) { operation in
-            XCTAssertTrue(model.busy)
+            XCTAssertTrue(model.isRefreshing)
+            XCTAssertFalse(model.busy)
             model.retire()
             gate.finish(actions.value)
             try await operation.value
@@ -484,6 +486,164 @@ final class HomeDetailsModelTests: XCTestCase {
         XCTAssertTrue(model.canInvite)
     }
 
+    private struct FixedSession: ShopperSessionProviding {
+        let session: ShopperSession
+        func currentSession() throws -> ShopperSession { session }
+    }
+
+    func testBlockedRenameWriterShowsProgressAndKeepsMainActorResponsive() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        _ = try needs.createHousehold(name: "Original")
+        let graph = try XCTUnwrap(HomeDiscoveryService(persistence: persistence).discover().homes.first?.graph)
+        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.test.home-details",
+            environment: "Development", accountRecordName: "owner")
+        let cart = PersonalCartService(persistence: persistence, sessionProvider: FixedSession(session: session))
+        let home = ActiveHomeScope(session: session, graph: graph)
+        let fake = Actions(value: snapshot(scope: home))
+        let base = fake.actions
+        let actions = HomeDetailsActions(refresh: base.refresh, pending: base.pending,
+            invite: base.invite, resend: base.resend, acknowledge: base.acknowledge,
+            rename: { name in
+                try await Task.detached { try needs.renameHome(name: name, scope: home) }.value
+            })
+        let model = HomeDetailsModel(scope: home, actions: actions)
+        await model.refresh()
+        let entered = expectation(description: "Writer occupied")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        DispatchQueue.global().async {
+            persistence.writer.performAndWait {
+                entered.fulfill()
+                _ = release.wait(timeout: .now() + 2)
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        let started = ContinuousClock.now
+        let rename = Task { await model.rename("Updated") }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(250))
+        XCTAssertEqual(model.operation, .renaming)
+        XCTAssertFalse(model.canRename)
+        release.signal()
+        let saved = await rename.value
+        XCTAssertTrue(saved)
+        XCTAssertEqual(model.snapshot?.homeName, "Updated")
+        XCTAssertNil(model.operation)
+        let homes = try HomeDiscoveryService(persistence: persistence).discover().homes
+        XCTAssertEqual(homes.first?.name, "Updated")
+        withExtendedLifetime(cart) {}
+    }
+
+    func testDelayedRefreshCoalescesAndKeepsCachedEditorsAvailable() async throws {
+        let actions = Actions(value: snapshot(scope: try scope()))
+        let model = HomeDetailsModel(scope: actions.value.scope, actions: actions.actions)
+        await model.refresh()
+        let gate = Gate<HomeMembershipSnapshot>()
+        var refreshCount = 0
+        actions.refreshOperation = {
+            refreshCount += 1
+            return try await gate.wait()
+        }
+        try await withGateTask(gate, operation: { await model.refresh() }) { first in
+            XCTAssertTrue(model.isRefreshing)
+            XCTAssertFalse(model.busy)
+            XCTAssertTrue(model.canRename)
+            XCTAssertTrue(model.canInvite)
+            XCTAssertEqual(model.snapshot, actions.value)
+            let secondStarted = expectation(description: "Second refresh requested")
+            let second = Task {
+                secondStarted.fulfill()
+                await model.refresh()
+            }
+            await fulfillment(of: [secondStarted], timeout: 2)
+            XCTAssertEqual(refreshCount, 1)
+            gate.finish(actions.value)
+            try await first.value
+            await second.value
+            XCTAssertEqual(refreshCount, 1)
+            XCTAssertFalse(model.isRefreshing)
+        }
+    }
+
+    func testOfflineRefreshRetainsPermissionsAndRenameDoesNotAwaitNetwork() async throws {
+        let actions = Actions(value: snapshot(scope: try scope()))
+        let model = HomeDetailsModel(scope: actions.value.scope, actions: actions.actions)
+        await model.refresh()
+        actions.refreshOperation = { throw CKError(.networkUnavailable) }
+        await model.refresh()
+        XCTAssertFalse(model.isCurrent)
+        XCTAssertNotNil(model.refreshError)
+        XCTAssertEqual(model.snapshot, actions.value)
+        XCTAssertTrue(model.canRename)
+        XCTAssertTrue(model.canInvite)
+        let renamed = await model.rename("  New name  ")
+        XCTAssertTrue(renamed)
+        XCTAssertEqual(model.snapshot?.homeName, "New name")
+        XCTAssertNil(model.error)
+    }
+
+    func testRefreshStartedBeforeRenameCannotOverwriteCommittedNameOrPublishFailure() async throws {
+        for fails in [false, true] {
+            let actions = Actions(value: snapshot(scope: try scope()))
+            let model = HomeDetailsModel(scope: actions.value.scope, actions: actions.actions)
+            await model.refresh()
+            let gate = Gate<HomeMembershipSnapshot>()
+            actions.refreshOperation = { try await gate.wait() }
+            try await withGateTask(gate, operation: { await model.refresh() }) { refresh in
+                let renamed = await model.rename("New name")
+                XCTAssertTrue(renamed, "Durable save finishes while the old network request is suspended")
+                XCTAssertEqual(model.snapshot?.homeName, "New name")
+                if fails { gate.cancel() } else { gate.finish(actions.value) }
+                try await refresh.value
+                XCTAssertEqual(model.snapshot?.homeName, "New name")
+                XCTAssertNil(model.refreshError)
+                XCTAssertTrue(model.canRename)
+            }
+        }
+    }
+
+    func testRefreshDuringCommandCannotClearProgressOrAllowSecondMutation() async throws {
+        let actions = Actions(value: snapshot(scope: try scope()))
+        let model = HomeDetailsModel(scope: actions.value.scope, actions: actions.actions)
+        await model.refresh()
+        let gate = Gate<HomeInvitationDelivery>()
+        actions.inviteOperation = { try await gate.wait() }
+        try await withGateTask(gate, operation: { await model.invite() }) { invitation in
+            XCTAssertEqual(model.operation, .inviting)
+            XCTAssertEqual(model.operation?.label, "Creating invitation…")
+            await model.refresh()
+            XCTAssertEqual(model.operation, .inviting)
+            await model.invite()
+            XCTAssertEqual(actions.invitationRetries.count, 1)
+            gate.finish(actions.delivery)
+            try await invitation.value
+            XCTAssertNil(model.operation)
+            XCTAssertTrue(model.canInvite)
+        }
+    }
+
+    func testReactivationWhileOldRefreshIsDrainingStartsOneFreshRead() async throws {
+        let actions = Actions(value: snapshot(scope: try scope()))
+        let model = HomeDetailsModel(scope: actions.value.scope, actions: actions.actions)
+        let gate = Gate<HomeMembershipSnapshot>()
+        actions.refreshOperation = { try await gate.wait() }
+        try await withGateTask(gate, operation: { await model.refresh() }) { old in
+            model.retire()
+            model.activate()
+            actions.refreshOperation = nil
+            let restarted = Task { await model.refresh() }
+            await Task.yield()
+            gate.finish(actions.value)
+            try await old.value
+            await restarted.value
+            XCTAssertEqual(model.snapshot, actions.value)
+            XCTAssertTrue(model.isCurrent)
+            XCTAssertTrue(model.canRename)
+            XCTAssertFalse(model.isRefreshing)
+        }
+    }
+
     func testMismatchedRefreshRevokesPreviouslyEnabledActions() async throws {
         let scope = try scope()
         let actions = Actions(value: snapshot(scope: scope))
@@ -496,7 +656,7 @@ final class HomeDetailsModelTests: XCTestCase {
         XCTAssertFalse(model.canInvite)
         XCTAssertFalse(model.canRename)
         XCTAssertFalse(model.busy)
-        XCTAssertEqual(model.error, HomeMembershipError.scopeChanged.localizedDescription)
+        XCTAssertEqual(model.refreshError, HomeMembershipError.scopeChanged.localizedDescription)
         XCTAssertEqual(model.snapshot?.scope, scope, "A mismatched completion must never replace the original snapshot")
     }
 
@@ -631,6 +791,93 @@ final class HomeDetailsModelTests: XCTestCase {
         XCTAssertEqual(after.acceptedOtherCount, 1)
         XCTAssertEqual(after.pendingCount, 1)
         XCTAssertEqual(after.members.filter { $0.id == invitation.participantID }.map(\.acceptance), [.pending])
+    }
+
+    func testNamedInvitationFixtureRetainsIdentityAcrossRelaunchAndIsolatesStores() async throws {
+        let scope = try scope()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("Shopping.sqlite").path
+        func make(_ storePath: String, role: String = "owner") throws -> HomeDetailsActions {
+            try XCTUnwrap(HomeDetailsUITestFixture.make(scope: scope, name: "Original", rename: { _ in },
+                environment: ["SHOPPING_UI_TEST_STORE_PATH": storePath, "SHOPPING_UI_TEST_HOME_MEMBERS": role]))
+        }
+        let actions = try make(path)
+        let named = try XCTUnwrap(actions.namedInvitations)
+        let draft = try await named.prepare("  Beka  ")
+        XCTAssertEqual(draft.name, "Beka")
+        XCTAssertTrue(draft.participantIDs.isEmpty)
+        let reused = try await named.prepare("beka")
+        XCTAssertEqual(reused.id, draft.id)
+        let delivery = try await named.create(draft.id, false)
+        XCTAssertEqual(delivery.url.host, "example.invalid")
+        XCTAssertEqual(delivery.participantID, "fixture-invitation-1")
+        let membership = try await actions.refresh()
+        XCTAssertEqual(membership.pendingCount, 1)
+        XCTAssertEqual(membership.acceptedOtherCount, 1)
+
+        let restoredActions = try make(path)
+        let restored = try XCTUnwrap(restoredActions.namedInvitations)
+        let records = try await restored.load()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.id, draft.id)
+        XCTAssertEqual(records.first?.participantID, delivery.participantID)
+        XCTAssertNil(records.first?.lastHandoffAt, "Opening or dismissing the sheet cannot claim handoff")
+        let resent = try await restored.create(draft.id, false)
+        XCTAssertEqual(resent.url, delivery.url)
+        try await restored.handoff(draft.id)
+        let handedOff = try await restored.load()
+        XCTAssertNotNil(handedOff.first?.lastHandoffAt)
+        let afterHandoff = try await restoredActions.refresh()
+        XCTAssertEqual(afterHandoff.pendingCount, 1, "Handoff is not acceptance")
+
+        let other = try XCTUnwrap(make(directory.appendingPathComponent("Other.sqlite").path).namedInvitations)
+        let isolated = try await other.load()
+        XCTAssertTrue(isolated.isEmpty, "Even stores in one directory must have separate fixture state")
+        let discarded = try await other.prepare("Draft to discard")
+        try await other.discard(discarded.id)
+        let discardedRecords = try await other.load()
+        XCTAssertEqual(discardedRecords.first?.isTerminal, true)
+        let confirmation = try await restored.cancel(draft.id)
+        XCTAssertEqual(confirmation.memberNames, ["Beka"])
+        let removals = try XCTUnwrap(restoredActions.removals)
+        _ = try await removals.confirm(confirmation)
+        let afterCancellation = try make(path)
+        let finalRecords = try await XCTUnwrap(afterCancellation.namedInvitations).load()
+        XCTAssertEqual(finalRecords.first?.isTerminal, true)
+        let finalMembership = try await afterCancellation.refresh()
+        XCTAssertEqual(finalMembership.pendingCount, 0)
+        XCTAssertEqual(finalMembership.acceptedOtherCount, 1)
+
+        let contributor = try XCTUnwrap(make(path, role: "contributor").namedInvitations)
+        do { _ = try await contributor.prepare("Forbidden"); XCTFail("Only the owner can prepare an invitation") }
+        catch { XCTAssertEqual(error as? HomeMembershipError, .ownerRequired) }
+        do { _ = try await contributor.create(draft.id, false); XCTFail("Only the owner can create an invitation") }
+        catch { XCTAssertEqual(error as? HomeMembershipError, .ownerRequired) }
+    }
+
+    func testNamedInvitationFixtureFailureRetainsDraftAndRetryCreatesOnlyOneParticipant() async throws {
+        let scope = try scope()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let actions = try XCTUnwrap(HomeDetailsUITestFixture.make(scope: scope, name: "Original", rename: { _ in },
+            environment: ["SHOPPING_UI_TEST_STORE_PATH": directory.appendingPathComponent("Shopping.sqlite").path,
+                "SHOPPING_UI_TEST_HOME_MEMBERS": "owner", "SHOPPING_UI_TEST_HOME_INVITE_FAILURE": "1"]))
+        let named = try XCTUnwrap(actions.namedInvitations)
+        let draft = try await named.prepare("Beka")
+        do { _ = try await named.create(draft.id, false); XCTFail("The fixture must expose the actual backend failure") }
+        catch { XCTAssertEqual(error.localizedDescription, HomeShareGraphValidator.Failure.ambiguousIdentity.localizedDescription) }
+        let failedRecords = try await named.load()
+        XCTAssertEqual(failedRecords.map(\.id), [draft.id])
+        XCTAssertTrue(failedRecords[0].participantIDs.isEmpty)
+        let failedSnapshot = try await actions.refresh()
+        XCTAssertEqual(failedSnapshot.pendingCount, 0)
+        let delivery = try await named.create(draft.id, true)
+        XCTAssertEqual(delivery.participantID, "fixture-invitation-1")
+        let retriedSnapshot = try await actions.refresh()
+        XCTAssertEqual(retriedSnapshot.pendingCount, 1)
+        let retriedRecords = try await named.load()
+        XCTAssertEqual(retriedRecords.map(\.id), [draft.id])
     }
 
     func testUIFixtureContributorRenamesThroughRealCallbackAndRestrictedActionsRejectWrites() async throws {
