@@ -56,6 +56,25 @@ class APITests < Minitest::Test
   def preflight(number = "", version = "1.4.0")
     @catalog.preflight(marketing_version: version, requested_number: number)
   end
+  def test_default_version_identity_survives_failed_verify_without_claiming_availability
+    require "tempfile"
+    @api.inventory.last["attributes"]["processingState"] = "INVALID"
+    Tempfile.create("distribution-output") do |output|
+      env = { "MARKETING_VERSION" => "", "BUILD_NUMBER" => "27", "GITHUB_OUTPUT" => output.path }
+      TestFlight.stub(:project_version, "1.4.0") do
+        assert_raises(RuntimeError) { run_distribution(env, client_factory: -> { @api }) }
+      end
+      assert_equal "marketing_version=1.4.0\nbuild_number=27\n", File.read(output.path)
+    end
+  end
+  def test_identity_is_published_before_client_initialization_failure
+    require "tempfile"
+    Tempfile.create("distribution-output") do |output|
+      env = { "MARKETING_VERSION" => "1.4.0", "BUILD_NUMBER" => "27", "GITHUB_OUTPUT" => output.path }
+      assert_raises(RuntimeError) { run_distribution(env, client_factory: -> { raise "fixture credential failure" }) }
+      assert_equal "marketing_version=1.4.0\nbuild_number=27\n", File.read(output.path)
+    end
+  end
   def test_get_only_inventory_selects_next_number_including_processing
     @api.inventory << @api.build("processing", "1.4.0", "30", "PROCESSING")
     receipt = preflight

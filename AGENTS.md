@@ -13,13 +13,13 @@ Before implementation, read the full Plane issue, its dependencies, and its acce
 - Create issue branches using an appropriate conventional prefix, such as `feat/`, `fix/`, `docs/`, or `chore/`, followed by `shopping-<number>-<short-description>`. Plane has no `gitBranchName` requirement.
 - A milestone branch (`milestone/phase-N`) is the integration target for all work in that phase. An optional epic branch within a milestone is based on, and merges back into, that milestone branch; it does not independently target `main`.
 - Squash-merge each completed issue into its milestone or epic worktree, using a Conventional Commit message that includes the Plane issue, then remove the issue worktree and branch when safe.
-- At phase completion, open one PR from the milestone branch to `main`. CI and the required PR approval must pass before merge. Do not merge or force-push without the authorization required by the active workflow.
+- At phase completion, open one PR from the milestone branch to `main`. The `Build & Test` and `Release SDK Build` checks must pass before merge. This single-contributor repository requires no GitHub approval; use independent agent review and resolve findings before opening the phase PR. Do not merge or force-push without the authorization required by the active workflow.
 
 Example:
 
 ```text
 main
-  └── milestone/phase-1  (PR → main after approval)
+  └── milestone/phase-1  (PR → main after review and CI)
         ├── chore/shopping-24-app-shell
         └── docs/shopping-28-plane-guidance
 ```

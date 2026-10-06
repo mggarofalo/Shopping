@@ -121,7 +121,9 @@ After the workflow reaches `main`:
    build 6. It does not reserve a build number or distribute anything.
    For `all_testers`, it also verifies the recorded group identities and exact
    tester membership, disables publication if public-link access is enabled,
-   and checks that existing Apple review metadata is complete. It never fills
+   checks that existing Apple review metadata is complete, and rejects a new
+   upload when another build of the selected marketing version has a pending
+   beta review. Internal-only releases do not need an external review slot. It never fills
    in new review contact, demo-account, description or compliance answers.
 3. For `confirm_upload`, source marketing versions must match across all four
    iPhone/Watch configurations. Leave the build number blank to allocate it
@@ -160,7 +162,8 @@ After the workflow reaches `main`:
    failure without uploading another build.
 
    Apple permits only one build of a marketing version in beta review at a time.
-   Before a new submission, verification checks other iOS builds of that exact
+   Read-only preflight checks the selected version before archive/upload.
+   Before a new submission, verification checks again for other iOS builds of that exact
    version for `WAITING_FOR_REVIEW` or `IN_REVIEW`. If one is pending, it stops
    before notification changes, review submission, or external assignment and
    identifies the blocking build. Preserve the existing review, then rerun
@@ -180,6 +183,23 @@ keychain, archive and export files on success or failure, restores the original
 keychain search list, preserves identical pre-existing profiles, and refuses to
 overwrite conflicting profiles. Signing secrets are available only to the
 protected upload step; the API key is also used by protected preflight/verification.
+
+## Retained release evidence
+
+Upload and verify jobs publish `release-evidence-*` artifacts for 14 days, even
+when a later stage fails. The manifest connects the marketing version, build
+number, workflow commit and outcomes. Upload records its actual source SHA;
+verify-only leaves that field unknown because the current checkout cannot prove
+the source of an older build. Upload success, internal availability, and pending
+external review are separate outcomes. An uncertain upload result calls for
+`verify_only`, not another upload of the same build.
+
+The upload artifact retains dSYM bundles and sanitized stage diagnostics outside
+the temporary signing directory. It excludes the IPA, archive, embedded profiles,
+keychain, private keys and raw logs. Cleanup still removes temporary signing
+material and restores the previous keychain search list. Download needed symbols
+before the retention window expires; publishing these artifacts does not install
+Sentry or implement SHOPPING-115 symbol upload.
 
 ## Local automatic-signing fallback
 

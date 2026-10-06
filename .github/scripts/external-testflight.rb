@@ -42,6 +42,19 @@ module TestFlight
   end
 end
 
+def preflight_external_testflight(client, env = ENV, policy: nil)
+  policy ||= JSON.parse(File.read(File.expand_path("../testflight-audience.json", __dir__)))
+  requested_version = env.fetch("MARKETING_VERSION", "")
+  version = requested_version.empty? ? TestFlight.project_version : TestFlight.version(requested_version)
+  catalog = TestFlight::Catalog.new(client)
+  audience = TestFlight::ExistingAudience.new(catalog, policy)
+  groups = audience.groups
+  catalog.require_beta_review_slot!(marketing_version: version)
+  audience.review_metadata
+  { marketing_version: version, tester_groups: groups.map { |group| group.dig("attributes", "name") },
+    existing_review_metadata_complete: true, pending_review_check_passed: true, read_only: true }
+end
+
 def distribute_external_testflight(client, env = ENV, policy: nil)
   policy ||= JSON.parse(File.read(File.expand_path("../testflight-audience.json", __dir__)))
   catalog = TestFlight::Catalog.new(client)
@@ -64,11 +77,7 @@ def distribute_external_testflight(client, env = ENV, policy: nil)
     raise "Build cannot be externally distributed in state #{state}"
   end
   if state == "READY_FOR_BETA_SUBMISSION" && reviews.empty?
-    blockers = catalog.pending_beta_reviews(marketing_version: version, except_build_id: id)
-    unless blockers.empty?
-      waiting = blockers.map { |review| "#{version} (#{review.fetch(:build_number)}): #{review.fetch(:state)}" }.join(", ")
-      raise "External beta review blocked by existing review #{waiting}. Apple allows one build per version in review. Preserve that submission; retry verify-only for #{version} (#{number}) after its review completes. This build has not been submitted or assigned externally."
-    end
+    catalog.require_beta_review_slot!(marketing_version: version, build_number: number, except_build_id: id)
     audience.review_metadata
   end
   if detail.dig("attributes", "autoNotifyEnabled") != true
@@ -91,20 +100,20 @@ def distribute_external_testflight(client, env = ENV, policy: nil)
   ready = TestFlight::READY_STATES.include?(final["externalBuildState"])
   pending = reviews.any? { |review| %w[WAITING_FOR_REVIEW IN_REVIEW].include?(review.dig("attributes", "betaReviewState")) }
   raise "External availability or a pending Apple review is not confirmed; retry verification" unless ready || pending
-  { marketing_version: version, build_number: number, build_id: id,
+  receipt = { marketing_version: version, build_number: number, build_id: id,
     tester_group: external.dig("attributes", "name"), assigned: true, available: ready,
     external_state: final["externalBuildState"], auto_notify_enabled: true,
     reviews: reviews.map { |review| { id: review.fetch("id"), state: review.dig("attributes", "betaReviewState") } } }
+  if env["GITHUB_OUTPUT"]
+    File.open(env.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts("external_available=#{ready}") }
+  end
+  receipt
 end
 
 if $PROGRAM_NAME == __FILE__
   begin
     if ARGV == ["--preflight"]
-      policy = JSON.parse(File.read(File.expand_path("../testflight-audience.json", __dir__)))
-      audience = TestFlight::ExistingAudience.new(TestFlight::Catalog.new(AppStoreConnect.new(read_only: true)), policy)
-      groups = audience.groups
-      audience.review_metadata
-      puts JSON.pretty_generate({ tester_groups: groups.map { |group| group.dig("attributes", "name") }, existing_review_metadata_complete: true, read_only: true })
+      puts JSON.pretty_generate(preflight_external_testflight(AppStoreConnect.new(read_only: true)))
     elsif ARGV.empty?
       puts JSON.pretty_generate(distribute_external_testflight(AppStoreConnect.new))
     else

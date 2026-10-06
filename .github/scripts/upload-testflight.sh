@@ -29,14 +29,27 @@ INSTALLED_PROFILES=()
 ORIGINAL_KEYCHAINS=()
 SEARCH_LIST_CHANGED=false
 cleanup() {
+    local exit_code=$?
+    trap - EXIT
+    set +e
+    python3 "$SCRIPT_DIR/release-evidence.py" collect "$ARCHIVE_PATH" "$exit_code"
+    local evidence_exit=$?
+
     if [[ "$SEARCH_LIST_CHANGED" == true ]]; then
         security list-keychains -d user -s ${ORIGINAL_KEYCHAINS[@]+"${ORIGINAL_KEYCHAINS[@]}"} >/dev/null 2>&1 || true
     fi
     for installed in ${INSTALLED_PROFILES[@]+"${INSTALLED_PROFILES[@]}"}; do rm -f "$installed"; done
     security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
     rm -rf "$TEMP_ROOT"
+    if [[ "$exit_code" -eq 0 && "$evidence_exit" -ne 0 ]]; then exit "$evidence_exit"; fi
+    exit "$exit_code"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+export RELEASE_EVIDENCE_DIR="${RELEASE_EVIDENCE_DIR:-$(mktemp -d "${RUNNER_TEMP:-/tmp}/shopping-release-evidence.XXXXXX")}"
+python3 "$SCRIPT_DIR/release-evidence.py" init
+echo "Release evidence: $RELEASE_EVIDENCE_DIR"
 security list-keychains -d user > "$TEMP_ROOT/original-keychains.txt"
 while IFS= read -r keychain; do
     keychain="${keychain#*\"}"; keychain="${keychain%\"*}"
@@ -73,12 +86,12 @@ for target in iphone watch; do
 done
 SEARCH_LIST_CHANGED=true
 security list-keychains -d user -s "$KEYCHAIN_PATH" ${ORIGINAL_KEYCHAINS[@]+"${ORIGINAL_KEYCHAINS[@]}"}
-xcodebuild archive -project Shopping.xcodeproj -scheme Shopping -configuration Release \
+python3 "$SCRIPT_DIR/release-evidence.py" run archive "$TEMP_ROOT/archive.log" xcodebuild archive -project Shopping.xcodeproj -scheme Shopping -configuration Release \
     -destination "generic/platform=iOS" -archivePath "$ARCHIVE_PATH" -derivedDataPath "$TEMP_ROOT/DerivedData" \
     DEVELOPMENT_TEAM=649367BDD4 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_CERTIFICATE" \
     SHOPPING_IPHONE_PROFILE_UUID="$IPHONE_PROFILE_UUID" SHOPPING_WATCH_PROFILE_UUID="$WATCH_PROFILE_UUID" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
-xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist "$TEMP_ROOT/ExportOptions.plist"
+python3 "$SCRIPT_DIR/release-evidence.py" run export "$TEMP_ROOT/export.log" xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist "$TEMP_ROOT/ExportOptions.plist"
 shopt -s nullglob
 ipa_paths=("$EXPORT_PATH"/*.ipa)
 shopt -u nullglob
@@ -87,8 +100,8 @@ readonly IPA_PATH="${ipa_paths[0]}"
 python3 "$SCRIPT_DIR/validate-cloudkit-sharing.py" --ipa "$IPA_PATH"
 python3 "$SCRIPT_DIR/validate-release-identity.py" --ipa "$IPA_PATH" --version "$MARKETING_VERSION" --build "$BUILD_NUMBER" --commit "$(git rev-parse HEAD)"
 export API_PRIVATE_KEYS_DIR="$API_PRIVATE_KEYS_DIRECTORY"
-xcrun altool --validate-app --file "$IPA_PATH" --type ios --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID"
+python3 "$SCRIPT_DIR/release-evidence.py" run validation "$TEMP_ROOT/validation.log" xcrun altool --validate-app --file "$IPA_PATH" --type ios --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID"
 # Serialization cannot reserve a number against uploads from other clients.
 # Repeat the GET-only check immediately before the one permitted upload.
 RELEASE_MODE=upload ruby "$SCRIPT_DIR/preflight-testflight.rb"
-xcrun altool --upload-app --file "$IPA_PATH" --type ios --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID"
+python3 "$SCRIPT_DIR/release-evidence.py" run upload "$TEMP_ROOT/upload.log" xcrun altool --upload-app --file "$IPA_PATH" --type ios --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID"
