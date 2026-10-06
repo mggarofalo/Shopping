@@ -1,15 +1,16 @@
 #!/usr/bin/env ruby
 require "minitest/autorun"
+require "tempfile"
 require_relative "external-testflight"
 
 class ExternalFixture
-  attr_accessor :groups, :members, :reviews, :state, :notify, :assigned, :metadata, :description, :processing, :sibling_reviews, :sibling_version
+  attr_accessor :groups, :members, :reviews, :state, :notify, :assigned, :metadata, :description, :processing, :sibling_reviews, :sibling_version, :target_version
   attr_reader :writes
   def initialize
     @groups = [group("home", "Garofalo Home", true), group("external", "Fixture Beka group", false)]
     @members = { "home" => ["michael"], "external" => ["beka"] }
     @reviews, @writes = [], []
-    @sibling_reviews, @sibling_version = [], "1.5.0"
+    @sibling_reviews, @sibling_version, @target_version = [], "1.5.0", "1.5.0"
     @state, @notify, @assigned, @processing = "READY_FOR_BETA_SUBMISSION", false, false, "VALID"
     @metadata = { "contactFirstName" => "Existing", "contactLastName" => "Contact", "contactPhone" => "existing", "contactEmail" => "existing", "demoAccountRequired" => false }
     @description = "Existing approved beta app description"
@@ -25,7 +26,7 @@ class ExternalFixture
     when %r{\A/v1/betaGroups/([^/]+)/betaTesters\z} then @members.fetch($1).map { |id| { "id" => id } }
     when "/v1/builds"
       query = URI.decode_www_form(uri.query).to_h
-      raise "Wrong build identity" unless [nil, "29"].include?(query["filter[version]"]) && query["filter[preReleaseVersion.version]"] == "1.5.0" && query["filter[preReleaseVersion.platform]"] == "IOS"
+      raise "Wrong build identity" unless [nil, "29"].include?(query["filter[version]"]) && query["filter[preReleaseVersion.version]"] == @target_version && query["filter[preReleaseVersion.platform]"] == "IOS"
       target = { "id" => "target", "attributes" => { "version" => "29", "processingState" => @processing, "usesNonExemptEncryption" => false } }
       return [target] if query["filter[version]"] || @sibling_version != query["filter[preReleaseVersion.version]"]
       [target, { "id" => "sibling", "attributes" => { "version" => "28" } }]
@@ -68,6 +69,76 @@ class ExternalDistributionTests < Minitest::Test
   end
   def distribute
     distribute_external_testflight(@api, { "BUILD_NUMBER" => "29", "MARKETING_VERSION" => "1.5.0" }, policy: @policy)
+  end
+  def preflight(env = { "MARKETING_VERSION" => "1.5.0" })
+    preflight_external_testflight(@api, env, policy: @policy)
+  end
+  def test_preflight_clear_version_is_read_only_and_reports_selected_version
+    receipt = preflight
+    assert_equal "1.5.0", receipt[:marketing_version]
+    assert receipt[:pending_review_check_passed]
+    assert receipt[:existing_review_metadata_complete]
+    assert receipt[:read_only]
+    assert_empty @api.writes
+  end
+  def test_preflight_blocks_each_pending_review_state_without_changing_existing_submission
+    %w[WAITING_FOR_REVIEW IN_REVIEW].each do |state|
+      setup
+      @api.sibling_reviews = [{ "id" => "existing-review", "attributes" => { "betaReviewState" => state } }]
+      existing = Marshal.dump(@api.sibling_reviews)
+      message = assert_raises(RuntimeError) { preflight }.message
+      assert_includes message, "1.5.0 (28): #{state}"
+      assert_includes message, "before uploading a new build"
+      assert_equal existing, Marshal.dump(@api.sibling_reviews)
+      assert_empty @api.writes
+      refute @api.assigned
+    end
+  end
+  def test_preflight_checks_all_builds_for_new_upload_including_existing_target_review
+    @api.reviews = [{ "id" => "target-review", "attributes" => { "betaReviewState" => "IN_REVIEW" } }]
+    assert_includes assert_raises(RuntimeError) { preflight }.message, "1.5.0 (29): IN_REVIEW"
+    assert_empty @api.writes
+  end
+  def test_preflight_does_not_block_completed_or_other_version_reviews
+    @api.sibling_reviews = [{ "id" => "completed-review", "attributes" => { "betaReviewState" => "APPROVED" } }]
+    assert preflight[:pending_review_check_passed]
+    @api.sibling_version = "1.4.9"
+    @api.sibling_reviews.first["attributes"]["betaReviewState"] = "WAITING_FOR_REVIEW"
+    assert preflight[:pending_review_check_passed]
+    assert_empty @api.writes
+  end
+  def test_preflight_defaults_to_source_marketing_version_and_honors_override
+    TestFlight.stub(:project_version, "2.0.0") do
+      @api.target_version = "2.0.0"
+      assert_equal "2.0.0", preflight({})[:marketing_version]
+      assert_equal "2.0.0", preflight({ "MARKETING_VERSION" => "" })[:marketing_version]
+      @api.target_version = "1.5.0"
+      assert_equal "1.5.0", preflight[:marketing_version]
+    end
+    assert_empty @api.writes
+  end
+  def test_preflight_still_requires_existing_audience_and_metadata
+    @api.members["external"] << "unexpected"
+    assert_raises(RuntimeError) { preflight }
+    assert_empty @api.writes
+    setup
+    @api.metadata["contactPhone"] = ""
+    assert_raises(RuntimeError) { preflight }
+    assert_empty @api.writes
+  end
+  def test_availability_output_is_written_only_after_confirmed_distribution
+    Tempfile.create("external-output") do |file|
+      env = { "MARKETING_VERSION" => "1.5.0", "BUILD_NUMBER" => "29", "GITHUB_OUTPUT" => file.path }
+      @api.sibling_reviews = [{ "id" => "pending", "attributes" => { "betaReviewState" => "IN_REVIEW" } }]
+      assert_raises(RuntimeError) { distribute_external_testflight(@api, env, policy: @policy) }
+      assert_empty File.read(file.path)
+      @api.sibling_reviews = []
+      distribute_external_testflight(@api, env, policy: @policy)
+      assert_equal "external_available=false\n", File.read(file.path)
+      @api.state = "IN_BETA_TESTING"
+      distribute_external_testflight(@api, env, policy: @policy)
+      assert_equal "external_available=false\nexternal_available=true\n", File.read(file.path)
+    end
   end
   def test_submission_before_assignment_and_pending_is_not_availability
     receipt = distribute

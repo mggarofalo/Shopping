@@ -16,7 +16,7 @@ jobs = workflow.fetch("jobs")
   check(job["environment"] == "testflight" && job["needs"] == "intent", "protected intent prerequisite #{name}")
   check(job.fetch("if").include?("github.ref == 'refs/heads/main'"), "main guard #{name}")
   check(job.fetch("if").include?("!inputs."), "exclusive mode guard #{name}")
-  check(job.fetch("steps").first == { "uses" => "actions/checkout@v5" }, "exact dispatched checkout #{name}")
+  check(job.fetch("steps").first == { "uses" => YAML.safe_load(File.read("#{File.expand_path("../workflows/swift-ci.yml", __dir__)}"), aliases: true).fetch("jobs").fetch("build").fetch("steps").first.fetch("uses") }, "exact dispatched checkout #{name}")
 end
 intent = jobs.fetch("intent").fetch("steps").first.fetch("run")
 [false, true].repeated_permutation(3).each do |modes|
@@ -71,3 +71,14 @@ check(steps.index { |step| step["run"] == "ruby .github/scripts/external-testfli
   check(status.success? == (audience == "internal_only"), "audience intent validation")
 end
 puts "Existing external audience and private-release contracts passed."
+
+%w[preflight upload].each do |name|
+  steps = jobs.fetch(name).fetch("steps")
+  inventory = steps.find { |step| step["run"] == "ruby .github/scripts/preflight-testflight.rb" }
+  external = steps.find { |step| step["run"] == "ruby .github/scripts/external-testflight.rb --preflight" }
+  check(inventory["id"] == "preflight", "resolved preflight output #{name}")
+  check(external["env"]["MARKETING_VERSION"] == "${{ steps.preflight.outputs.marketing_version }}", "review guard uses selected marketing version #{name}")
+  check(external["if"] == "${{ inputs.audience == 'all_testers' }}", "internal-only #{name} cannot be blocked by external review")
+  check(steps.index(inventory) < steps.index(external), "inventory resolves version before review check #{name}")
+end
+puts "External pending-review preflight contracts passed."

@@ -100,7 +100,7 @@ Run the signed physical-device plan by replacing the placeholder with the connec
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingDevice -destination 'platform=iOS,id=<DEVICE-UDID>'
 ```
 
-CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job then boots one iPhone 16 Pro/iOS 18.5 simulator, uses `build-for-testing -testPlan ShoppingAcceptance` once, and reuses that `DerivedData` for two `test-without-building` commands:
+CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job boots one iPhone 16 Pro/iOS 18.5 simulator, uses `build-for-testing -testPlan ShoppingAcceptance` once, and reuses that `DerivedData` for two `test-without-building` commands:
 
 1. `-testPlan ShoppingFast` writes `FastResults.xcresult`; only this bundle feeds the existing coverage gate.
 2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
@@ -121,7 +121,7 @@ SwiftUI rendering dominates the lines uncovered by the fast plan. `ShoppingFull`
 
 ## Workflow ownership
 
-- Pull requests run the existing `Build & Test` check. Its name stays stable for branch protection. The active `main` ruleset required pull requests but no status-check context on September 8, 2026; changing repository protection is outside this code change.
+- Pull requests run `Build & Test` and `Release SDK Build`. The maintained main policy in `.github/main-ruleset.json` requires both checks from GitHub Actions on an up-to-date branch. Their names remain stable. GitHub approval count stays zero for this single-contributor repository; independent agent review and remediation happen before the phase PR. Inspect the proposed live-policy update with `python3 .github/scripts/main-ruleset.py`, explicitly apply with `--apply`, and verify without writing with `--check`. The reconciliation preserves other protections and refuses unexpected scope or approval-policy changes.
 - Milestone pushes do not start routine CI independently. An open pull request targeting `main` or `milestone/**` runs the quick check on each update; use manual Swift CI dispatch when validation is needed before opening a PR. This removes the duplicate push/PR job pair.
 - Pushes to `main` and manual Swift CI dispatch run the same quick acceptance check. The milestone commit must still receive exact-SHA local and hosted exhaustive coverage before integration.
 - Remote `ShoppingFull` is deliberately infrequent and is expected to pass: it runs only through the exact-commit local pass and dispatch commands above. Missing or stale attestations fail in the lightweight preflight before simulator setup.
@@ -137,3 +137,9 @@ Routine and exhaustive jobs retain `*Timing.json`, `*Timing.md`, `*TimingMetadat
 The local `run-local-shopping-full.sh` prints two paths. Lightweight `Timing.{json,md}`, `Metadata.json`, `Phases.jsonl`, and `Summary.{json,md}` reports persist in the Git common directory under `shopping-test-timings/<SHA>/<unique-run-id>/` for both successful and failed runs. Each run has a separate directory, including repeated runs of one commit. This history survives temporary-directory cleanup and is shared across worktrees without modifying source files. Large build/test logs and the result bundle stay in the printed temporary artifact directory and may be removed by the operating system. The attestation points to the durable timing report. Each report records the absolute temporary `result_bundle_path`, and logged phases record `log_path`, so failed runs can be traced back to raw artifacts while those temporary paths still exist. It measures source snapshot, simulator startup, build-for-testing, test-without-building, and summary separately. The runner still requires a clean commit, tests an isolated snapshot, checks the original clean SHA again, and records its attestation only after successful tests. Reporting runs on failure too. The remote exact-SHA attestation preflight and coverage gates remain mandatory.
 
 The JSON report uses `schema_version: 1`. `phases[].wall_seconds` is monotonic elapsed command time; build/test phases also retain the exact argument array, including test selection and worker options; `tests[].duration_seconds` and `suites[].summed_test_seconds` are xcresult measurements, which can overlap under parallel execution. Preserve this distinction when comparing runs. Compare the same plan and test inventory on the same toolchain/runtime, and retain the raw reports as evidence. See [runtime measurements](test-strategy.md#runtime-measurements) for focused local commands and [ShoppingFull runtime investigation](shopping-full-runtime.md) for measured bottlenecks and policy recommendations.
+
+## CI dependency maintenance
+
+External Actions use full commit SHAs, with readable version comments. Weekly Dependabot PRs propose GitHub Actions updates; they receive the same required CI and independent review. `ruby .github/scripts/check-action-pins.rb` rejects mutable references across every workflow. Never automatically merge dependency updates solely because a newer version exists.
+
+The [CI startup experiment](cicd-startup.md) records why the overlap candidate was rejected: its combined startup/build interval took 9m 35s versus 7m 26s for the fresh serial baseline. Routine CI retains serial setup and compilation.
