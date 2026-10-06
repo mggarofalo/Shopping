@@ -3,10 +3,25 @@ require_relative "testflight-common"
 
 $stdout.sync = true
 
-def distribute_testflight(client, env = ENV, sleep_for: ->(seconds) { sleep seconds })
-  marketing_version = env.fetch("MARKETING_VERSION", "")
-  marketing_version = marketing_version.empty? ? TestFlight.project_version : TestFlight.version(marketing_version)
-  target_number = TestFlight.number(env.fetch("BUILD_NUMBER"))
+def distribution_identity(env)
+  version = env.fetch("MARKETING_VERSION", "")
+  { marketing_version: version.empty? ? TestFlight.project_version : TestFlight.version(version),
+    build_number: TestFlight.number(env.fetch("BUILD_NUMBER")) }
+end
+
+def run_distribution(env = ENV, client_factory: -> { AppStoreConnect.new })
+  identity = distribution_identity(env)
+  if env["GITHUB_OUTPUT"]
+    File.open(env.fetch("GITHUB_OUTPUT"), "a") do |file|
+      identity.each { |name, value| file.puts "#{name}=#{value}" }
+    end
+  end
+  distribute_testflight(client_factory.call, env, identity: identity)
+end
+
+def distribute_testflight(client, env = ENV, sleep_for: ->(seconds) { sleep seconds }, identity: distribution_identity(env))
+  marketing_version = identity.fetch(:marketing_version)
+  target_number = identity.fetch(:build_number)
   source_number = TestFlight.number(env.fetch("DISTRIBUTE_FROM_BUILD", "6"))
   catalog = TestFlight::Catalog.new(client)
   source = catalog.source_build(source_number, env["DISTRIBUTE_FROM_VERSION"])
@@ -59,11 +74,7 @@ end
 
 if $PROGRAM_NAME == __FILE__
   begin
-    result = distribute_testflight(AppStoreConnect.new)
-    puts JSON.pretty_generate(result)
-    if ENV["GITHUB_OUTPUT"]
-      File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts "marketing_version=#{result.fetch(:marketing_version)}" }
-    end
+    puts JSON.pretty_generate(run_distribution)
   rescue StandardError => error
     warn "TestFlight distribution failed: #{error.message}"
     exit 1
