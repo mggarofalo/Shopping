@@ -61,7 +61,7 @@ class AudienceAuditTests < Minitest::Test
     assert_equal "testflight", job["environment"]
     assert_equal "intent", job["needs"]
     assert_includes job["if"], "refs/heads/main"
-    assert_equal({ "uses" => "actions/checkout@v5" }, job["steps"].first)
+    assert_equal({ "uses" => YAML.safe_load(File.read("#{File.expand_path("../workflows/swift-ci.yml", __dir__)}"), aliases: true).fetch("jobs").fetch("build").fetch("steps").first.fetch("uses") }, job["steps"].first)
     refute job["steps"].last["env"].keys.any? { |key| key.match?(/PROVISIONING|CERTIFICATE|GH_TOKEN/) }
     intent = workflow["jobs"]["intent"]["steps"].first["run"]
     %w[refs/heads/main refs/heads/feature].each do |ref|

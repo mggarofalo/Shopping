@@ -71,7 +71,7 @@ jobs:
     timeout-minutes: 20
     environment: testflight
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Check clean exact source
         run: .github/scripts/validate-release-source.sh
       - name: Inspect build inventory and approved audience (GET only)
@@ -102,7 +102,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Check clean exact source and required CI
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,7 +168,7 @@ jobs:
     timeout-minutes: 20
     environment: testflight
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Check clean exact source
         run: .github/scripts/validate-release-source.sh
       - name: Confirm processing and tester distribution

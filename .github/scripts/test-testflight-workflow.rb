@@ -16,7 +16,7 @@ jobs = workflow.fetch("jobs")
   check(job["environment"] == "testflight" && job["needs"] == "intent", "protected intent prerequisite #{name}")
   check(job.fetch("if").include?("github.ref == 'refs/heads/main'"), "main guard #{name}")
   check(job.fetch("if").include?("!inputs."), "exclusive mode guard #{name}")
-  check(job.fetch("steps").first == { "uses" => "actions/checkout@v5" }, "exact dispatched checkout #{name}")
+  check(job.fetch("steps").first == { "uses" => YAML.safe_load(File.read("#{File.expand_path("../workflows/swift-ci.yml", __dir__)}"), aliases: true).fetch("jobs").fetch("build").fetch("steps").first.fetch("uses") }, "exact dispatched checkout #{name}")
 end
 intent = jobs.fetch("intent").fetch("steps").first.fetch("run")
 [false, true].repeated_permutation(3).each do |modes|
