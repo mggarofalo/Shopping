@@ -1,0 +1,8 @@
+{
+  "repository": "mggarofalo/Shopping",
+  "ruleset_id": 22381187,
+  "required_status_checks": [
+    {"context": "Build & Test", "integration_id": 15368},
+    {"context": "Release SDK Build", "integration_id": 15368}
+  ]
+}
