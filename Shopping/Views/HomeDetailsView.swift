@@ -367,6 +367,7 @@ struct HomeDetailsView: View {
 struct MembershipRemovalPrompt {
     let title: String
     let action: String
+    let dismissAction: String
     let message: String?
 
     init(confirmation: HomeMembershipRemovalConfirmation, members: [HomeMember], invitedName: String? = nil) {
@@ -381,15 +382,18 @@ struct MembershipRemovalPrompt {
                 .first { !$0.isEmpty }
             title = name.map { "Cancel invitation to “\($0)”?" } ?? "Cancel invitation?"
             action = "Cancel Invitation"
-            message = nil
+            dismissAction = "Keep Invitation"
+            message = "This link will no longer let someone join."
         } else if confirmation.removal.purpose == .removeMember {
             let name = confirmation.memberNames.first
             title = name.map { "Remove “\($0)”?" } ?? "Remove member?"
             action = "Remove Member"
+            dismissAction = "Cancel"
             message = "They’ll lose access to “\(confirmation.homeName)”."
         } else {
             title = "Remove access?"
             action = "Remove Access"
+            dismissAction = "Cancel"
             message = "Other people will lose access to “\(confirmation.homeName)”."
         }
     }

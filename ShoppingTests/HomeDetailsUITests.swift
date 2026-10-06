@@ -239,7 +239,7 @@ final class HomeDetailsUITests: XCTestCase {
         attachScreenshot("Named invitation cancellation confirmation", app: app)
         let confirm = try alertAction("Cancel Invitation", id: "shopping.home.confirmRemoval", in: alert)
         XCTAssertTrue(confirm.isHittable)
-        try alertAction("Cancel", id: "shopping.home.cancelRemoval", in: alert).tap()
+        try alertAction("Keep Invitation", id: "shopping.home.cancelRemoval", in: alert).tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 3))
         assertReadyInvitation(app)
         reveal(remove, in: app)

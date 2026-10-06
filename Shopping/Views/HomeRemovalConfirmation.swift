@@ -16,7 +16,7 @@ private struct HomeRemovalConfirmation: ViewModifier {
                     .disabled(!model.canManageMembers)
                     .accessibilityIdentifier("shopping.home.confirmRemoval")
             }
-            Button("Cancel", role: .cancel) { model.removalConfirmation = nil }
+            Button(prompt?.dismissAction ?? "Cancel", role: .cancel) { model.removalConfirmation = nil }
                 .accessibilityIdentifier("shopping.home.cancelRemoval")
         } message: {
             if let message = prompt?.message { Text(message) }
