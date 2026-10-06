@@ -2839,17 +2839,9 @@ final class PersistenceBootstrap: ObservableObject {
         let actions = HomeDetailsActions(
             refresh: { [self] in
                 let (ready, url, transport) = try membershipContext(scope)
-                await refreshHomeAccessAndReplay()
+                let result = try await homeMembershipCoordinator.refresh(scope: scope, journalURL: url, transport: transport)
                 try validateMembershipPresentation(ready, scope: scope)
-                do {
-                    let result = try await homeMembershipCoordinator.refresh(scope: scope, journalURL: url, transport: transport)
-                    try await refreshHomes()
-                    try validateMembershipPresentation(ready, scope: scope)
-                    return result
-                } catch {
-                    try? await refreshHomes()
-                    throw error
-                }
+                return result
             },
             pending: { [self] in
                 let (ready, url, _) = try membershipContext(scope)
@@ -2883,7 +2875,9 @@ final class PersistenceBootstrap: ObservableObject {
                 let service = ready.service
                 try await Task.detached(priority: .userInitiated) { try service.renameHome(name: name, scope: scope) }.value
                 try validateMembershipPresentation(ready, scope: scope)
-                try await refreshHomes()
+                // The writer has committed. Discovery updates other home surfaces
+                // independently and must not turn that save into a retryable failure.
+                Task { try? await self.refreshHomes() }
             }, removals: HomeDetailsRemovalActions(
                 prepare: { [self] purpose, participantID in
                     let (ready, url, transport) = try membershipContext(scope)
