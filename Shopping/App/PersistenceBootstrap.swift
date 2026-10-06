@@ -2836,6 +2836,14 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func homeDetailsActions(scope: ActiveHomeScope) -> HomeDetailsActions {
+        let named = HomeNamedInvitationActions.managed(scope: scope, coordinator: homeMembershipCoordinator,
+            context: { [self] in
+                let (ready, url, transport) = try membershipContext(scope)
+                let share = try await transport.localInvitationShare(scope: scope)
+                try validateMembershipPresentation(ready, scope: scope)
+                return HomeNamedInvitationActions.Context(journalURL: url, transport: transport, share: share,
+                    validate: { try self.validateMembershipPresentation(ready, scope: scope) })
+            }, prepareShare: { [self] retry in _ = try await prepareSelectedHomeShare(retryInterrupted: retry) })
         let actions = HomeDetailsActions(
             refresh: { [self] in
                 let (ready, url, transport) = try membershipContext(scope)
@@ -2912,7 +2920,7 @@ final class PersistenceBootstrap: ObservableObject {
                     }.value
                     try validateMembershipPresentation(ready, scope: scope)
                     return needsRetry
-                })
+                }, namedInvitations: named)
 #if DEBUG
         if var fixture = homeDetailsFixtures[scope] { fixture.deletion = actions.deletion; return fixture }
         if var fixture = HomeDetailsUITestFixture.make(scope: scope,

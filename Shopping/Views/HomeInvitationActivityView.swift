@@ -6,13 +6,13 @@ import UIKit
 struct HomeInvitationActivityView: UIViewControllerRepresentable {
     let delivery: HomeInvitationDelivery
     let onPresented: () -> Void
-    let onFinished: () -> Void
+    let onFinished: (Bool, Error?) -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = PresentedActivityController(activityItems: HomeInvitationActivitySource.items(url: delivery.url), applicationActivities: nil)
         controller.didPresent = onPresented
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            Task { @MainActor in onFinished() }
+        controller.completionWithItemsHandler = { _, completed, _, error in
+            Task { @MainActor in onFinished(completed, error) }
         }
         if let popover = controller.popoverPresentationController {
             popover.sourceView = controller.view

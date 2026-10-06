@@ -793,6 +793,93 @@ final class HomeDetailsModelTests: XCTestCase {
         XCTAssertEqual(after.members.filter { $0.id == invitation.participantID }.map(\.acceptance), [.pending])
     }
 
+    func testNamedInvitationFixtureRetainsIdentityAcrossRelaunchAndIsolatesStores() async throws {
+        let scope = try scope()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("Shopping.sqlite").path
+        func make(_ storePath: String, role: String = "owner") throws -> HomeDetailsActions {
+            try XCTUnwrap(HomeDetailsUITestFixture.make(scope: scope, name: "Original", rename: { _ in },
+                environment: ["SHOPPING_UI_TEST_STORE_PATH": storePath, "SHOPPING_UI_TEST_HOME_MEMBERS": role]))
+        }
+        let actions = try make(path)
+        let named = try XCTUnwrap(actions.namedInvitations)
+        let draft = try await named.prepare("  Beka  ")
+        XCTAssertEqual(draft.name, "Beka")
+        XCTAssertTrue(draft.participantIDs.isEmpty)
+        let reused = try await named.prepare("beka")
+        XCTAssertEqual(reused.id, draft.id)
+        let delivery = try await named.create(draft.id, false)
+        XCTAssertEqual(delivery.url.host, "example.invalid")
+        XCTAssertEqual(delivery.participantID, "fixture-invitation-1")
+        let membership = try await actions.refresh()
+        XCTAssertEqual(membership.pendingCount, 1)
+        XCTAssertEqual(membership.acceptedOtherCount, 1)
+
+        let restoredActions = try make(path)
+        let restored = try XCTUnwrap(restoredActions.namedInvitations)
+        let records = try await restored.load()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.id, draft.id)
+        XCTAssertEqual(records.first?.participantID, delivery.participantID)
+        XCTAssertNil(records.first?.lastHandoffAt, "Opening or dismissing the sheet cannot claim handoff")
+        let resent = try await restored.create(draft.id, false)
+        XCTAssertEqual(resent.url, delivery.url)
+        try await restored.handoff(draft.id)
+        let handedOff = try await restored.load()
+        XCTAssertNotNil(handedOff.first?.lastHandoffAt)
+        let afterHandoff = try await restoredActions.refresh()
+        XCTAssertEqual(afterHandoff.pendingCount, 1, "Handoff is not acceptance")
+
+        let other = try XCTUnwrap(make(directory.appendingPathComponent("Other.sqlite").path).namedInvitations)
+        let isolated = try await other.load()
+        XCTAssertTrue(isolated.isEmpty, "Even stores in one directory must have separate fixture state")
+        let discarded = try await other.prepare("Draft to discard")
+        try await other.discard(discarded.id)
+        let discardedRecords = try await other.load()
+        XCTAssertEqual(discardedRecords.first?.isTerminal, true)
+        let confirmation = try await restored.cancel(draft.id)
+        XCTAssertEqual(confirmation.memberNames, ["Beka"])
+        let removals = try XCTUnwrap(restoredActions.removals)
+        _ = try await removals.confirm(confirmation)
+        let afterCancellation = try make(path)
+        let finalRecords = try await XCTUnwrap(afterCancellation.namedInvitations).load()
+        XCTAssertEqual(finalRecords.first?.isTerminal, true)
+        let finalMembership = try await afterCancellation.refresh()
+        XCTAssertEqual(finalMembership.pendingCount, 0)
+        XCTAssertEqual(finalMembership.acceptedOtherCount, 1)
+
+        let contributor = try XCTUnwrap(make(path, role: "contributor").namedInvitations)
+        do { _ = try await contributor.prepare("Forbidden"); XCTFail("Only the owner can prepare an invitation") }
+        catch { XCTAssertEqual(error as? HomeMembershipError, .ownerRequired) }
+        do { _ = try await contributor.create(draft.id, false); XCTFail("Only the owner can create an invitation") }
+        catch { XCTAssertEqual(error as? HomeMembershipError, .ownerRequired) }
+    }
+
+    func testNamedInvitationFixtureFailureRetainsDraftAndRetryCreatesOnlyOneParticipant() async throws {
+        let scope = try scope()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let actions = try XCTUnwrap(HomeDetailsUITestFixture.make(scope: scope, name: "Original", rename: { _ in },
+            environment: ["SHOPPING_UI_TEST_STORE_PATH": directory.appendingPathComponent("Shopping.sqlite").path,
+                "SHOPPING_UI_TEST_HOME_MEMBERS": "owner", "SHOPPING_UI_TEST_HOME_INVITE_FAILURE": "1"]))
+        let named = try XCTUnwrap(actions.namedInvitations)
+        let draft = try await named.prepare("Beka")
+        do { _ = try await named.create(draft.id, false); XCTFail("The fixture must expose the actual backend failure") }
+        catch { XCTAssertEqual(error.localizedDescription, HomeShareGraphValidator.Failure.ambiguousIdentity.localizedDescription) }
+        let failedRecords = try await named.load()
+        XCTAssertEqual(failedRecords.map(\.id), [draft.id])
+        XCTAssertTrue(failedRecords[0].participantIDs.isEmpty)
+        let failedSnapshot = try await actions.refresh()
+        XCTAssertEqual(failedSnapshot.pendingCount, 0)
+        let delivery = try await named.create(draft.id, true)
+        XCTAssertEqual(delivery.participantID, "fixture-invitation-1")
+        let retriedSnapshot = try await actions.refresh()
+        XCTAssertEqual(retriedSnapshot.pendingCount, 1)
+        let retriedRecords = try await named.load()
+        XCTAssertEqual(retriedRecords.map(\.id), [draft.id])
+    }
+
     func testUIFixtureContributorRenamesThroughRealCallbackAndRestrictedActionsRejectWrites() async throws {
         let scope = try scope()
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path

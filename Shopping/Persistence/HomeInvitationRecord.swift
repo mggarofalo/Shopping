@@ -40,7 +40,8 @@ struct HomeInvitationRecord: Equatable, Identifiable, Sendable {
             return Self(id: draft.invitationID, name: latestName, origin: draft.origin, share: boundShare,
                 participantIDs: Set(bindings.compactMap(\.participantID)),
                 lastHandoffAt: values.filter { $0.kind == .handoff }.map(\.createdAt).max(),
-                isTerminal: !participants.isEmpty && participants.isSubset(of: accepted))
+                isTerminal: participants.isEmpty ? values.contains { $0.kind == .discarded }
+                    : participants.isSubset(of: accepted))
         }
         let counts = Dictionary(grouping: records, by: \.normalizedName).mapValues(\.count)
         for index in records.indices { records[index].hasConflictingName = counts[records[index].normalizedName, default: 0] > 1 }
@@ -50,7 +51,7 @@ struct HomeInvitationRecord: Equatable, Identifiable, Sendable {
 
 /// Append-only events converge across owner devices without overwriting a competing capability.
 struct HomeInvitationEvent: Codable, Equatable, Identifiable, Sendable {
-    enum Kind: String, Codable, Sendable { case named, renamed, bound, handoff, accepted }
+    enum Kind: String, Codable, Sendable { case named, renamed, bound, handoff, accepted, discarded }
     let id: UUID
     let invitationID: UUID
     let origin: ActiveHomeScope

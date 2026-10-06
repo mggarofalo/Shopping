@@ -7,6 +7,7 @@ import SwiftUI
 final class HomeDetailsModel: ObservableObject {
     let scope: ActiveHomeScope
     private let actions: HomeDetailsActions
+    private let initialAccess: HomeCandidate.Access?
     @Published private(set) var snapshot: HomeMembershipSnapshot?
     @Published private(set) var pending: HomeMembershipCoordinator.Pending?
     enum Operation: Equatable {
@@ -51,13 +52,14 @@ final class HomeDetailsModel: ObservableObject {
     private var refreshGeneration: Int?
     private var refreshRequested = false
 
-    init(scope: ActiveHomeScope, actions: HomeDetailsActions) {
+    init(scope: ActiveHomeScope, actions: HomeDetailsActions, initialAccess: HomeCandidate.Access? = nil) {
         self.scope = scope
         self.actions = actions
+        self.initialAccess = initialAccess
     }
 
-    var canInvite: Bool { active && !authorityRevoked && !busy && snapshot?.canInvite == true }
-    var canRename: Bool { active && !authorityRevoked && !busy && snapshot?.canEditName == true }
+    var canInvite: Bool { active && !authorityRevoked && !busy && (snapshot?.canInvite ?? (initialAccess == .owner)) }
+    var canRename: Bool { active && !authorityRevoked && !busy && (snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor)) }
     var canManageMembers: Bool { canInvite && snapshot?.source == .server && actions.removals != nil }
 
     var canLeave: Bool {

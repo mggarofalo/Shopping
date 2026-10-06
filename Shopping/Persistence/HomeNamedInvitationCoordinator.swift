@@ -1,6 +1,19 @@
 import Foundation
 
 extension HomeMembershipCoordinator {
+    func discardInvitationDraft(recordID: UUID, scope: ActiveHomeScope, share: HomeShareIdentity?,
+                                transport: any HomeInvitationTrackingTransport) async throws {
+        try await serialized(scope: scope) {
+            let records = try await Self.records(scope: scope, share: share, transport: transport)
+            guard let record = records.first(where: { $0.id == recordID }), record.participantIDs.isEmpty else {
+                throw HomeMembershipError.outcomeUncertain
+            }
+            try await transport.retainInvitationEvent(HomeInvitationEvent(id: UUID(), invitationID: recordID,
+                origin: scope, share: record.share, name: record.name, kind: .discarded,
+                participantID: nil, createdAt: Date()), scope: scope)
+        }
+    }
+
     func invitationRecords(scope: ActiveHomeScope, share: HomeShareIdentity?,
                            transport: any HomeInvitationTrackingTransport) async throws -> [HomeInvitationRecord] {
         try await Self.records(scope: scope, share: share, transport: transport)
@@ -84,6 +97,7 @@ extension HomeMembershipCoordinator {
             let share = try Self.ownerShare(snapshot, scope: scope, share: nil)
             let records = try await Self.records(scope: scope, share: share, transport: transport)
             guard let record = records.first(where: { $0.id == recordID }) else { throw HomeMembershipError.invitationUnavailable }
+            guard !record.isTerminal else { throw HomeMembershipError.invitationCancelled }
             guard !record.hasConflictingParticipants else { throw HomeMembershipError.invitationNameConflict }
             if let participantID = record.participantID {
                 guard try !journal.isSuppressed(participantID, scope: scope) else { throw HomeMembershipError.invitationCancelled }
@@ -109,13 +123,14 @@ extension HomeMembershipCoordinator {
         }
     }
 
-    func prepareInvitationCancellation(recordID: UUID, scope: ActiveHomeScope, share: HomeShareIdentity,
+    func prepareInvitationCancellation(recordID: UUID, participantID requestedParticipantID: String? = nil, scope: ActiveHomeScope, share: HomeShareIdentity,
                                        journalURL: URL, transport: any HomeInvitationTrackingTransport) async throws -> HomeMembershipRemovalConfirmation {
         try await serialized(scope: scope) {
             let snapshot = try await Self.refreshMembership(scope: scope, journal: HomeInviteJournal(url: journalURL), transport: transport)
             _ = try Self.ownerShare(snapshot, scope: scope, share: share)
             let records = try await Self.records(scope: scope, share: share, transport: transport)
-            guard let record = records.first(where: { $0.id == recordID }), let participantID = record.participantID else {
+            guard let record = records.first(where: { $0.id == recordID }), let participantID = requestedParticipantID ?? record.participantID,
+                  record.participantIDs.contains(participantID) else {
                 throw HomeMembershipError.invitationUnavailable
             }
             guard !snapshot.members.contains(where: { $0.id == participantID && $0.acceptance == .accepted }) else {
@@ -155,12 +170,14 @@ extension HomeMembershipCoordinator {
 
     private static func records(scope: ActiveHomeScope, share: HomeShareIdentity?,
                                 transport: any HomeInvitationTrackingTransport) async throws -> [HomeInvitationRecord] {
-        var records = try HomeInvitationRecord.project(await transport.invitationEvents(scope: scope), scope: scope, share: share)
+        let events = try await transport.invitationEvents(scope: scope)
+        var records = try HomeInvitationRecord.project(events, scope: scope, share: share)
         if let share {
             let cancelled = try await transport.retainedRemovals(scope: scope, share: share)
                 .reduce(into: Set<String>()) { $0.formUnion($1.participantIDs) }
             for index in records.indices where !records[index].participantIDs.isEmpty {
-                if records[index].participantIDs.isSubset(of: cancelled) { records[index].isTerminal = true }
+                let accepted = Set(events.filter { $0.invitationID == records[index].id && $0.kind == .accepted }.compactMap(\.participantID))
+                if records[index].participantIDs.isSubset(of: cancelled.union(accepted)) { records[index].isTerminal = true }
             }
         }
         let counts = Dictionary(grouping: records.filter { !$0.isTerminal }, by: \.normalizedName).mapValues(\.count)

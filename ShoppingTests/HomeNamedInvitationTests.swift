@@ -16,6 +16,28 @@ final class HomeNamedInvitationTests: XCTestCase {
         return (url, scope, NamedInvitationTransport(native: MembershipTransportDouble(scope: scope, journalURL: url)))
     }
 
+    func testDiscardedDraftReleasesNameAndCannotCreateLink() async throws {
+        let (url, scope, transport) = try fixture()
+        let coordinator = HomeMembershipCoordinator()
+        let draft = try await coordinator.prepareInvitation(name: "Beka", scope: scope, share: nil, transport: transport)
+        try await coordinator.discardInvitationDraft(recordID: draft.id, scope: scope, share: nil, transport: transport)
+        let replacement = try await coordinator.prepareInvitation(name: "Beka", scope: scope, share: nil, transport: transport)
+        XCTAssertNotEqual(draft.id, replacement.id)
+        do {
+            _ = try await coordinator.invite(recordID: draft.id, scope: scope, journalURL: url, transport: transport)
+            XCTFail("A discarded draft cannot create a capability")
+        } catch { XCTAssertEqual(error as? HomeMembershipError, .invitationCancelled) }
+        let counts = await transport.native.counts()
+        XCTAssertEqual(counts.created, 0)
+        try await transport.retainInvitationEvent(HomeInvitationEvent(id: UUID(), invitationID: draft.id,
+            origin: scope, share: MembershipTransportDouble.share, name: "Beka", kind: .bound,
+            participantID: "concurrent-link", createdAt: Date()), scope: scope)
+        let records = try await coordinator.invitationRecords(scope: scope,
+            share: MembershipTransportDouble.share, transport: transport)
+        XCTAssertFalse(try XCTUnwrap(records.first { $0.id == draft.id }).isTerminal,
+            "An unseen concurrent capability must remain visible for explicit cancellation")
+    }
+
     func testNameIsDurableBeforeCreationAndReusesNormalizedNameAfterAcknowledgement() async throws {
         let (url, scope, transport) = try fixture()
         let coordinator = HomeMembershipCoordinator()
@@ -113,6 +135,35 @@ final class HomeNamedInvitationTests: XCTestCase {
                 share: MembershipTransportDouble.share, transport: transport)
             XCTFail("Existing active names must be reused or distinguished")
         } catch { XCTAssertEqual(error as? HomeMembershipError, .invitationNameConflict) }
+    }
+
+    func testConcurrentLinksCanBeCancelledIndividuallyAfterAnotherAccepts() async throws {
+        let (url, scope, transport) = try fixture()
+        let coordinator = HomeMembershipCoordinator()
+        let draft = try await coordinator.prepareInvitation(name: "Beka", scope: scope, share: nil, transport: transport)
+        for participantID in ["joined", "pending"] {
+            try await transport.retainInvitationEvent(HomeInvitationEvent(id: UUID(), invitationID: draft.id,
+                origin: scope, share: MembershipTransportDouble.share, name: draft.name, kind: .bound,
+                participantID: participantID, createdAt: Date()), scope: scope)
+        }
+        await transport.native.include("joined", acceptance: .accepted)
+        await transport.native.include("pending", acceptance: .pending)
+        let snapshot = try await coordinator.refresh(scope: scope, journalURL: url, transport: transport)
+        let records = try await coordinator.invitationRecords(scope: scope,
+            share: MembershipTransportDouble.share, transport: transport)
+        let record = try XCTUnwrap(records.first)
+        XCTAssertFalse(record.isTerminal)
+        let presentation = HomeInvitationPresentation(record: record, snapshot: snapshot)
+        XCTAssertNil(presentation.acceptedMember)
+        XCTAssertEqual(presentation.status, "Multiple links need review")
+        let confirmation = try await coordinator.prepareInvitationCancellation(recordID: draft.id,
+            participantID: "pending", scope: scope, share: MembershipTransportDouble.share,
+            journalURL: url, transport: transport)
+        XCTAssertEqual(confirmation.removal.participantIDs, ["pending"])
+        _ = try await coordinator.confirmRemoval(confirmation, scope: scope, journalURL: url, transport: transport)
+        let final = try await coordinator.invitationRecords(scope: scope,
+            share: MembershipTransportDouble.share, transport: transport)
+        XCTAssertTrue(try XCTUnwrap(final.first).isTerminal)
     }
 
     func testReplicaProjectionPreservesCompetingCapabilitiesAndPortableIdentity() throws {

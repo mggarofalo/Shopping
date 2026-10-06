@@ -146,7 +146,9 @@ struct HomeSelectionView: View {
         if case .activeHome(let scope) = entry.root {
             NavigationLink {
                 HomeDetailsView(scope: scope, name: entry.currentHomeName ?? "Home",
-                    actions: bootstrap.homeDetailsActions(scope: scope))
+                    actions: bootstrap.homeDetailsActions(scope: scope),
+                    access: entry.homes.first(where: { $0.candidate.graph == scope.graph })?.access)
+                    .id(scope)
             } label: {
                 Label("Home Settings", systemImage: "gearshape")
             }

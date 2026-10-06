@@ -7,7 +7,9 @@ struct HomeSummaryLink: View {
 
     var body: some View {
         NavigationLink {
-            HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope))
+            HomeDetailsView(scope: scope, name: name, actions: bootstrap.homeDetailsActions(scope: scope),
+                access: bootstrap.homeEntry.homes.first(where: { $0.candidate.graph == scope.graph })?.access)
+                .id(scope)
         } label: {
             LabeledContent("Home") {
                 Text(bootstrap.homeEntry.currentHomeDisplayName ?? name)
