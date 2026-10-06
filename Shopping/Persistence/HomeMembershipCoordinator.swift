@@ -152,7 +152,7 @@ actor HomeMembershipCoordinator {
         }
     }
 
-    private func serialized<Value: Sendable>(scope: ActiveHomeScope,
+    func serialized<Value: Sendable>(scope: ActiveHomeScope,
         operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
         activeRequestCount += 1
         defer { activeRequestCount -= 1 }
@@ -167,7 +167,7 @@ actor HomeMembershipCoordinator {
         return try await task.value
     }
 
-    private static func perform(_ saved: HomeInviteJournal.Intent, observed: HomeMembershipSnapshot,
+    static func perform(_ saved: HomeInviteJournal.Intent, observed: HomeMembershipSnapshot,
                                 journal: HomeInviteJournal, transport: any HomeMembershipTransport) async throws -> HomeInvitationDelivery {
         guard try !journal.isSuppressed(saved.material.participantID, scope: saved.scope) else { throw HomeMembershipError.invitationCancelled }
         if try member(saved.material.participantID, in: observed) != nil || saved.phase != .prepared {
@@ -194,7 +194,7 @@ actor HomeMembershipCoordinator {
         return try await observedDelivery(submitted, snapshot: result, journal: journal, transport: transport)
     }
 
-    private static func observedDelivery(_ saved: HomeInviteJournal.Intent, snapshot: HomeMembershipSnapshot,
+    static func observedDelivery(_ saved: HomeInviteJournal.Intent, snapshot: HomeMembershipSnapshot,
         journal: HomeInviteJournal, transport: any HomeMembershipTransport) async throws -> HomeInvitationDelivery {
         _ = try ownerShare(snapshot, scope: saved.scope, share: saved.share)
         guard let member = try member(saved.material.participantID, in: snapshot) else {
@@ -218,7 +218,7 @@ actor HomeMembershipCoordinator {
         return HomeInvitationDelivery(id: saved.id, scope: saved.scope, participantID: saved.material.participantID, url: url)
     }
 
-    private static func refreshMembership(scope: ActiveHomeScope, journal: HomeInviteJournal,
+    static func refreshMembership(scope: ActiveHomeScope, journal: HomeInviteJournal,
         transport: any HomeMembershipTransport, retryRemovals: Bool = false) async throws -> HomeMembershipSnapshot {
         var snapshot = try await transport.refresh(scope: scope)
         try validate(snapshot, scope: scope, share: try journal.load(scope: scope)?.share)
@@ -252,6 +252,9 @@ actor HomeMembershipCoordinator {
             }
         }
         snapshot.removals = try journal.removals(scope: scope)
+        if let tracking = transport as? any HomeInvitationTrackingTransport {
+            try await retainAcceptedInvitations(snapshot, transport: tracking)
+        }
         return snapshot
     }
 
@@ -261,7 +264,7 @@ actor HomeMembershipCoordinator {
         if let share, snapshot.share != share { throw HomeMembershipError.membershipChanged }
     }
 
-    private static func ownerShare(_ snapshot: HomeMembershipSnapshot, scope: ActiveHomeScope,
+    static func ownerShare(_ snapshot: HomeMembershipSnapshot, scope: ActiveHomeScope,
                                    share: HomeShareIdentity?) throws -> HomeShareIdentity {
         try validate(snapshot, scope: scope, share: share)
         guard snapshot.source == .server, let actualShare = snapshot.share else { throw HomeMembershipError.shareUnavailable }
@@ -271,7 +274,7 @@ actor HomeMembershipCoordinator {
         return actualShare
     }
 
-    private static func member(_ id: String, in snapshot: HomeMembershipSnapshot) throws -> HomeMember? {
+    static func member(_ id: String, in snapshot: HomeMembershipSnapshot) throws -> HomeMember? {
         let members = snapshot.members.filter { $0.id == id }
         guard members.count <= 1 else { throw HomeMembershipError.invalidParticipant }
         return members.first

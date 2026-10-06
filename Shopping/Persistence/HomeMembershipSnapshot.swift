@@ -77,9 +77,12 @@ enum HomeMembershipError: Error, LocalizedError, Equatable {
     case shareUnavailable, membershipChanged, invalidParticipant, missingURL
     case outcomeUncertain, invitationAlreadyAccepted, invitationUnavailable, invalidJournal
     case invitationCancelled, noMembersToRemove
+    case invitationNameRequired, invitationNameConflict
 
     var errorDescription: String? {
         switch self {
+        case .invitationNameRequired: return "Enter a name for the person you’re inviting."
+        case .invitationNameConflict: return "There is already an invitation with this name. Open it or use a distinguishing name."
         case .ownerRequired: return "Only this home’s owner can manage invitations."
         case .unsupportedAccess: return "This home’s access settings are not supported. Its groceries have been retained."
         case .scopeChanged: return "Your home or iCloud account changed. Return to the original home to continue."

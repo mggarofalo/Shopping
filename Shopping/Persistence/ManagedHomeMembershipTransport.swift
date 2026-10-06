@@ -4,7 +4,7 @@ import Foundation
 
 /// Reads only the known managed share through CloudKit. All membership writes use
 /// Core Data's managed share API; domain records never go through raw CloudKit APIs.
-final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked Sendable {
+final class ManagedHomeMembershipTransport: HomeInvitationTrackingTransport, @unchecked Sendable {
     private struct Graph: Sendable {
         let name: String
         let share: HomeShareIdentity?
@@ -132,6 +132,29 @@ final class ManagedHomeMembershipTransport: HomeMembershipTransport, @unchecked 
         guard !removals.contains(where: { $0.participantIDs.contains(participantID) }) else { throw HomeMembershipError.invitationCancelled }
         _ = try environment(scope)
         return url
+    }
+
+    func invitationEvents(scope: ActiveHomeScope) async throws -> [HomeInvitationEvent] {
+        let (_, role) = try environment(scope)
+        guard role == .ownerPrivate, let privateRecords else { return [] }
+        let result = try await Task.detached(priority: .utility) {
+            try privateRecords.retainedHomeInvitationEvents(scope: scope)
+        }.value
+        _ = try environment(scope)
+        return result
+    }
+
+    func retainInvitationEvent(_ event: HomeInvitationEvent, scope: ActiveHomeScope) async throws {
+        let (store, role) = try environment(scope)
+        guard role == .ownerPrivate, let privateRecords, event.matches(scope: scope) else {
+            throw HomeMembershipError.ownerRequired
+        }
+        if let share = event.share {
+            let current = try await graph(scope, store: store)
+            guard current.share == share else { throw HomeMembershipError.scopeChanged }
+        }
+        try await Task.detached(priority: .userInitiated) { try privateRecords.retainHomeInvitationEvent(event) }.value
+        _ = try environment(scope)
     }
 
     func retainedRemovals(scope: ActiveHomeScope, share: HomeShareIdentity) async throws -> [HomeMembershipRemoval] {
