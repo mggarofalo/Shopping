@@ -60,6 +60,16 @@ final class HomeNamedInvitationTests: XCTestCase {
         let counts = await transport.native.counts()
         XCTAssertEqual(counts.created, 1)
         XCTAssertEqual(counts.added, 0)
+        let cancellation = try await coordinator.prepareInvitationCancellation(recordID: draft.id, scope: scope,
+            share: MembershipTransportDouble.share, journalURL: url, transport: transport)
+        _ = try await coordinator.confirmRemoval(cancellation, scope: scope, journalURL: url, transport: transport)
+        let cancelled = try await coordinator.invitationRecords(scope: scope,
+            share: MembershipTransportDouble.share, transport: transport)
+        XCTAssertTrue(try XCTUnwrap(cancelled.first).isTerminal)
+        do {
+            _ = try await coordinator.invite(recordID: draft.id, scope: scope, journalURL: url, transport: transport)
+            XCTFail("Cancellation must suppress the unobserved capability")
+        } catch { XCTAssertEqual(error as? HomeMembershipError, .invitationCancelled) }
     }
 
     func testAcceptedIdentityAndRetainedCancellationReleaseNamesWithoutDeletingHistory() async throws {

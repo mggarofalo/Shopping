@@ -69,7 +69,10 @@ extension HomeMembershipCoordinator {
                 name: label, kind: .bound, participantID: participantID, createdAt: Date())
             if existingDraft == nil { try await transport.retainInvitationEvent(named, scope: scope) }
             try await transport.retainInvitationEvent(bound, scope: scope)
-            return try await Self.records(scope: scope, share: share, transport: transport).first { $0.id == id }!
+            guard let result = try await Self.records(scope: scope, share: share, transport: transport).first(where: { $0.id == id }) else {
+                throw HomeMembershipError.invalidJournal
+            }
+            return result
         }
     }
 
