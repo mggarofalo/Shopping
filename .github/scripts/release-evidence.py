@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Release evidence is an allowlist, never a copy of the signing workspace."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -8,9 +9,8 @@ import shutil
 import subprocess
 import sys
 
-# Do not retain arbitrary tool output: it can include signing arguments, decoded
-# credentials or developer contact information. Only fixed diagnostic categories
-# survive. Full transient output remains in the private signing workspace.
+# Retain bounded error/warning reasons, never the complete command transcript.
+# Scrub credentials before truncation so a partial secret cannot survive a limit.
 DIAGNOSTICS = {
     "compiler_error": re.compile(r"\berror:", re.I),
     "compiler_warning": re.compile(r"\bwarning:", re.I),
@@ -20,6 +20,45 @@ DIAGNOSTICS = {
     "export_succeeded": re.compile(r"\*\* EXPORT SUCCEEDED \*\*"),
     "export_failed": re.compile(r"\*\* EXPORT FAILED \*\*"),
 }
+
+
+DIAGNOSTIC_TEXT = re.compile(r"\b(?:error|warning):|\bERROR (?:ITMS|ITC)-[0-9]+|Error Domain=|NSLocalizedDescription|\*\* (?:ARCHIVE|EXPORT) (?:SUCCEEDED|FAILED) \*\*", re.I)
+SECRET_NAME = re.compile(r"SECRET|TOKEN|PASSWORD|PRIVATE_KEY|CERTIFICATE|PROVISIONING|API_KEY|ISSUER", re.I)
+
+
+def secret_values(command):
+    values = set()
+    for name, value in os.environ.items():
+        if value and SECRET_NAME.search(name):
+            values.add(value)
+            if name.endswith("BASE64"):
+                try:
+                    decoded = base64.b64decode(value, validate=True).decode("utf-8")
+                    values.add(decoded)
+                    values.update(decoded.splitlines())
+                except (ValueError, UnicodeDecodeError):
+                    pass
+    for argument in command:
+        if "=" in argument and re.search(r"PROFILE|CODE_SIGN|DEVELOPMENT_TEAM", argument.split("=", 1)[0]):
+            values.add(argument.split("=", 1)[1])
+    # Include escaped representations used by structured command diagnostics.
+    values.update(json.dumps(value)[1:-1] for value in list(values))
+    return sorted((value for value in values if value), key=len, reverse=True)
+
+
+def sanitize(line, secrets):
+    for value in secrets:
+        line = line.replace(value, "[REDACTED]")
+    line = re.sub(r"(?i)(?:Bearer\s+)[^\s\"']+", "Bearer [REDACTED]", line)
+    line = re.sub(r"(?i)\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b|\b[0-9a-f]{40}\b", "[SIGNING-ID]", line)
+    line = re.sub(r"Apple (?:Distribution|Development):[^\n]*?\([A-Z0-9]{10}\)", "[SIGNING-IDENTITY]", line)
+    line = re.sub(r"[A-Za-z0-9+/=_-]{64,}", "[ENCODED-DATA]", line)
+    line = re.sub(r"(?i)(?:password|token|apiKey|apiIssuer|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE(?:_SPECIFIER)?)\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)", "[SIGNING-ARGUMENT]", line)
+    for name in ("RUNNER_TEMP", "HOME"):
+        if os.environ.get(name):
+            line = line.replace(os.environ[name], f"[{name}]")
+    line = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[EMAIL]", line)
+    return line.strip()[:2000]
 
 
 def directory():
@@ -55,21 +94,39 @@ def run(stage, raw_path, command):
     # Output is stored only under TEMP_ROOT; never print or upload it wholesale.
     with open(raw_path, "wb") as raw:
         result = subprocess.run(command, stdout=raw, stderr=subprocess.STDOUT)
-    with open(raw_path, errors="replace") as raw:
-        for line in raw:
-            for name, pattern in DIAGNOSTICS.items():
-                if pattern.search(line):
-                    counts[name] += 1
     code = result.returncode if result.returncode >= 0 else 128 - result.returncode
-    record = {"stage": stage, "exit_code": code, "diagnostic_counts": counts,
-              "note": "Arbitrary command output excluded to protect signing credentials."}
-    (directory() / f"{stage}.log").write_text(json.dumps(record, indent=2) + "\n")
-    data = manifest()
-    data[stage] = "succeeded" if code == 0 else "failed"
-    if stage == "upload" and code != 0:
-        data[stage] = "unconfirmed"  # A network error can follow Apple accepting it.
-    write_manifest(data)
-    print(f"Release {stage}: exit {code}; sanitized diagnostics retained.")
+    try:
+        secrets = secret_values(command)
+        diagnostics = []
+        in_pem = False
+        with open(raw_path, errors="replace") as raw:
+            for line in raw:
+                if "-----BEGIN " in line:
+                    in_pem = True
+                skip = in_pem
+                if "-----END " in line:
+                    in_pem = False
+                if skip:
+                    continue
+                for name, pattern in DIAGNOSTICS.items():
+                    if pattern.search(line):
+                        counts[name] += 1
+                if len(line) <= 65536 and len(diagnostics) < 200 and DIAGNOSTIC_TEXT.search(line):
+                    diagnostics.append(sanitize(line, secrets))
+        record = {"stage": stage, "exit_code": code, "diagnostic_counts": counts,
+                  "diagnostics": diagnostics,
+                  "note": "At most 200 redacted error/warning lines; commands and raw output excluded."}
+        (directory() / f"{stage}.log").write_text(json.dumps(record, indent=2) + "\n")
+        data = manifest()
+        data[stage] = "succeeded" if code == 0 else "failed"
+        if stage == "upload" and code != 0:
+            data[stage] = "unconfirmed"  # A network error can follow Apple accepting it.
+        write_manifest(data)
+        print(f"Release {stage}: exit {code}; sanitized diagnostics retained.")
+    except Exception:
+        # Never print an exception containing raw text or secret path values.
+        print("Release evidence failed; command status preserved when nonzero.", file=sys.stderr)
+        return code or 1
     return code
 
 

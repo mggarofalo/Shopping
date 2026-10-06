@@ -16,13 +16,17 @@ spec = importlib.util.spec_from_file_location("guards", ROOT / "test-release-gua
 guards = importlib.util.module_from_spec(spec); spec.loader.exec_module(guards)
 
 class CleanupTests(unittest.TestCase):
-    def scenario(self, collision=False, failure="archive"):
+    def scenario(self, collision=False, failure="archive", evidence_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); scripts = root / "scripts"; scripts.mkdir()
             tools = root / "bin"; tools.mkdir()
             home = root / "home"; profiles = home / "Library/Developer/Xcode/UserData/Provisioning Profiles"; profiles.mkdir(parents=True)
             for filename in ["upload-testflight.sh", "validate-release-profiles.py", "release-evidence.py"]:
                 shutil.copy(ROOT / filename, scripts / filename)
+            if evidence_failure:
+                helper = scripts / "release-evidence.py"
+                helper.write_text(helper.read_text().replace('    action, *args = sys.argv[1:]',
+                    '    action, *args = sys.argv[1:]\n    if action == "collect": sys.exit(31)'))
             (scripts / "validate-release-source.sh").write_text("exit 0\n")
             (scripts / "require-release-ci.py").write_text("pass\n")
             for name in ("validate-cloudkit-sharing.py", "validate-release-identity.py"):
@@ -71,10 +75,11 @@ exit 0
 ''')
             for tool in tools.iterdir(): tool.chmod(0o755)
             env = dict(os.environ, HOME=str(home), RUNNER_TEMP=str(root), FIXTURE_ROOT=str(root), PATH=f"{tools}:{os.environ['PATH']}", BUILD_NUMBER="28", MARKETING_VERSION="1.4.0", RELEASE_EVIDENCE_DIR=str(root / "evidence"), FAILURE=failure)
-            for key, value in {"APP_STORE_CONNECT_API_ISSUER_ID":"fixture", "APP_STORE_CONNECT_API_KEY_ID":"fixture", "APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD":"fixture", "APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64":"fixture", "APPLE_DISTRIBUTION_CERTIFICATE_BASE64":"fixture", "APP_STORE_PROVISIONING_PROFILE_BASE64":"iphone", "APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64":"watch"}.items():
+            for key, value in {"APP_STORE_CONNECT_API_ISSUER_ID":"fixture", "APP_STORE_CONNECT_API_KEY_ID":"fixture", "APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD":"canary-secret", "APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64":"fixture", "APPLE_DISTRIBUTION_CERTIFICATE_BASE64":"fixture", "APP_STORE_PROVISIONING_PROFILE_BASE64":"iphone", "APP_STORE_WATCH_PROVISIONING_PROFILE_BASE64":"watch"}.items():
                 env[key] = base64.b64encode(value.encode()).decode() if key.endswith("BASE64") else value
             result = subprocess.run(["bash", str(scripts / "upload-testflight.sh")], env=env, capture_output=True, text=True)
             expected_code = 1 if collision else 9 if failure in ("archive", "export") else 23 if failure == "upload" else 0
+            if evidence_failure and expected_code == 0: expected_code = 31
             self.assertEqual(result.returncode, expected_code, result.stdout + result.stderr)
             self.assertEqual(existing.read_bytes(), b"collision" if collision else b"iphone")
             self.assertFalse((profiles / (pair["watch"]["UUID"] + ".mobileprovision")).exists())
@@ -93,9 +98,10 @@ exit 0
             else:
                 evidence = json.loads((root / "evidence" / "manifest.json").read_text())
                 self.assertEqual(evidence["archive"], "failed" if failure == "archive" else "succeeded")
-                self.assertEqual(evidence["upload_script_exit_code"], expected_code)
+                if not evidence_failure:
+                    self.assertEqual(evidence["upload_script_exit_code"], expected_code)
                 self.assertTrue((root / "evidence" / "archive.log").exists())
-                self.assertEqual((root / "evidence" / "dSYMs").exists(), failure != "archive")
+                self.assertEqual((root / "evidence" / "dSYMs").exists(), failure != "archive" and not evidence_failure)
                 self.assertEqual(evidence["upload"], "unconfirmed" if failure == "upload" else "succeeded" if failure == "none" else "not_attempted")
                 args = (root / "archive-args").read_text()
                 self.assertIn("SHOPPING_IPHONE_PROFILE_UUID=" + pair["iphone"]["UUID"], args)
@@ -107,5 +113,7 @@ exit 0
     def test_export_failure_preserves_symbols_and_cleans_credentials(self): self.scenario(failure="export")
     def test_upload_failure_preserves_symbols_and_cleans_credentials(self): self.scenario(failure="upload")
     def test_success_preserves_symbols_and_cleans_credentials(self): self.scenario(failure="none")
+    def test_collection_failure_fails_success_and_still_cleans(self): self.scenario(failure="none", evidence_failure=True)
+    def test_original_failure_wins_over_collection_failure(self): self.scenario(failure="upload", evidence_failure=True)
 
 if __name__ == "__main__": unittest.main()

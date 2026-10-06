@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Evidence/secret boundaries without signing, Apple requests or a simulator."""
+import base64
 import importlib.util
 import json
 import os
@@ -42,8 +43,45 @@ class EvidenceTests(unittest.TestCase):
             log = (self.output / f"{stage}.log").read_text()
             self.assertNotIn("canary", log)
             self.assertNotIn("PRIVATE KEY", log)
-            self.assertEqual(json.loads(log)["diagnostic_counts"]["compiler_error"], 1)
+            self.assertEqual(json.loads(log)["diagnostic_counts"]["compiler_error"], 0)
         self.assertEqual(evidence.manifest()["upload"], "unconfirmed")
+
+    def test_useful_failure_reason_survives_secret_redaction(self):
+        private_key = "decoded-private-key-canary"
+        secret = "password-canary"
+        profile = "profile-canary"
+        message = ("error: Missing required module ShoppingDomain; password=" + secret +
+                   "; signing " + private_key + "; profile " + profile)
+        with patch.dict(os.environ, APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD=secret,
+                        APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64=base64.b64encode(private_key.encode()).decode()):
+            code = evidence.run("archive", self.root / "raw", [sys.executable, "-c",
+                "import sys; print(sys.argv[1]); sys.exit(7)", message, "SHOPPING_IPHONE_PROFILE_UUID=" + profile])
+        self.assertEqual(code, 7)
+        log = (self.output / "archive.log").read_text()
+        self.assertIn("Missing required module ShoppingDomain", log)
+        for value in (secret, private_key, profile):
+            self.assertNotIn(value, log)
+
+    def test_evidence_failure_preserves_command_failure_but_fails_success(self):
+        original = evidence.write_manifest
+        for command_code in (0, 17):
+            calls = 0
+            def write(data):
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    raise OSError("fake evidence failure")
+                original(data)
+            with patch.object(evidence, "write_manifest", side_effect=write):
+                code = evidence.run("export", self.root / "raw", [sys.executable, "-c", f"raise SystemExit({command_code})"])
+            self.assertEqual(code, command_code or 1)
+
+    def test_diagnostic_text_is_bounded(self):
+        evidence.run("export", self.root / "raw", [sys.executable, "-c",
+            "print(('error: unavailable export destination ' + 'x ' * 2000 + '\\n') * 250)"])
+        diagnostics = json.loads((self.output / "export.log").read_text())["diagnostics"]
+        self.assertEqual(len(diagnostics), 200)
+        self.assertTrue(all(len(line) <= 2000 for line in diagnostics))
 
     def test_success_and_failed_distribution_preserve_uploaded_identity(self):
         evidence.write_manifest({"source_sha": "b" * 40, "marketing_version": "1.3.0",

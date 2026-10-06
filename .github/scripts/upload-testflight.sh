@@ -33,6 +33,7 @@ cleanup() {
     trap - EXIT
     set +e
     python3 "$SCRIPT_DIR/release-evidence.py" collect "$ARCHIVE_PATH" "$exit_code"
+    local evidence_exit=$?
 
     if [[ "$SEARCH_LIST_CHANGED" == true ]]; then
         security list-keychains -d user -s ${ORIGINAL_KEYCHAINS[@]+"${ORIGINAL_KEYCHAINS[@]}"} >/dev/null 2>&1 || true
@@ -40,6 +41,7 @@ cleanup() {
     for installed in ${INSTALLED_PROFILES[@]+"${INSTALLED_PROFILES[@]}"}; do rm -f "$installed"; done
     security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
     rm -rf "$TEMP_ROOT"
+    if [[ "$exit_code" -eq 0 && "$evidence_exit" -ne 0 ]]; then exit "$evidence_exit"; fi
     exit "$exit_code"
 }
 trap cleanup EXIT
