@@ -47,6 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - name: Validate CI policy
+        run: |
+          ruby .github/scripts/check-action-pins.rb
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_main_ruleset.py
+
       - name: Validate timing reports
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_test_timing.py'
 
