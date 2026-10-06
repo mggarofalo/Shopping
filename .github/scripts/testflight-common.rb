@@ -154,7 +154,7 @@ module TestFlight
       client.list("/v1/betaGroups/#{id}/relationships/builds?limit=200").map { |build| build.fetch("id") }
     end
 
-    def pending_beta_reviews(marketing_version:, except_build_id:)
+    def pending_beta_reviews(marketing_version:, except_build_id: nil)
       builds(marketing_version: marketing_version).reject { |build| build.fetch("id") == except_build_id }.flat_map do |build|
         reviews = client.list(TestFlight.query("/v1/betaAppReviewSubmissions", "filter[build]" => build.fetch("id"), "limit" => 200))
         reviews.map do |review|
@@ -163,6 +163,18 @@ module TestFlight
           { build_number: TestFlight.number(build.dig("attributes", "version")), build_id: build.fetch("id"), review_id: review.fetch("id"), state: state }
         end.compact
       end
+    end
+
+    def require_beta_review_slot!(marketing_version:, build_number: nil, except_build_id: nil)
+      blockers = pending_beta_reviews(marketing_version: marketing_version, except_build_id: except_build_id)
+      return if blockers.empty?
+      waiting = blockers.map { |review| "#{marketing_version} (#{review.fetch(:build_number)}): #{review.fetch(:state)}" }.join(", ")
+      recovery = if except_build_id
+        "retry verify-only for #{marketing_version} (#{build_number}) after its review completes. This build has not been submitted or assigned externally."
+      else
+        "retry preflight after its review completes, before uploading a new build. No upload or external assignment has been performed by this preflight."
+      end
+      raise "External beta review blocked by existing review #{waiting}. Apple allows one build per version in review. Preserve that submission; #{recovery}"
     end
 
     def source_groups(source)

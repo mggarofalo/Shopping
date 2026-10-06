@@ -71,3 +71,14 @@ check(steps.index { |step| step["run"] == "ruby .github/scripts/external-testfli
   check(status.success? == (audience == "internal_only"), "audience intent validation")
 end
 puts "Existing external audience and private-release contracts passed."
+
+%w[preflight upload].each do |name|
+  steps = jobs.fetch(name).fetch("steps")
+  inventory = steps.find { |step| step["run"] == "ruby .github/scripts/preflight-testflight.rb" }
+  external = steps.find { |step| step["run"] == "ruby .github/scripts/external-testflight.rb --preflight" }
+  check(inventory["id"] == "preflight", "resolved preflight output #{name}")
+  check(external["env"]["MARKETING_VERSION"] == "${{ steps.preflight.outputs.marketing_version }}", "review guard uses selected marketing version #{name}")
+  check(external["if"] == "${{ inputs.audience == 'all_testers' }}", "internal-only #{name} cannot be blocked by external review")
+  check(steps.index(inventory) < steps.index(external), "inventory resolves version before review check #{name}")
+end
+puts "External pending-review preflight contracts passed."

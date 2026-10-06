@@ -75,6 +75,7 @@ jobs:
       - name: Check clean exact source
         run: .github/scripts/validate-release-source.sh
       - name: Inspect build inventory and approved audience (GET only)
+        id: preflight
         env:
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
@@ -88,6 +89,7 @@ jobs:
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
         run: ruby .github/scripts/external-testflight.rb --preflight
   upload:
     name: Archive & Upload
@@ -125,6 +127,7 @@ jobs:
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          MARKETING_VERSION: ${{ steps.preflight.outputs.marketing_version }}
         run: ruby .github/scripts/external-testflight.rb --preflight
       - name: Archive, validate, and upload
         env:
