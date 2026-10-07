@@ -23,30 +23,19 @@ struct HomeDetailsView: View {
     }
 
     private var homeName: String { model.snapshot?.homeName ?? initialName }
+    private var canEditName: Bool {
+        model.snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor)
+    }
     private var cloudNeedsAttention: Bool {
         bootstrap.homeSharingStatus.activity.notices.contains { $0.id != .invitation }
     }
     private var cloudIsWorking: Bool {
-        model.isRefreshing || bootstrap.isCheckingSharingStatus || bootstrap.cloudStatus.isWorking
+        bootstrap.cloudStatus.isWorking
     }
     private var supportsLinks: Bool { if #available(iOS 18.0, *) { true } else { false } }
 
     var body: some View {
         List {
-            Section("Home") {
-                if model.snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor) {
-                    Button {
-                        name = homeName
-                        showingNameEditor = true
-                    } label: {
-                        LabeledContent("Name", value: homeName)
-                    }
-
-                    .accessibilityIdentifier("shopping.home.rename")
-                } else {
-                    LabeledContent("Name", value: homeName)
-                }
-            }
             Section {
                 if let snapshot = model.snapshot {
                     if snapshot.source == .localUnshared {
@@ -105,22 +94,7 @@ struct HomeDetailsView: View {
                         .accessibilityIdentifier("shopping.home.checkDeletion")
                 }
             }
-            Section("Sharing") {
-                if model.isRefreshing {
-                    ProgressView("Checking members…").accessibilityIdentifier("shopping.home.checking")
-                } else if let error = model.refreshError {
-                    Text(error).foregroundStyle(.secondary)
-                    Button("Check again") { Task { await refresh() } }
-                } else if let snapshot = model.snapshot {
-                    LabeledContent("Members checked") { Text(snapshot.observedAt, style: .relative) }
-                }
-                if let operation = model.operation {
-                    ProgressView(operation.label).accessibilityIdentifier("shopping.home.progress")
-                }
-                if invitations.busy, let operation = invitations.operation {
-                    ProgressView(operation).accessibilityIdentifier("shopping.home.invitation.progress")
-                }
-            }
+            sharingSection
             if let snapshot = model.snapshot {
                 if snapshot.access != .owner && snapshot.source == .server {
                     Section {
@@ -148,15 +122,20 @@ struct HomeDetailsView: View {
                 }
             }
         }
-        .navigationTitle("Home Settings")
+        .navigationTitle(homeName)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showingSharingStatus = true } label: {
-                    HomeCloudSymbol(isWorking: cloudIsWorking, needsAttention: cloudNeedsAttention)
+            if canEditName {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        name = homeName
+                        showingNameEditor = true
+                    } label: {
+                        Label("Rename home", systemImage: "pencil")
+                    }
+                    .accessibilityLabel("Rename \(homeName)")
+                    .accessibilityIdentifier("shopping.home.rename")
                 }
-                .accessibilityLabel("Sharing status")
-                .accessibilityValue(cloudNeedsAttention ? "Needs attention" : model.isRefreshing ? "Checking home" : cloudIsWorking ? "Syncing" : "")
-                .accessibilityIdentifier("shopping.home.sharingStatus")
             }
         }
         .refreshable { await refresh() }
@@ -231,10 +210,43 @@ struct HomeDetailsView: View {
                 ManagementNameEditor(title: "Rename home", name: $name, fieldTitle: "Home name",
                     fieldIdentifier: "shopping.home.nameEditor", saveLabel: "Save home name",
                     initiallyFocused: true, unavailableMessage: "This home is not currently writable. Your draft is retained.",
-                    available: model.snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor), busy: model.busy || invitations.busy,
+                    available: canEditName, busy: model.busy || invitations.busy,
                     onSave: { Task { if await model.rename(name) { showingNameEditor = false } } },
                     onCancel: { showingNameEditor = false }, draftIdentity: "home-name")
                 if let error = model.error { Text(error).foregroundStyle(.red).padding() }
+            }
+        }
+    }
+
+    private var sharingSection: some View {
+        Section("Sharing") {
+            Label {
+                Text(cloudNeedsAttention ? "Sharing needs attention" : cloudIsWorking ? "iCloud activity" : "iCloud")
+            } icon: {
+                Image(systemName: cloudNeedsAttention ? "exclamationmark.icloud" : "icloud")
+                    .foregroundStyle(cloudNeedsAttention ? Color.orange : Color.accentColor)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("shopping.home.cloudStatus")
+
+            Button { showingSharingStatus = true } label: {
+                HStack {
+                    Text("Sharing details").foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                }
+            }
+            .accessibilityIdentifier("shopping.home.sharingStatus")
+
+            if let error = model.refreshError {
+                Text(error).foregroundStyle(.secondary)
+                Button("Check again") { Task { await refresh() } }
+            }
+            if let operation = model.operation {
+                ProgressView(operation.label).accessibilityIdentifier("shopping.home.progress")
+            }
+            if invitations.busy, let operation = invitations.operation {
+                ProgressView(operation).accessibilityIdentifier("shopping.home.invitation.progress")
             }
         }
     }

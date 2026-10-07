@@ -2352,3 +2352,12 @@ sharing-status navigation assertions remain in place.
 These are simulator and stateful backend tests. SHOPPING-205 separately owns real
 owner-device synchronization, recipient acceptance, VoiceOver and physical
 Animation Hitches evidence. No simulator timing establishes that device gate.
+
+## SHOPPING-212: Quiet Home Settings presentation
+
+The former cloud-toolbar delayed-refresh workflow now proves the custom home
+title, absence of a background spinner and elapsed-check timer, explicit Sharing
+details navigation during the suspended read, and eventual member presentation.
+Contributor rename still proves the updated title and persistence after relaunch;
+restricted-access and native Dynamic Type coverage remain. HomeSharingStatusUITests
+uses the labeled details row. Local-home settings tests retain their separate screen.

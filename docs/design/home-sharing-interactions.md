@@ -6,8 +6,9 @@ SHOPPING-204 (screen and journeys), and SHOPPING-205 (physical evidence).
 
 ## Presentation contract
 
-Home Settings uses native grouped sections for the home name, accepted members,
-named invitations, sharing status, and destructive actions. A background refresh
+Home Settings uses the custom home name as its native large navigation title,
+with a pencil rename action for writable homes. Grouped sections contain accepted
+members, named invitations, sharing status, and destructive actions. A background refresh
 keeps the last known content visible and does not disable navigation or editors.
 Command progress is explicit and placed beside the initiating action. Permission,
 membership freshness, and command progress are distinct states. Every mutation
@@ -74,3 +75,14 @@ device delivery. Its target is no app-caused main-thread hang of 250 ms or more,
 with repeated 100 ms stalls investigated. Simulator and stateful backend results
 do not establish real CloudKit timing or physical-device performance. Preserve
 installed TestFlight data when collecting traces.
+
+## 1.5.3 presentation refinement (SHOPPING-212)
+
+Routine member refresh is silent: no inserted spinner row and no elapsed-check
+timer. Pull-to-refresh retains native progress, and command progress and errors
+remain explicit. A stable passive iCloud label uses an accent cloud, with text
+for observed activity or attention; it does not claim all devices are synchronized.
+A separate Sharing details row makes diagnostic navigation explicit. This uses
+the status-versus-detail distinction illustrated by
+[CloudSyncStatusView](https://github.com/platadani/CloudSyncStatusView), without
+adding a dependency or replacing the application's existing CloudKit monitor.
