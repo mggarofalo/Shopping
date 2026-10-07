@@ -9,8 +9,7 @@ struct CatalogItemRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !item.notes.isEmpty {
                     Text(item.notes)
                         .font(.caption)

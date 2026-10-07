@@ -8,6 +8,10 @@ Catalog is the reference for item rows. Stores is the reference for selection an
 - Keep the grocery edit button at least 44 points tall, including the space beside short titles. `ShoppingItemColumns` aligns the first text baselines so the smaller store label stays aligned when that hit area grows.
 - Use `ShoppingItemStoreSummary` for store-name fitting and omitted-store counts. The row must still announce the complete store summary, including archived restrictions and unresolved identities. Keep selected-store purchase-rule symbols accessible through the row value.
 - Apply `shoppingItemRow()` to the entire row: measure the content, enforce the 44-point minimum, then apply four points of vertical padding on each side. Apply `shoppingListRowInsets()` once. Applying padding before the minimum produces a shorter row and was the source of Grocery/Catalog drift.
+- Use the same `shoppingItemRow()` padding order for personal-cart and Stores/Categories/People management rows, including native selection mode. Do not apply the padding again inside a nested button label.
+- `ShoppingManagementRowLabel` keeps archived status beside short names at standard sizes and below the full-width name at accessibility sizes.
+- Native lists and forms inherit a 56-point row minimum from the iPhone app root. Settings uses native insets throughout; do not mix thin item insets into native navigation or picker rows. Controls, supporting copy and multiline fields retain their intrinsic height.
+- Catalog names wrap vertically, just like grocery names; never force one line to normalize row heights.
 - Minimum height is not fixed height. Notes, quantity controls and accessibility-sized text may expand a row. Keep independent quantity buttons at least 44 points in each direction and allow their layout to adapt at accessibility sizes. Never clip supporting text to force equal heights for different content.
 
 ## Store and filter controls

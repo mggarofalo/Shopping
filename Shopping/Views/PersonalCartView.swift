@@ -80,8 +80,7 @@ struct PersonalCartView: View {
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
-                    .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                    .shoppingItemRow()
                 }
                 .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
                     cart.isCartTransitionPending(entry.needID))

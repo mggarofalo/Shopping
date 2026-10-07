@@ -75,6 +75,7 @@ struct GroceryScopeControls: View {
                 if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                 filtersButton
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             activeFilterChips
         }
         .padding(.horizontal)

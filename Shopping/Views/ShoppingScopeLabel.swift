@@ -6,7 +6,13 @@ struct ShoppingScopeLabel: View {
     let systemImage: String
 
     var body: some View {
-        Label(title, systemImage: systemImage)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: systemImage).accessibilityHidden(true)
+            Text(title)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .layoutPriority(1)
+        }
             .font(.body)
             .imageScale(.medium)
             .fixedSize(horizontal: false, vertical: true)

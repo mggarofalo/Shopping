@@ -2361,3 +2361,20 @@ details navigation during the suspended read, and eventual member presentation.
 Contributor rename still proves the updated title and persistence after relaunch;
 restricted-access and native Dynamic Type coverage remain. HomeSharingStatusUITests
 uses the labeled details row. Local-home settings tests retain their separate screen.
+
+
+## SHOPPING-214: Shared row spacing
+
+`ShoppingAppearanceUITests/testManagementRowsKeepSharedSpacingWhenSelecting` owns
+short-row geometry across Stores, Categories and People, minimum row height,
+normal-to-selection stability, an archived long store name remaining visible after scrolling, and enabled selected actions at standard and
+accessibility XXXL text. It does not require long or semantically different
+controls to have identical heights. Existing CategoryManagement UI tests retain
+rename, archive/delete, reordering and selection behavior.
+
+The existing Catalog column test now requires the long title to wrap and keeps
+notes within the measured row, complete store accessibility, and editor content.
+The former notes-to-title height ratio assumed a one-line truncated title and
+is replaced by independent wrapping, ordering and containment assertions.
+The primary appearance journey owns editor and Settings screenshots in both
+appearances and text sizes. No Fast or quick acceptance selection changes.

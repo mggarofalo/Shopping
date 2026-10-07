@@ -283,7 +283,8 @@ struct StoreManagementView: View {
 
     private func storeRowActions<Content: View>(_ content: Content, store: Store) -> some View {
         content
-        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .shoppingItemRow()
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { store.isArchived ? restore(store) : archive(store) } label: {
@@ -319,11 +320,7 @@ struct StoreManagementView: View {
     }
 
     private func storeRowLabel(_ store: Store) -> some View {
-        HStack {
-            Text(store.name)
-            Spacer()
-            if store.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
-        }
+        ShoppingManagementRowLabel(name: store.name, isArchived: store.isArchived)
     }
 
     private func beginCreate() {

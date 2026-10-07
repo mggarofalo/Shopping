@@ -246,13 +246,84 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(title.exists)
             XCTAssertTrue(notes.exists)
             XCTAssertLessThan(title.frame.maxY, notes.frame.minY + 1)
-            XCTAssertGreaterThan(notes.frame.height, title.frame.height * 2)
+            XCTAssertGreaterThan(title.frame.height, size.contains("Accessibility") ? 100 : 35,
+                                 "The complete long title must wrap instead of truncating to one line")
+            XCTAssertGreaterThan(notes.frame.height, 35)
+            let cell = app.collectionViews.cells.containing(.button, identifier: row.identifier).firstMatch
+            XCTAssertGreaterThanOrEqual(title.frame.minY, cell.frame.minY)
+            XCTAssertLessThanOrEqual(notes.frame.maxY, cell.frame.maxY)
             XCTAssertLessThanOrEqual(title.frame.width, row.frame.width * 0.7)
             XCTAssertLessThanOrEqual(notes.frame.width, row.frame.width * 0.7)
             attach("Catalog2to1 \(appearance) \(size)", app)
+            if size.contains("Accessibility") {
+                for _ in 0..<8 where notes.frame.maxY > app.frame.maxY - 100 { app.swipeUp() }
+                XCTAssertTrue(notes.isHittable)
+                XCTAssertLessThanOrEqual(notes.frame.maxY, app.frame.maxY - 100,
+                                         "The end of an expanded row must remain reachable by scrolling")
+                attach("Catalog long title scrolled to notes \(size)", app)
+            }
             row.tap()
             XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 3))
             XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, name)
+            app.terminate()
+        }
+    }
+
+    func testManagementRowsKeepSharedSpacingWhenSelecting() {
+        for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ManagementRows-\(UUID().uuidString).sqlite").path
+            app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+            openSettings(app)
+            var standardHeight: CGFloat?
+            for (screen, name, prefix) in [("Stores", "Costco", "stores"),
+                                           ("Categories", "Produce", "categories"),
+                                           ("People", "Michael", "people")] {
+                app.buttons[screen].tap()
+                let select = app.buttons["shopping.\(prefix).select"]
+                XCTAssertTrue(select.existsOrAppears(timeout: 3))
+                let cell = app.collectionViews.cells.containing(.any, identifier: name).firstMatch
+                XCTAssertTrue(cell.existsOrAppears(timeout: 3))
+                XCTAssertTrue(cell.isHittable)
+                let height = cell.frame.height
+                XCTAssertGreaterThanOrEqual(height, 56)
+                if size == "UICTContentSizeCategoryL" {
+                    if let standardHeight { XCTAssertEqual(height, standardHeight, accuracy: 1) }
+                    standardHeight = height
+                }
+                attach("\(screen) rows \(size)", app)
+                if screen == "Stores", size.contains("Accessibility") {
+                    let archived = app.collectionViews.cells.containing(NSPredicate(
+                        format: "label BEGINSWITH %@", "Neighborhood Market (closed)"
+                    )).firstMatch
+                    for _ in 0..<8 where !archived.isHittable || archived.frame.maxY > app.frame.maxY - 100 {
+                        app.swipeUp()
+                    }
+                    XCTAssertTrue(archived.existsOrAppears(timeout: 3))
+                    XCTAssertTrue(archived.isHittable)
+                    XCTAssertLessThanOrEqual(archived.frame.maxY, app.frame.maxY - 100)
+                    XCTAssertGreaterThan(archived.frame.height, height)
+                    attach("Archived store name \(size)", app)
+                    for _ in 0..<8 where !cell.isHittable { app.swipeDown() }
+                    XCTAssertTrue(cell.isHittable)
+                }
+                select.tap()
+                XCTAssertTrue(app.buttons["shopping.\(prefix).done"].existsOrAppears(timeout: 3))
+                let selectedCell = app.collectionViews.cells.containing(.any, identifier: name).firstMatch
+                XCTAssertTrue(selectedCell.existsOrAppears(timeout: 3))
+                XCTAssertEqual(selectedCell.frame.height, height, accuracy: 1,
+                               "Entering selection must not change row padding")
+                selectedCell.tap()
+                XCTAssertTrue(app.buttons["shopping.\(prefix).batchDelete"].isHittable)
+                XCTAssertTrue(app.buttons["shopping.\(prefix).batchDelete"].isEnabled)
+                app.buttons["shopping.\(prefix).done"].tap()
+                app.navigationBars[screen].buttons.firstMatch.tap()
+                XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 3))
+            }
             app.terminate()
         }
     }
