@@ -2378,3 +2378,5 @@ The former notes-to-title height ratio assumed a one-line truncated title and
 is replaced by independent wrapping, ordering and containment assertions.
 The primary appearance journey owns editor and Settings screenshots in both
 appearances and text sizes. No Fast or quick acceptance selection changes.
+
+Quantity-entry follow-up for SHOPPING-214: `AppPresentationTests/testQuantityEntryDistinguishesBlankFromInvalidText` owns strict optional/1–99 parsing. `GroceryEditingUITests/testQuantityStartsUnsetAndCanBeAddedThenCleared` owns discoverable creation/edit entry, invalid bounds, direct entry, Cancel, Clear, save/reopen/relaunch and an actual edge tap. `testQuantityDraftRetainsOtherFieldsAcrossInvalidInputAndRelaunch` owns corrected/invalid draft interruption with the active-home fixture. Existing Checklist, promotion and device tests retain their quantity persistence, occurrence identity, cart and largest-text proof through the new text-field interaction. The quick acceptance inventory is unchanged.

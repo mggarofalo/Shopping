@@ -36,7 +36,7 @@ final class GroceryEditingUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
+        XCTAssertTrue(app.textFields["shopping.grocery.quantity"].exists)
         attachScreenshot(named: "Remembered item editor", app: app)
     }
 
@@ -159,7 +159,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         match.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
-        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].exists)
+        XCTAssertTrue(app.textFields["shopping.grocery.quantity"].exists)
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
         app.buttons["shopping.grocery.cancel"].tap()
@@ -323,11 +323,15 @@ final class GroceryEditingUITests: XCTestCase {
         attachScreenshot(named: "Category and cart acknowledgement", app: app)
     }
 
-    private func launchApp(fixture: String? = nil, contentSize: String? = nil) -> XCUIApplication {
+    private func launchApp(fixture: String? = nil, contentSize: String? = nil, activeHome: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingEditingUITest-\(UUID().uuidString).sqlite").path
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
+        if activeHome {
+            app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
+            app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
+        }
         if let contentSize {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize]
         }
@@ -551,16 +555,14 @@ extension GroceryEditingUITests {
             name.tap()
             name.typeText("\n")
 
-            let addQuantity = app.buttons["shopping.grocery.quantity.add"]
-            reveal(addQuantity, in: app)
-            addQuantity.tap()
-            let quantity = app.steppers["shopping.grocery.quantity"]
+            let quantity = app.textFields["shopping.grocery.quantity"]
+            reveal(quantity, in: app)
+            XCTAssertEqual(quantity.value as? String, "Optional")
+            quantity.replaceText(with: "2")
+            app.buttons["shopping.grocery.keyboardDone"].tap()
             let clear = app.buttons["shopping.grocery.quantity.clear"]
-            XCTAssertTrue(quantity.existsOrAppears(timeout: 2))
-            XCTAssertTrue(clear.exists)
-            XCTAssertGreaterThanOrEqual(clear.frame.width, 44 - 0.01)
+            reveal(clear, in: app)
             XCTAssertGreaterThanOrEqual(clear.frame.height, 44 - 0.01)
-            XCTAssertLessThan(abs(clear.frame.midY - quantity.frame.midY), 22)
             attachScreenshot(
                 named: "Two-line notes and inline quantity - \(contentSize ?? "default")",
                 app: app
@@ -594,19 +596,107 @@ extension GroceryEditingUITests {
         }
     }
 
+    func testQuantityDraftRetainsOtherFieldsAcrossInvalidInputAndRelaunch() {
+        let app = launchApp(fixture: "populated", activeHome: true)
+        let row = groceryRow(named: "Granola", app: app)
+        reveal(row, in: app)
+        row.tap()
+        let field = app.textFields["shopping.grocery.quantity"]
+        reveal(field, in: app)
+        field.replaceText(with: "1")
+        field.replaceText(with: "+2")
+        XCTAssertFalse(app.buttons["shopping.grocery.save"].isEnabled)
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        let notes = app.textFields["shopping.grocery.purchaseNotes"]
+        revealAbove(notes, in: app)
+        notes.replaceText(with: "Keep this note with the corrected quantity")
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        reveal(field, in: app)
+        field.replaceText(with: "2")
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        reveal(row, in: app)
+        row.tap()
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        XCTAssertEqual(field.value as? String, "2")
+        XCTAssertEqual(notes.value as? String, "Keep this note with the corrected quantity")
+        reveal(field, in: app)
+        field.tap()
+        field.typeText("x")
+        XCTAssertFalse(app.buttons["shopping.grocery.save"].isEnabled)
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        revealAbove(notes, in: app)
+        notes.replaceText(with: "Keep later notes while quantity is invalid")
+        app.terminate()
+        app.launch()
+        reveal(row, in: app)
+        row.tap()
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        XCTAssertEqual(field.value as? String, "2")
+        XCTAssertEqual(notes.value as? String, "Keep later notes while quantity is invalid")
+        app.buttons["shopping.grocery.cancel"].tap()
+    }
+
     func testQuantityStartsUnsetAndCanBeAddedThenCleared() {
         let app = launchApp()
         openAdd(in: app)
-        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].existsOrAppears(timeout: 2))
-        XCTAssertFalse(app.steppers["shopping.grocery.quantity"].exists)
-
-        app.buttons["shopping.grocery.quantity.add"].tap()
-        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "1")
-        let clear = app.buttons["shopping.grocery.quantity.clear"]
-        XCTAssertGreaterThanOrEqual(clear.frame.width, 44 - 0.01)
-        XCTAssertGreaterThanOrEqual(clear.frame.height, 44 - 0.01)
-        clear.tap()
-        XCTAssertTrue(app.buttons["shopping.grocery.quantity.add"].existsOrAppears(timeout: 2))
-        XCTAssertFalse(app.steppers["shopping.grocery.quantity"].exists)
+        enterName("Rice", in: app)
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        setPill(app.buttons["shopping.purchase.anyStore"], selected: true, app: app)
+        let field = app.textFields["shopping.grocery.quantity"]
+        revealAbove(field, in: app)
+        XCTAssertEqual(field.value as? String, "Optional")
+        attachScreenshot(named: "Always-visible optional Quantity field", app: app)
+        for invalid in ["0", "100"] {
+            field.replaceText(with: invalid)
+            XCTAssertFalse(app.buttons["shopping.grocery.save"].isEnabled)
+        }
+        field.replaceText(with: "99")
+        XCTAssertTrue(app.buttons["shopping.grocery.save"].isEnabled)
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        app.buttons["shopping.grocery.quantity.clear"].tap()
+        XCTAssertEqual(field.value as? String, "Optional")
+        field.replaceText(with: "1")
+        app.buttons["shopping.grocery.save"].tap()
+        let row = groceryRow(named: "Rice", app: app)
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
+        let quantity = app.buttons["Edit quantity for Rice"]
+        XCTAssertEqual(quantity.value as? String, "1")
+        quantity.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap()
+        let quickField = app.textFields["shopping.quantity.input"]
+        XCTAssertTrue(quickField.existsOrAppears(timeout: 3))
+        quickField.replaceText(with: "9")
+        app.buttons["shopping.quantity.cancel"].tap()
+        XCTAssertEqual(quantity.value as? String, "1")
+        quantity.tap()
+        XCTAssertTrue(quickField.existsOrAppears(timeout: 3))
+        quickField.replaceText(with: "10")
+        attachScreenshot(named: "Native quantity entry at standard text", app: app)
+        app.buttons["shopping.quantity.save"].tap()
+        XCTAssertTrue(app.buttons["shopping.quantity.save"].waitForNonExistence(timeout: 3))
+        XCTAssertEqual(quantity.value as? String, "10")
+        row.tap()
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        XCTAssertEqual(field.value as? String, "10")
+        app.buttons["shopping.grocery.quantity.clear"].tap()
+        app.buttons["shopping.grocery.cancel"].tap()
+        XCTAssertEqual(quantity.value as? String, "10")
+        quantity.tap()
+        XCTAssertTrue(quickField.existsOrAppears(timeout: 3))
+        app.buttons["shopping.quantity.clear"].tap()
+        XCTAssertEqual(quickField.value as? String, "Optional")
+        app.buttons["shopping.quantity.save"].tap()
+        XCTAssertTrue(quantity.waitForNonExistence(timeout: 3))
+        row.tap()
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        XCTAssertEqual(field.value as? String, "Optional")
+        field.replaceText(with: "99")
+        app.buttons["shopping.grocery.save"].tap()
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(quantity.existsOrAppears(timeout: 5))
+        XCTAssertEqual(quantity.value as? String, "99")
     }
 }

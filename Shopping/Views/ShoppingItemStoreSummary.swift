@@ -5,6 +5,7 @@ struct ShoppingItemStoreSummary: View {
     let storeLabels: [String]
     let hasSavedStores: Bool
     var hasResolvedIdentity = true
+    var alignment: HorizontalAlignment = .trailing
 
     var body: some View {
         Group {
@@ -21,8 +22,8 @@ struct ShoppingItemStoreSummary: View {
         }
         .font(.caption)
         .foregroundStyle(Color.grocerySecondary)
-        .multilineTextAlignment(.trailing)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
     }
 
     private var fullSummary: String {

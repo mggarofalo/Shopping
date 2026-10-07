@@ -156,8 +156,16 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(groceryCell.frame.height, 44)
             let bareRowHeight = groceryCell.frame.height
             let needID = grocery.identifier.replacingOccurrences(of: "shopping.grocery.row.", with: "")
-            XCTAssertTrue(app.buttons["shopping.checklist.quantity.decrease.\(needID)"].isHittable)
-            XCTAssertTrue(app.buttons["shopping.checklist.quantity.increase.\(needID)"].isHittable)
+            let quantity = app.buttons["shopping.checklist.quantity.edit.\(needID)"]
+            XCTAssertTrue(quantity.isHittable)
+            XCTAssertEqual(quantity.value as? String, "6")
+            XCTAssertGreaterThanOrEqual(quantity.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(quantity.frame.height, 44)
+            XCTAssertLessThanOrEqual(quantity.frame.maxX, groceryCell.frame.maxX)
+            if size == "UICTContentSizeCategoryL" {
+                XCTAssertEqual(groceryCell.frame.height, 56, accuracy: 1,
+                               "A simple quantity must not append another row of controls")
+            }
             let richRow = app.buttons.matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label == %@", "shopping.grocery.row.", "Edit Granola"
             )).firstMatch

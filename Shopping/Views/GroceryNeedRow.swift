@@ -20,25 +20,27 @@ struct GroceryNeedRow: View {
     var onRemoved: ((UUID, UUID, UUID) -> Void)? = nil
     @State private var removalError: String?
     @State private var removalPending = false
+    @State private var quantityPresentation: QuantityPresentation?
+
+    private struct QuantityPresentation: Identifiable {
+        let id = UUID()
+        let quantity: Int64?
+        let revision: Int64
+    }
 
 
     var body: some View {
-        ShoppingItemColumns {
-            detailsControl
-            VStack(alignment: .trailing, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    if let storeIndicator {
-                        Image(systemName: storeIndicator.symbol)
-                            .imageScale(.small)
-                            .foregroundStyle(Color.grocerySecondary)
-                            .accessibilityHidden(true)
-                    }
-                    ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
-                        hasSavedStores: !assignedStores.isEmpty,
-                        hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil)
-                        .accessibilityHidden(true)
+        Group {
+            if need.quantity != nil {
+                HStack(alignment: .top, spacing: 12) {
+                    detailsControl
+                    quantityControl
                 }
-                if need.quantity != nil { controls }
+            } else {
+                ShoppingItemColumns {
+                    detailsControl
+                    storeMetadata
+                }
             }
         }
         .shoppingItemRow()
@@ -117,31 +119,56 @@ struct GroceryNeedRow: View {
         }
     }
 
-    private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 0) { quantityControls }
-                .fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .trailing, spacing: 0) { quantityControls }
-        }
-    }
-
     @ViewBuilder
-    private var quantityControls: some View {
+    private var quantityControl: some View {
         if let quantity = need.quantity {
             if let onQuantityChange {
-                quantityButton("minus", quantity: quantity, change: -1, action: onQuantityChange)
-                Text("\(quantity)")
-                    .monospacedDigit()
+                Button {
+                    quantityPresentation = QuantityPresentation(quantity: need.quantity, revision: need.revision)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("\(quantity)×").monospacedDigit()
+                        Image(systemName: "chevron.down").font(.caption2)
+                            .accessibilityHidden(true)
+                    }
                     .fixedSize()
-                    .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityLabel("Quantity \(quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
-                quantityButton("plus", quantity: quantity, change: 1, action: onQuantityChange)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(!quantityActionAvailable)
+                .accessibilityLabel("Edit quantity for \(title)")
+                .accessibilityValue("\(quantity)")
+                .accessibilityIdentifier("shopping.checklist.quantity.edit.\(need.id.uuidString)")
+                .sheet(item: $quantityPresentation) { presentation in
+                    ShoppingQuantityEditor(itemName: title, quantity: presentation.quantity,
+                                           actionAvailable: quantityActionAvailable,
+                                           itemChanged: need.revision != presentation.revision) {
+                        guard quantityActionAvailable, need.revision == presentation.revision else { return }
+                        onQuantityChange(need, $0)
+                    }
+                }
             } else {
-                Text("\(quantity)").foregroundStyle(Color.grocerySecondary)
+                Text("\(quantity)×").foregroundStyle(Color.grocerySecondary)
                     .accessibilityLabel("Quantity \(quantity)")
                     .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
             }
+        }
+    }
+
+    private var storeMetadata: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if let storeIndicator {
+                Image(systemName: storeIndicator.symbol)
+                    .imageScale(.small)
+                    .foregroundStyle(Color.grocerySecondary)
+                    .accessibilityHidden(true)
+            }
+            ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
+                hasSavedStores: !assignedStores.isEmpty,
+                hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil,
+                alignment: need.quantity == nil ? .trailing : .leading)
+                .accessibilityHidden(true)
         }
     }
 
@@ -157,21 +184,6 @@ struct GroceryNeedRow: View {
         "\(cartActionTitle) \(title)"
     }
 
-    private func quantityButton(
-        _ symbol: String, quantity: Int64, change: Int64, action: @escaping (Need, Int64?) -> Void
-    ) -> some View {
-        Button {
-            action(need, quantity + change)
-        } label: {
-            Image(systemName: symbol).frame(minWidth: 44, minHeight: ShoppingListMetrics.minimumRowHeight)
-        }
-        .buttonStyle(.borderless)
-        .disabled(!quantityActionAvailable || (change < 0 ? quantity <= 1 : quantity >= 99))
-        .accessibilityLabel("\(change < 0 ? "Decrease" : "Increase") quantity for \(title)")
-        .accessibilityIdentifier(
-            "shopping.checklist.quantity.\(change < 0 ? "decrease" : "increase").\(need.id.uuidString)")
-    }
-
     private var details: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -184,6 +196,7 @@ struct GroceryNeedRow: View {
                         .accessibilityHidden(true)
                 }
             }
+            if need.quantity != nil { storeMetadata }
             if need.kind == NeedKind.oneTime.rawValue {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
@@ -263,6 +276,7 @@ struct GroceryNeedRow: View {
         if (personalCarted ?? need.carted) { values.append("In cart") }
         if let storeIndicator { values.append(storeIndicator.title) }
         values.append(storeSummary)
+        if let quantity = need.quantity { values.append("Quantity \(quantity)") }
         if let personLabel { values.append("For \(personLabel)") }
         if !need.notes.isEmpty { values.append(need.notes) }
         return values.joined(separator: ", ")

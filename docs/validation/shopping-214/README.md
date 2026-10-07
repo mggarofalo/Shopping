@@ -20,26 +20,57 @@ shared store/filter labels measure their text independently of the symbol.
 Archived management status moves below the full-width name at accessibility
 sizes rather than compressing the name into a narrow column.
 
-## Remaining quantity gate
+## Quantity design
 
-The supplied reference PNG and its replacement both failed supported Library
-materialization with HTTP 403, including one bounded retry each. Their actual
-pixels have not been viewed. The screenshot-dependent quantity redesign is
-still pending. Existing quantity placement, actions, bounds and pending-state
-behavior are unchanged in this draft. Simulator captures below establish
-independent layout evidence; they do not replace the requested reference.
+Michael clarified that the former number and plus/minus controls felt appended
+below the redesigned row, and that adding a quantity in the editor was hard to
+find. The replacement uses a compact native disclosure button (`6×`) beside the
+main item content. Store metadata sits below the name for these rows, keeping a
+simple quantity-bearing row at the shared 56-point minimum. The 44-point target
+belongs to the button label and remains separate from the item-edit target.
+Personal-cart quantity readouts use the same multiplication notation.
+
+Tapping the quantity opens a native numeric-entry form with Clear quantity,
+Cancel and Done. Quantity entry comes first; the complete item name remains
+available below it even at accessibility sizes. Create/edit forms always show
+a labeled Quantity field with an Optional placeholder, an explicit clear action
+and the 1–99/blank guidance. No hidden gesture is required.
+
+Raw text remains a draft. Blank means unspecified, valid input is a whole ASCII
+number from 1 to 99, and invalid text disables saving. Cancel discards quick
+edits, unchanged Done does not mutate, and an observed item revision change
+blocks submission until the sheet is reopened. Existing command and pending
+mutation guards remain in place. Other editor draft fields retain with the last
+valid optional quantity while raw quantity text is invalid; no draft schema or
+saved-data meaning changes.
+
+Both Library references returned HTTP 403 after their bounded attempts, so their
+pixels were never available. Michael subsequently authorized this design from
+his description and actual simulator inspection; that access failure is no
+longer an implementation blocker.
 
 ## Before and after
 
 Captured using isolated fixtures on iPhone 17 Pro, iOS 26.5, Xcode 27.0
-(27A266a). Before images use the clean base; after images use the uncommitted
-spacing implementation before the marketing-version edit, so Settings still
-shows 1.5.3 and a dirty source identifier.
+(27A266a). Before images use the clean base. Quantity images use the final uncommitted
+1.5.4 candidate. Earlier Settings/scope images use the spacing implementation
+before the version edit, so Settings shows 1.5.3 and a dirty source identifier.
+Screenshots establish appearance; CI below establishes the committed candidate.
 
 | Screen | Before | After |
 | --- | --- | --- |
+| Grocery quantity, standard text | [Before](before-quantity-rows.png) | [After](after-quantity-rows.png) |
+| Create/edit quantity discovery | [Before](before-quantity-editor.png) | [After](after-quantity-editor.png) |
 | Settings, standard text | [Before](before-settings.png) | [After](after-settings.png) |
 | Store control, accessibility XXXL | [Before](before-scope-accessibility.png) | [After](after-scope-accessibility.png) |
+
+[Native quantity entry](after-quantity-entry.png) and the
+[largest-text numeric entry](after-quantity-entry-accessibility.png) show the
+replacement interaction. [Largest-text rows](after-quantity-rows-accessibility.png)
+show intrinsic growth and separate edit targets. The
+[scrolled accessibility editor](after-quantity-editor-accessibility.png) keeps
+the full label, value, clear action and guidance readable.
+[Personal cart](after-cart-quantity.png) uses the matching readout.
 
 [Catalog long title, standard text](after-catalog-long-title.png) shows the
 complete wrapped title and supporting notes. Very large text can create a row
@@ -62,20 +93,53 @@ scroll-reachability check passed separately. Failed local result bundles are
 retained in the task workspace, including an invocation rejected before any
 tests because it named a nonexistent test target.
 
-Final `ShoppingFast` passed **747 tests**, with zero failures or skips
-(709 XCTest and 38 Swift Testing). This run includes the final adaptive-label
-source. Result bundle: `FinalFast.xcresult`; focused final bundles:
-`FinalManagementCorrected.xcresult` and `SpacingLongTitle.xcresult`.
+The spacing candidate passed `ShoppingFast` with **747 tests**, zero failures
+or skips. The final quantity candidate adds strict blank/ASCII/1–99 validation
+coverage. The final five-workflow visual run passed with zero failures or skips
+(`QuantityFinalVisuals.xcresult`). Final `ShoppingFast` passed **748 tests**, zero failures or skips
+(710 XCTest and 38 Swift Testing; `QuantityFinalFast.xcresult`).
 
-Two independent read-only adversarial reviews found no confirmed code defects.
-Their validation feedback added an enabled-selection assertion, long-title
-scroll-reachability proof and a test ownership entry.
+Quantity validation includes add/change/clear/cancel/save/reopen/relaunch,
+invalid-input draft recovery with other edited fields, actual target-edge taps,
+compact geometry, one-time promotion identity, filters, light/dark appearance,
+and four Dynamic Type categories. Twelve focused UI methods passed in
+`quantity-regression.log` before the final growth assertion failed: the
+accessible quantity element has a 44-point touch floor, so its height need not
+increase between every small text category. The corrected assertion preserves
+nondecreasing height, requires growth beyond the standard target at the largest
+size, and retains strict title/notes growth and touch-size checks. That process
+was interrupted during the ChatGPT restart, leaving an incomplete result bundle;
+its log is retained and is not reported as a completed suite.
+
+`QuantityPresentation.xcresult` separately records passing catalog acceptance,
+quantity lifecycle and long-name accessibility workflows. Earlier failed local
+bundles are retained, including fixes for a legacy fixture lacking draft scope,
+an input-helper cursor issue and an initial sheet-state capture issue. Final
+screenshots are exported from successful workflows, not failure snapshots.
+
+The first spacing-only CI run passed Fast and Release SDK Build but failed one
+catalog readiness wait. Its retained hierarchy already showed “Oat milk”; the
+wait now uses a native field predicate with the same timeout and expected-value
+assertion. The affected workflow passed locally. Final exact-head CI is required
+on the completed PR; no remote full-suite dispatch is claimed.
+
+The final visual bundle retains three invalid-frame and two internal QoS
+runtime warnings. The clean baseline also records an invalid-frame warning.
+No warning was tied to a confirmed defect in this scoped review; this is not a
+warning-free or physical-device performance claim.
+
+Two independent read-only adversarial reviews covered both spacing and the
+quantity follow-up. Findings in invalid-draft retention, captured revision
+handling, stale test queries and actual touch-target sizing were resolved.
+Validation feedback added enabled-selection, long-title scroll-reachability,
+edge-tap and interrupted-draft checks. The final production review found no
+remaining confirmed defect; it does not claim atomic cross-device conflict
+handling beyond the existing writer contract.
 
 ## Release gate
 
 Both iPhone and Watch Debug/Release marketing versions are prepared as 1.5.4.
-The parent must resolve the remaining reference/quantity design and confirm the
-release gate before merge or upload. Recheck required CI on the exact merged
+The parent must confirm the design and release gate before merge or upload. Recheck required CI on the exact merged
 main SHA, use the established read-only inventory/audience preflight, and choose
 an unused build number. The previous tag identifies 1.5.3 (33); a proposed next
 number is not a reservation. Existing publication intent remains Michael's

@@ -66,7 +66,9 @@ struct GroceryEditorView: View {
     @State private var name: String
     @State private var catalogNotes: String
     @State private var purchaseNotes: String
-    @State private var quantity: Int?
+    @State private var quantityText: String
+    @State private var lastValidQuantity: Int?
+    @FocusState private var quantityFocused: Bool
     @State private var urgency: NeedUrgency
     @State private var categoryID: UUID?
     @State private var storeIDs: Set<UUID>
@@ -106,7 +108,8 @@ struct GroceryEditorView: View {
         _name = State(initialValue: item?.name ?? need?.title ?? target.prefilledName)
         _catalogNotes = State(initialValue: item?.notes ?? "")
         _purchaseNotes = State(initialValue: need?.notes ?? "")
-        _quantity = State(initialValue: need?.quantity.map(Int.init))
+        _quantityText = State(initialValue: need?.quantity.map(String.init) ?? "")
+        _lastValidQuantity = State(initialValue: need?.quantity.map(Int.init))
         _urgency = State(initialValue: NeedUrgency(rawValue: need?.urgency ?? "") ?? .normal)
         _personID = State(initialValue: need?.person?.id ?? target.prefilledPersonID)
         if let need {
@@ -155,7 +158,14 @@ struct GroceryEditorView: View {
         }
         return need.kind == NeedKind.oneTime.rawValue && need.item == nil
     }
-    private var validQuantity: Bool { quantity.map { (1...99).contains($0) } ?? true }
+    private var quantity: Int? {
+        get { validQuantity ? Int(quantityText) : lastValidQuantity }
+        nonmutating set {
+            lastValidQuantity = newValue
+            quantityText = newValue.map(String.init) ?? ""
+        }
+    }
+    private var validQuantity: Bool { ShoppingQuantityField.isValid(quantityText) }
     private var personSelectionValid: Bool {
         guard let personID else { return true }
         if scopedPeople.contains(where: { $0.id == personID && !$0.isArchived }) { return true }
@@ -318,33 +328,16 @@ struct GroceryEditorView: View {
                     promotionSection
                 }
                 Section {
-                    if let quantity {
-                        HStack(spacing: 8) {
-                            Stepper(
-                                value: Binding(
-                                    get: { self.quantity ?? 1 },
-                                    set: { self.quantity = $0 }
-                                ),
-                                in: 1...99
-                            ) {
-                                LabeledContent("Quantity") { Text("\(quantity)") }
-                            }
-                            .accessibilityValue("\(quantity)")
-                            .accessibilityIdentifier("shopping.grocery.quantity")
-                            Button { self.quantity = nil } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Clear quantity")
+                    ShoppingQuantityField(text: $quantityText, focus: $quantityFocused,
+                                          identifier: "shopping.grocery.quantity")
+                    if !quantityText.isEmpty {
+                        Button("Clear quantity") { quantityText = "" }
                             .accessibilityIdentifier("shopping.grocery.quantity.clear")
-                        }
-                    } else {
-                        Button("Add quantity") { quantity = 1 }
-                            .buttonStyle(.borderless)
-                            .accessibilityIdentifier("shopping.grocery.quantity.add")
                     }
+                } footer: {
+                    Text("1–99, or leave blank when no quantity is needed.")
+                }
+                Section {
                     Toggle("Urgent", isOn: Binding(
                         get: { urgency == .urgent },
                         set: { urgency = $0 ? .urgent : .normal }
@@ -442,7 +435,7 @@ struct GroceryEditorView: View {
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedField = nil }
+                    Button("Done") { focusedField = nil; quantityFocused = false }
                         .accessibilityIdentifier("shopping.grocery.keyboardDone")
                 }
             }
@@ -469,6 +462,10 @@ struct GroceryEditorView: View {
             }
             .onChange(of: name) { _, _ in allowDuplicate = false; error = nil }
             .onChange(of: draftValues) { _, _ in retainDraft() }
+            .onChange(of: quantityText) { _, text in
+                if ShoppingQuantityField.isValid(text) { lastValidQuantity = Int(text) }
+                retainDraft()
+            }
             .onDisappear { retainDraft() }
             .onChange(of: promotionChoice) { _, _ in
                 allowDuplicate = false

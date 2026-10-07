@@ -72,7 +72,8 @@ struct PersonalCartView: View {
                             Text(entry.title).foregroundStyle(Color.primary)
                             Spacer()
                             if let quantity = entry.quantity {
-                                Text("\(quantity)").foregroundStyle(Color.secondary).fixedSize()
+                                Text("\(quantity)×").monospacedDigit().foregroundStyle(Color.secondary).fixedSize()
+                                    .accessibilityLabel("Quantity \(quantity)")
                             }
                         }
                         if !entry.notes.isEmpty {

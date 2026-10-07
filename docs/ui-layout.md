@@ -4,7 +4,7 @@ Catalog is the reference for item rows. Stores is the reference for selection an
 
 ## Item rows
 
-- Use `ShoppingItemColumns` for the same 2:1 description/store columns in Catalog and Grocery List. Keep the title and notes on the left, with inline person assignment on groceries. Keep store summaries on the right, within the row's symmetric insets.
+- Use `ShoppingItemColumns` for the same 2:1 description/store columns in Catalog and Grocery List when no quantity is specified. Keep the title and notes on the left, with inline person assignment on groceries. Keep store summaries on the right, within the row's symmetric insets.
 - Keep the grocery edit button at least 44 points tall, including the space beside short titles. `ShoppingItemColumns` aligns the first text baselines so the smaller store label stays aligned when that hit area grows.
 - Use `ShoppingItemStoreSummary` for store-name fitting and omitted-store counts. The row must still announce the complete store summary, including archived restrictions and unresolved identities. Keep selected-store purchase-rule symbols accessible through the row value.
 - Apply `shoppingItemRow()` to the entire row: measure the content, enforce the 44-point minimum, then apply four points of vertical padding on each side. Apply `shoppingListRowInsets()` once. Applying padding before the minimum produces a shorter row and was the source of Grocery/Catalog drift.
@@ -12,7 +12,10 @@ Catalog is the reference for item rows. Stores is the reference for selection an
 - `ShoppingManagementRowLabel` keeps archived status beside short names at standard sizes and below the full-width name at accessibility sizes.
 - Native lists and forms inherit a 56-point row minimum from the iPhone app root. Settings uses native insets throughout; do not mix thin item insets into native navigation or picker rows. Controls, supporting copy and multiline fields retain their intrinsic height.
 - Catalog names wrap vertically, just like grocery names; never force one line to normalize row heights.
-- Minimum height is not fixed height. Notes, quantity controls and accessibility-sized text may expand a row. Keep independent quantity buttons at least 44 points in each direction and allow their layout to adapt at accessibility sizes. Never clip supporting text to force equal heights for different content.
+- Quantity-bearing grocery rows place a native `6×` disclosure button beside the main content, with store metadata below the name. Keep its 44-point hit region inside the label, and align the two content regions at the top so a simple quantity stays within the shared row minimum. Do not append loose increment/decrement controls below store metadata.
+- Quantity entry uses a native form with a numeric keyboard, explicit Clear, Cancel and Done. The item editor always shows a labeled Quantity field with an Optional placeholder. Accept blank or whole ASCII digits from 1 through 99; invalid text must not be silently converted into a cleared quantity. Preserve other retained draft fields using the last valid quantity.
+- Capture quantity and revision together when presenting the quick editor. Unchanged Done performs no mutation; an observed item change blocks submission until the editor is reopened. Existing parent command/pending guards still apply.
+- Minimum height is not fixed height. Notes, quantity controls and accessibility-sized text may expand a row. Keep the quantity entry button at least 44 points in each direction and allow their layout to adapt at accessibility sizes. Never clip supporting text to force equal heights for different content.
 
 ## Store and filter controls
 
