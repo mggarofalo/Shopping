@@ -6,6 +6,7 @@ struct GroceryNeedRow: View {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.hapticFeedback) private var hapticFeedback
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
     @ObservedObject var need: Need
     let activeStores: [Store]
@@ -31,15 +32,18 @@ struct GroceryNeedRow: View {
 
     var body: some View {
         Group {
-            if need.quantity != nil {
-                HStack(alignment: .top, spacing: 12) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
                     detailsControl
-                    quantityControl
+                    HStack(alignment: .top, spacing: 8) {
+                        supportingDetailsControl
+                        quantityControl
+                    }
                 }
             } else {
-                ShoppingItemColumns {
+                HStack(alignment: .top, spacing: 8) {
                     detailsControl
-                    storeMetadata
+                    quantityControl
                 }
             }
         }
@@ -126,11 +130,9 @@ struct GroceryNeedRow: View {
                 Button {
                     quantityPresentation = QuantityPresentation(quantity: need.quantity, revision: need.revision)
                 } label: {
-                    HStack(spacing: 4) {
-                        Text("\(quantity)×").monospacedDigit()
-                        Image(systemName: "chevron.down").font(.caption2)
-                            .accessibilityHidden(true)
-                    }
+                    Text("\(quantity)×")
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
                     .fixedSize()
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
@@ -167,7 +169,7 @@ struct GroceryNeedRow: View {
             ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
                 hasSavedStores: !assignedStores.isEmpty,
                 hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil,
-                alignment: need.quantity == nil ? .trailing : .leading)
+                alignment: .leading)
                 .accessibilityHidden(true)
         }
     }
@@ -184,19 +186,45 @@ struct GroceryNeedRow: View {
         "\(cartActionTitle) \(title)"
     }
 
+    private var titleDetails: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            titleWithAssignment
+                .accessibilityLabel(title)
+            if need.urgency == NeedUrgency.urgent.rawValue {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.body)
+                    .foregroundStyle(Color.groceryUrgent)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var supportingDetailsControl: some View {
+        if let onEdit {
+            Button { onEdit(need) } label: { supportingDetails }
+                .buttonStyle(.plain)
+                // The name control already announces this complete summary.
+                .accessibilityHidden(true)
+        } else {
+            supportingDetails.accessibilityHidden(true)
+        }
+    }
+
     private var details: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                titleWithAssignment
-                    .accessibilityLabel(title)
-                if need.urgency == NeedUrgency.urgent.rawValue {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.body)
-                        .foregroundStyle(Color.groceryUrgent)
-                        .accessibilityHidden(true)
-                }
-            }
-            if need.quantity != nil { storeMetadata }
+            titleDetails
+            if !dynamicTypeSize.isAccessibilitySize { supportingDetails }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var supportingDetails: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            storeMetadata
             if need.kind == NeedKind.oneTime.rawValue {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
@@ -213,9 +241,8 @@ struct GroceryNeedRow: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

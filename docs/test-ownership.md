@@ -2380,3 +2380,14 @@ The primary appearance journey owns editor and Settings screenshots in both
 appearances and text sizes. No Fast or quick acceptance selection changes.
 
 Quantity-entry follow-up for SHOPPING-214: `AppPresentationTests/testQuantityEntryDistinguishesBlankFromInvalidText` owns strict optional/1–99 parsing. `GroceryEditingUITests/testQuantityStartsUnsetAndCanBeAddedThenCleared` owns discoverable creation/edit entry, invalid bounds, direct entry, Cancel, Clear, save/reopen/relaunch and an actual edge tap. `testQuantityDraftRetainsOtherFieldsAcrossInvalidInputAndRelaunch` owns corrected/invalid draft interruption with the active-home fixture. Existing Checklist, promotion and device tests retain their quantity persistence, occurrence identity, cart and largest-text proof through the new text-field interaction. The quick acceptance inventory is unchanged.
+
+The refined quantity layout keeps one complete VoiceOver summary on the name
+control at accessibility sizes. Its separately arranged visual metadata is not a
+second accessibility stop. Standard-size notes retain direct text growth and
+padding assertions. Accessibility coverage retains full summary values,
+increasing native-cell height, scrolling the complete long-note cell into view,
+and recorded screenshots. Actual pixel review owns accessibility note clipping,
+line growth and padding; cell bounds alone do not prove those visual properties.
+The largest standard type category also exercises invalid quick-entry feedback,
+inline clear and Cancel with the keyboard visible. The long-name workflow checks
+the full wrapping sheet context before editing at accessibility XXXL.

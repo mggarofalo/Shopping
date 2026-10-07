@@ -98,6 +98,7 @@ struct CartedGroceriesView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(8))
+                .contentMargins(.top, 0, for: .scrollContent)
         .navigationTitle("In cart")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $navigation.searchText, prompt: "Search groceries")

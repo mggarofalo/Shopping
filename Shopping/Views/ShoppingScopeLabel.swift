@@ -13,8 +13,8 @@ struct ShoppingScopeLabel: View {
                 .multilineTextAlignment(.leading)
                 .layoutPriority(1)
         }
-            .font(.body)
-            .imageScale(.medium)
+            .font(.subheadline)
+            .imageScale(.small)
             .fixedSize(horizontal: false, vertical: true)
             .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
             .contentShape(Rectangle())

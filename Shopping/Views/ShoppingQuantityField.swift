@@ -5,6 +5,8 @@ struct ShoppingQuantityField: View {
     @Binding var text: String
     var focus: FocusState<Bool>.Binding
     let identifier: String
+    var clearIdentifier: String? = nil
+    var showsLabel = true
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -12,14 +14,28 @@ struct ShoppingQuantityField: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         layout {
-            Text("Quantity")
-            TextField("Optional", text: $text)
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .focused(focus)
-                .accessibilityLabel("Quantity")
-                .accessibilityIdentifier(identifier)
+            if showsLabel { Text("Quantity") }
+            HStack(spacing: 0) {
+                TextField("Optional", text: $text)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(!showsLabel || dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                    .font(showsLabel ? .body : .title2)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .focused(focus)
+                    .accessibilityLabel("Quantity")
+                    .accessibilityIdentifier(identifier)
+                if !text.isEmpty {
+                    Button { text = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear quantity")
+                    .accessibilityIdentifier(clearIdentifier ?? identifier + ".clear")
+                }
+            }
         }
     }
 

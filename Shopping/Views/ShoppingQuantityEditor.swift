@@ -7,6 +7,7 @@ struct ShoppingQuantityEditor: View {
     let initialQuantity: Int64?
     let onSave: (Int64?) -> Void
     @State private var text: String
+    @ScaledMetric(relativeTo: .body) private var sheetHeight: CGFloat = 260
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -24,18 +25,22 @@ struct ShoppingQuantityEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    ShoppingQuantityField(text: $text, focus: $focused, identifier: "shopping.quantity.input")
-                    if !text.isEmpty {
-                        Button("Clear quantity") { text = "" }
-                            .accessibilityIdentifier("shopping.quantity.clear")
-                    }
+                    ShoppingQuantityField(text: $text, focus: $focused,
+                                          identifier: "shopping.quantity.input",
+                                          clearIdentifier: "shopping.quantity.clear", showsLabel: false)
+                } header: {
+                    Text(itemName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("shopping.quantity.itemName")
                 } footer: {
-                    Text(itemChanged
-                         ? "This item changed while you were editing. Close and reopen Quantity to use the latest value."
-                         : "Enter a whole number from 1 to 99, or leave blank when no quantity is needed.")
-                }
-                Section("Item") {
-                    Text(itemName).fixedSize(horizontal: false, vertical: true)
+                    if itemChanged {
+                        Text("This item changed. Reopen quantity to use the latest value.")
+                    } else if !ShoppingQuantityField.isValid(text) {
+                        Text("Use a number from 1 to 99, or leave blank.")
+                    }
                 }
             }
             .navigationTitle("Quantity")
@@ -56,7 +61,9 @@ struct ShoppingQuantityEditor: View {
                 }
             }
         }
-        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+        .onAppear { focused = !dynamicTypeSize.isAccessibilitySize }
     }
 }
 

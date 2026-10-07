@@ -61,20 +61,43 @@ final class ShoppingDeviceUITests: XCTestCase {
         XCTAssertTrue((candles.value as? String ?? "").contains("Bring the reusable bags"))
         XCTAssertTrue((candles.value as? String ?? "").contains("One-time"))
         screenshot("SHOPPING-107 accessibility wrapped note", app: app)
-        let longNote = app.staticTexts.matching(NSPredicate(
-            format: "label BEGINSWITH %@", "Bring the reusable bags"
-        )).firstMatch
-        XCTAssertTrue(longNote.exists)
+        // Metadata is announced in the name value, not as a second edit stop.
+        // The native cell includes the complete long note; scroll its end into view
+        // and inspect the screenshot to prove the final lines remain visible.
+        let cell = app.collectionViews.cells.containing(.button, identifier: candles.identifier).firstMatch
+        XCTAssertTrue(cell.exists)
         let increase = app.buttons["Edit quantity for Birthday candles"]
         XCTAssertTrue(increase.exists)
-        for _ in 0..<18 where longNote.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 ||
-            increase.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 {
+        for _ in 0..<18 where cell.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 {
             app.swipeUp()
         }
-        XCTAssertLessThanOrEqual(longNote.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
-        XCTAssertLessThanOrEqual(increase.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
+        XCTAssertLessThanOrEqual(cell.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
+        XCTAssertLessThanOrEqual(increase.frame.maxY, cell.frame.maxY)
         assertTouchSize(increase)
         screenshot("SHOPPING-107 accessibility final note clear", app: app)
+    }
+
+    func testQuickQuantitySheetKeepsCompactContextAtStandardText() {
+        let app = launch(fixture: "populated", contentSize: "UICTContentSizeCategoryL")
+        let quantity = app.buttons["Edit quantity for Bananas"]
+        reveal(quantity, in: app)
+        quantity.tap()
+        let field = app.textFields["shopping.quantity.input"]
+        XCTAssertTrue(field.existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        let ready = NSPredicate { _, _ in
+            field.isHittable && field.frame.maxY <= app.keyboards.firstMatch.frame.minY
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 3), .completed)
+        let context = app.staticTexts["shopping.quantity.itemName"]
+        XCTAssertEqual(context.label, "Bananas")
+        XCTAssertGreaterThan(app.navigationBars["Quantity"].frame.minY, app.frame.height * 0.25,
+                             "A short quantity edit should preserve visible grocery context")
+        XCTAssertGreaterThanOrEqual(context.frame.minY, app.navigationBars["Quantity"].frame.maxY)
+        XCTAssertLessThanOrEqual(context.frame.maxY, field.frame.minY)
+        screenshot("Compact native quantity sheet with keyboard", app: app)
+        app.buttons["shopping.quantity.cancel"].tap()
+        XCTAssertEqual(quantity.value as? String, "6")
     }
 
     func testLongNameAtLargestTextKeepsSeparateShoppingControlsReachable() {
@@ -90,6 +113,10 @@ final class ShoppingDeviceUITests: XCTestCase {
         reveal(increase, in: app)
         assertTouchSize(increase)
         increase.tap()
+        let itemContext = app.staticTexts["shopping.quantity.itemName"]
+        XCTAssertTrue(itemContext.existsOrAppears(timeout: 3))
+        XCTAssertEqual(itemContext.label, longName)
+        screenshot("Full item context before quantity entry at largest text", app: app)
         let field = app.textFields["shopping.quantity.input"]
         reveal(field, in: app)
         field.replaceText(with: "7")
@@ -259,15 +286,24 @@ final class ShoppingDeviceUITests: XCTestCase {
         var previousQuantityHeight: CGFloat = 0
         var standardQuantityHeight: CGFloat = 0
         var previousNotesHeight: CGFloat = 0
+        var previousCellHeight: CGFloat = 0
         for size in sizes {
             let app = launch(fixture: "populated", contentSize: size)
             let title = app.staticTexts["Granola"]
             reveal(app.buttons["Edit Granola"], in: app)
             XCTAssertGreaterThan(title.frame.height, previousTitleHeight)
             previousTitleHeight = title.frame.height
-            let notes = app.staticTexts["Low sugar"]
-            XCTAssertGreaterThan(notes.frame.height, previousNotesHeight)
-            previousNotesHeight = notes.frame.height
+            let granola = app.buttons["Edit Granola"]
+            XCTAssertTrue((granola.value as? String ?? "").contains("Low sugar"))
+            let cell = app.collectionViews.cells.containing(.button, identifier: granola.identifier).firstMatch
+            XCTAssertGreaterThan(cell.frame.height, previousCellHeight)
+            previousCellHeight = cell.frame.height
+            if !size.contains("Accessibility") {
+                let notes = app.staticTexts["Low sugar"]
+                XCTAssertGreaterThan(notes.frame.height, previousNotesHeight)
+                previousNotesHeight = notes.frame.height
+            }
+            screenshot("Supporting metadata growth - \(size)", app: app)
             let bananas = app.buttons["Edit Bananas"]
             reveal(bananas, in: app)
             let quantity = quantity(for: bananas, in: app)
@@ -282,6 +318,25 @@ final class ShoppingDeviceUITests: XCTestCase {
             previousQuantityHeight = quantity.frame.height
             assertTouchSize(app.buttons["Edit quantity for Bananas"])
             screenshot("Grocery text sizing - \(size)", app: app)
+            if size == "UICTContentSizeCategoryXXXL" {
+                let quantityButton = app.buttons["Edit quantity for Bananas"]
+                quantityButton.tap()
+                let field = app.textFields["shopping.quantity.input"]
+                reveal(field, in: app)
+                field.replaceText(with: "100")
+                XCTAssertFalse(app.buttons["shopping.quantity.save"].isEnabled)
+                let guidance = app.staticTexts["Use a number from 1 to 99, or leave blank."]
+                reveal(guidance, in: app)
+                XCTAssertLessThanOrEqual(guidance.frame.maxY, app.keyboards.firstMatch.frame.minY)
+                screenshot("Compact quantity validation at largest standard text", app: app)
+                let clear = app.buttons["shopping.quantity.clear"]
+                reveal(clear, in: app)
+                clear.tap()
+                XCTAssertEqual(field.value as? String, "Optional")
+                XCTAssertTrue(app.buttons["shopping.quantity.save"].isEnabled)
+                app.buttons["shopping.quantity.cancel"].tap()
+                XCTAssertEqual(quantityButton.value as? String, "6")
+            }
             app.terminate()
         }
     }
@@ -629,7 +684,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         let prefix = "shopping.grocery.row."
         XCTAssertTrue(row.identifier.hasPrefix(prefix))
         let id = String(row.identifier.dropFirst(prefix.count))
-        return app.buttons["shopping.checklist.quantity.edit.\(id)"].staticTexts.firstMatch
+        return app.buttons["shopping.checklist.quantity.edit.\(id)"]
     }
 
     private func assertTouchSize(_ element: XCUIElement) {

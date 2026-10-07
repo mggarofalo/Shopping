@@ -112,7 +112,8 @@ struct GroceryScopeControls: View {
     private var storeMenu: some View {
         HStack(spacing: 0) {
             Button { showingStores = true } label: {
-                ShoppingScopeLabel(title: selectedStoreName, systemImage: "storefront")
+                ShoppingScopeLabel(title: navigation.selectedStoreID == nil ? "Store" : selectedStoreName,
+                                           systemImage: "storefront")
             }
             .sheet(isPresented: $showingStores) {
                 GroceryStorePicker(navigation: navigation, stores: stores, counts: storeCounts)

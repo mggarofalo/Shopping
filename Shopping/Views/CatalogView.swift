@@ -347,7 +347,8 @@ struct CatalogView: View {
                             }
                         }
                     } label: {
-                        ShoppingScopeLabel(title: selectedStoreName, systemImage: "storefront")
+                        ShoppingScopeLabel(title: filters.selectedStoreID == nil ? "Store" : selectedStoreName,
+                                           systemImage: "storefront")
                     }
                     .menuStyle(.button)
                     .accessibilityIdentifier("shopping.catalog.store.menu")

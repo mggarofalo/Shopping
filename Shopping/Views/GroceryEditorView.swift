@@ -256,20 +256,7 @@ struct GroceryEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(isEditing ? "Current item" : "New item") {
-                    if isEditing {
-                        Label(
-                            remembered ? "Remembered item" : "One-time item",
-                            systemImage: remembered ? "bookmark" : "1.circle"
-                        ).accessibilityIdentifier(
-                            remembered ? "shopping.grocery.remembered" : "shopping.grocery.oneTime")
-                    } else if target.need?.kind == NeedKind.oneTime.rawValue {
-                        Label("One-time item", systemImage: "1.circle").accessibilityIdentifier(
-                            "shopping.grocery.oneTime")
-                    } else {
-                        Toggle("Remember this item", isOn: $remembered).accessibilityIdentifier(
-                            "shopping.grocery.remembered")
-                    }
+                Section {
                     if isPromotingOneTime && promotionChoice == .existing {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(selectedCatalogItem?.name ?? "Choose an item from Catalog")
@@ -285,6 +272,27 @@ struct GroceryEditorView: View {
                             .focused($focusedField, equals: .name)
                             .submitLabel(.done)
                             .onSubmit { focusedField = nil }
+                    }
+                    ShoppingQuantityField(text: $quantityText, focus: $quantityFocused,
+                                          identifier: "shopping.grocery.quantity")
+                } footer: {
+                    if !validQuantity {
+                        Text("Use a number from 1 to 99, or leave blank.")
+                    }
+                }
+                Section {
+                    if isEditing {
+                        Label(
+                            remembered ? "Remembered item" : "One-time item",
+                            systemImage: remembered ? "bookmark" : "1.circle"
+                        ).accessibilityIdentifier(
+                            remembered ? "shopping.grocery.remembered" : "shopping.grocery.oneTime")
+                    } else if target.need?.kind == NeedKind.oneTime.rawValue {
+                        Label("One-time item", systemImage: "1.circle").accessibilityIdentifier(
+                            "shopping.grocery.oneTime")
+                    } else {
+                        Toggle("Remember this item", isOn: $remembered).accessibilityIdentifier(
+                            "shopping.grocery.remembered")
                     }
                     if !remembered && !isPromotingOneTime {
                         Text("This item won’t be remembered in Catalog.")
@@ -326,16 +334,6 @@ struct GroceryEditorView: View {
                 if !isEditing { matches }
                 if isEditing, !remembered {
                     promotionSection
-                }
-                Section {
-                    ShoppingQuantityField(text: $quantityText, focus: $quantityFocused,
-                                          identifier: "shopping.grocery.quantity")
-                    if !quantityText.isEmpty {
-                        Button("Clear quantity") { quantityText = "" }
-                            .accessibilityIdentifier("shopping.grocery.quantity.clear")
-                    }
-                } footer: {
-                    Text("1–99, or leave blank when no quantity is needed.")
                 }
                 Section {
                     Toggle("Urgent", isOn: Binding(

@@ -22,19 +22,25 @@ sizes rather than compressing the name into a narrow column.
 
 ## Quantity design
 
-Michael clarified that the former number and plus/minus controls felt appended
-below the redesigned row, and that adding a quantity in the editor was hard to
-find. The replacement uses a compact native disclosure button (`6×`) beside the
-main item content. Store metadata sits below the name for these rows, keeping a
-simple quantity-bearing row at the shared 56-point minimum. The 44-point target
-belongs to the button label and remains separate from the item-edit target.
-Personal-cart quantity readouts use the same multiplication notation.
+The quantity is quiet, unboxed `6×` typography in a native 44-point button.
+Every grocery uses a leading name and store metadata below it, so adding or
+clearing quantity never moves the store summary. Standard rows place quantity
+beside the content; accessibility sizes give the name the full width and place
+metadata and quantity on the next line. Long notes cannot push quantity to the
+bottom. Personal-cart readouts use matching multiplication notation.
 
-Tapping the quantity opens a native numeric-entry form with Clear quantity,
-Cancel and Done. Quantity entry comes first; the complete item name remains
-available below it even at accessibility sizes. Create/edit forms always show
-a labeled Quantity field with an Optional placeholder, an explicit clear action
-and the 1–99/blank guidance. No hidden gesture is required.
+Tapping quantity opens a compact native sheet that grows with text size with the full wrapping
+item name, a numeric field, inline clear, Cancel and Done. Accessibility sizes
+show context before opening the keyboard. The item editor places the always-
+visible optional Quantity field immediately after Name, ahead of remembrance
+and notes. Invalid input alone reveals the range guidance.
+
+The refinement drew from [Grocery's design rationale](https://conradstoll.com/blog/2022/5/22/grocery-30),
+[Crouton's official product imagery](https://crouton.app/), and
+[AnyList's quantity entry](https://help.anylist.com/articles/add-item-quantity/).
+It uses system typography, native grouping and a restrained action tint; no
+custom badge borders, extra pencils or persistent increment/decrement controls.
+Crouton's image informed hierarchy, not an unverified claim about its interaction.
 
 Raw text remains a draft. Blank means unspecified, valid input is a whole ASCII
 number from 1 to 99, and invalid text disables saving. Cancel discards quick
@@ -52,10 +58,13 @@ longer an implementation blocker.
 ## Before and after
 
 Captured using isolated fixtures on iPhone 17 Pro, iOS 26.5, Xcode 27.0
-(27A266a). Before images use the clean base. Quantity images use the final uncommitted
-1.5.4 candidate. Earlier Settings/scope images use the spacing implementation
-before the version edit, so Settings shows 1.5.3 and a dirty source identifier.
-Screenshots establish appearance; CI below establishes the committed candidate.
+(27A266a). Before images use the clean 1.5.3 base. Refined images use the final
+uncommitted 1.5.4 source; Settings therefore displays a dirty source identifier.
+The standard compact sheet uses a text-scaled 260-point native detent; accessibility
+sizes use the large sheet. Multiple native detents caused iOS to expand on keyboard
+focus, so that behavior was rejected through actual simulator screenshot review.
+The Form remains scrollable for long context and feedback. Screenshots establish
+appearance; the PR's exact-head CI establishes the committed candidate.
 
 | Screen | Before | After |
 | --- | --- | --- |
@@ -69,8 +78,12 @@ Screenshots establish appearance; CI below establishes the committed candidate.
 replacement interaction. [Largest-text rows](after-quantity-rows-accessibility.png)
 show intrinsic growth and separate edit targets. The
 [scrolled accessibility editor](after-quantity-editor-accessibility.png) keeps
-the full label, value, clear action and guidance readable.
+the full label, value and clear action readable. Guidance appears for invalid input.
 [Personal cart](after-cart-quantity.png) uses the matching readout.
+[Full item context before the keyboard](after-quantity-context-accessibility.png)
+remains readable at accessibility XXXL. The [scrolled end of a long grocery note](after-grocery-notes-scrolled-accessibility.png)
+shows the final line clear of the tab bar. Pixel review also checked metadata
+font growth and spacing across standard L, XXXL, accessibility M and XXXL.
 
 [Catalog long title, standard text](after-catalog-long-title.png) shows the
 complete wrapped title and supporting notes. Very large text can create a row
@@ -81,6 +94,12 @@ name and status below at accessibility XXXL. These two captures use the final
 source implementation with 1.5.4 prepared.
 
 ## Validation record
+
+The records below distinguish the original spacing/quantity candidate from the
+refinement. The current PR head requires fresh CI; earlier green CI does not
+validate a later design. Refined screenshots are captured from successful
+workflows and inspected as actual pixels, including the full end of long notes.
+
 
 The unchanged baseline build and two existing appearance workflows passed. The
 first spacing run passed all six existing appearance methods; the new management
@@ -135,6 +154,36 @@ Validation feedback added enabled-selection, long-title scroll-reachability,
 edge-tap and interrupted-draft checks. The final production review found no
 remaining confirmed defect; it does not claim atomic cross-device conflict
 handling beyond the existing writer contract.
+
+## Refined candidate validation
+
+`StudioFinalVisuals.xcresult` passed all **12 selected UI workflows**, zero
+failures or skips: seven appearance/spacing workflows, notes and quantity editing,
+cart quantity persistence, accessibility long notes, four-size growth and long-name
+quantity/cart interactions. The subsequent compact-sheet correction passed its
+focused keyboard/context/Cancel check in `StudioCompactSized.xcresult`.
+`StudioFinalQuantity.xcresult` then passed all **3 final-presentation workflows**:
+quantity add/change/clear/cancel/save/reopen/relaunch, four-size growth with XXXL
+invalid-input feedback, and largest-text long-name quantity/cart interaction.
+The final [XXXL validation screenshot](after-quantity-validation-large-text.png)
+shows the field, inline clear and complete feedback above the keyboard.
+
+Earlier refinement failures remain retained: the old notes/text-child UI queries
+no longer matched the deliberate single-announcement accessibility layout;
+quantity tests now establish visible keyboard bounds before interacting with the
+presented field. The compact-sheet test exposed actual automatic expansion with
+multiple native detents. A scaled compact detent plus a large accessibility sheet
+resolved it, and the final field-value, persistence, geometry and Cancel assertions
+remain intact. No failed result is reported as a passing completed suite.
+
+`StudioFinalFast.xcresult` passed **748 tests**, zero failures or skips.
+
+Independent source/test review found no outstanding substantive defect. Actual
+pixel review verified normal and accessibility rows, full wrapping item context,
+long-note final lines, standard and accessibility item forms, and keyboard-visible
+compact/invalid entry. These are simulator results, not physical-device VoiceOver,
+CloudKit convergence or performance proof. The required hosted checks must pass on
+the exact current PR head; their results are recorded on PR #84.
 
 ## Release gate
 
