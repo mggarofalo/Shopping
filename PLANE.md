@@ -44,6 +44,8 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 
 | Phase 28: Named Invitations and Responsive Home Settings | `a5894e86-4ff2-4b48-a784-5ef31d8315f3` | SHOPPING-202/203/204/205: [interaction contract](docs/design/home-sharing-interactions.md), independent background refresh and command progress, owner-private named invitations, native invitation journeys, and separate physical-device proof. |
 
+| Phase 30: Home Settings polish | `f15f0382-bcb8-4002-9a2a-53c3fdde59a8` | SHOPPING-212: custom home title, pencil rename, quiet cloud status, and patch 1.5.3. |
+
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States
