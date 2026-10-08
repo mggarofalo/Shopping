@@ -86,3 +86,41 @@ fixtures, not screenshots of a real household.
 Rapid interaction: [two independent pending Adds](independent-pending-adds.png),
 [quantity and removal before the first save](pending-quantity-and-removal.png),
 and [final committed cart without duplicates](committed-consecutive-edits.png).
+
+
+## Pre-upload recovery correction
+
+PR #85 passed required CI and merged at `c0ae5a9`, but independent follow-up
+review identified a cancellation-feedback gap before upload. A predecessor could
+save successfully and fail to return its receipt; queued same-item quantity or
+Remove commands were correctly withheld, but rereading the saved predecessor
+cleared their cancellation warning. `ReceiptRegressionBefore.xcresult` reproduces
+this on the unchanged merged session: two methods, six missing-feedback
+assertions, with the one-Add and durable quantity-1 assertions passing.
+
+The correction preserves a separate cancellation notice across immediate and
+delayed reconciliation, including uncertainty on another item. It does not infer
+an exact local successor from a general snapshot or blindly repeat Add. Authority
+and scope changes clear old notices. The original no-descendant recovery remains
+a silent success when the saved command is confirmed. Final correction validation
+and the new exact-head/main gates are required before upload; the superseded main
+run was canceled and no 1.5.5 build had been uploaded.
+
+
+`RecoveryWatchFinal.xcresult` passed both affected native UI workflows (failed
+Add acknowledgment/retry and Check cart recovery). Its 94 unit methods had one
+fixture failure: the spy restored the requested store before returning, so the
+new automatic-store-change case never changed scope. The fixture now uses its
+existing return hook and independently asserts the new selected store. Product
+code was unchanged for that correction. The new lost-receipt, delayed recovery,
+and explicit-OK assertions passed in that run. Independent review found no
+remaining blocker after the notice lifecycle fixes.
+
+
+Final correction validation: **94/94 Watch unit tests** passed in
+`RecoveryWatchUnits.xcresult`; both affected native retry/Check cart UI workflows
+passed in `RecoveryWatchFinal.xcresult`; complete ShoppingFast **750/750** passed
+with zero failures/skips in `RecoveryFastFinal.xcresult`. Its two internal QoS
+warnings remain retained. The original 14-scenario Watch UI evidence and final
+rapid-edit screenshots remain applicable; the correction changes only recovery
+feedback and its acknowledgment, not row geometry or command persistence.

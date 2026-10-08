@@ -118,6 +118,156 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
+    func testCommittedAddReceiptFailureReportsCanceledFollowingQuantityAndRemoval() async throws {
+        let followingCommands: [WatchShoppingCommand] = [
+            .setQuantity(token: "bananas", quantity: 5),
+            .remove(token: "bananas")
+        ]
+        for following in followingCommands {
+            let service = SpyService()
+            let session = WatchShoppingSession(service: service)
+            await session.reload()
+            let started = expectation(description: "Predecessor Add held for \(following)")
+            service.suspendCommand = true
+            service.commandStarted = { started.fulfill() }
+            let adding = Task { await session.perform(.add(token: "bananas", quantity: 1)) }
+            await fulfillment(of: [started], timeout: 2)
+            let reserved = expectation(description: "Following edit accepted")
+            let editing = Task { reserved.fulfill(); return await session.perform(following) }
+            await fulfillment(of: [reserved], timeout: 2)
+            if case .setQuantity = following {
+                XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 5, "The later quantity was accepted before the receipt failed")
+            } else {
+                XCTAssertNil(session.snapshot.item(id: "bananas"), "The later removal was accepted before the receipt failed")
+            }
+            service.value = savedBananas(service.value, quantity: 1)
+            service.commandContinuation?.resume(throwing: NSError(domain: "Receipt read failed", code: 1))
+            let predecessorSaved = await adding.value
+            let followingSaved = await editing.value
+            XCTAssertTrue(predecessorSaved, "The authoritative reread confirms the original Add")
+            XCTAssertFalse(followingSaved, "A lost receipt cannot authorize replay through a replacement token")
+            XCTAssertEqual(service.commands, [.add(token: "bananas", quantity: 1)])
+            XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 1)
+            XCTAssertTrue(session.snapshot.item(id: "bananas")?.isInOwnCart ?? false)
+            XCTAssertFalse(session.hasUnconfirmedAdd)
+            XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
+            await session.reload()
+            XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.",
+                "A later ordinary read must not erase unapplied-edit feedback")
+        }
+    }
+
+    func testCanceledFollowingEditFeedbackSurvivesDelayedRecoveryAndClearsWithAuthority() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Original Add held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let adding = Task { await session.perform(.add(token: "bananas", quantity: 1)) }
+        await fulfillment(of: [started], timeout: 2)
+        let reserved = expectation(description: "Quantity five accepted")
+        let editing = Task { reserved.fulfill(); return await session.perform(.setQuantity(token: "bananas", quantity: 5)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 5)
+        service.value = savedBananas(service.value, quantity: 1)
+        service.failLoad = true
+        service.commandContinuation?.resume(throwing: NSError(domain: "Receipt read failed", code: 1))
+        let predecessorConfirmed = await adding.value
+        let followingSaved = await editing.value
+        XCTAssertFalse(predecessorConfirmed)
+        XCTAssertFalse(followingSaved)
+        XCTAssertTrue(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.errorMessage?.contains("Later changes to this item were not applied") ?? false)
+        session.errorMessage = nil // The alert binding resets when Check cart is selected.
+        service.failLoad = false
+        await session.reload()
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 1)
+        XCTAssertEqual(service.commands, [.add(token: "bananas", quantity: 1)])
+        XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
+        service.value = WatchShoppingSnapshot(authorityID: "new-account", availability: .ready)
+        service.onChange?(.authorityInvalidated)
+        XCTAssertNil(session.errorMessage, "Canceled edits from the old account cannot produce feedback in the new account")
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+    }
+
+    func testExplicitErrorAcknowledgementPreventsCanceledNoticeReturningOnRecovery() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Original Add held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let adding = Task { await session.perform(.add(token: "bananas", quantity: 1)) }
+        await fulfillment(of: [started], timeout: 2)
+        let reserved = expectation(description: "Following removal accepted")
+        let removing = Task { reserved.fulfill(); return await session.perform(.remove(token: "bananas")) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertNil(session.snapshot.item(id: "bananas"))
+        service.value = savedBananas(service.value, quantity: 1)
+        service.failLoad = true
+        service.commandContinuation?.resume(throwing: NSError(domain: "Receipt read failed", code: 1))
+        _ = await adding.value
+        _ = await removing.value
+        XCTAssertTrue(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.errorMessage?.contains("Later changes to this item were not applied") ?? false)
+        session.acknowledgeError()
+        XCTAssertNil(session.errorMessage)
+        service.failLoad = false
+        await session.reload()
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 1)
+        XCTAssertEqual(service.commands, [.add(token: "bananas", quantity: 1)])
+        XCTAssertNil(session.errorMessage, "Explicit OK acknowledges the cancellation notice as well as dismissing the alert")
+    }
+
+    func testUnsafeReceiptCancellationFeedbackSurvivesUnrelatedFailureReconciliation() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Original Add held")
+        var held: CheckedContinuation<WatchShoppingCommit, Error>?
+        service.commitHandler = { command in
+            if case .add = command {
+                return try await withCheckedThrowingContinuation { held = $0; started.fulfill() }
+            }
+            throw NSError(domain: "Independent removal failed", code: 1)
+        }
+        let adding = Task { await session.perform(.add(token: "bananas", quantity: 1)) }
+        await fulfillment(of: [started], timeout: 2)
+        let quantityReserved = expectation(description: "Dependent quantity accepted")
+        let editing = Task { quantityReserved.fulfill(); return await session.perform(.setQuantity(token: "bananas", quantity: 5)) }
+        await fulfillment(of: [quantityReserved], timeout: 2)
+        let removalReserved = expectation(description: "Independent removal accepted")
+        let removing = Task { removalReserved.fulfill(); return await session.perform(.remove(token: "milk")) }
+        await fulfillment(of: [removalReserved], timeout: 2)
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 5)
+        XCTAssertNil(session.snapshot.item(id: "milk"))
+        service.value = savedBananas(service.value, quantity: 4)
+        held?.resume(returning: .item(occurrenceID: "bananas",
+            item: localItem("bananas", token: "remote-replacement", quantity: 4), mayRebase: false))
+        let predecessorSaved = await adding.value
+        let dependentSaved = await editing.value
+        let independentSaved = await removing.value
+        XCTAssertTrue(predecessorSaved)
+        XCTAssertFalse(dependentSaved)
+        XCTAssertFalse(independentSaved)
+        XCTAssertEqual(service.commands, [.add(token: "bananas", quantity: 1), .remove(token: "milk")],
+            "The unrelated intent still executes, without replaying the unsafe dependent quantity")
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 4)
+        XCTAssertTrue(session.snapshot.item(id: "milk")?.isInOwnCart ?? false)
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
+        await session.reload()
+        XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
+        service.onLoad = { service.value.selectedStoreID = WatchPreviewService.secondStoreID }
+        await session.reload()
+        XCTAssertEqual(session.snapshot.selectedStoreID, WatchPreviewService.secondStoreID,
+            "The returned snapshot must actually change store scope despite the previously requested selection")
+        XCTAssertNil(session.errorMessage, "An automatic store-selection change must clear feedback from the old scope")
+    }
+
     func testUnconfirmedAddBlocksOnlyThatOccurrenceUntilReconnectReadResolvesIt() async {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
@@ -418,7 +568,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(service.commands.count, 1)
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 4)
         XCTAssertFalse(session.snapshot.item(id: "bananas")?.isPendingAdd ?? true)
-        XCTAssertEqual(session.errorMessage, "This item changed. Check its quantity before trying again.")
+        XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
     }
 
     func testIncomingChangeCoalescesBehindDirtyLocalIntentsAndCatchesUp() async throws {
