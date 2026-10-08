@@ -9,6 +9,21 @@ final class WatchShoppingSession {
     private var uncertain: [WatchCartIntent] = []
     private struct QuantityDraft { let quantity: Int? }
     private var failedAddDrafts: [String: QuantityDraft] = [:]
+    private struct CanceledEditNotice {
+        let authorityID: String?
+        let storeID: UUID?
+        let generation: Int
+    }
+    // A canceled accepted edit is distinct from uncertainty about its predecessor.
+    // Successful reads can resolve uncertainty without having saved that edit.
+    private var canceledEditNotice: CanceledEditNotice?
+    private var cancellationMessage: String? {
+        guard let notice = canceledEditNotice,
+              notice.generation == authorityGeneration,
+              notice.authorityID == savedSnapshot.authorityID,
+              notice.storeID == savedSnapshot.selectedStoreID else { return nil }
+        return "Later changes to this item were not applied. Check your cart before trying again."
+    }
     var hasUnconfirmedAdd: Bool { !uncertain.isEmpty }
     var snapshot: WatchShoppingSnapshot {
         var value = savedSnapshot
@@ -84,6 +99,13 @@ final class WatchShoppingSession {
 
     func refreshHomeAccess() { service.refreshHomeAccess() }
 
+    // Explicit OK acknowledges the canceled edits. The alert binding also resets
+    // for Check cart, which must preserve this notice until recovery completes.
+    func acknowledgeError() {
+        canceledEditNotice = nil
+        errorMessage = nil
+    }
+
     func quantityDraft(for item: WatchShoppingItem) -> Int? {
         if let draft = failedAddDrafts[item.occurrenceID] { return draft.quantity }
         return item.quantity
@@ -112,7 +134,7 @@ final class WatchShoppingSession {
                 let hadUncertainty = !uncertain.isEmpty
                 uncertain.removeAll()
                 applySnapshot(value)
-                if hadUncertainty { errorMessage = nil }
+                if hadUncertainty { errorMessage = cancellationMessage }
             }
         } catch {
             if generation == authorityGeneration, errorMessage == nil { errorMessage = error.localizedDescription }
@@ -163,7 +185,10 @@ final class WatchShoppingSession {
             errorMessage = "This item’s update could not be confirmed. Check the cart before changing it again."
             return nil
         }
-        if uncertain.isEmpty { errorMessage = nil }
+        if uncertain.isEmpty {
+            canceledEditNotice = nil
+            errorMessage = nil
+        }
         pending.append(intent)
         if !isDraining {
             isDraining = true
@@ -222,6 +247,7 @@ final class WatchShoppingSession {
                 let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
                 pending.removeAll { $0.occurrenceID == intent.occurrenceID }
                 for descendant in descendants { complete(descendant.id, success: false) }
+                if !descendants.isEmpty { recordCanceledEdits(following: intent) }
                 if case .add(_, let quantity) = intent.command {
                     failedAddDrafts[intent.occurrenceID] = QuantityDraft(quantity: quantity)
                 }
@@ -238,7 +264,10 @@ final class WatchShoppingSession {
                 let unresolved = uncertain.contains { $0.id == intent.id }
                 let applied = !unresolved && intent.matches(savedSnapshot)
                 if unresolved {
-                    errorMessage = "Your cart update could not be confirmed. It may already be saved. Check the cart before trying again."
+                    let uncertaintyMessage = "Your cart update could not be confirmed. It may already be saved. Check the cart before trying again."
+                    errorMessage = [uncertaintyMessage, cancellationMessage].compactMap { $0 }.joined(separator: " ")
+                } else if let cancellationMessage {
+                    errorMessage = cancellationMessage
                 } else if !applied { errorMessage = message }
                 complete(intent.id, success: applied)
             }
@@ -263,9 +292,13 @@ final class WatchShoppingSession {
         let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
         pending.removeAll { $0.occurrenceID == intent.occurrenceID }
         for descendant in descendants { complete(descendant.id, success: false) }
-        if !descendants.isEmpty {
-            errorMessage = "This item changed. Check its quantity before trying again."
-        }
+        if !descendants.isEmpty { recordCanceledEdits(following: intent) }
+    }
+
+    private func recordCanceledEdits(following intent: WatchCartIntent) {
+        canceledEditNotice = CanceledEditNotice(authorityID: intent.authorityID,
+            storeID: intent.storeID, generation: intent.generation)
+        errorMessage = cancellationMessage
     }
 
     private func complete(_ id: UUID, success: Bool) { completions.removeValue(forKey: id)?.resume(returning: success) }
@@ -276,6 +309,7 @@ final class WatchShoppingSession {
         pending.removeAll()
         uncertain.removeAll()
         failedAddDrafts.removeAll()
+        canceledEditNotice = nil
         let waiting = completions.values
         completions.removeAll()
         for completion in waiting { completion.resume(returning: false) }
@@ -314,6 +348,7 @@ final class WatchShoppingSession {
             return false
         }
         isBusy = true
+        canceledEditNotice = nil
         errorMessage = nil
         let generation = authorityGeneration
         let authorityID = snapshot.authorityID
@@ -349,6 +384,12 @@ final class WatchShoppingSession {
     }
 
     private func applySnapshot(_ value: WatchShoppingSnapshot) {
+        if value.authorityID != savedSnapshot.authorityID || value.selectedStoreID != savedSnapshot.selectedStoreID {
+            if let cancellationMessage, errorMessage?.contains(cancellationMessage) == true {
+                errorMessage = nil
+            }
+            canceledEditNotice = nil
+        }
         if value.availability != .ready || value.authorityID != savedSnapshot.authorityID {
             sheet = nil
             errorMessage = nil

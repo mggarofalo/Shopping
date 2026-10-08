@@ -129,7 +129,7 @@ private struct WatchShoppingErrorPresenter: ViewModifier {
             if session.hasUnconfirmedAdd {
                 Button("Check cart") { Task { await session.reload() } }
             }
-            Button("OK", role: .cancel) { session.errorMessage = nil }
+            Button("OK", role: .cancel) { session.acknowledgeError() }
         } message: { Text(session.errorMessage ?? "") }
     }
 }

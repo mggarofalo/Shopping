@@ -2445,3 +2445,11 @@ unconfirmed recovery tests retain their UI proof with immediate accepted-action
 navigation. Durable relaunch tests wait for confirmed local state before
 termination; a visible pending row is not a saved-data assertion. Existing large
 text and persistent checkout/restore workflows remain separate owners.
+
+
+The SHOPPING-216 pre-upload recovery correction is owned by
+`WatchShoppingSessionTests`: held Add followed by accepted quantity/Remove,
+lost receipt after durable save, immediate and delayed successful rereads,
+retained cancellation feedback, and authority cleanup. Its existing
+`testCommittedAddReadFailureReconcilesWithoutReexecuting` retains no-descendant
+recovery behavior. The failed baseline is retained in the validation record.
