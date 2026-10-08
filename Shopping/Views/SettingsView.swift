@@ -10,19 +10,15 @@ struct SettingsView: View {
             List {
                 Section {
                     HomeScopeControl()
-                        .shoppingListRowInsets()
                 }
                 NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
-                    .shoppingListRowInsets()
                 NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
-                    .shoppingListRowInsets()
                 NavigationLink { PersonManagementView() } label: { Label("People", systemImage: "person.2") }
-                    .shoppingListRowInsets()
                 Section("Appearance") {
                     if dynamicTypeSize.isAccessibilitySize {
-                        appearancePicker.pickerStyle(.menu).shoppingListRowInsets()
+                        appearancePicker.pickerStyle(.menu)
                     } else {
-                        appearancePicker.pickerStyle(.segmented).shoppingListRowInsets()
+                        appearancePicker.pickerStyle(.segmented)
                     }
                 }
                 HouseholdSettingsSection()

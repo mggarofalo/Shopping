@@ -52,9 +52,7 @@ final class CatalogRefreshUITests: XCTestCase {
         app.buttons["shopping.catalog.keyboardDone"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         let typedName = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in
-                app.textFields["shopping.catalog.name"].value as? String == "Oat milk"
-            }, object: nil
+            predicate: NSPredicate(format: "value == %@", "Oat milk"), object: name
         )
         let nameReady = XCTWaiter.wait(for: [typedName], timeout: 3)
         if nameReady != .completed {

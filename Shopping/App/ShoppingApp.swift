@@ -55,6 +55,7 @@ struct ShoppingApp: App {
         WindowGroup {
             PersistenceRootView(bootstrap: bootstrap)
                 .tint(.groceryAccent)
+                .environment(\.defaultMinListRowHeight, ShoppingListMetrics.minimumListRowHeight)
                 .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
         }
     }

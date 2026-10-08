@@ -5,6 +5,16 @@ import XCTest
 
 final class AppPresentationTests: XCTestCase {
     @MainActor
+    func testQuantityEntryDistinguishesBlankFromInvalidText() {
+        for text in ["", "1", "9", "10", "99", "01"] {
+            XCTAssertTrue(ShoppingQuantityField.isValid(text), text)
+        }
+        for text in ["0", "100", "-1", "+2", "1.5", "abc", " ", " 2", "2 ", "１２", String(repeating: "9", count: 30)] {
+            XCTAssertFalse(ShoppingQuantityField.isValid(text), text)
+        }
+    }
+
+    @MainActor
     func testGroceryAccentSharesTheGlobalAdaptivePalette() throws {
         let palettes: [(UIUserInterfaceStyle, CGFloat, CGFloat, CGFloat)] = [
             (.light, 0.10, 0.32, 0.23),

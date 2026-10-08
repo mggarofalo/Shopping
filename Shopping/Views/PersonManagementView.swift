@@ -156,6 +156,7 @@ struct PersonManagementView: View {
                     .buttonStyle(.plain)
             }
         }
+        .shoppingItemRow()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { setArchived(person, !person.isArchived) } label: {
                 Label(person.isArchived ? "Restore" : "Archive", systemImage: person.isArchived ? "arrow.uturn.backward" : "archivebox")
@@ -210,11 +211,7 @@ struct PersonManagementView: View {
     }
 
     private func personLabel(_ person: Person) -> some View {
-        HStack {
-            Text(person.name)
-            Spacer()
-            if person.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
-        }
+        ShoppingManagementRowLabel(name: person.name, isArchived: person.isArchived)
         .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
     }

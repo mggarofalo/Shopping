@@ -72,7 +72,8 @@ struct PersonalCartView: View {
                             Text(entry.title).foregroundStyle(Color.primary)
                             Spacer()
                             if let quantity = entry.quantity {
-                                Text("\(quantity)").foregroundStyle(Color.secondary).fixedSize()
+                                Text("\(quantity)×").monospacedDigit().foregroundStyle(Color.secondary).fixedSize()
+                                    .accessibilityLabel("Quantity \(quantity)")
                             }
                         }
                         if !entry.notes.isEmpty {
@@ -80,8 +81,7 @@ struct PersonalCartView: View {
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
-                    .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
+                    .shoppingItemRow()
                 }
                 .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
                     cart.isCartTransitionPending(entry.needID))

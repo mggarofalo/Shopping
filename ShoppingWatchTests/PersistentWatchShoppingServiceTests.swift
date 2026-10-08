@@ -79,6 +79,64 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
     }
 
+    func testSessionPublishesPendingCartBeforeBlockedWriterCompletes() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        let row = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        let session = WatchShoppingSession(service: service, initialSnapshot: initial)
+        let entered = expectation(description: "Writer held")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait { entered.fulfill(); release.wait() }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        let reserved = expectation(description: "Add reserved")
+        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: row.commandToken, quantity: nil)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertEqual(session.snapshot.cartCount, 1)
+        XCTAssertTrue(session.snapshot.grocerySections.isEmpty)
+        XCTAssertTrue(session.snapshot.item(id: row.id)?.isPendingAdd ?? false)
+        XCTAssertNil(session.snapshot.item(id: row.id)?.quantity)
+        release.signal()
+        let success = await adding.value
+        XCTAssertTrue(success)
+        let saved = try XCTUnwrap(session.snapshot.item(id: row.id))
+        XCTAssertNotEqual(saved.id, row.id)
+        XCTAssertEqual(saved.occurrenceID, row.id)
+        XCTAssertFalse(saved.isPendingAdd)
+        XCTAssertNil(saved.quantity)
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertNil(entries.first?.quantity)
+    }
+
+    func testSessionKeepsUnconfirmedCommittedAddUntilSelectionReadCanRecover() async throws {
+        let f = try fixture()
+        let selectionDirectory = f.directory.appendingPathComponent("selection")
+        let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
+            selectionURL: selectionDirectory.appendingPathComponent("store.json"), cartService: f.cart)
+        let initial = try await service.load(storeID: f.storeID)
+        let row = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        let session = WatchShoppingSession(service: service, initialSnapshot: initial)
+        // The durable Add succeeds; only the subsequent selection-file write fails.
+        try FileManager.default.removeItem(at: selectionDirectory)
+        try Data("not a directory".utf8).write(to: selectionDirectory)
+        let success = await session.perform(.add(token: row.commandToken, quantity: 8))
+        XCTAssertFalse(success)
+        XCTAssertTrue(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.snapshot.item(id: row.id)?.isAddUnconfirmed ?? false)
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.quantity, 8)
+        try FileManager.default.removeItem(at: selectionDirectory)
+        await session.reload()
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertEqual(session.snapshot.cartCount, 1)
+        XCTAssertEqual(session.snapshot.item(id: row.id)?.quantity, 8)
+        XCTAssertNotEqual(session.snapshot.item(id: row.id)?.id, row.id)
+        XCTAssertNil(session.errorMessage)
+    }
+
     func testHomeNameFollowsWatchSelectionAndRefreshesAfterRename() async throws {
         let f = try fixture()
         let otherHomeID = UUID()

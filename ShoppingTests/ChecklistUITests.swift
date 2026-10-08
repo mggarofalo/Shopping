@@ -285,18 +285,11 @@ final class ChecklistUITests: XCTestCase {
         let granola = row("Granola", app: app)
         reveal(granola, app: app)
         granola.tap()
-        let addQuantity = app.buttons["shopping.grocery.quantity.add"]
-        XCTAssertTrue(addQuantity.existsOrAppears(timeout: 2))
-        addQuantity.tap()
-        let quantity = app.steppers["shopping.grocery.quantity"]
-        XCTAssertEqual(quantity.value as? String, "1")
-        let increment = quantity.buttons.matching(NSPredicate(
-            format: "identifier == %@ OR label == %@",
-            "shopping.grocery.quantity-Increment", "Increment"
-        )).firstMatch
-        reveal(increment, app: app)
-        increment.tap()
-        XCTAssertEqual(quantity.value as? String, "2")
+        let quantity = app.textFields["shopping.grocery.quantity"]
+        reveal(quantity, app: app)
+        XCTAssertTrue(quantity.existsOrAppears(timeout: 2))
+        XCTAssertEqual(quantity.value as? String, "Optional")
+        quantity.replaceText(with: "2")
         app.buttons["shopping.grocery.save"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 2))
         cart("Granola", app: app)
@@ -314,7 +307,7 @@ final class ChecklistUITests: XCTestCase {
         reveal(row("Granola", app: app), app: app)
         row("Granola", app: app).tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 2))
-        XCTAssertEqual(app.steppers["shopping.grocery.quantity"].value as? String, "2")
+        XCTAssertEqual(app.textFields["shopping.grocery.quantity"].value as? String, "2")
         XCTAssertEqual(app.textFields["shopping.grocery.purchaseNotes"].value as? String, "Low sugar")
         XCTAssertEqual(app.switches["shopping.grocery.urgency"].value as? String, "1")
     }
@@ -375,7 +368,7 @@ final class ChecklistUITests: XCTestCase {
         let granola = row("Granola", app: app)
         reveal(granola, app: app)
         XCTAssertGreaterThanOrEqual(granola.frame.height, 44 - 0.01)
-        let quantity = app.buttons["Increase quantity for Bananas"]
+        let quantity = app.buttons["Edit quantity for Bananas"]
         reveal(quantity, app: app)
         XCTAssertGreaterThanOrEqual(quantity.frame.height, 44 - 0.01)
         attachScreenshot("Checklist at accessibility text size", app: app)

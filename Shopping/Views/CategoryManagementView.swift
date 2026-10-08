@@ -217,7 +217,8 @@ struct CategoryManagementView: View {
 
     private func categoryRowActions<Content: View>(_ content: Content, category: Category) -> some View {
         content
-        .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .shoppingItemRow()
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { setArchived(category, !category.isArchived) } label: {
@@ -290,11 +291,7 @@ struct CategoryManagementView: View {
     }
 
     private func categoryRowLabel(_ category: Category) -> some View {
-        HStack {
-            Text(category.name)
-            Spacer()
-            if category.isArchived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
-        }
+        ShoppingManagementRowLabel(name: category.name, isArchived: category.isArchived)
     }
 
     private func beginCreate() {
