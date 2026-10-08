@@ -7,7 +7,7 @@ The accepted SHOPPING-214 iPhone design remains unchanged. Patch 1.5.4 adds imme
 - Add moves the occurrence from groceries into the cart immediately, retaining the exact optional quantity. Cart rows announce Adding to your cart and show a small clock; the item card keeps its quantity visible with Adding to cart… until the save returns.
 - The foreground session owns one pending presentation overlay over the latest saved snapshot. It reserves the existing serialized command before waiting for a refresh. Older reads can refresh the saved base without undoing the pending Add. Need identity connects the grocery row to its distinct durable membership ID; existing claims retain their authoritative quantity.
 - Pending entries have no usable membership command. Quantity changes, removal, Buy anyway, and checkout wait for authoritative state. Exact repeated Add taps coalesce without creating another command.
-- Ordinary write failures reconcile from a fresh read and expose feedback with a retryable item. A command can commit before its final read or selection-file write fails; reconciliation never re-executes that command. If both reads fail, the item remains explicitly unconfirmed, mutations are blocked, and Check cart or a later successful local refresh resolves it.
+- Ordinary write failures reconcile from a fresh read and expose feedback with a retryable item. A command can commit before its final read or selection-file write fails; reconciliation never re-executes that command. If both reads fail, the item card says Update unconfirmed (without implying a read is still active), mutations are blocked, and Check cart or a later successful local refresh resolves it.
 - Account/authority invalidation removes pending state immediately. Scope changes remove the overlay. Successful reconciliation releases the overlay, so later authoritative removal or quantity changes remain visible.
 - Offline saves use the existing independent Watch SQLite/CloudKit path. The pending indicator means local save confirmation, not phone delivery. No WatchConnectivity dependency or new outbox was added.
 
@@ -36,13 +36,16 @@ from these test durations.
 | WatchOptimisticSmallFinal | 3 UI passed, zero failed/skipped | 42mm large text, pending swipe and Check cart recovery with corrected alignment. |
 | WatchOptimisticCompatibility | 74 unit/persistence and 1 pending-swipe UI passed | Final compiler-compatible source; zero failed/skipped. |
 | WatchPatchFinalFast | 748 passed, zero failed/skipped | Required aggregate repeated after the compatibility correction. |
+| WatchUnconfirmedCopy | 1 UI passed, zero failed/skipped | Final copy-only correction on 42mm: Check cart confirms quantity 3, restores enabled controls, and leaves exactly one cart row. |
 | WatchPatchFast | 748 passed, zero failed/skipped | Required iPhone Fast aggregate with the Watch patch. |
 
 The failed result bundle and hierarchy are retained. The recovery failure showed
 confirmed quantity 3 and enabled controls, with Remove below the visible list.
 Only the test lookup changed; no product workaround, wait increase, retry,
-skipped assertion or baseline change was introduced. Production source is the
-same across the aggregate and corrected UI runs.
+skipped assertion or baseline change was introduced. The aggregate covers the same reconciliation implementation; the final
+copy-only correction replaces Checking cart… with Update unconfirmed, accurately
+describing an unresolved result when no confirmation read is active. The existing
+42mm recovery workflow passed again after that correction.
 
 On 42mm, the long-name row measured 107.5 points in a viewport from 40 to
 156.5 points: only 9 points of placement margin. Crown steps oscillated between

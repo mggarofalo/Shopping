@@ -68,7 +68,7 @@ struct WatchItemCard: View {
         .navigationTitle("Item")
         .safeAreaInset(edge: .bottom, spacing: 4) {
             if session.snapshot.item(id: itemID)?.isPendingAdd == true {
-                Text(session.hasUnconfirmedAdd ? "Checking cart…" : "Adding to cart…")
+                Text(session.hasUnconfirmedAdd ? "Update unconfirmed" : "Adding to cart…")
                     .font(.caption2)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding(.bottom, 8)
