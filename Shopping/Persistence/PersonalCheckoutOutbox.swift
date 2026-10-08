@@ -71,41 +71,49 @@ extension PersonalCartService {
             Set(try repository.values(PersonalCartCommandResult.self, kind: "cart").values.compactMap(\.edit).map { $0.snapshot.needID })
         }
         for needID in needIDs {
-            try quarantineUnavailable {
-                try transact { repository in
-                    let results = try repository.values(PersonalCartCommandResult.self, kind: "cart")
-                    let group = results.values.compactMap(\.edit).filter { $0.snapshot.needID == needID }
-                    guard let reference = group.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first?.snapshot else { return }
-                    let entries = try self.entries(householdID: reference.householdID, listID: reference.listID, repository: repository)
-                    let entry = entries.first { $0.needID == needID }
-                    let tips = group.filter { candidate in !group.contains { $0.ancestors.contains(candidate.id) } }
-                    guard let generation = entry?.id ?? tips.max(by: { $0.id.uuidString < $1.id.uuidString })?.snapshot.id else {
-                        throw PersonalCartError.corruptRecord
-                    }
-                    let evidence = Set(group.map(\.id))
-                    let checkoutIDs = try repository.values(PersonalCheckoutIntent.self, kind: "checkout").filter {
-                        $0.value.accepted.contains(needID)
-                    }.map(\.key)
-                    let restoreIDs = try repository.values(PersonalRestoreIntent.self, kind: "restore").filter {
-                        $0.value.restoredNeedIDs.contains(needID)
-                    }.map(\.key)
-                    let demandEvents = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand",
-                        householdID: reference.householdID, in: repository.context)
-                    let demandIDs = demandEvents.values.filter { $0.needID == needID || $0.replaces.contains(needID) }.map(\.id)
-                    let allEvidence = evidence.union(checkoutIDs).union(restoreIDs).union(demandIDs)
-                    let publication = PersonalCartPresencePublication(session: repository.session,
-                        reference: reference, entry: entry, generation: generation, evidence: allEvidence)
-                    guard try repository.homeEffectMayPublish(kind: .cartGeneration,
-                        subjectID: publication.authorityGeneration, householdID: reference.householdID,
-                        listID: reference.listID) else { throw PersonalCartError.quarantined }
-                    let existing = try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self,
-                        kind: "presence", householdID: reference.householdID, id: publication.event.id,
-                        in: repository.context)[publication.event.id]
-                    let event = try publication.retaining(existing)
-                    try repository.publish(event, id: event.id, kind: "presence",
-                        householdID: reference.householdID, listID: reference.listID,
-                        effectKind: .cartGeneration, effectID: publication.authorityGeneration)
+            try quarantineUnavailable { try republishPresence(needIDs: [needID]) }
+        }
+    }
+
+    /// Publish only the latest causal state of the changed needs. Errors remain
+    /// visible to the caller so its coalescer can retain the dirty IDs. The
+    /// persisted private commands let full recovery reconstruct this work after
+    /// termination, even if that in-memory dirty set has been lost.
+    func republishPresence(needIDs: Set<UUID>) throws {
+        for needID in needIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            try transact { repository in
+                let results = try repository.values(PersonalCartCommandResult.self, kind: "cart")
+                let group = results.values.compactMap(\.edit).filter { $0.snapshot.needID == needID }
+                guard let reference = group.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first?.snapshot else { return }
+                let entries = try self.entries(householdID: reference.householdID, listID: reference.listID, repository: repository)
+                let entry = entries.first { $0.needID == needID }
+                let tips = group.filter { candidate in !group.contains { $0.ancestors.contains(candidate.id) } }
+                guard let generation = entry?.id ?? tips.max(by: { $0.id.uuidString < $1.id.uuidString })?.snapshot.id else {
+                    throw PersonalCartError.corruptRecord
                 }
+                let evidence = Set(group.map(\.id))
+                let checkoutIDs = try repository.values(PersonalCheckoutIntent.self, kind: "checkout").filter {
+                    $0.value.accepted.contains(needID)
+                }.map(\.key)
+                let restoreIDs = try repository.values(PersonalRestoreIntent.self, kind: "restore").filter {
+                    $0.value.restoredNeedIDs.contains(needID)
+                }.map(\.key)
+                let demandEvents = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand",
+                    householdID: reference.householdID, in: repository.context)
+                let demandIDs = demandEvents.values.filter { $0.needID == needID || $0.replaces.contains(needID) }.map(\.id)
+                let allEvidence = evidence.union(checkoutIDs).union(restoreIDs).union(demandIDs)
+                let publication = PersonalCartPresencePublication(session: repository.session,
+                    reference: reference, entry: entry, generation: generation, evidence: allEvidence)
+                guard try repository.homeEffectMayPublish(kind: .cartGeneration,
+                    subjectID: publication.authorityGeneration, householdID: reference.householdID,
+                    listID: reference.listID) else { throw PersonalCartError.quarantined }
+                let existing = try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self,
+                    kind: "presence", householdID: reference.householdID, id: publication.event.id,
+                    in: repository.context)[publication.event.id]
+                let event = try publication.retaining(existing)
+                try repository.publish(event, id: event.id, kind: "presence",
+                    householdID: reference.householdID, listID: reference.listID,
+                    effectKind: .cartGeneration, effectID: publication.authorityGeneration)
             }
         }
     }

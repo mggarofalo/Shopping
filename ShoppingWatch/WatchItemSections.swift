@@ -10,7 +10,7 @@ struct WatchItemSections: View {
             Section {
                 ForEach(section.items) { item in
                     NavigationLink {
-                        WatchItemCard(session: session, itemID: item.id)
+                        WatchItemCard(session: session, itemID: item.occurrenceID)
                     } label: {
                         WatchItemLabel(item: item)
                     }
@@ -22,13 +22,13 @@ struct WatchItemSections: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if item.isInOwnCart && item.canRemove {
                             Button("Remove", systemImage: "cart.badge.minus") {
-                                Task { await session.perform(.remove(token: item.commandToken)) }
+                                session.submit(.remove(token: item.commandToken))
                             }
                             .tint(.orange)
                             .disabled(session.isBusy)
                         } else if !item.isInOwnCart && item.canAdd {
                             Button("Add", systemImage: "cart.badge.plus") {
-                                Task { await session.perform(.add(token: item.commandToken, quantity: item.quantity)) }
+                                session.submit(.add(token: item.commandToken, quantity: item.quantity))
                             }
                             .tint(.green)
                             .disabled(session.isBusy)
@@ -37,11 +37,11 @@ struct WatchItemSections: View {
                     .accessibilityActions {
                         if item.isInOwnCart && item.canRemove {
                             Button("Remove from your cart") {
-                                Task { await session.perform(.remove(token: item.commandToken)) }
+                                session.submit(.remove(token: item.commandToken))
                             }
                         } else if !item.isInOwnCart && item.canAdd {
                             Button("Add to your cart") {
-                                Task { await session.perform(.add(token: item.commandToken, quantity: item.quantity)) }
+                                session.submit(.add(token: item.commandToken, quantity: item.quantity))
                             }
                         }
                     }

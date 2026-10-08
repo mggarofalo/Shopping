@@ -6,6 +6,12 @@ enum WatchServiceChange: Equatable {
     case syncChanged(WatchSyncStatus)
 }
 
+// A receipt acknowledges a local durable write, never CloudKit delivery.
+enum WatchShoppingCommit {
+    case snapshot(WatchShoppingSnapshot)
+    case item(occurrenceID: String, item: WatchShoppingItem?, mayRebase: Bool = true)
+}
+
 @MainActor
 protocol WatchShoppingService: AnyObject {
     // Invalidate synchronously before an account/authority switch, even during an async command.
@@ -13,6 +19,7 @@ protocol WatchShoppingService: AnyObject {
     var onChange: (@MainActor (WatchServiceChange) -> Void)? { get set }
     func refreshHomeAccess()
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot
+    func commit(_ command: WatchShoppingCommand) async throws -> WatchShoppingCommit
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot
     func captureCheckout(storeID: UUID) async throws -> WatchCheckoutPreview
     func checkout(token: String) async throws -> WatchActionResult
@@ -21,6 +28,9 @@ protocol WatchShoppingService: AnyObject {
 
 extension WatchShoppingService {
     func refreshHomeAccess() {}
+    func commit(_ command: WatchShoppingCommand) async throws -> WatchShoppingCommit {
+        .snapshot(try await execute(command))
+    }
 }
 
 // Explicit unavailable/setup presentation, also used for startup failures and previews.

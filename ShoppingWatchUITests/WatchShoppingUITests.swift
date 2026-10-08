@@ -241,6 +241,11 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(check.waitForExistence(timeout: 5))
         screenshot("Watch unconfirmed Add offers safe recovery", app: app)
         check.tap()
+        assertReturnedToGroceries(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(bananas, in: app)
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
+        bananas.tap()
         let remove = app.buttons["watch.item.remove"]
         reveal(remove, in: app)
         XCTAssertTrue(remove.isEnabled)
@@ -251,8 +256,7 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertEqual(increase.value as? String, "3")
         screenshot("Watch confirmed cart after recovery", app: app)
         app.navigationBars["Item"].buttons["BackButton"].tap()
-        assertReturnedToGroceries(app)
-        app.buttons["watch.cart.open"].tap()
+        assertReturnedToCart(app)
         reveal(bananas, in: app)
         XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
         XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
@@ -271,20 +275,109 @@ final class WatchShoppingUITests: XCTestCase {
         assertBottomAction(add, in: app)
         screenshot("Watch before optimistic card Add", app: app)
         add.tap()
-        let pending = app.staticTexts["watch.item.add.pending"]
-        XCTAssertTrue(pending.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.navigationBars["Item"].exists)
-        XCTAssertFalse(add.exists)
-        XCTAssertFalse(increase.isEnabled)
-        XCTAssertEqual(increase.value as? String, "1")
-        screenshot("Watch pending card Add keeps quantity", app: app)
-        XCTAssertTrue(app.buttons["watch.cart.open"].waitForExistence(timeout: 40))
         assertReturnedToGroceries(app)
+        XCTAssertFalse(granola.exists)
         app.buttons["watch.cart.open"].tap()
         reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Saving your cart"))
         XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 1"))
-        XCTAssertFalse((granola.value as? String ?? "").contains("Adding"))
+        XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+        granola.tap()
+        let pending = app.staticTexts["watch.item.add.pending"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 3))
+        XCTAssertFalse(add.exists)
+        reveal(increase, in: app)
+        XCTAssertTrue(increase.isEnabled)
+        XCTAssertEqual(increase.value as? String, "1")
+        screenshot("Watch pending card Add keeps quantity editable", app: app)
+        app.navigationBars["Item"].buttons["BackButton"].tap()
+        assertReturnedToCart(app)
+        reveal(granola, in: app)
+        waitForSavedCartItem(granola, timeout: 40)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 1"))
         screenshot("Watch completed optimistic card Add", app: app)
+    }
+
+    func testDifferentItemsAndPendingQuantityAndRemovalStayUsableDuringFirstSave() {
+        // Only the first Add is held for 90 seconds. Later service commands run
+        // normally; every pending assertion below must precede that first receipt.
+        let app = launchFixture("rapidCartEdits")
+        let bananas = app.buttons["watch.item.bananas"]
+        let granola = app.buttons["watch.item.granola"]
+        let milk = app.buttons["watch.item.milk"]
+        reveal(bananas, in: app)
+        bananas.swipeLeft()
+        let swipeAdd = app.buttons["Add"]
+        XCTAssertTrue(swipeAdd.waitForExistence(timeout: 3))
+        XCTAssertTrue(swipeAdd.isEnabled)
+        swipeAdd.tap()
+        XCTAssertTrue(bananas.waitForNonExistence(timeout: 3))
+
+        reveal(granola, in: app)
+        granola.tap()
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        XCTAssertTrue(increase.isEnabled)
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "1")
+        let cardAdd = app.buttons["watch.item.add"]
+        assertBottomAction(cardAdd, in: app)
+        XCTAssertTrue(cardAdd.isEnabled)
+        cardAdd.tap()
+        assertReturnedToGroceries(app)
+        XCTAssertFalse(granola.exists)
+        let cart = app.buttons["watch.cart.open"]
+        XCTAssertTrue(cart.label.contains("3 items"))
+        cart.tap()
+        reveal(bananas, in: app)
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Saving your cart"))
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Saving your cart"))
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 1"))
+        XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+        screenshot("Watch accepts a different item while first Add is held", app: app)
+
+        granola.tap()
+        reveal(increase, in: app)
+        XCTAssertTrue(increase.isEnabled)
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "2")
+        app.navigationBars["Item"].buttons["BackButton"].tap()
+        assertReturnedToCart(app)
+        reveal(bananas, in: app)
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Saving your cart"))
+        bananas.tap()
+        let remove = app.buttons["watch.item.remove"]
+        reveal(remove, in: app)
+        XCTAssertTrue(remove.isEnabled)
+        remove.tap()
+        assertReturnedToCart(app)
+        XCTAssertFalse(bananas.exists)
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 2"))
+        XCTAssertTrue((granola.value as? String ?? "").contains("Saving your cart"))
+        XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+        screenshot("Watch pending quantity and Remove apply before first save", app: app)
+
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"),
+                                              object: app.buttons["watch.checkout.open"])
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed)
+        waitForSavedCartItem(granola)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 2"))
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.granola").count, 1)
+        XCTAssertFalse(bananas.exists)
+        reveal(milk, in: app)
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.milk").count, 1)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        XCTAssertFalse(app.buttons["OK"].exists)
+        screenshot("Watch consecutive cart edits committed without duplicates", app: app)
+        app.navigationBars["In cart"].buttons["BackButton"].tap()
+        XCTAssertTrue(cart.waitForExistence(timeout: 3))
+        XCTAssertTrue(cart.label.contains("2 items"))
+        reveal(bananas, in: app)
+        XCTAssertTrue(bananas.isEnabled)
+        XCTAssertFalse(granola.exists)
     }
 
     func testSlowSwipeAddMovesToCartBeforeSaveReturns() {
@@ -301,11 +394,11 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(cart.label.contains("2 items"))
         cart.tap()
         reveal(bananas, in: app)
-        XCTAssertTrue((bananas.value as? String ?? "").contains("Adding to your cart"))
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Saving your cart"))
         XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
         XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
         screenshot("Watch pending swipe Add already in cart", app: app)
-        let completed = NSPredicate(format: "value CONTAINS %@ AND NOT value CONTAINS %@", "In your cart", "Adding")
+        let completed = NSPredicate(format: "value CONTAINS %@ AND NOT value CONTAINS %@", "In your cart", "Saving")
         expectation(for: completed, evaluatedWith: bananas)
         waitForExpectations(timeout: 40)
         XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
@@ -360,8 +453,11 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertGreaterThan(app.staticTexts.matching(NSPredicate(
             format: "label == %@", "Preview add failed. Your cart is unchanged. Try again."
         )).count, 0)
-        screenshot("Watch failed add retains card", app: app)
+        screenshot("Watch failed Add returns to groceries with recovery", app: app)
         app.buttons["OK"].tap()
+        assertReturnedToGroceries(app)
+        reveal(granola, in: app)
+        granola.tap()
         XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
         reveal(increase, in: app)
         XCTAssertEqual(increase.value as? String, "2")
@@ -414,6 +510,7 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 5), .completed)
         app.buttons["watch.cart.open"].tap()
         reveal(milk, in: app)
+        waitForSavedCartItem(milk)
         let quantity = milk.value as? String
         XCTAssertNotNil(quantity)
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).count, 1)
@@ -447,6 +544,7 @@ final class WatchShoppingUITests: XCTestCase {
         app.buttons["watch.cart.open"].tap()
         reveal(milk, in: app)
         XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
+        waitForSavedCartItem(milk)
         let cartIdentifier = milk.identifier
         XCTAssertNotEqual(cartIdentifier, groceryIdentifier)
         app.terminate()
@@ -536,6 +634,11 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["1"].waitForExistence(timeout: 3))
         increase.tap()
         XCTAssertTrue(app.staticTexts["2"].waitForExistence(timeout: 3))
+        app.navigationBars["Item"].buttons["BackButton"].tap()
+        assertReturnedToCart(app)
+        reveal(milk, in: app)
+        waitForSavedCartItem(milk)
+        XCTAssertTrue((milk.value as? String ?? "").contains("Quantity 2"))
         app.terminate()
         app.launch()
         selectMarketIfNeeded(app)
@@ -636,6 +739,19 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(app.buttons["watch.cart.open"].isHittable, file: file, line: line)
     }
 
+    private func assertReturnedToCart(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(app.navigationBars["Item"].waitForNonExistence(timeout: 5), file: file, line: line)
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 3), file: file, line: line)
+    }
+
+    private func waitForSavedCartItem(_ item: XCUIElement, timeout: TimeInterval = 5,
+                                     file: StaticString = #filePath, line: UInt = #line) {
+        let committed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND value CONTAINS %@ AND NOT value CONTAINS %@",
+                                   "In your cart", "Saving"), object: item)
+        XCTAssertEqual(XCTWaiter.wait(for: [committed], timeout: timeout), .completed, file: file, line: line)
+    }
+
     private func selectMarketIfNeeded(_ app: XCUIApplication) {
         if !app.buttons["watch.cart.open"].waitForExistence(timeout: 3) {
             let market = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Market")).element
@@ -690,13 +806,15 @@ final class WatchShoppingUITests: XCTestCase {
             let checkout = app.buttons["watch.checkout.open"]
             let cart = app.buttons["watch.cart.open"]
             let add = app.buttons["watch.item.add"]
+            let pending = app.staticTexts["watch.item.add.pending"]
             // A disabled checkout still occupies space beside the enabled View cart button.
             // A presented confirmation has no footer; underlying root controls may remain in AX.
             let footerVisible = !confirmation.exists && checkout.exists
                 && (checkout.isHittable || (cart.exists && cart.isHittable))
             let footerTop = footerVisible
                 ? min(checkout.frame.minY, cart.exists && cart.isHittable ? cart.frame.minY : checkout.frame.minY)
-                : add.exists && add.isHittable ? add.frame.minY : app.frame.maxY + 2
+                : add.exists && add.isHittable ? add.frame.minY
+                : pending.exists && pending.isHittable ? pending.frame.minY : app.frame.maxY + 2
             return (navigation.exists ? navigation.frame.maxY : 30, footerTop - 2)
         }
         func isClear() -> Bool {

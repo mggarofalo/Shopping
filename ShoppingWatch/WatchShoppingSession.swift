@@ -5,12 +5,19 @@ import Observation
 @Observable
 final class WatchShoppingSession {
     private var savedSnapshot = WatchShoppingSnapshot()
-    private var pendingAdd: PendingAdd?
-    var hasUnconfirmedAdd: Bool { pendingAdd?.isUnconfirmed == true }
+    private var pending: [WatchCartIntent] = []
+    private var uncertain: [WatchCartIntent] = []
+    private struct QuantityDraft { let quantity: Int? }
+    private var failedAddDrafts: [String: QuantityDraft] = [:]
+    var hasUnconfirmedAdd: Bool { !uncertain.isEmpty }
     var snapshot: WatchShoppingSnapshot {
-        guard let pendingAdd else { return savedSnapshot }
-        return pendingAdd.project(onto: savedSnapshot)
+        var value = savedSnapshot
+        for intent in uncertain { value = intent.project(onto: value, uncertain: true) }
+        for intent in pending { value = intent.project(onto: value, uncertain: false) }
+        if !pending.isEmpty || !uncertain.isEmpty { value.canCheckout = false }
+        return value
     }
+    // Only scope changes, checkout and recovery reserve the whole session.
     private(set) var isBusy = false
     var errorMessage: String?
     var sheet: WatchShoppingSheet?
@@ -27,8 +34,15 @@ final class WatchShoppingSession {
     private var isRefreshing = false
     private var refreshWaiter: CheckedContinuation<Void, Never>?
     private var authorityGeneration = 0
+    private var isDraining = false
+    private var completions: [UUID: CheckedContinuation<Bool, Never>] = [:]
+    private var refreshTask: Task<Void, Never>?
+    private let incomingRefreshInterval: Duration
+    private var lastSnapshotRead = ContinuousClock().now
 
-    init(service: any WatchShoppingService, initialSnapshot: WatchShoppingSnapshot = WatchShoppingSnapshot()) {
+    init(service: any WatchShoppingService, initialSnapshot: WatchShoppingSnapshot = WatchShoppingSnapshot(),
+         incomingRefreshInterval: Duration = .seconds(2)) {
+        self.incomingRefreshInterval = incomingRefreshInterval
         savedSnapshot = initialSnapshot
         self.service = service
         service.onChange = { [weak self] change in
@@ -36,7 +50,7 @@ final class WatchShoppingSession {
             switch change {
             case .authorityInvalidated:
                 self.authorityGeneration += 1
-                self.pendingAdd = nil
+                self.discardIntents()
                 self.savedSnapshot = WatchShoppingSnapshot()
                 self.sheet = nil
                 self.errorMessage = nil
@@ -44,7 +58,7 @@ final class WatchShoppingSession {
             case .dataChanged:
                 self.requestReload()
             case .syncChanged(let status):
-                guard self.snapshot.syncStatus != status else { return }
+                guard self.savedSnapshot.syncStatus != status else { return }
                 self.savedSnapshot.syncStatus = status
             }
         }
@@ -52,65 +66,226 @@ final class WatchShoppingSession {
 
     private func requestReload() {
         reloadRequested = true
-        guard !isBusy, !isRefreshing else { return }
-        Task { await reload() }
+        guard !isBusy, !isRefreshing, !isDraining else { return }
+        scheduleRefresh()
+    }
+
+    // This only coalesces local projection reads. Durability starts immediately;
+    // CloudKit owns export timing and has no application-controlled interval.
+    private func scheduleRefresh() {
+        guard refreshTask == nil else { return }
+        refreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, let self else { return }
+            self.refreshTask = nil
+            await self.reload()
+        }
     }
 
     func refreshHomeAccess() { service.refreshHomeAccess() }
 
+    func quantityDraft(for item: WatchShoppingItem) -> Int? {
+        if let draft = failedAddDrafts[item.occurrenceID] { return draft.quantity }
+        return item.quantity
+    }
+
     func reload(storeID: UUID? = nil) async {
         if let storeID {
-            // Store selection is an explicit action: its caller may dismiss only
-            // after the captured selection has actually finished.
             await run { .snapshot(try await self.service.load(storeID: storeID)) }
             return
         }
-        guard !isBusy, !isRefreshing else {
+        guard !isBusy, !isRefreshing, !isDraining else {
             reloadRequested = true
             return
         }
+        await readSnapshot()
+        if reloadRequested, !isBusy, !isDraining { scheduleRefresh() }
+    }
+
+    private func readSnapshot() async {
         isRefreshing = true
         reloadRequested = false
-        let selectedStoreID = snapshot.selectedStoreID
         let generation = authorityGeneration
         do {
-            let value = try await service.load(storeID: selectedStoreID)
+            let value = try await service.load(storeID: savedSnapshot.selectedStoreID)
             if generation == authorityGeneration {
-                if hasUnconfirmedAdd { pendingAdd = nil; errorMessage = nil }
+                let hadUncertainty = !uncertain.isEmpty
+                uncertain.removeAll()
                 applySnapshot(value)
+                if hadUncertainty { errorMessage = nil }
             }
         } catch {
-            // A background read must not dismiss feedback from an explicit action.
-            if generation == authorityGeneration, errorMessage == nil {
-                errorMessage = error.localizedDescription
-            }
+            if generation == authorityGeneration, errorMessage == nil { errorMessage = error.localizedDescription }
         }
+        lastSnapshotRead = ContinuousClock().now
         isRefreshing = false
         let waiter = refreshWaiter
         refreshWaiter = nil
         waiter?.resume()
-        if reloadRequested, !isBusy { await reload() }
+    }
+
+    // UI acceptance is separate from the durable result. Navigation can finish
+    // while the writer works; subsequent independent taps remain available.
+    @discardableResult
+    func submit(_ command: WatchShoppingCommand) -> Bool {
+        guard case .buyAnyway = command else { return enqueue(command) != nil }
+        Task { await perform(command) }
+        return false
     }
 
     @discardableResult
     func perform(_ command: WatchShoppingCommand) async -> Bool {
-        // A repeated accessibility action can arrive even after its row disappears.
-        // Coalesce the exact pending add without presenting a spurious error.
-        if pendingAdd?.command == command { return false }
-        let authorityID = snapshot.authorityID
-        let applied = await run(optimisticCommand: command) {
-            .snapshot(try await self.service.execute(command))
+        if case .buyAnyway = command {
+            let authorityID = snapshot.authorityID
+            let applied = await run { .snapshot(try await self.service.execute(command)) }
+            return applied && snapshot.availability == .ready && snapshot.authorityID == authorityID
         }
-        return applied && snapshot.availability == .ready && snapshot.authorityID == authorityID
+        guard let id = enqueue(command) else { return false }
+        return await withCheckedContinuation { completions[id] = $0 }
+    }
+
+    private func enqueue(_ command: WatchShoppingCommand) -> UUID? {
+        guard !isBusy else {
+            errorMessage = "Another cart action is still finishing. Try again when it completes."
+            return nil
+        }
+        let intent = WatchCartIntent(command: command, snapshot: snapshot, generation: authorityGeneration)
+        let duplicate: Bool
+        if case .setQuantity = command {
+            // A reversal (2 → 3 → 2) is a new intent even while the first 2 is
+            // still saving. Only the latest desired state can suppress a repeat.
+            duplicate = pending.last(where: { $0.occurrenceID == intent.occurrenceID })?.command == command
+        } else {
+            duplicate = pending.contains(where: { $0.command == command })
+        }
+        guard !duplicate else { return nil }
+        guard !uncertain.contains(where: { $0.occurrenceID == intent.occurrenceID }) else {
+            errorMessage = "This item’s update could not be confirmed. Check the cart before changing it again."
+            return nil
+        }
+        if uncertain.isEmpty { errorMessage = nil }
+        pending.append(intent)
+        if !isDraining {
+            isDraining = true
+            Task { await drain() }
+        }
+        return intent.id
+    }
+
+    private func drain() async {
+        if isRefreshing { await withCheckedContinuation { refreshWaiter = $0 } }
+        var failed: [(WatchCartIntent, String)] = []
+        while !pending.isEmpty {
+            // A continuous stream of local edits must not starve incoming state.
+            // This is a local read checkpoint, not a CloudKit fetch or write delay.
+            if reloadRequested, lastSnapshotRead.duration(to: ContinuousClock().now) >= incomingRefreshInterval {
+                await readSnapshot()
+            }
+            guard let intent = pending.first else { break }
+            guard intent.generation == authorityGeneration,
+                  intent.authorityID == savedSnapshot.authorityID,
+                  intent.storeID == savedSnapshot.selectedStoreID else {
+                pending.removeFirst()
+                errorMessage = PersonalCartError.scopeChanged.localizedDescription
+                complete(intent.id, success: false)
+                continue
+            }
+            do {
+                let receipt = try await service.commit(intent.command)
+                guard intent.generation == authorityGeneration,
+                      pending.first?.id == intent.id else { continue }
+                pending.removeFirst()
+                failedAddDrafts.removeValue(forKey: intent.occurrenceID)
+                switch receipt {
+                case .snapshot(let value):
+                    applySnapshot(value)
+                    // Legacy/preview full snapshots are not causal receipts.
+                    // Keep captured descendant tokens for service revalidation.
+                case .item(let occurrenceID, let item, let mayRebase):
+                    if occurrenceID == intent.occurrenceID {
+                        savedSnapshot.replaceCartItem(occurrenceID: occurrenceID, item: item, section: intent.section)
+                        if mayRebase, item != nil {
+                            rebaseFollowing(intent, item: item)
+                        } else {
+                            cancelDescendants(of: intent)
+                        }
+                    }
+                    reloadRequested = true
+                }
+                complete(intent.id, success: savedSnapshot.availability == .ready
+                    && savedSnapshot.authorityID == intent.authorityID)
+            } catch {
+                guard intent.generation == authorityGeneration,
+                      pending.first?.id == intent.id else { continue }
+                pending.removeFirst()
+                // Do not dispatch descendants through an uncertain causal token.
+                let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
+                pending.removeAll { $0.occurrenceID == intent.occurrenceID }
+                for descendant in descendants { complete(descendant.id, success: false) }
+                if case .add(_, let quantity) = intent.command {
+                    failedAddDrafts[intent.occurrenceID] = QuantityDraft(quantity: quantity)
+                }
+                if intent.item != nil { uncertain.append(intent) }
+                failed.append((intent, error.localizedDescription))
+                errorMessage = error.localizedDescription
+            }
+        }
+        // Independent local commits precede reconciliation of uncertain writes.
+        // The read can establish whether the failed call nevertheless committed.
+        if !failed.isEmpty {
+            await readSnapshot()
+            for (intent, message) in failed where intent.generation == authorityGeneration {
+                let unresolved = uncertain.contains { $0.id == intent.id }
+                let applied = !unresolved && intent.matches(savedSnapshot)
+                if unresolved {
+                    errorMessage = "Your cart update could not be confirmed. It may already be saved. Check the cart before trying again."
+                } else if !applied { errorMessage = message }
+                complete(intent.id, success: applied)
+            }
+        }
+        isDraining = false
+        if !pending.isEmpty {
+            isDraining = true
+            Task { await drain() }
+        } else if reloadRequested { scheduleRefresh() }
+    }
+
+    private func rebaseFollowing(_ finished: WatchCartIntent, item: WatchShoppingItem?) {
+        guard let item, item.occurrenceID == finished.occurrenceID else { return }
+        for index in pending.indices where pending[index].occurrenceID == finished.occurrenceID
+            && pending[index].command.token == finished.command.token {
+            pending[index].command = pending[index].command.replacingToken(item.commandToken)
+            pending[index].item = item
+        }
+    }
+
+    private func cancelDescendants(of intent: WatchCartIntent) {
+        let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
+        pending.removeAll { $0.occurrenceID == intent.occurrenceID }
+        for descendant in descendants { complete(descendant.id, success: false) }
+        if !descendants.isEmpty {
+            errorMessage = "This item changed. Check its quantity before trying again."
+        }
+    }
+
+    private func complete(_ id: UUID, success: Bool) { completions.removeValue(forKey: id)?.resume(returning: success) }
+
+    private func discardIntents() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        pending.removeAll()
+        uncertain.removeAll()
+        failedAddDrafts.removeAll()
+        let waiting = completions.values
+        completions.removeAll()
+        for completion in waiting { completion.resume(returning: false) }
     }
 
     func prepareCheckout() async {
         guard snapshot.canCheckout, let storeID = snapshot.selectedStore?.id else { return }
         await run {
             let preview = try await self.service.captureCheckout(storeID: storeID)
-            guard !preview.rows.isEmpty else {
-                return .emptyCapture(try await self.service.load(storeID: storeID))
-            }
+            guard !preview.rows.isEmpty else { return .emptyCapture(try await self.service.load(storeID: storeID)) }
             return .checkout(preview)
         }
     }
@@ -133,80 +308,39 @@ final class WatchShoppingSession {
     }
 
     @discardableResult
-    private func run(optimisticCommand: WatchShoppingCommand? = nil, _ operation: () async throws -> Update) async -> Bool {
-        guard !hasUnconfirmedAdd else {
-            errorMessage = "Your last cart update could not be confirmed. Check the cart before trying another action."
+    private func run(_ operation: () async throws -> Update) async -> Bool {
+        guard !isBusy, pending.isEmpty, uncertain.isEmpty, !isDraining else {
+            errorMessage = "Your cart updates are still finishing. Check the cart before trying this action."
             return false
         }
-        guard !isBusy else {
-            errorMessage = "Another cart action is still finishing. Try again when it completes."
-            return false
-        }
-        // Reserve the action before waiting: imports coalesce behind it and a
-        // second tap cannot enqueue another mutation using the same capture.
         isBusy = true
         errorMessage = nil
         let generation = authorityGeneration
         let authorityID = snapshot.authorityID
-        pendingAdd = optimisticCommand.flatMap { PendingAdd(command: $0, snapshot: savedSnapshot) }
-        if isRefreshing {
-            await withCheckedContinuation { refreshWaiter = $0 }
-        }
+        if isRefreshing { await withCheckedContinuation { refreshWaiter = $0 } }
         var applied = false
         do {
-            guard generation == authorityGeneration else { throw PersonalCartError.scopeChanged }
-            guard snapshot.authorityID == authorityID else { throw PersonalCartError.scopeChanged }
+            guard generation == authorityGeneration, snapshot.authorityID == authorityID else {
+                throw PersonalCartError.scopeChanged
+            }
             try Task.checkCancellation()
             let update = try await operation()
-            if generation == authorityGeneration {
-                pendingAdd = nil
-                apply(update)
-                applied = true
-            }
+            if generation == authorityGeneration { apply(update); applied = true }
         } catch {
-            // Do not resurrect old-account errors or UI after authority invalidation.
-            if generation == authorityGeneration {
-                // execute may have saved successfully before its final read failed.
-                // Reconcile while the pending row remains visible, then remove the
-                // overlay. Never restore an entire captured (possibly old) snapshot.
-                if let pending = pendingAdd {
-                    do {
-                        let latest = try await service.load(storeID: savedSnapshot.selectedStoreID)
-                        if generation == authorityGeneration {
-                            pendingAdd = nil
-                            applySnapshot(latest)
-                            applied = latest.availability == .ready && latest.authorityID == authorityID
-                                && latest.cartSections.flatMap(\.items).contains { $0.occurrenceID == pending.item.occurrenceID }
-                            if !applied { errorMessage = error.localizedDescription }
-                        }
-                    } catch {
-                        if generation == authorityGeneration, pendingAdd != nil {
-                            pendingAdd?.isUnconfirmed = true
-                            errorMessage = "Your cart update could not be confirmed. It may already be saved. Check the cart before trying again."
-                        }
-                    }
-                } else {
-                    errorMessage = error.localizedDescription
-                }
-            }
+            if generation == authorityGeneration { errorMessage = error.localizedDescription }
         }
         isBusy = false
-        if reloadRequested {
-            reloadRequested = false
-            await reload()
-        }
+        if reloadRequested { await reload() }
         return applied && generation == authorityGeneration
     }
 
     private func apply(_ update: Update) {
         switch update {
-        case .snapshot(let value):
-            applySnapshot(value)
+        case .snapshot(let value): applySnapshot(value)
         case .emptyCapture(let value):
             applySnapshot(value)
             errorMessage = "Your cart changed. There are no eligible items to check out."
-        case .checkout(let preview):
-            sheet = .checkout(preview)
+        case .checkout(let preview): sheet = .checkout(preview)
         case .result(let result):
             let sameAuthority = snapshot.authorityID == result.snapshot.authorityID
             applySnapshot(result.snapshot)
@@ -215,88 +349,119 @@ final class WatchShoppingSession {
     }
 
     private func applySnapshot(_ value: WatchShoppingSnapshot) {
-        if value.availability != .ready || value.authorityID != snapshot.authorityID {
+        if value.availability != .ready || value.authorityID != savedSnapshot.authorityID {
             sheet = nil
             errorMessage = nil
+            failedAddDrafts.removeAll()
         }
-        if value.availability != .ready || value.authorityID != savedSnapshot.authorityID
-            || value.selectedStoreID != savedSnapshot.selectedStoreID {
-            pendingAdd = nil
-        }
+        // A refresh never rebases queued tokens onto a remote membership. Only
+        // the acknowledgement of their own preceding local command can do so.
         savedSnapshot = value
     }
 }
 
-private struct PendingAdd {
-    let command: WatchShoppingCommand
+private struct WatchCartIntent {
+    let id = UUID()
+    var command: WatchShoppingCommand
+    let generation: Int
     let authorityID: String?
     let storeID: UUID?
-    let section: WatchItemSection
-    let item: WatchShoppingItem
-    var isUnconfirmed = false
+    let occurrenceID: String
+    let section: WatchItemSection?
+    var item: WatchShoppingItem?
 
-    init?(command: WatchShoppingCommand, snapshot: WatchShoppingSnapshot) {
-        guard case .add(let token, let quantity) = command,
-              snapshot.availability == .ready,
-              let section = snapshot.grocerySections.first(where: { $0.items.contains { $0.commandToken == token && $0.canAdd } }),
-              var item = section.items.first(where: { $0.commandToken == token && $0.canAdd }),
-              !item.isInOwnCart else { return nil }
+    init(command: WatchShoppingCommand, snapshot: WatchShoppingSnapshot, generation: Int) {
         self.command = command
+        self.generation = generation
         authorityID = snapshot.authorityID
         storeID = snapshot.selectedStoreID
-        self.section = section
-        item.quantity = quantity
-        item.isInOwnCart = true
-        item.isPendingAdd = true
-        item.canAdd = false
-        item.canRemove = false
-        item.canChangeQuantity = false
-        item.canBuyAnyway = false
-        self.item = item
+        section = (snapshot.cartSections + snapshot.grocerySections).first { $0.items.contains { $0.commandToken == command.token } }
+        item = section?.items.first { $0.commandToken == command.token }
+        occurrenceID = item?.occurrenceID ?? command.token
     }
 
-    func project(onto saved: WatchShoppingSnapshot) -> WatchShoppingSnapshot {
+    func project(onto saved: WatchShoppingSnapshot, uncertain: Bool) -> WatchShoppingSnapshot {
         guard saved.availability == .ready, saved.authorityID == authorityID,
-              saved.selectedStoreID == storeID else { return saved }
+              saved.selectedStoreID == storeID, let original = item else { return saved }
         var value = saved
-        value.grocerySections = value.grocerySections.compactMap { section in
-            var section = section
-            section.items.removeAll { $0.occurrenceID == item.occurrenceID }
-            return section.items.isEmpty ? nil : section
+        var row = saved.item(id: occurrenceID) ?? original
+        switch command {
+        case .add(_, let quantity):
+            if !row.isInOwnCart { row.quantity = quantity }
+            row.isInOwnCart = true
+        case .setQuantity(_, let quantity): row.quantity = quantity
+        case .remove:
+            value.replaceCartItem(occurrenceID: occurrenceID, item: nil, section: section)
+            return value
+        case .buyAnyway: return saved
         }
-        // An older in-flight refresh may already observe this occurrence in the
-        // private cart (with a different membership ID and quantity). Keep that
-        // authoritative membership; the writer also preserves an existing claim.
-        for sectionIndex in value.cartSections.indices {
-            if let rowIndex = value.cartSections[sectionIndex].items.firstIndex(where: { $0.occurrenceID == item.occurrenceID }) {
-                value.cartSections[sectionIndex].items[rowIndex].isPendingAdd = true
-                value.cartSections[sectionIndex].items[rowIndex].isAddUnconfirmed = isUnconfirmed
-                value.cartSections[sectionIndex].items[rowIndex].canRemove = false
-                value.cartSections[sectionIndex].items[rowIndex].canChangeQuantity = false
-                value.cartSections[sectionIndex].items[rowIndex].canBuyAnyway = false
-                value.canCheckout = false
-                return value
+        row.commandToken = command.token
+        row.isPendingAdd = true
+        row.isAddUnconfirmed = uncertain
+        row.canAdd = false
+        row.canRemove = !uncertain
+        row.canChangeQuantity = !uncertain
+        row.canBuyAnyway = false
+        value.replaceCartItem(occurrenceID: occurrenceID, item: row, section: section)
+        return value
+    }
+
+    func matches(_ snapshot: WatchShoppingSnapshot) -> Bool {
+        guard snapshot.availability == .ready, snapshot.authorityID == authorityID, item != nil else { return false }
+        let row = snapshot.cartSections.flatMap(\.items).first { $0.occurrenceID == occurrenceID }
+        switch command {
+        case .add: return row != nil
+        case .remove: return row == nil
+        case .setQuantity(_, let quantity): return row != nil && row?.quantity == quantity
+        case .buyAnyway: return false
+        }
+    }
+}
+
+private extension WatchShoppingSnapshot {
+    mutating func replaceCartItem(occurrenceID: String, item: WatchShoppingItem?, section: WatchItemSection?) {
+        grocerySections = grocerySections.compactMap { group in
+            var group = group
+            group.items.removeAll { $0.occurrenceID == occurrenceID }
+            return group.items.isEmpty ? nil : group
+        }
+        for index in cartSections.indices { cartSections[index].items.removeAll { $0.occurrenceID == occurrenceID } }
+        if let item, let section {
+            if let index = cartSections.firstIndex(where: { $0.id == section.id }) {
+                cartSections[index].items.append(item)
+            } else {
+                var group = section
+                group.items = [item]
+                cartSections.append(group)
             }
         }
-        var projectedItem = item
-        projectedItem.isAddUnconfirmed = isUnconfirmed
-        if let index = value.cartSections.firstIndex(where: { $0.id == section.id }) {
-            value.cartSections[index].items.append(projectedItem)
-            value.cartSections[index].items.sort {
+        cartSections.removeAll { $0.items.isEmpty }
+        for index in cartSections.indices {
+            cartSections[index].items.sort {
                 let comparison = $0.name.localizedStandardCompare($1.name)
                 return comparison == .orderedSame ? $0.occurrenceID < $1.occurrenceID : comparison == .orderedAscending
             }
-        } else {
-            var pendingSection = section
-            pendingSection.items = [projectedItem]
-            value.cartSections.append(pendingSection)
-            value.cartSections.sort {
-                if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
-                if $0.categoryOrder != $1.categoryOrder { return $0.categoryOrder < $1.categoryOrder }
-                return $0.id < $1.id
-            }
         }
-        value.canCheckout = false
-        return value
+        cartSections.sort {
+            if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
+            if $0.categoryOrder != $1.categoryOrder { return $0.categoryOrder < $1.categoryOrder }
+            return $0.id < $1.id
+        }
+    }
+}
+
+private extension WatchShoppingCommand {
+    var token: String {
+        switch self {
+        case .add(let token, _), .remove(let token), .setQuantity(let token, _), .buyAnyway(let token): token
+        }
+    }
+    func replacingToken(_ token: String) -> Self {
+        switch self {
+        case .add(_, let quantity): .add(token: token, quantity: quantity)
+        case .remove: .remove(token: token)
+        case .setQuantity(_, let quantity): .setQuantity(token: token, quantity: quantity)
+        case .buyAnyway: .buyAnyway(token: token)
+        }
     }
 }

@@ -53,9 +53,7 @@ struct WatchItemCard: View {
                 }
                 if item.isInOwnCart && item.canRemove {
                     Button("Remove from your cart", role: .destructive) {
-                        Task {
-                            if await session.perform(.remove(token: item.commandToken)) { dismiss() }
-                        }
+                        if session.submit(.remove(token: item.commandToken)) { dismiss() }
                     }
                     .disabled(session.isBusy)
                     .accessibilityIdentifier("watch.item.remove")
@@ -68,7 +66,7 @@ struct WatchItemCard: View {
         .navigationTitle("Item")
         .safeAreaInset(edge: .bottom, spacing: 4) {
             if session.snapshot.item(id: itemID)?.isPendingAdd == true {
-                Text(session.hasUnconfirmedAdd ? "Update unconfirmed" : "Adding to cart…")
+                Text(session.snapshot.item(id: itemID)?.isAddUnconfirmed == true ? "Update unconfirmed" : "Saving cart…")
                     .font(.caption2)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding(.bottom, 8)
@@ -77,11 +75,7 @@ struct WatchItemCard: View {
             } else if let item = addableItem {
                 HStack {
                     Button {
-                        Task {
-                            if await session.perform(.add(token: item.commandToken, quantity: draftQuantity)) {
-                                dismiss()
-                            }
-                        }
+                        if session.submit(.add(token: item.commandToken, quantity: draftQuantity)) { dismiss() }
                     } label: {
                         Text("Add to cart").font(.caption2)
                     }
@@ -99,7 +93,9 @@ struct WatchItemCard: View {
         .ignoresSafeArea(.container, edges: addableItem == nil && session.snapshot.item(id: itemID)?.isPendingAdd != true ? [] : .bottom)
         .task {
             if !hasLoadedDraft {
-                draftQuantity = session.snapshot.item(id: itemID)?.quantity
+                if let item = session.snapshot.item(id: itemID) {
+                    draftQuantity = session.quantityDraft(for: item)
+                }
                 hasLoadedDraft = true
             }
         }
@@ -146,7 +142,7 @@ struct WatchItemCard: View {
 
     private func setQuantity(_ quantity: Int?, item: WatchShoppingItem) {
         if item.isInOwnCart {
-            Task { await session.perform(.setQuantity(token: item.commandToken, quantity: quantity)) }
+            session.submit(.setQuantity(token: item.commandToken, quantity: quantity))
         } else {
             draftQuantity = quantity
         }

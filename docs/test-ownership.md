@@ -2424,3 +2424,24 @@ helper: a 107.5-point row had a 9-point clear placement window. Fine alignment
 now starts earlier after a direction reversal; hittability, full/oversized-row
 bounds and the 24-step limit are unchanged. The failed and interrupted diagnostic
 runs remain in the SHOPPING-215 evidence record.
+
+## Watch independent local edits (SHOPPING-216)
+
+`WatchShoppingSessionTests` owns held-writer different-item acceptance, ordered
+quantity/removal receipts, quantity reversals, per-occurrence uncertainty,
+authority invalidation and incoming-change checkpoints. `WatchPresencePublisherTests`
+owns the fixed first publication window, captured-version acknowledgements,
+partial failure/retry and invalidated late completions. `PersonalCartServiceTests`
+owns deferred SQLite recovery and latest changed-need presence/tombstones.
+`ReplicaApplicationContractTests` retains ownership of explicit same-value quantity
+edits as causal intent during concurrent replica reconciliation. `PersistentWatchShoppingServiceTests` owns the production local
+receipt, selection-refresh separation and refusal to chain onto a preexisting
+phone membership.
+
+`WatchShoppingUITests/testDifferentItemsAndPendingQuantityAndRemovalStayUsableDuringFirstSave`
+uniquely proves that the second item, quantity controls and removal navigation
+remain usable while the first save is held. Existing slow Add, failure retry and
+unconfirmed recovery tests retain their UI proof with immediate accepted-action
+navigation. Durable relaunch tests wait for confirmed local state before
+termination; a visible pending row is not a saved-data assertion. Existing large
+text and persistent checkout/restore workflows remain separate owners.

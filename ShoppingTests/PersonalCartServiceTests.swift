@@ -51,6 +51,94 @@ final class PersonalCartServiceTests: XCTestCase {
         return try XCTUnwrap(cart.entries(householdID: fixture.householdID, listID: fixture.listID).first)
     }
 
+    private func presenceEvents(_ cart: PersonalCartService, householdID: UUID) throws -> [UUID: HouseholdPresenceEvent] {
+        try cart.transact(save: false) { repository in
+            try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                householdID: householdID, in: repository.context)
+        }
+    }
+
+    func testDeferredCartEditsSurviveRelaunchBeforePresencePublication() throws {
+        let f = try makeFixture()
+        let otherItem = try f.service.createItem(name: "Bananas", householdID: f.householdID)
+        let otherNeed = try f.service.addRememberedNeed(itemID: otherItem, listID: f.listID,
+            householdID: f.householdID, quantity: nil)
+        try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID,
+            initialQuantity: 2, presencePolicy: .deferred)
+        try f.cart.cart(needID: otherNeed, householdID: f.householdID, listID: f.listID,
+            presencePolicy: .deferred)
+        let initial = try f.cart.entries(householdID: f.householdID, listID: f.listID)
+        let milk = try XCTUnwrap(initial.first { $0.needID == f.needID })
+        let bananas = try XCTUnwrap(initial.first { $0.needID == otherNeed })
+        try f.cart.setQuantity(7, token: milk.token, presencePolicy: .deferred)
+        try f.cart.uncart(bananas.token, presencePolicy: .deferred)
+        let saved = try f.cart.entries(householdID: f.householdID, listID: f.listID)
+        XCTAssertEqual(saved.map(\.needID), [f.needID])
+        XCTAssertEqual(saved.first?.quantity, 7)
+        XCTAssertTrue(try presenceEvents(f.cart, householdID: f.householdID).isEmpty)
+
+        f.persistence.writer.performAndWait { f.persistence.writer.reset() }
+        f.persistence.container.viewContext.performAndWait { f.persistence.container.viewContext.reset() }
+        for store in f.persistence.container.persistentStoreCoordinator.persistentStores {
+            try f.persistence.container.persistentStoreCoordinator.remove(store)
+        }
+        let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
+        let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())
+        XCTAssertEqual(try cart.entries(householdID: f.householdID, listID: f.listID), saved)
+        XCTAssertTrue(try presenceEvents(cart, householdID: f.householdID).isEmpty)
+        try cart.resumePending()
+        let published = try presenceEvents(cart, householdID: f.householdID)
+        XCTAssertEqual(published.count, 2)
+        XCTAssertEqual(published.values.first { $0.needID == f.needID }?.quantity, 7)
+        XCTAssertEqual(published.values.first { $0.needID == f.needID }?.removed, false)
+        XCTAssertEqual(published.values.first { $0.needID == otherNeed }?.removed, true)
+        try cart.resumePending()
+        XCTAssertEqual(try presenceEvents(cart, householdID: f.householdID), published)
+    }
+
+    func testChangedNeedPresencePublishesOnlyLatestStateAndRetainsFailedWork() throws {
+        let policy = SharedWritePolicy()
+        let f = try makeFixture(permissionPolicy: policy)
+        let otherItem = try f.service.createItem(name: "Bananas", householdID: f.householdID)
+        let otherNeed = try f.service.addRememberedNeed(itemID: otherItem, listID: f.listID,
+            householdID: f.householdID, quantity: nil)
+        for need in [f.needID, otherNeed] {
+            try f.cart.cart(needID: need, householdID: f.householdID, listID: f.listID,
+                presencePolicy: .deferred)
+        }
+        try f.cart.republishPresence(needIDs: [f.needID])
+        let first = try presenceEvents(f.cart, householdID: f.householdID)
+        XCTAssertEqual(first.count, 1)
+        XCTAssertEqual(first.values.first?.needID, f.needID)
+        let milk = try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID)
+            .first { $0.needID == f.needID })
+        policy.denied = true
+        try f.cart.setQuantity(5, token: milk.token, presencePolicy: .deferred)
+        XCTAssertThrowsError(try f.cart.republishPresence(needIDs: [f.needID])) {
+            XCTAssertEqual($0 as? PersistencePermissionError, .updateDenied)
+        }
+        XCTAssertEqual(try presenceEvents(f.cart, householdID: f.householdID), first)
+        let changed = try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID)
+            .first { $0.needID == f.needID })
+        XCTAssertEqual(changed.quantity, 5)
+        try f.cart.uncart(changed.token, presencePolicy: .deferred)
+        policy.denied = false
+        try f.cart.republishPresence(needIDs: [f.needID])
+        let final = try presenceEvents(f.cart, householdID: f.householdID)
+        XCTAssertEqual(final.count, 2)
+        XCTAssertTrue(final.values.allSatisfy { $0.needID == f.needID })
+        let tombstone = try XCTUnwrap(final.values.first(where: \.removed))
+        XCTAssertTrue(try XCTUnwrap(first.values.first).evidence.isStrictSubset(of: tombstone.evidence))
+        // Retrying an older dirty ID reads current state; it cannot re-add Milk
+        // or publish the other need that has not been requested by this batch.
+        try f.cart.republishPresence(needIDs: [f.needID])
+        XCTAssertEqual(try presenceEvents(f.cart, householdID: f.householdID), final)
+        XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).map(\.needID), [otherNeed])
+        try f.cart.resumePending()
+        XCTAssertEqual(try presenceEvents(f.cart, householdID: f.householdID).values
+            .filter { $0.needID == otherNeed }.count, 1)
+    }
+
     func testSavedCartHomeDisplayUsesExactGraphAndFallsBackForMissingOrAmbiguousHome() async throws {
         let f = try makeFixture()
         let original = PersonalCartScopeSnapshot(householdID: f.householdID, listID: f.listID)
