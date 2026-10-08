@@ -18,8 +18,8 @@ struct WatchItemSection: Identifiable, Equatable {
 
 struct WatchShoppingItem: Identifiable, Equatable {
     // Stable presentation identity, including orphaned cart memberships.
-    let id: String
-    let commandToken: String
+    var id: String
+    var commandToken: String
     let name: String
     var quantity: Int?
     let rule: WatchPurchaseRule?
@@ -42,7 +42,7 @@ struct WatchShoppingItem: Identifiable, Equatable {
     var accessibilityValue: String {
         [quantity.map { "Quantity \($0)" }, rule?.title,
          isUrgent ? "Urgent" : nil,
-         isAddUnconfirmed ? "Cart update not yet confirmed" : isPendingAdd ? "Adding to your cart" : isInOwnCart ? "In your cart" : nil,
+         isAddUnconfirmed ? "Cart update not yet confirmed" : isPendingAdd ? "Saving your cart" : isInOwnCart ? "In your cart" : nil,
          otherCarts.isEmpty ? nil : "Also in another shopper’s cart",
          purchasedNotice, unavailableReason]
             .compactMap { $0 }.joined(separator: ", ")

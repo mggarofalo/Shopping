@@ -232,10 +232,11 @@ final class WatchPersistenceBootstrap {
                     let imported = try await runtime.history.consumeSummary()
                     guard self.current?.persistence === runtime.persistence else { return }
                     runtime.persistence.homeNativeAccess.applyImportedHistory(imported)
-                    await self.drainAssociations(runtime)
-                    guard self.current?.persistence === runtime.persistence else { return }
+                    // Imported state is usable immediately after history merge.
+                    // Association/network work must not delay list reconciliation.
+                    if imported.transactionCount > 0 { self.onDataChanged?() }
+                    Task { @MainActor [weak self] in await self?.drainAssociations(runtime) }
                     if imported.requiresAccessRefresh { self.refreshHomeAccess(recheckIfRunning: true) }
-                    self.onDataChanged?()
                 } catch {
                     guard self.current?.persistence === runtime.persistence else { return }
                     self.syncMessage = "Saved data is available. Recent changes could not be refreshed."
@@ -249,6 +250,7 @@ final class WatchPersistenceBootstrap {
     /// particular, the active-list timer and store switching never await it.
     func refreshHomeAccess(recheckIfRunning: Bool = false) {
         guard let runtime = current else { return }
+        retryPendingAssociations()
         let requestID = UUID(), generation = authorityGeneration
         accessRefreshID = requestID
         Task { [weak self] in

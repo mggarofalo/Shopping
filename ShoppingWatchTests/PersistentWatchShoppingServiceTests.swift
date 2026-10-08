@@ -79,6 +79,68 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
     }
 
+    func testLocalCommitReturnsDurableReceiptBeforeAdvisoryPublication() async throws {
+        let f = try fixture()
+        let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
+            cartService: f.cart, loadRecoveryPolicy: .verifiedBackgroundReplay, presenceDelay: .seconds(60))
+        let initial = try await service.load(storeID: f.storeID)
+        let grocery = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        let receipt = try await service.commit(.add(token: grocery.commandToken, quantity: 7))
+        guard case .item(let occurrence, let item, let mayRebase) = receipt else { return XCTFail("Expected local receipt") }
+        let row = try XCTUnwrap(item)
+        XCTAssertEqual(occurrence, f.needID.uuidString)
+        XCTAssertEqual(row.quantity, 7)
+        XCTAssertTrue(mayRebase)
+        XCTAssertFalse(row.isPendingAdd)
+        let persisted = try await Task.detached {
+            try f.cart.transact(save: false) { repository in
+                (try f.cart.entries(householdID: f.householdID, listID: f.listID, repository: repository),
+                 try PersonalCartRepository.sharedValues(HouseholdPresenceEvent.self, kind: "presence",
+                    householdID: f.householdID, in: repository.context).count)
+            }
+        }.value
+        XCTAssertEqual(persisted.0.first?.quantity, 7)
+        XCTAssertEqual(persisted.1, 0, "Durability must not wait for advisory publication")
+        let changed = try await service.commit(.setQuantity(token: row.commandToken, quantity: 8))
+        guard case .item(_, let changedItem, let canChain) = changed else { return XCTFail("Expected quantity receipt") }
+        XCTAssertTrue(canChain)
+        let changedRow = try XCTUnwrap(changedItem)
+        XCTAssertEqual(changedRow.quantity, 8)
+        let removed = try await service.commit(.remove(token: changedRow.commandToken))
+        guard case .item(_, let removedItem, let removalConfirmed) = removed else { return XCTFail("Expected removal receipt") }
+        XCTAssertNil(removedItem)
+        XCTAssertTrue(removalConfirmed)
+        let relaunched = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider)
+        let recovered = try await relaunched.load(storeID: f.storeID)
+        XCTAssertEqual(recovered.cartCount, 0)
+        XCTAssertEqual(recovered.grocerySections.first?.items.first?.occurrenceID, f.needID.uuidString)
+    }
+
+    func testAddReceiptCannotChainOntoMembershipAlreadyAddedByPhone() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        let grocery = try XCTUnwrap(initial.grocerySections.first?.items.first)
+        try await Task.detached {
+            try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID,
+                initialQuantity: 4, presencePolicy: .deferred)
+        }.value
+        let receipt = try await service.commit(.add(token: grocery.commandToken, quantity: 9))
+        guard case .item(_, let item, let mayRebase) = receipt else { return XCTFail("Expected local receipt") }
+        XCTAssertEqual(item?.quantity, 4, "Keep the concurrently created membership")
+        XCTAssertFalse(mayRebase, "A queued edit must not adopt the phone membership as its own successor")
+    }
+
+    func testOrdinaryReloadDoesNotRewriteUnchangedSelection() async throws {
+        let f = try fixture(), service = adapter(f)
+        _ = try await service.load(storeID: f.storeID)
+        let url = f.directory.appendingPathComponent("selection.json")
+        let date = Date(timeIntervalSince1970: 1_000)
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+        _ = try await service.load(storeID: f.storeID)
+        let modified = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        XCTAssertEqual(modified, date)
+    }
+
     func testSessionPublishesPendingCartBeforeBlockedWriterCompletes() async throws {
         let f = try fixture(), service = adapter(f)
         let initial = try await service.load(storeID: f.storeID)
@@ -110,7 +172,7 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertNil(entries.first?.quantity)
     }
 
-    func testSessionKeepsUnconfirmedCommittedAddUntilSelectionReadCanRecover() async throws {
+    func testLocalCartCommitIsConfirmedEvenWhenLaterSelectionRefreshFails() async throws {
         let f = try fixture()
         let selectionDirectory = f.directory.appendingPathComponent("selection")
         let service = PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
@@ -118,13 +180,16 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         let initial = try await service.load(storeID: f.storeID)
         let row = try XCTUnwrap(initial.grocerySections.first?.items.first)
         let session = WatchShoppingSession(service: service, initialSnapshot: initial)
-        // The durable Add succeeds; only the subsequent selection-file write fails.
+        // Break selection persistence after the initial read. Cart durability must
+        // remain independent of a later complete projection/selection refresh.
         try FileManager.default.removeItem(at: selectionDirectory)
         try Data("not a directory".utf8).write(to: selectionDirectory)
         let success = await session.perform(.add(token: row.commandToken, quantity: 8))
-        XCTAssertFalse(success)
-        XCTAssertTrue(session.hasUnconfirmedAdd)
-        XCTAssertTrue(session.snapshot.item(id: row.id)?.isAddUnconfirmed ?? false)
+        XCTAssertTrue(success)
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertFalse(session.snapshot.item(id: row.id)?.isAddUnconfirmed ?? true)
+        do { _ = try await service.load(storeID: f.storeID); XCTFail("Selection refresh should fail") }
+        catch { /* The independent local commit remains confirmed. */ }
         let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entries.first?.quantity, 8)

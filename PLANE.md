@@ -47,6 +47,8 @@ SHOPPING-26 is the baseline product specification. SHOPPING-54 refines it with c
 | Phase 30: Home Settings polish | `f15f0382-bcb8-4002-9a2a-53c3fdde59a8` | SHOPPING-212: custom home title, pencil rename, quiet cloud status, and patch 1.5.3. |
 | Phase 31: Quantity and Row Layout | `74fc22ec-e8b7-4d50-8e50-22b1886661e5` | SHOPPING-214/215: adaptive quantities, consistent content-sized row spacing, and optimistic Watch Add for patch 1.5.4. |
 
+| Phase 32: Responsive Watch cart state | `8aa2337a-7846-4517-88ef-f0333c682441` | SHOPPING-216: independent local cart edits, causal receipts, changed-need publication and patch 1.5.5. |
+
 Pull-to-refresh is deferred to SHOPPING-31. Catalog import and events are removed from the product scope.
 
 ## States

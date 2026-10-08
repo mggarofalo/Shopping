@@ -33,6 +33,21 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var sharedWritable = false
     private var activeHouseholdID: UUID?
     private var currentAttention: String?
+    private lazy var presencePublisher = WatchPresencePublisher(delay: presenceDelay) { [weak self] needIDs in
+        guard let cart = self?.cart else { return [] }
+        return await Task.detached(priority: .utility) {
+            let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
+            os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch presence batch", signpostID: signpostID)
+            defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch presence batch", signpostID: signpostID) }
+            var succeeded: Set<UUID> = []
+            for id in needIDs {
+                do { try cart.republishPresence(needIDs: [id]); succeeded.insert(id) }
+                catch { /* Retain this need without blocking other homes. */ }
+            }
+            return succeeded
+        }.value
+    }
+    private let presenceDelay: Duration
 
     static func production() -> PersistentWatchShoppingService {
         do { return PersistentWatchShoppingService(bootstrap: try WatchPersistenceBootstrap()) }
@@ -42,7 +57,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     init(persistence: PersistenceController, sessionProvider: any ShopperSessionProviding,
          preferredHouseholdID: UUID? = nil, selectionURL: URL? = nil,
          householdWritable: (@MainActor (UUID) -> Bool)? = nil, cartService: PersonalCartService? = nil,
-         loadRecoveryPolicy: LoadRecoveryPolicy? = nil) {
+         loadRecoveryPolicy: LoadRecoveryPolicy? = nil, presenceDelay: Duration = .seconds(2)) {
         bootstrap = nil
         cart = cartService ?? PersonalCartService(persistence: persistence, sessionProvider: sessionProvider)
         provider = sessionProvider
@@ -50,10 +65,12 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         self.selectionURL = selectionURL
         self.householdWritable = householdWritable
         self.loadRecoveryPolicy = loadRecoveryPolicy
+        self.presenceDelay = presenceDelay
     }
 
     private init(bootstrap: WatchPersistenceBootstrap) {
         self.bootstrap = bootstrap
+        presenceDelay = .seconds(2)
         preferredHouseholdID = nil
         householdWritable = nil
         loadRecoveryPolicy = nil
@@ -66,6 +83,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     }
 
     private init(error: Error) {
+        presenceDelay = .seconds(2)
         bootstrap = nil
         preferredHouseholdID = nil
         householdWritable = nil
@@ -77,6 +95,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
 
     func invalidateAuthority() {
         if authorityID != nil { onChange?(.authorityInvalidated) }
+        presencePublisher.invalidate()
         authorityID = nil
         epoch = UUID()
         lastSnapshot = WatchShoppingSnapshot()
@@ -114,7 +133,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 ?? "Saved shopping data could not be opened. Relaunch Shopping to retry; your data is retained."
             return WatchShoppingSnapshot(availability: .setupRequired(message))
         }
-        bootstrap?.retryPendingAssociations()
+        presencePublisher.retry()
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
         let preferredHouseholdID = self.preferredHouseholdID
         let selectionURL = self.selectionURL
@@ -273,15 +292,28 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         if let selectionURL {
             let selection = Selection(accountBinding: session.accountBinding, householdID: projection.scope.householdID,
                 storeID: selectedStoreID)
-            try await Task.detached(priority: .utility) {
-                try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try JSONEncoder().encode(selection).write(to: selectionURL, options: .atomic)
-            }.value
+            if selection != loaded.savedSelection {
+                try await Task.detached(priority: .utility) {
+                    try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try JSONEncoder().encode(selection).write(to: selectionURL, options: .atomic)
+                }.value
+            }
         }
         return snapshot
     }
 
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
+        let result = try await commit(command)
+        if case .snapshot(let snapshot) = result { return snapshot }
+        return try await load(storeID: selectedStoreID)
+    }
+
+    /// Acknowledges the local durable edit, independently of derived household
+    /// presence, complete projections, and CloudKit's system-managed export.
+    func commit(_ command: WatchShoppingCommand) async throws -> WatchShoppingCommit {
+        let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
+        os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch local commit", signpostID: signpostID)
+        defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch local commit", signpostID: signpostID) }
         let opaque: String
         switch command {
         case .add(let token, _), .remove(let token), .setQuantity(let token, _), .buyAnyway(let token): opaque = token
@@ -289,6 +321,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let token = try WatchTokenCoding.decode(WatchCommandToken.self, opaque)
         let (cart, session) = try await resolve()
         try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
+        guard let basis = lastSnapshot.item(id: token.needID.uuidString) else { throw PersonalCartError.staleEntry }
         switch command {
         case .add(_, let quantity):
             try await requireShared(storeID: token.storeID)
@@ -305,17 +338,18 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
             try await Task.detached(priority: .userInitiated) {
                 try cart.cart(needID: token.needID, householdID: token.householdID, listID: token.listID,
-                    initialQuantity: quantity.map(Int64.init), expectedStoreID: token.storeID, operationID: token.operationID)
+                    initialQuantity: quantity.map(Int64.init), expectedStoreID: token.storeID, operationID: token.operationID,
+                    presencePolicy: .deferred)
             }.value
         case .remove:
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
             try await Task.detached(priority: .userInitiated) {
-                try cart.uncart(membership, operationID: token.operationID)
+                try cart.uncart(membership, operationID: token.operationID, presencePolicy: .deferred)
             }.value
         case .setQuantity(_, let quantity):
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
             try await Task.detached(priority: .userInitiated) {
-                try cart.setQuantity(quantity.map(Int64.init), token: membership, operationID: token.operationID)
+                try cart.setQuantity(quantity.map(Int64.init), token: membership, operationID: token.operationID, presencePolicy: .deferred)
             }.value
         case .buyAnyway:
             try await requireShared(storeID: token.storeID)
@@ -326,8 +360,77 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 try cart.checkout(capture, buyAnywayReceiptIDs: token.acknowledgedReceipts, operationID: token.operationID)
             }.value
             guard result.purchasedCount > 0 else { throw PersonalCartError.purchasedNoticeRequired }
+            return .snapshot(try await load(storeID: selectedStoreID))
         }
-        return try await load(storeID: selectedStoreID)
+        try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
+        presencePublisher.markDirty(token.needID)
+        let (entry, mayRebase) = try await Task.detached(priority: .userInitiated) {
+            try cart.transact(save: false) { repository in
+                let entry = try cart.entries(householdID: token.householdID, listID: token.listID,
+                    repository: repository).first { $0.needID == token.needID }
+                let result = try repository.values(PersonalCartCommandResult.self, kind: "cart")[token.operationID]
+                // Only this operation's exact successor can authorize a queued
+                // edit. A phone remove/re-add or concurrent quantity change may
+                // already have replaced it before this receipt read.
+                let mayRebase: Bool
+                if let edit = result?.edit {
+                    mayRebase = edit.action == .remove ? entry == nil : entry?.token == edit.snapshot.token
+                } else {
+                    mayRebase = token.membership != nil && entry?.token == token.membership
+                }
+                return (entry, mayRebase)
+            }
+        }.value
+        try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
+        let row: WatchShoppingItem?
+        if let entry {
+            var value = basis
+            value.id = entry.id.uuidString
+            value.commandToken = try WatchTokenCoding.encode(WatchCommandToken(authorityID: token.authorityID,
+                accountBinding: token.accountBinding, householdID: token.householdID, listID: token.listID,
+                needID: token.needID, storeID: token.storeID, membership: entry.token,
+                acknowledgedReceipts: Set(entry.purchaseNotices.map(\.receiptID)), operationID: UUID()))
+            value.quantity = entry.quantity.flatMap(Int.init(exactly:))
+            value.isInOwnCart = true
+            value.isPendingAdd = false
+            value.isAddUnconfirmed = false
+            value.canAdd = false
+            value.canRemove = true
+            value.canChangeQuantity = true
+            // A purchase acknowledgement must be captured from the next full read.
+            value.canBuyAnyway = false
+            if !entry.purchaseNotices.isEmpty {
+                value.purchasedNotice = "Already purchased by another shopper."
+            }
+            row = value
+        } else {
+            row = nil
+        }
+        patchLocalReceipt(occurrenceID: token.needID.uuidString, row: row)
+        return .item(occurrenceID: token.needID.uuidString, item: row, mayRebase: mayRebase)
+    }
+
+    private func patchLocalReceipt(occurrenceID: String, row: WatchShoppingItem?) {
+        let source = (lastSnapshot.cartSections + lastSnapshot.grocerySections)
+            .first { $0.items.contains { $0.occurrenceID == occurrenceID } }
+        lastSnapshot.grocerySections = lastSnapshot.grocerySections.compactMap { section in
+            var section = section
+            section.items.removeAll { $0.occurrenceID == occurrenceID }
+            return section.items.isEmpty ? nil : section
+        }
+        lastSnapshot.cartSections = lastSnapshot.cartSections.compactMap { section in
+            var section = section
+            section.items.removeAll { $0.occurrenceID == occurrenceID }
+            return section.items.isEmpty ? nil : section
+        }
+        if let row, var source {
+            if let index = lastSnapshot.cartSections.firstIndex(where: { $0.id == source.id }) {
+                lastSnapshot.cartSections[index].items.append(row)
+            } else {
+                source.items = [row]
+                lastSnapshot.cartSections.append(source)
+            }
+        }
     }
 
     func captureCheckout(storeID: UUID) async throws -> WatchCheckoutPreview {
@@ -416,7 +519,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         guard valid, self.cart === cart else { throw PersonalCartError.permissionDenied }
     }
 
-    private struct Selection: Codable, Sendable {
+    private struct Selection: Codable, Sendable, Equatable {
         let accountBinding: String
         let householdID: UUID
         let storeID: UUID?

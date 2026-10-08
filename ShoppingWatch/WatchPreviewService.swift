@@ -14,6 +14,7 @@ final class WatchPreviewService: WatchShoppingService {
     private var failsNextAdd = false
     private var failsNextLoad = false
     private var hasUnconfirmedFixtureAdd = false
+    private var hasDelayedFirstAdd = false
     static let firstStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     static let secondStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
 
@@ -76,6 +77,10 @@ final class WatchPreviewService: WatchShoppingService {
         case .add(let token, let quantity):
             // Controlled service latency for UI proof; never used in production.
             if scenario == "slowAdd" { try await Task.sleep(for: .seconds(30)) }
+            if scenario == "rapidCartEdits", !hasDelayedFirstAdd {
+                hasDelayedFirstAdd = true
+                try await Task.sleep(for: .seconds(90))
+            }
             if failsNextAdd {
                 failsNextAdd = false
                 throw NSError(domain: "WatchPreview", code: 3, userInfo: [

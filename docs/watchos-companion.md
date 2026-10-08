@@ -86,16 +86,38 @@ SHOPPING-143 keeps the header as ordinary scrolling content, so accessing store 
 
 ### Optimistic Add (SHOPPING-215)
 
-Add now immediately moves an occurrence into a pending cart presentation while
-the existing local command runs. A clock and accessible Adding to your cart
-state distinguish it from a confirmed save; the details card preserves its
-quantity and displays Adding to cart… until success returns to groceries.
-Pending memberships cannot be edited or checked out. The foreground overlay
-uses occurrence identity and Settings category order without changing saved data.
+The cart is a local membership/quantity view over the authenticated shopper’s
+private durable graph. Eligible active household needs outside that cart appear
+in groceries. Purchased, archived, unavailable and orphaned saved entries retain
+their existing semantics; this is not a complement of the entire catalog.
 
-Failed commands reconcile through a local read before reverting presentation.
-If a save may already have committed and reconciliation also fails, the Watch
-keeps an explicitly unconfirmed row and offers Check cart, without resubmitting
-the mutation. A successful local refresh resolves this state. CloudKit delivery
-continues independently; a confirmed local cart is not proof of phone receipt.
-See [validation evidence](validation/shopping-215/README.md).
+SHOPPING-216 replaces the single pending Add/global busy gate with a serial local
+commit queue. Add and Remove navigation completes on acceptance; independent
+rows and pending quantities remain editable while the writer is occupied.
+Checkout and scope/recovery actions remain barriers until local edits settle.
+Each receipt retires only its own intent. Same-item queued edits may use only
+that operation’s exact causal successor; a concurrent phone replacement cancels
+dependent intents rather than retargeting them. Failed or uncertain saves affect
+that occurrence; independent items can continue. An authoritative read resolves
+uncertainty without resubmitting the mutation.
+
+Private cart commands save promptly using the existing causal records and
+removal evidence. A fixed two-second window publishes the latest advisory
+presence for changed needs only; continuous tapping does not reset the window.
+Captured versions acknowledge only their own batch. Failed needs stay pending
+while other needs publish, and durable replay recovers publication after relaunch.
+CloudKit continues to mirror the existing private/shared stores. This local
+coalescer does not configure or promise a two-second network interval: Apple
+provides no API to control managed synchronization timing ([TN3164](https://developer.apple.com/documentation/technotes/tn3164-debugging-the-synchronization-of-nspersistentcloudkitcontainer)).
+
+Remote store notifications consume persistent history and publish imported
+state before unrelated share-association work. Local-author history does not
+cause an echo reload. Imports coalesce behind local commits; they never overwrite
+newer pending intents. Activation and the existing active-view fallback reread
+the local replica to catch missed/coalesced notifications. Background suspension
+can delay publication and pushes; persisted commands remain the recovery source.
+No schema, entitlement or transport migration is part of this patch.
+
+The physical Watch was unavailable to developer tools on October 8. Simulator
+and SQLite tests establish the queue and persistence behavior, not real-device
+CloudKit delivery or a measured physical responsiveness improvement.
