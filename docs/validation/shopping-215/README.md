@@ -34,6 +34,8 @@ from these test durations.
 | WatchOptimisticSmall | 1 UI passed, 1 UI failed | 42mm pending swipe passed; existing large-text reveal overshot a narrow clear-frame window. |
 | WatchSmallAlignmentDiagnosis | Interrupted, exit 75 | Repeated geometry established the overshoot; stopped after collecting evidence. |
 | WatchOptimisticSmallFinal | 3 UI passed, zero failed/skipped | 42mm large text, pending swipe and Check cart recovery with corrected alignment. |
+| WatchOptimisticCompatibility | 74 unit/persistence and 1 pending-swipe UI passed | Final compiler-compatible source; zero failed/skipped. |
+| WatchPatchFinalFast | 748 passed, zero failed/skipped | Required aggregate repeated after the compatibility correction. |
 | WatchPatchFast | 748 passed, zero failed/skipped | Required iPhone Fast aggregate with the Watch patch. |
 
 The failed result bundle and hierarchy are retained. The recovery failure showed
@@ -74,3 +76,12 @@ The before images show the state immediately before Add in the same workflow;
 they are not presented as screenshots of a different released binary.
 
 Simulator evidence cannot establish physical Watch VoiceOver/Crown behavior, on-device frame timing, or live CloudKit convergence with the phone off. Those remain the established device-validation scope; no physical app was replaced.
+
+
+The first integrated candidate (`e44f0c8`) failed Release SDK Build in
+[CI 37709353537](https://github.com/mggarofalo/Shopping/actions/runs/37709353537):
+the hosted compiler resolved a later local `item` declaration inside earlier
+closures and rejected the capture-before-declaration. Local Xcode 27 accepted
+that shadowing. The temporary value was renamed `projectedItem`, preserving
+behavior and making the stored-property references unambiguous. The failed CI
+log is retained; the replacement candidate must pass both required jobs.

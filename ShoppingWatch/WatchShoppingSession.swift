@@ -278,17 +278,17 @@ private struct PendingAdd {
                 return value
             }
         }
-        var item = item
-        item.isAddUnconfirmed = isUnconfirmed
+        var projectedItem = item
+        projectedItem.isAddUnconfirmed = isUnconfirmed
         if let index = value.cartSections.firstIndex(where: { $0.id == section.id }) {
-            value.cartSections[index].items.append(item)
+            value.cartSections[index].items.append(projectedItem)
             value.cartSections[index].items.sort {
                 let comparison = $0.name.localizedStandardCompare($1.name)
                 return comparison == .orderedSame ? $0.occurrenceID < $1.occurrenceID : comparison == .orderedAscending
             }
         } else {
             var pendingSection = section
-            pendingSection.items = [item]
+            pendingSection.items = [projectedItem]
             value.cartSections.append(pendingSection)
             value.cartSections.sort {
                 if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
