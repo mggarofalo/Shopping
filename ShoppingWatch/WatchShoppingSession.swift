@@ -4,7 +4,13 @@ import Observation
 @MainActor
 @Observable
 final class WatchShoppingSession {
-    private(set) var snapshot = WatchShoppingSnapshot()
+    private var savedSnapshot = WatchShoppingSnapshot()
+    private var pendingAdd: PendingAdd?
+    var hasUnconfirmedAdd: Bool { pendingAdd?.isUnconfirmed == true }
+    var snapshot: WatchShoppingSnapshot {
+        guard let pendingAdd else { return savedSnapshot }
+        return pendingAdd.project(onto: savedSnapshot)
+    }
     private(set) var isBusy = false
     var errorMessage: String?
     var sheet: WatchShoppingSheet?
@@ -23,14 +29,15 @@ final class WatchShoppingSession {
     private var authorityGeneration = 0
 
     init(service: any WatchShoppingService, initialSnapshot: WatchShoppingSnapshot = WatchShoppingSnapshot()) {
-        snapshot = initialSnapshot
+        savedSnapshot = initialSnapshot
         self.service = service
         service.onChange = { [weak self] change in
             guard let self else { return }
             switch change {
             case .authorityInvalidated:
                 self.authorityGeneration += 1
-                self.snapshot = WatchShoppingSnapshot()
+                self.pendingAdd = nil
+                self.savedSnapshot = WatchShoppingSnapshot()
                 self.sheet = nil
                 self.errorMessage = nil
                 self.requestReload()
@@ -38,7 +45,7 @@ final class WatchShoppingSession {
                 self.requestReload()
             case .syncChanged(let status):
                 guard self.snapshot.syncStatus != status else { return }
-                self.snapshot.syncStatus = status
+                self.savedSnapshot.syncStatus = status
             }
         }
     }
@@ -68,7 +75,10 @@ final class WatchShoppingSession {
         let generation = authorityGeneration
         do {
             let value = try await service.load(storeID: selectedStoreID)
-            if generation == authorityGeneration { applySnapshot(value) }
+            if generation == authorityGeneration {
+                if hasUnconfirmedAdd { pendingAdd = nil; errorMessage = nil }
+                applySnapshot(value)
+            }
         } catch {
             // A background read must not dismiss feedback from an explicit action.
             if generation == authorityGeneration, errorMessage == nil {
@@ -84,8 +94,13 @@ final class WatchShoppingSession {
 
     @discardableResult
     func perform(_ command: WatchShoppingCommand) async -> Bool {
+        // A repeated accessibility action can arrive even after its row disappears.
+        // Coalesce the exact pending add without presenting a spurious error.
+        if pendingAdd?.command == command { return false }
         let authorityID = snapshot.authorityID
-        let applied = await run { .snapshot(try await self.service.execute(command)) }
+        let applied = await run(optimisticCommand: command) {
+            .snapshot(try await self.service.execute(command))
+        }
         return applied && snapshot.availability == .ready && snapshot.authorityID == authorityID
     }
 
@@ -118,7 +133,11 @@ final class WatchShoppingSession {
     }
 
     @discardableResult
-    private func run(_ operation: () async throws -> Update) async -> Bool {
+    private func run(optimisticCommand: WatchShoppingCommand? = nil, _ operation: () async throws -> Update) async -> Bool {
+        guard !hasUnconfirmedAdd else {
+            errorMessage = "Your last cart update could not be confirmed. Check the cart before trying another action."
+            return false
+        }
         guard !isBusy else {
             errorMessage = "Another cart action is still finishing. Try again when it completes."
             return false
@@ -129,6 +148,7 @@ final class WatchShoppingSession {
         errorMessage = nil
         let generation = authorityGeneration
         let authorityID = snapshot.authorityID
+        pendingAdd = optimisticCommand.flatMap { PendingAdd(command: $0, snapshot: savedSnapshot) }
         if isRefreshing {
             await withCheckedContinuation { refreshWaiter = $0 }
         }
@@ -139,12 +159,36 @@ final class WatchShoppingSession {
             try Task.checkCancellation()
             let update = try await operation()
             if generation == authorityGeneration {
+                pendingAdd = nil
                 apply(update)
                 applied = true
             }
         } catch {
             // Do not resurrect old-account errors or UI after authority invalidation.
-            if generation == authorityGeneration { errorMessage = error.localizedDescription }
+            if generation == authorityGeneration {
+                // execute may have saved successfully before its final read failed.
+                // Reconcile while the pending row remains visible, then remove the
+                // overlay. Never restore an entire captured (possibly old) snapshot.
+                if let pending = pendingAdd {
+                    do {
+                        let latest = try await service.load(storeID: savedSnapshot.selectedStoreID)
+                        if generation == authorityGeneration {
+                            pendingAdd = nil
+                            applySnapshot(latest)
+                            applied = latest.availability == .ready && latest.authorityID == authorityID
+                                && latest.cartSections.flatMap(\.items).contains { $0.occurrenceID == pending.item.occurrenceID }
+                            if !applied { errorMessage = error.localizedDescription }
+                        }
+                    } catch {
+                        if generation == authorityGeneration, pendingAdd != nil {
+                            pendingAdd?.isUnconfirmed = true
+                            errorMessage = "Your cart update could not be confirmed. It may already be saved. Check the cart before trying again."
+                        }
+                    }
+                } else {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
         isBusy = false
         if reloadRequested {
@@ -175,6 +219,84 @@ final class WatchShoppingSession {
             sheet = nil
             errorMessage = nil
         }
-        snapshot = value
+        if value.availability != .ready || value.authorityID != savedSnapshot.authorityID
+            || value.selectedStoreID != savedSnapshot.selectedStoreID {
+            pendingAdd = nil
+        }
+        savedSnapshot = value
+    }
+}
+
+private struct PendingAdd {
+    let command: WatchShoppingCommand
+    let authorityID: String?
+    let storeID: UUID?
+    let section: WatchItemSection
+    let item: WatchShoppingItem
+    var isUnconfirmed = false
+
+    init?(command: WatchShoppingCommand, snapshot: WatchShoppingSnapshot) {
+        guard case .add(let token, let quantity) = command,
+              snapshot.availability == .ready,
+              let section = snapshot.grocerySections.first(where: { $0.items.contains { $0.commandToken == token && $0.canAdd } }),
+              var item = section.items.first(where: { $0.commandToken == token && $0.canAdd }),
+              !item.isInOwnCart else { return nil }
+        self.command = command
+        authorityID = snapshot.authorityID
+        storeID = snapshot.selectedStoreID
+        self.section = section
+        item.quantity = quantity
+        item.isInOwnCart = true
+        item.isPendingAdd = true
+        item.canAdd = false
+        item.canRemove = false
+        item.canChangeQuantity = false
+        item.canBuyAnyway = false
+        self.item = item
+    }
+
+    func project(onto saved: WatchShoppingSnapshot) -> WatchShoppingSnapshot {
+        guard saved.availability == .ready, saved.authorityID == authorityID,
+              saved.selectedStoreID == storeID else { return saved }
+        var value = saved
+        value.grocerySections = value.grocerySections.compactMap { section in
+            var section = section
+            section.items.removeAll { $0.occurrenceID == item.occurrenceID }
+            return section.items.isEmpty ? nil : section
+        }
+        // An older in-flight refresh may already observe this occurrence in the
+        // private cart (with a different membership ID and quantity). Keep that
+        // authoritative membership; the writer also preserves an existing claim.
+        for sectionIndex in value.cartSections.indices {
+            if let rowIndex = value.cartSections[sectionIndex].items.firstIndex(where: { $0.occurrenceID == item.occurrenceID }) {
+                value.cartSections[sectionIndex].items[rowIndex].isPendingAdd = true
+                value.cartSections[sectionIndex].items[rowIndex].isAddUnconfirmed = isUnconfirmed
+                value.cartSections[sectionIndex].items[rowIndex].canRemove = false
+                value.cartSections[sectionIndex].items[rowIndex].canChangeQuantity = false
+                value.cartSections[sectionIndex].items[rowIndex].canBuyAnyway = false
+                value.canCheckout = false
+                return value
+            }
+        }
+        var item = item
+        item.isAddUnconfirmed = isUnconfirmed
+        if let index = value.cartSections.firstIndex(where: { $0.id == section.id }) {
+            value.cartSections[index].items.append(item)
+            value.cartSections[index].items.sort {
+                let comparison = $0.name.localizedStandardCompare($1.name)
+                return comparison == .orderedSame ? $0.occurrenceID < $1.occurrenceID : comparison == .orderedAscending
+            }
+        } else {
+            var pendingSection = section
+            pendingSection.items = [item]
+            value.cartSections.append(pendingSection)
+            value.cartSections.sort {
+                if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
+                if $0.categoryOrder != $1.categoryOrder { return $0.categoryOrder < $1.categoryOrder }
+                return $0.id < $1.id
+            }
+        }
+        value.canCheckout = false
+        return value
     }
 }

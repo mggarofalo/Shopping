@@ -12,6 +12,8 @@ final class WatchPreviewService: WatchShoppingService {
     private let scenario: String
     private var failsNextCheckout = false
     private var failsNextAdd = false
+    private var failsNextLoad = false
+    private var hasUnconfirmedFixtureAdd = false
     static let firstStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
     static let secondStoreID = UUID(uuidString: "10000000-0000-0000-0000-000000000002")!
 
@@ -52,6 +54,7 @@ final class WatchPreviewService: WatchShoppingService {
     }
 
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
+        if failsNextLoad { failsNextLoad = false; throw fixtureError }
         if scenario == "unavailable" {
             return WatchShoppingSnapshot(availability: .unavailable("Your saved household could not be opened. Try again."))
         }
@@ -71,6 +74,8 @@ final class WatchPreviewService: WatchShoppingService {
         }
         switch command {
         case .add(let token, let quantity):
+            // Controlled service latency for UI proof; never used in production.
+            if scenario == "slowAdd" { try await Task.sleep(for: .seconds(30)) }
             if failsNextAdd {
                 failsNextAdd = false
                 throw NSError(domain: "WatchPreview", code: 3, userInfo: [
@@ -102,6 +107,11 @@ final class WatchPreviewService: WatchShoppingService {
             }
         }
         rebuild()
+        if scenario == "unconfirmedAdd", !hasUnconfirmedFixtureAdd {
+            hasUnconfirmedFixtureAdd = true
+            failsNextLoad = true
+            throw fixtureError
+        }
         return value
     }
 
@@ -149,7 +159,7 @@ final class WatchPreviewService: WatchShoppingService {
                 let rows = eligible.filter { item in
                     item.isInOwnCart == cart && category == (item.id == "milk" ? "Dairy" : item.id == "granola" ? "Pantry" : "Produce")
                 }
-                return rows.isEmpty ? nil : WatchItemSection(id: category, title: category, items: rows)
+                return rows.isEmpty ? nil : WatchItemSection(id: category, title: category, items: rows, categoryOrder: Int64(["Produce", "Dairy", "Pantry"].firstIndex(of: category)!))
             }
         }
         value.stores = value.stores.map { store in
@@ -180,14 +190,14 @@ final class WatchPreviewService: WatchShoppingService {
                 ]),
                 WatchItemSection(id: "Pantry", title: "Pantry", items: [
                     WatchShoppingItem(id: "granola", commandToken: "granola", name: "Granola", quantity: nil, rule: .canBuyHere, isInOwnCart: false, notes: "Low sugar", canAdd: true)
-                ])
+                ], categoryOrder: 2)
             ],
             cartSections: [WatchItemSection(id: "Dairy", title: "Dairy", items: [
                 WatchShoppingItem(id: "milk", commandToken: "milk", name: "Oat milk", quantity: 2, rule: .canBuyHere, isInOwnCart: true,
                     otherCarts: [WatchCartPresence(id: "sam", shopperName: "Sam", quantity: 1)],
                     purchasedNotice: "Already purchased by Sam. Keep this entry until you choose Remove or Buy anyway.",
                     canRemove: true, canChangeQuantity: true, canBuyAnyway: true)
-            ])], canCheckout: false)
+            ], categoryOrder: 1)], canCheckout: false)
     }
 
     static func previewSession() -> WatchShoppingSession {

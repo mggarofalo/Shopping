@@ -2391,3 +2391,36 @@ line growth and padding; cell bounds alone do not prove those visual properties.
 The largest standard type category also exercises invalid quick-entry feedback,
 inline clear and Cancel with the keyboard visible. The long-name workflow checks
 the full wrapping sheet context before editing at accessibility XXXL.
+
+
+## Optimistic Watch Add (SHOPPING-215)
+
+`WatchShoppingSessionTests` owns immediate pending cart membership/quantity,
+repeat-tap suppression, held-read reconciliation, need-to-membership identity,
+existing authoritative quantity, category rank, failure/retry, uncertain write
+outcomes, subsequent uncarted recovery, offline/status/reconnect observations,
+and authority invalidation during reconciliation. Existing command and checkout
+serialization tests remain enabled.
+
+`PersistentWatchShoppingServiceTests` owns a real blocked Core Data writer with
+pending presentation before completion, and a committed Add whose subsequent
+selection-file write fails. Recovery confirms the existing membership without
+re-executing Add. Its existing isolated SQLite relaunch tests retain durable
+quantity, checkout and recovery proof.
+
+`WatchShoppingUITests/testSlowCardAddShowsPendingQuantityBeforeSaveReturns` and
+`testSlowSwipeAddMovesToCartBeforeSaveReturns` own actual pending visibility,
+quantity, disabled conflicting controls and final state before/after a controlled
+30-second DEBUG-only service delay. `testUnconfirmedAddOffersCheckCartAndResolvesWithoutDuplicate`
+owns the Check cart recovery action. The existing card/swipe failure and durable
+relaunch workflows retain their original assertions. No test or plan selection
+was removed; the iPhone acceptance inventory and coverage baseline are unchanged.
+
+See [Watch Add evidence](validation/shopping-215/README.md) for final results and
+physical-device limitations.
+
+The 42mm large-text evidence exposed Crown-step overshoot in the shared UI reveal
+helper: a 107.5-point row had a 9-point clear placement window. Fine alignment
+now starts earlier after a direction reversal; hittability, full/oversized-row
+bounds and the 24-step limit are unchanged. The failed and interrupted diagnostic
+runs remain in the SHOPPING-215 evidence record.

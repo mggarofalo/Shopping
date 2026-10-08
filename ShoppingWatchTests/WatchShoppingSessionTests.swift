@@ -3,6 +3,265 @@ import XCTest
 
 @MainActor
 final class WatchShoppingSessionTests: XCTestCase {
+    func testOptimisticAddMovesImmediatelyAndCoalescesRepeatTap() async throws {
+        let service = SpyService(), started = expectation(description: "Save held")
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let before = session.snapshot
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let command = WatchShoppingCommand.add(token: "bananas", quantity: 6)
+        let task = Task { await session.perform(command) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertFalse(session.snapshot.grocerySections.flatMap(\.items).contains { $0.id == "bananas" })
+        let row = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        XCTAssertTrue(row.isInOwnCart)
+        XCTAssertTrue(row.isPendingAdd)
+        XCTAssertEqual(row.quantity, 6)
+        XCTAssertFalse(row.canRemove || row.canChangeQuantity || row.canBuyAnyway)
+        XCTAssertFalse(session.snapshot.canCheckout)
+        XCTAssertEqual(session.snapshot.cartCount, before.cartCount + 1)
+        XCTAssertEqual(session.snapshot.cartSections.map(\.id), ["Produce", "Dairy"])
+        let repeated = await session.perform(command)
+        XCTAssertFalse(repeated)
+        XCTAssertNil(session.errorMessage)
+        XCTAssertEqual(service.commands, [command])
+        service.value = savedBananas(before, quantity: 6)
+        service.commandContinuation?.resume(returning: service.value)
+        let success = await task.value
+        XCTAssertTrue(success)
+        XCTAssertEqual(session.snapshot, service.value)
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.id, "saved-membership")
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isPendingAdd ?? true)
+    }
+
+    func testOlderHeldRefreshCannotUndoOptimisticAddOrDuplicateExistingMembership() async throws {
+        let service = SpyService()
+        let model = WatchShoppingSession(service: service)
+        await model.reload()
+        let old = service.value
+        let loadStarted = expectation(description: "Old load held")
+        service.suspendNextLoad = true
+        service.loadStarted = { loadStarted.fulfill() }
+        let refresh = Task { await model.reload() }
+        await fulfillment(of: [loadStarted], timeout: 2)
+        let reserved = expectation(description: "Add reserved")
+        let commandStarted = expectation(description: "Command started after read")
+        service.suspendCommand = true
+        service.commandStarted = { commandStarted.fulfill() }
+        let task = Task { reserved.fulfill(); return await model.perform(.add(token: "bananas", quantity: 9)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertEqual(model.snapshot.item(id: "bananas")?.quantity, 9)
+        XCTAssertTrue(service.commands.isEmpty)
+        // Another replica has already carted the same need with a different
+        // membership ID and quantity. A repeated Add preserves that claim.
+        let existing = savedBananas(old, quantity: 4)
+        service.loadContinuation?.resume(returning: existing)
+        await refresh.value
+        await fulfillment(of: [commandStarted], timeout: 2)
+        XCTAssertEqual(model.snapshot.cartCount, 2)
+        XCTAssertEqual(model.snapshot.item(id: "bananas")?.quantity, 4)
+        XCTAssertTrue(model.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        service.value = existing
+        for _ in 0..<20 { service.onChange?(.dataChanged) }
+        service.commandContinuation?.resume(returning: existing)
+        let succeeded = await task.value
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(model.snapshot, existing)
+        XCTAssertEqual(service.loadCount, 3)
+        // A later authoritative removal is not hidden by a lingering overlay.
+        service.value = old
+        await model.reload()
+        XCTAssertFalse(model.snapshot.item(id: "bananas")?.isInOwnCart ?? true)
+    }
+
+    func testFailedOptimisticAddUsesLatestSnapshotAndCanRetryNilQuantity() async throws {
+        let service = SpyService(), started = expectation(description: "Save held")
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let task = Task { await session.perform(.add(token: "bananas", quantity: nil)) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertNil(session.snapshot.item(id: "bananas")?.quantity)
+        service.value.grocerySections[0].items[0].notes = "Latest imported note"
+        service.commandContinuation?.resume(throwing: NSError(domain: "test", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Save failed"]))
+        let success = await task.value
+        XCTAssertFalse(success)
+        XCTAssertEqual(session.snapshot, service.value)
+        XCTAssertEqual(session.errorMessage, "Save failed")
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.canAdd ?? false)
+        service.suspendCommand = false
+        service.value = savedBananas(service.value, quantity: nil)
+        let retry = await session.perform(.add(token: "bananas", quantity: nil))
+        XCTAssertTrue(retry)
+        XCTAssertNil(session.snapshot.item(id: "bananas")?.quantity)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testCommittedAddReadFailureReconcilesWithoutReexecuting() async {
+        let service = SpyService()
+        let model = WatchShoppingSession(service: service)
+        await model.reload()
+        let saved = savedBananas(service.value, quantity: 7)
+        service.shouldFail = true
+        service.onCommand = { service.value = saved }
+        let success = await model.perform(.add(token: "bananas", quantity: 7))
+        XCTAssertTrue(success)
+        XCTAssertEqual(model.snapshot, saved)
+        XCTAssertEqual(service.commands.count, 1)
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testUnconfirmedAddBlocksRetryUntilReconnectReadResolvesIt() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let saved = savedBananas(service.value, quantity: 1)
+        service.shouldFail = true
+        service.failLoad = true
+        service.onCommand = { service.value = saved }
+        let command = WatchShoppingCommand.add(token: "bananas", quantity: 1)
+        let success = await session.perform(command)
+        XCTAssertFalse(success)
+        XCTAssertTrue(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isAddUnconfirmed ?? false)
+        XCTAssertTrue(session.errorMessage?.contains("may already be saved") ?? false)
+        let repeated = await session.perform(command)
+        XCTAssertFalse(repeated)
+        let other = await session.perform(.remove(token: "milk"))
+        XCTAssertFalse(other)
+        XCTAssertEqual(service.commands.count, 1)
+        service.failLoad = false
+        await session.reload()
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertEqual(session.snapshot, saved)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testOfflineSavedAddSurvivesStatusChangesAndReconnect() async {
+        let service = SpyService(), started = expectation(description: "Local save held")
+        service.value.syncStatus = WatchSyncStatus(attentionMessages: ["Offline; waiting to sync"])
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let task = Task { await session.perform(.add(token: "bananas", quantity: 99)) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        let saved = savedBananas(service.value, quantity: 99)
+        service.value = saved
+        service.commandContinuation?.resume(returning: saved)
+        let success = await task.value
+        XCTAssertTrue(success)
+        XCTAssertEqual(session.snapshot.syncStatus.state, .attention)
+        service.onChange?(.syncChanged(WatchSyncStatus()))
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 99)
+        service.value.syncStatus = WatchSyncStatus()
+        await session.reload()
+        XCTAssertEqual(session.snapshot.cartCount, 2)
+        XCTAssertEqual(service.commands.count, 1)
+    }
+
+    func testAuthorityInvalidationDuringFailureReconciliationCannotResurrectPendingAdd() async {
+        let service = SpyService(), started = expectation(description: "Reconciliation held")
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let oldSaved = savedBananas(service.value, quantity: 3)
+        service.shouldFail = true
+        service.suspendNextLoad = true
+        service.loadStarted = { started.fulfill() }
+        let task = Task { await session.perform(.add(token: "bananas", quantity: 3)) }
+        await fulfillment(of: [started], timeout: 2)
+        service.value = WatchShoppingSnapshot(authorityID: "new-account", availability: .ready)
+        service.onChange?(.authorityInvalidated)
+        XCTAssertTrue(session.snapshot.cartSections.isEmpty)
+        service.loadContinuation?.resume(returning: oldSaved)
+        let success = await task.value
+        XCTAssertFalse(success)
+        XCTAssertEqual(session.snapshot.authorityID, "new-account")
+        XCTAssertTrue(session.snapshot.cartSections.isEmpty)
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testUnconfirmedFailureRecoversToUncartedStateWithoutRetryingWrite() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.shouldFail = true
+        service.failLoad = true
+        let success = await session.perform(.add(token: "bananas", quantity: nil))
+        XCTAssertFalse(success)
+        XCTAssertTrue(session.hasUnconfirmedAdd)
+        service.failLoad = false
+        await session.reload()
+        XCTAssertEqual(session.snapshot, service.value)
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.canAdd ?? false)
+        XCTAssertEqual(service.commands.count, 1)
+    }
+
+    func testHeldRefreshKeepsPendingAddVisibleThenFailureUsesRefreshedMetadata() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let read = expectation(description: "Read held")
+        service.suspendNextLoad = true
+        service.loadStarted = { read.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [read], timeout: 2)
+        let started = expectation(description: "Command held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let reserved = expectation(description: "Add reserved")
+        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "bananas", quantity: 2)) }
+        await fulfillment(of: [reserved], timeout: 2)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        service.value.grocerySections[0].items[0].notes = "New note from earlier read"
+        service.loadContinuation?.resume(returning: service.value)
+        await refresh.value
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertEqual(session.snapshot.cartCount, 2)
+        service.commandContinuation?.resume(throwing: NSError(domain: "test", code: 2))
+        _ = await adding.value
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.notes, "New note from earlier read")
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isInOwnCart ?? true)
+    }
+
+    func testPendingAddPreservesSettingsCategoryRankAndOccurrenceNameOrdering() async {
+        let service = SpyService()
+        service.value.cartSections = [
+            WatchItemSection(id: "active", title: "First", items: [], categoryOrder: -1),
+            WatchItemSection(id: "archived", title: "Archived", items: [], categoryRank: 1),
+            WatchItemSection(id: "uncategorized", title: "Uncategorized", items: [], categoryRank: 2)
+        ]
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Command held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let adding = Task { await session.perform(.add(token: "bananas", quantity: 3)) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(session.snapshot.cartSections.map(\.id), ["active", "Produce", "archived", "uncategorized"])
+        service.commandContinuation?.resume(returning: service.value)
+        _ = await adding.value
+    }
+
+    private func savedBananas(_ source: WatchShoppingSnapshot, quantity: Int?) -> WatchShoppingSnapshot {
+        var value = source
+        value.grocerySections[0].items.removeAll { $0.id == "bananas" }
+        value.cartSections.insert(WatchItemSection(id: "Produce", title: "Produce", items: [
+            WatchShoppingItem(id: "saved-membership", commandToken: "saved-token", name: "Bananas",
+                quantity: quantity, rule: .canBuyHere, isInOwnCart: true, needID: "bananas",
+                canRemove: true, canChangeQuantity: true)
+        ]), at: 0)
+        value.canCheckout = true
+        return value
+    }
+
     func testNormalLaunchRequiresSetupWithoutFixtures() async {
         let session = WatchShoppingSession(service: UnavailableWatchShoppingService())
         await session.reload()
@@ -383,12 +642,14 @@ private final class SpyService: WatchShoppingService {
     var loadStarted: (() -> Void)?
     var loadContinuation: CheckedContinuation<WatchShoppingSnapshot, Never>?
     var shouldFail = false
+    var failLoad = false
+    var onCommand: (() -> Void)?
     var commands: [WatchShoppingCommand] = []
     var checkoutTokens: [String] = []
     var restoreTokens: [String] = []
     var suspendCommand = false
     var commandStarted: (() -> Void)?
-    var commandContinuation: CheckedContinuation<WatchShoppingSnapshot, Never>?
+    var commandContinuation: CheckedContinuation<WatchShoppingSnapshot, Error>?
     var suspendCheckout = false
     var checkoutStarted: (() -> Void)?
     var checkoutContinuation: CheckedContinuation<WatchActionResult, Never>?
@@ -399,6 +660,7 @@ private final class SpyService: WatchShoppingService {
     func refreshHomeAccess() { accessRefreshCount += 1 }
     func load(storeID: UUID?) async throws -> WatchShoppingSnapshot {
         loadCount += 1
+        if failLoad { throw failure }
         requestedStores.append(storeID)
         if let storeID { value.selectedStoreID = storeID }
         onLoad?()
@@ -413,8 +675,9 @@ private final class SpyService: WatchShoppingService {
     }
     func execute(_ command: WatchShoppingCommand) async throws -> WatchShoppingSnapshot {
         commands.append(command)
+        onCommand?()
         if suspendCommand {
-            return await withCheckedContinuation { continuation in
+            return try await withCheckedThrowingContinuation { continuation in
                 commandContinuation = continuation
                 commandStarted?()
             }

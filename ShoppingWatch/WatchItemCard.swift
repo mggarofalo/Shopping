@@ -67,7 +67,14 @@ struct WatchItemCard: View {
         .listStyle(.plain)
         .navigationTitle("Item")
         .safeAreaInset(edge: .bottom, spacing: 4) {
-            if let item = addableItem {
+            if session.snapshot.item(id: itemID)?.isPendingAdd == true {
+                Text(session.hasUnconfirmedAdd ? "Checking cart…" : "Adding to cart…")
+                    .font(.caption2)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .padding(.bottom, 8)
+                    .background(.background)
+                    .accessibilityIdentifier("watch.item.add.pending")
+            } else if let item = addableItem {
                 HStack {
                     Button {
                         Task {
@@ -89,7 +96,7 @@ struct WatchItemCard: View {
                 .background(.background)
             }
         }
-        .ignoresSafeArea(.container, edges: addableItem == nil ? [] : .bottom)
+        .ignoresSafeArea(.container, edges: addableItem == nil && session.snapshot.item(id: itemID)?.isPendingAdd != true ? [] : .bottom)
         .task {
             if !hasLoadedDraft {
                 draftQuantity = session.snapshot.item(id: itemID)?.quantity

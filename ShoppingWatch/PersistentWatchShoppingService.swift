@@ -228,6 +228,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             var row = WatchShoppingItem(id: inCart ? entry.id.uuidString : entry.needID.uuidString,
                 commandToken: try WatchTokenCoding.encode(token), name: entry.title,
                 quantity: entry.quantity.flatMap(Int.init(exactly:)), rule: rule, isInOwnCart: inCart)
+            row.needID = entry.needID.uuidString
             row.isUrgent = entry.urgency == NeedUrgency.urgent.rawValue
             row.notes = entry.notes
             row.isOneTime = projection.oneTimeIDs.contains(entry.needID)

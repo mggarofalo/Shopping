@@ -82,3 +82,20 @@ Shopping, cart, and store selection expose a small sync control; tapping opens c
 On the grocery screen the store switcher and sync control occupy the first native `List` row (SHOPPING-143). They scroll away with groceries and return at the top; there is no scroll-direction tracking or automatic reappearance on an upward movement. Separate leading/trailing watchOS toolbar items move the system clock to the center and overlap a wide store-name control; `principal` placement is unavailable on watchOS. The scrolling row avoids that collision without custom offsets or gesture handling. Cart and store selection retain native trailing toolbar controls. The small symbol has a full 44-point header target, and details use a scrollable native list with Back and Done.
 
 SHOPPING-143 keeps the header as ordinary scrolling content, so accessing store or sync controls after shopping farther down requires returning to the top. `testStoreAndSyncScrollAwayAndReturnOnlyAtTop` proves disappearance, no reappearance after a small reverse scroll, fixed footer clearance, and working details/store navigation after returning. Existing empty-state, accessibility-text and store/swipe workflows retain those boundaries on both supported simulator sizes.
+
+
+### Optimistic Add (SHOPPING-215)
+
+Add now immediately moves an occurrence into a pending cart presentation while
+the existing local command runs. A clock and accessible Adding to your cart
+state distinguish it from a confirmed save; the details card preserves its
+quantity and displays Adding to cart… until success returns to groceries.
+Pending memberships cannot be edited or checked out. The foreground overlay
+uses occurrence identity and Settings category order without changing saved data.
+
+Failed commands reconcile through a local read before reverting presentation.
+If a save may already have committed and reconciliation also fails, the Watch
+keeps an explicitly unconfirmed row and offers Check cart, without resubmitting
+the mutation. A successful local refresh resolves this state. CloudKit delivery
+continues independently; a confirmed local cart is not proof of phone receipt.
+See [validation evidence](validation/shopping-215/README.md).

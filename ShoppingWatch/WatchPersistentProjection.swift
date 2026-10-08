@@ -75,7 +75,9 @@ struct WatchPersistentProjection: Sendable {
                 return comparison == .orderedSame ? $0.needID.uuidString < $1.needID.uuidString : comparison == .orderedAscending
             }
             return try WatchItemSection(id: ordered[0].categoryID?.uuidString ?? "uncategorized",
-                title: ordered[0].categoryName ?? "Uncategorized", items: ordered.map(make))
+                title: ordered[0].categoryName ?? "Uncategorized", items: ordered.map(make),
+                categoryRank: ordered[0].categoryID == nil ? 2 : archivedCategoryIDs.contains(ordered[0].categoryID!) ? 1 : 0,
+                categoryOrder: ordered[0].categoryOrder)
         }
     }
 }

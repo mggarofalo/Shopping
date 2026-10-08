@@ -12,6 +12,8 @@ struct WatchItemSection: Identifiable, Equatable {
     let id: String
     let title: String
     var items: [WatchShoppingItem]
+    var categoryRank = 0
+    var categoryOrder: Int64 = 0
 }
 
 struct WatchShoppingItem: Identifiable, Equatable {
@@ -28,6 +30,10 @@ struct WatchShoppingItem: Identifiable, Equatable {
     var otherCarts: [WatchCartPresence] = []
     var purchasedNotice: String?
     var unavailableReason: String?
+    var needID: String?
+    var occurrenceID: String { needID ?? id }
+    var isPendingAdd = false
+    var isAddUnconfirmed = false
     var canAdd = false
     var canRemove = false
     var canChangeQuantity = false
@@ -36,7 +42,7 @@ struct WatchShoppingItem: Identifiable, Equatable {
     var accessibilityValue: String {
         [quantity.map { "Quantity \($0)" }, rule?.title,
          isUrgent ? "Urgent" : nil,
-         isInOwnCart ? "In your cart" : nil,
+         isAddUnconfirmed ? "Cart update not yet confirmed" : isPendingAdd ? "Adding to your cart" : isInOwnCart ? "In your cart" : nil,
          otherCarts.isEmpty ? nil : "Also in another shopper’s cart",
          purchasedNotice, unavailableReason]
             .compactMap { $0 }.joined(separator: ", ")
@@ -82,7 +88,7 @@ struct WatchShoppingSnapshot: Equatable {
     var cartCount: Int { cartSections.reduce(0) { $0 + $1.items.count } }
     var cartCountText: String { "\(cartCount) \(cartCount == 1 ? "item" : "items")" }
     func item(id: String) -> WatchShoppingItem? {
-        (cartSections + grocerySections).lazy.flatMap(\.items).first { $0.id == id }
+        (cartSections + grocerySections).lazy.flatMap(\.items).first { $0.id == id || $0.needID == id }
     }
 }
 

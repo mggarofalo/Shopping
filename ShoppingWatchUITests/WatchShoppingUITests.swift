@@ -231,6 +231,87 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Item"].waitForExistence(timeout: 3))
     }
 
+    func testUnconfirmedAddOffersCheckCartAndResolvesWithoutDuplicate() {
+        let app = launchFixture("unconfirmedAdd")
+        let bananas = app.buttons["watch.item.bananas"]
+        reveal(bananas, in: app)
+        bananas.tap()
+        app.buttons["watch.item.add"].tap()
+        let check = app.buttons["Check cart"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        screenshot("Watch unconfirmed Add offers safe recovery", app: app)
+        check.tap()
+        let remove = app.buttons["watch.item.remove"]
+        reveal(remove, in: app)
+        XCTAssertTrue(remove.isEnabled)
+        XCTAssertFalse(app.staticTexts["watch.item.add.pending"].exists)
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        XCTAssertTrue(increase.isEnabled)
+        XCTAssertEqual(increase.value as? String, "3")
+        screenshot("Watch confirmed cart after recovery", app: app)
+        app.navigationBars["Item"].buttons["BackButton"].tap()
+        assertReturnedToGroceries(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(bananas, in: app)
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
+    }
+
+    func testSlowCardAddShowsPendingQuantityBeforeSaveReturns() {
+        let app = launchFixture("slowAdd")
+        let granola = app.buttons["watch.item.granola"]
+        reveal(granola, in: app)
+        granola.tap()
+        let increase = app.buttons["Increase your quantity"]
+        reveal(increase, in: app)
+        increase.tap()
+        XCTAssertEqual(increase.value as? String, "1")
+        let add = app.buttons["watch.item.add"]
+        assertBottomAction(add, in: app)
+        screenshot("Watch before optimistic card Add", app: app)
+        add.tap()
+        let pending = app.staticTexts["watch.item.add.pending"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Item"].exists)
+        XCTAssertFalse(add.exists)
+        XCTAssertFalse(increase.isEnabled)
+        XCTAssertEqual(increase.value as? String, "1")
+        screenshot("Watch pending card Add keeps quantity", app: app)
+        XCTAssertTrue(app.buttons["watch.cart.open"].waitForExistence(timeout: 40))
+        assertReturnedToGroceries(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(granola, in: app)
+        XCTAssertTrue((granola.value as? String ?? "").contains("Quantity 1"))
+        XCTAssertFalse((granola.value as? String ?? "").contains("Adding"))
+        screenshot("Watch completed optimistic card Add", app: app)
+    }
+
+    func testSlowSwipeAddMovesToCartBeforeSaveReturns() {
+        let app = launchFixture("slowAdd")
+        let bananas = app.buttons["watch.item.bananas"]
+        reveal(bananas, in: app)
+        screenshot("Watch before optimistic swipe Add", app: app)
+        bananas.swipeLeft()
+        let add = app.buttons["Add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        add.tap()
+        XCTAssertTrue(bananas.waitForNonExistence(timeout: 3))
+        let cart = app.buttons["watch.cart.open"]
+        XCTAssertTrue(cart.label.contains("2 items"))
+        cart.tap()
+        reveal(bananas, in: app)
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Adding to your cart"))
+        XCTAssertTrue((bananas.value as? String ?? "").contains("Quantity 3"))
+        XCTAssertFalse(app.buttons["watch.checkout.open"].isEnabled)
+        screenshot("Watch pending swipe Add already in cart", app: app)
+        let completed = NSPredicate(format: "value CONTAINS %@ AND NOT value CONTAINS %@", "In your cart", "Adding")
+        expectation(for: completed, evaluatedWith: bananas)
+        waitForExpectations(timeout: 40)
+        XCTAssertEqual(app.buttons.matching(identifier: "watch.item.bananas").count, 1)
+        screenshot("Watch completed optimistic swipe Add", app: app)
+    }
+
     func testCompactItemControlsAndPinnedAdd() {
         let app = launchFixture()
         let granola = app.buttons["watch.item.granola"]
@@ -645,9 +726,12 @@ final class WatchShoppingUITests: XCTestCase {
                 previousDirection = isAbove
             }
             // Normal steps cross native list snap points. After overshooting a measured
-            // row, align finely near its boundary without weakening the clear-frame check.
+            // row, align finely across the remaining distance. On 42mm at large
+            // text the valid alignment window is only 9 points; a 0.3 step can
+            // overshoot it repeatedly even from 40 points away. Keep the same
+            // full clear-frame / oversized-row checks.
             let rotation = element.exists && !oversized
-                ? (needsFineAlignment && distance <= 15 ? 0.05 : distance > 60 ? 0.6 : 0.3)
+                ? (needsFineAlignment && distance <= 60 ? 0.05 : distance > 60 ? 0.6 : 0.3)
                 : 0.15
             XCUIDevice.shared.rotateDigitalCrown(delta: isAbove ? -rotation : rotation)
         }

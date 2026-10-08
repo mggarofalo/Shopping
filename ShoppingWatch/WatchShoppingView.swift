@@ -126,6 +126,9 @@ private struct WatchShoppingErrorPresenter: ViewModifier {
             get: { session.errorMessage != nil && (session.sheet != nil) == inSheet },
             set: { if !$0 { session.errorMessage = nil } }
         )) {
+            if session.hasUnconfirmedAdd {
+                Button("Check cart") { Task { await session.reload() } }
+            }
             Button("OK", role: .cancel) { session.errorMessage = nil }
         } message: { Text(session.errorMessage ?? "") }
     }

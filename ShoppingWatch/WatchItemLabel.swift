@@ -14,6 +14,7 @@ struct WatchItemLabel: View {
             }
             if !item.otherCarts.isEmpty { Image(systemName: "person").font(.caption2).accessibilityHidden(true) }
             if let quantity = item.quantity { Text("\(quantity)").monospacedDigit() }
+            if item.isPendingAdd { Image(systemName: "clock").font(.caption2).accessibilityHidden(true) }
             if let rule = item.rule { Image(systemName: rule.symbol).font(.caption).accessibilityHidden(true) }
         }
         .font(.callout)
