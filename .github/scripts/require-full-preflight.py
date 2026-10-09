@@ -7,6 +7,9 @@ import sys
 from urllib.parse import urlencode
 
 
+REQUIRED_JOBS = ('Build & Test', 'Release SDK Build')
+
+
 def successful_candidate(runs, sha):
     # PR runs test a synthetic merge commit. A manual run or main push tests
     # the stated head itself and can establish compiler compatibility here.
@@ -22,7 +25,7 @@ def successful_candidate(runs, sha):
 
 
 def require_jobs(jobs):
-    for name in ('Build & Test', 'Release SDK Build'):
+    for name in REQUIRED_JOBS:
         matches = [job for job in jobs if job.get('name') == name]
         if len(matches) != 1 or matches[0].get('status') != 'completed' or matches[0].get('conclusion') != 'success':
             raise ValueError(f'Required job {name} has not passed exactly once')
@@ -30,6 +33,28 @@ def require_jobs(jobs):
 
 def api(path):
     return json.loads(subprocess.check_output(['gh', 'api', path], text=True))
+
+
+def latest_required_jobs(last_attempt, fetch):
+    """A partial rerun retains successful jobs from earlier attempts of this run."""
+    jobs = []
+    for attempt in range(last_attempt, 0, -1):
+        missing = set(REQUIRED_JOBS) - {job.get('name') for job in jobs}
+        if not missing:
+            break
+        jobs.extend(job for job in fetch(attempt) if job.get('name') in missing)
+    return jobs
+
+
+def jobs_for_attempt(repository, run_id, attempt):
+    jobs = []
+    page = 1
+    while True:
+        batch = api(f'repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}')['jobs']
+        jobs.extend(batch)
+        if len(batch) < 100:
+            return jobs
+        page += 1
 
 
 def main():
@@ -47,14 +72,8 @@ def main():
             break
         page += 1
     run = successful_candidate(runs, sha)
-    jobs = []
-    page = 1
-    while True:
-        batch = api(f"repos/{repository}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100&page={page}")['jobs']
-        jobs.extend(batch)
-        if len(batch) < 100:
-            break
-        page += 1
+    jobs = latest_required_jobs(run['run_attempt'],
+                                lambda attempt: jobs_for_attempt(repository, run['id'], attempt))
     require_jobs(jobs)
     print(f"Exact-source Full preflight passed: {sha} {run['html_url']}")
 

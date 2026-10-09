@@ -39,6 +39,28 @@ class FullPreflightTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 preflight.require_jobs(invalid)
 
+    def test_partial_rerun_keeps_other_successful_job_from_same_run(self):
+        build = dict(name='Build & Test', status='completed', conclusion='success')
+        release = dict(name='Release SDK Build', status='completed', conclusion='success')
+        attempts = {1: [dict(build, conclusion='failure'), release], 2: [build]}
+        jobs = preflight.latest_required_jobs(2, attempts.__getitem__)
+        preflight.require_jobs(jobs)
+        self.assertEqual(jobs, [build, release])
+
+    def test_old_success_never_masks_new_failed_or_skipped_job(self):
+        for conclusion in ['failure', 'skipped', 'cancelled']:
+            build = dict(name='Build & Test', status='completed', conclusion='success')
+            release = dict(name='Release SDK Build', status='completed', conclusion='success')
+            attempts = {1: [build, release], 2: [dict(build, conclusion=conclusion)]}
+            with self.assertRaises(ValueError):
+                preflight.require_jobs(preflight.latest_required_jobs(2, attempts.__getitem__))
+
+    def test_duplicate_job_in_latest_attempt_is_not_hidden(self):
+        build = dict(name='Build & Test', status='completed', conclusion='success')
+        release = dict(name='Release SDK Build', status='completed', conclusion='success')
+        with self.assertRaises(ValueError):
+            preflight.require_jobs(preflight.latest_required_jobs(1, lambda _: [build, build, release]))
+
     def test_preflight_precedes_expensive_operations(self):
         runner = Path(__file__).with_name('run-local-shopping-full.sh').read_text()
         self.assertLess(runner.index('require-full-preflight.py'), runner.index('mktemp'))

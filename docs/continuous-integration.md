@@ -98,7 +98,9 @@ Start the existing compatibility checks early with `gh workflow run swift-ci.yml
 --ref <issue-or-milestone-branch>` after pushing the candidate. Wait for both jobs
 to pass. `run-local-shopping-full.sh` verifies the latest exact-source manual run
 (or main push) before allocating local Full artifacts or touching a simulator.
-It rejects missing, running, failed, skipped, or cancelled proof. Pull-request
+It rejects missing, running, failed, skipped, or cancelled proof. For a partial
+rerun, it checks the most recent execution of each required job within that same
+exact-source run; an older success never overrides a newer failure or skip. Pull-request
 runs compile a synthetic merge commit and do not replace this exact-source gate.
 A source change requires another exact-source check; the preflight never copies
 proof between SHAs. Required PR/main CI and the hosted Full attestation remain.
