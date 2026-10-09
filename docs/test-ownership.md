@@ -2453,3 +2453,7 @@ lost receipt after durable save, immediate and delayed successful rereads,
 retained cancellation feedback, and authority cleanup. Its existing
 `testCommittedAddReadFailureReconcilesWithoutReexecuting` retains no-descendant
 recovery behavior. The failed baseline is retained in the validation record.
+
+## Phase 33 system actions (SHOPPING-217)
+
+`ShoppingActionTests` owns pending-request exclusivity, expiry/cancellation, Home/presentation invalidation, the three quick-action identities and concurrent background startup without a mounted view. Existing `ActiveHomeBootstrapTests` and presentation-retirement tests retain account/store lifecycle proof. `SystemActionUITests/testHomeScreenAddOpensCatalogAddWithoutChangingList` owns actual SpringBoard quick-action delivery into the existing grocery add sheet. Existing catalog save/add tests retain persistence and duplicate-add proof.

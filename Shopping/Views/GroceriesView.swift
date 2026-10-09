@@ -118,7 +118,7 @@ struct GroceriesView: View {
     }
 
     private var activeBody: some View {
-        NavigationStack {
+        NavigationStack(path: $navigation.groceryPath) {
             groceryContent
             .navigationTitle("Groceries")
             .navigationBarTitleDisplayMode(.inline)
@@ -255,6 +255,7 @@ struct GroceriesView: View {
             .onAppear {
                 completeSaveFeedback()
                 focusRequestedNeed()
+                presentSystemAdd()
             }
             .task(id: "\(selection.householdID?.uuidString ?? "nil")-\(selection.listID?.uuidString ?? "nil")") {
                 configureAndRefresh()
@@ -268,6 +269,7 @@ struct GroceriesView: View {
             .onChange(of: needs.count) { _, _ in refreshProjection() }
             .onChange(of: personalCart?.cartedNeedIDs) { _, _ in refreshProjection() }
             .onChange(of: personalCart?.outstandingNeedIDs) { _, _ in refreshProjection() }
+            .onChange(of: navigation.systemAddRequestID) { _, _ in presentSystemAdd() }
             .onChange(of: navigation.pendingNeedFocusID) { _, _ in focusRequestedNeed() }
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
@@ -277,6 +279,7 @@ struct GroceriesView: View {
                 configureAndRefresh()
                 completeSaveFeedback()
                 focusRequestedNeed()
+                presentSystemAdd()
             }
         }
     }
@@ -420,6 +423,15 @@ struct GroceriesView: View {
         !hasActiveUncartedNeeds
             ? "Add an item to get started."
             : "Try All, another store, search, or filters. Your shared grocery list is unchanged."
+    }
+
+    private func presentSystemAdd() {
+        guard navigation.systemAddRequestID != nil else { return }
+        navigation.systemAddRequestID = nil
+        addPickerScope = GroceryAddScope(
+            householdID: selection.householdID, listID: selection.listID,
+            selectedStoreID: nil, selectedStoreName: nil
+        )
     }
 
     private func presentAdd() {

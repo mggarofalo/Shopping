@@ -138,6 +138,7 @@ final class PersistenceBootstrap: ObservableObject {
     private let cloudMonitor = CloudSyncEventMonitor()
     private var transition: Transition?
     private var mountedPresentations: Set<UUID> = []
+    private var initialLoadingStarted = false
     private let defaults: UserDefaults
     let homeCoordinator: ActiveHomeCoordinator
     let invitations: HomeInvitationController?
@@ -1081,7 +1082,12 @@ final class PersistenceBootstrap: ObservableObject {
 
     // Called only by the loading view's task, after the retired ready hierarchy disappears.
     func runLoadingTransition() async {
-        guard let transition else { start(); return }
+        guard let transition else {
+            guard !initialLoadingStarted else { return }
+            initialLoadingStarted = true
+            start()
+            return
+        }
         guard loadingTransitionID == transition.id,
               transition.previous.map({ !mountedPresentations.contains($0.presentation.id) }) ?? true else { return }
         self.transition = nil

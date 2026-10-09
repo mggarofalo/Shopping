@@ -89,3 +89,7 @@ Keep the root checkout on `main` and create every issue, epic, and milestone che
 The phase milestone branch is the integration target. Optional epic branches within a phase target the milestone branch, then completed issue branches are squash-merged locally into their parent or milestone. At phase completion, open the milestone-to-`main` PR; The `Build & Test` and `Release SDK Build` checks and independent agent review are mandatory before merging; GitHub approval count remains zero for this single-contributor repository.
 
 Phase 1 and Phase 2 local foundation work merged through PR 1 (`c74cae8`). Phase 3 integrates validated local data recovery and the September 6 grocery UI revisions through PR 2, with the final catalog-caption contrast correction. Physical device validation remains open in SHOPPING-9. This local delivery does not satisfy physical-device or live-sharing acceptance: SHOPPING-10 enrollment and SHOPPING-30 two-account proof remain separate gates.
+
+## Phase 33: App Intents, Siri and Home Experience
+
+Module `32925179-3c3d-4115-9dfb-954a07313718` targets minor release **1.6.0**. SHOPPING-217 establishes shared system-action routing; SHOPPING-218 adds catalog-aware Siri and Shortcuts. SHOPPING-220 consolidates Home navigation; SHOPPING-221/222 add safe replacement of an empty, unshared starter Home while joining. Other Homes are kept. SHOPPING-223 owns physical Home validation; SHOPPING-219 owns release evidence. Broader SHOPPING-42 query/Spotlight work remains deferred and is not a dependency of this deterministic system-action slice.

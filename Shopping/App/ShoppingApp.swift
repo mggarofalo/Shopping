@@ -48,7 +48,7 @@ struct ShoppingApp: App {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
-        _bootstrap = StateObject(wrappedValue: .application())
+        _bootstrap = StateObject(wrappedValue: ShoppingApplicationRuntime.shared.bootstrap)
     }
 
     var body: some Scene {
