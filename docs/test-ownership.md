@@ -2493,3 +2493,22 @@ and actual system text-size changes. Screenshots use isolated SQLite fixtures.
 ### Starter replacement interaction (SHOPPING-222)
 
 `HomeReplacementUITests` owns the native decision/confirmation, Cancel/Keep Both, Not Now/reopen, Close during confirmed progress, changed-source notice, ineligible-source omission, explicit recovery after relaunch, and same-name accessibility XXXL interaction. Each scenario uses its own UUID store and the isolated `HomeReplacementUITestFixture`; relaunch removes the seed environment. `HomeAdoptionBootstrapTests.testDeferredReplacementCanReopenFromRetainedLocalStarter` covers the separate local-store reconnect boundary. Eligibility, durable cleanup, and account/navigation races remain owned by the SHOPPING-221 fast tests. Navigation waits for the invitation control to disappear before tapping the destination tab; a background Groceries title alone does not establish dismissal.
+
+## Personal Cart positive waits (SHOPPING-229)
+
+The same 19 `PersonalCartUITests` workflows retain every UI assertion, fixture,
+Settings transition and recovery boundary. Thirty-eight positive existence
+assertions use the shared `existsOrAppears` contract with unchanged timeout
+fallbacks. The query still has to resolve the original element; no first-match,
+expected-value filter, or fixture shortcut is added. Existing uniqueness, value,
+hittability, geometry and disappearance checks remain distinct.
+
+After discarding legacy cart status, the feedback message and removal of the
+Strawberries row are independently observed. The view publishes its feedback
+before awaiting list refresh, so the row has its own bounded disappearance wait.
+The workflow still verifies that earlier recovery history remains reachable and
+restorable after a same-store relaunch without fixture reseeding. This replaces
+an incidental polling delay with the actual resulting-state assertion.
+
+No tests are retired and no fixture contents are changed. Runtime benefit must
+come from matched measurements, not a reduction in proof inventory.
