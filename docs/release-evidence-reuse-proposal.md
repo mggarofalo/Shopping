@@ -41,7 +41,12 @@ SHA gate and is not recommended until measured duplication justifies it.
 2. Keep current within-job build reuse for Fast and Acceptance. Their distinct
    result bundles and Fast-only coverage gate remain authoritative.
 3. Keep main CI after integration: it proves the actual release source. Preserve
-   both required PR jobs and the unsigned Release archive.
+   both required PR jobs and the unsigned Release archive. The existing TestFlight
+   guard (`require-release-ci.py`) checks exact-main CI; it does not itself request
+   another Full run. Do not invent that extra requirement from the release gate.
+   The milestone Full requirement still applies to the final candidate, and a
+   changed candidate still needs new proof under the current rules. No attestation
+   is copied to the integration SHA.
 4. Investigate hosted build caching separately only after measuring restoration,
    upload, cache hit rate and compiler invalidation. Historical hosted build was
    290 seconds, an upper bound rather than a promised saving.
