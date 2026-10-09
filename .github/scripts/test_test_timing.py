@@ -119,7 +119,7 @@ class LocalGateTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repository"
         scripts = self.root / ".github/scripts"
         scripts.mkdir(parents=True)
-        for name in ("test-timing.py", "run-local-shopping-full.sh", "summarize-xcresult.sh"):
+        for name in ("test-timing.py", "run-local-shopping-full.sh", "summarize-xcresult.sh", "require-full-preflight.py"):
             shutil.copy2(SCRIPT.with_name(name), scripts / name)
         (self.root / "source.txt").write_text("original\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "fixture")):
@@ -136,6 +136,20 @@ fi
 exit 0
 """)
         self.tool("xcrun", "#!/bin/bash\nexit 0\n")
+        self.tool("gh", """#!/usr/bin/env python3
+import json, os, subprocess, sys
+if sys.argv[1] == 'repo':
+    print('fixture/repository')
+elif '/jobs?' in sys.argv[2]:
+    print(json.dumps({'jobs': [dict(name=name, status='completed', conclusion='success') for name in ('Build & Test', 'Release SDK Build')]}))
+else:
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    if os.environ.get('CHANGE_PREFLIGHT_SOURCE') == '1':
+        with open('source.txt', 'a') as stream:
+            stream.write('changed')
+    print(json.dumps({'workflow_runs': [dict(id=1, head_sha=sha, event='workflow_dispatch', status='completed', conclusion=os.environ.get('CI_RESULT', 'success'), run_attempt=1, html_url='https://example.test/run')]}))
+""")
+
         self.environment = dict(os.environ, PATH=str(self.fakebin) + os.pathsep + os.environ["PATH"],
                                 TMPDIR=self.temporary.name, ORIGINAL_ROOT=str(self.root))
 
@@ -197,6 +211,18 @@ exit 0
         self.assertEqual(result.returncode, 1)
         self.assertFalse(self.attestation().exists())
         self.assertIn("HEAD or the worktree changed", result.stderr)
+
+    def test_preflight_failure_never_starts_full(self):
+        result = self.run_local(CI_RESULT="failure")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / ".git/shopping-test-timings").exists())
+        self.assertFalse(self.attestation().exists())
+
+    def test_source_change_during_preflight_never_starts_full(self):
+        result = self.run_local(CHANGE_PREFLIGHT_SOURCE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Source changed during Full preflight", result.stderr)
+        self.assertFalse((self.root / ".git/shopping-test-timings").exists())
 
     def test_dirty_source_refused_before_execution(self):
         (self.root / "source.txt").write_text("dirty\n")
