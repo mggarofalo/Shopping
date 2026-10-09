@@ -56,7 +56,10 @@ struct AddGroceryIntent: ForegroundContinuableIntent {
             item = choice
         }
         let added = try await context.add(itemID: item.id, using: token)
-        return .result(dialog: added ? "Added \(item.name) to your grocery list." : "\(item.name) is already on your grocery list.")
+        let dialog: IntentDialog = added
+            ? "Added \(item.name) to your grocery list."
+            : "\(item.name) is already on your grocery list."
+        return .result(dialog: dialog)
     }
 }
 
