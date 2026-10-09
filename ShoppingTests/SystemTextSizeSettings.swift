@@ -75,13 +75,15 @@ final class SystemTextSizeSettings {
         original = try Self.readMetadata(fileURL: metadataURL, nonce: nonce)
         settings.launch()
         if !settings.navigationBars["Larger Text"].exists {
-            let accessibility = settings.buttons["com.apple.settings.accessibility"]
-            guard accessibility.existsOrAppears(timeout: 5), accessibility.isHittable else {
-                XCTFail("Settings control unavailable: com.apple.settings.accessibility")
-                throw Failure.missingControls
+            if !settings.navigationBars["Display & Text Size"].exists {
+                let accessibility = settings.buttons["com.apple.settings.accessibility"]
+                guard accessibility.existsOrAppears(timeout: 5), accessibility.isHittable else {
+                    XCTFail("Settings control unavailable: com.apple.settings.accessibility")
+                    throw Failure.missingControls
+                }
+                accessibility.tap()
+                try openSettingsRow(identifier: "DISPLAY_AND_TEXT", source: "Accessibility", destination: "Display & Text Size")
             }
-            accessibility.tap()
-            try openSettingsRow(identifier: "DISPLAY_AND_TEXT", source: "Accessibility", destination: "Display & Text Size")
             try openSettingsRow(identifier: "LARGER_TEXT", source: "Display & Text Size", destination: "Larger Text")
         }
         let controls = try readControls(captureInventory: true)
@@ -212,6 +214,9 @@ final class SystemTextSizeSettings {
     }
 
     private func setControls(toggleValue: String, position: CGFloat) throws {
+        if settings.navigationBars["Display & Text Size"].exists {
+            try openSettingsRow(identifier: "LARGER_TEXT", source: "Display & Text Size", destination: "Larger Text")
+        }
         let controls = try readControls()
         try wait("Larger Text controls must be reachable after Settings activation") {
             controls.rangeSwitch.exists && controls.rangeSwitch.isHittable && controls.slider.exists && controls.slider.isHittable
@@ -230,6 +235,14 @@ final class SystemTextSizeSettings {
         guard app.state != .notRunning else {
             XCTFail("The app stopped during the Settings roundtrip; activation must not relaunch it")
             throw Failure.appStopped
+        }
+        // Complete the native Settings edit before switching apps. Leaving
+        // during continuous slider updates can retain an intermediate size.
+        let back = settings.navigationBars["Larger Text"].buttons["Display & Text Size"]
+        try wait("Larger Text back button must be reachable") { back.exists && back.isHittable }
+        back.tap()
+        try wait("Settings must finish the Larger Text edit") {
+            self.settings.navigationBars["Display & Text Size"].exists
         }
         let previous = try Self.readMetadata(fileURL: fileURL, nonce: nonce)
         let activationStarted = ProcessInfo.processInfo.systemUptime
