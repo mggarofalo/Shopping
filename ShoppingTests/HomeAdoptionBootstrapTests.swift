@@ -1216,6 +1216,196 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertEqual(try access(try XCTUnwrap(opened.personalCartService), graph: fixture.invited).currentGrants.count, 1)
     }
 
+
+    private func retainedStarter(_ fixture: ImportedInvitationFixture) throws -> (URL, LocalStarterEvidence) {
+        let url = fixture.directory.appendingPathComponent("Starter.sqlite")
+        let local = try PersistenceController(storeURL: url)
+        let store = try XCTUnwrap(local.primaryStore)
+        let command = try LocalHomeCreationJournal(storeURL: url).begin(name: "My Home", storeIdentifier: store.identifier)
+        _ = try NeedService(persistence: local).createLocalHousehold(command: command)
+        let evidence = try XCTUnwrap(LocalStarterJournal(storeURL: url).load())
+        local.writer.performAndWait { local.writer.reset() }
+        local.container.viewContext.performAndWait { local.container.viewContext.reset() }
+        for store in local.container.persistentStoreCoordinator.persistentStores {
+            try local.container.persistentStoreCoordinator.remove(store)
+        }
+        let session = try fixture.provider.currentSession()
+        let source = DeviceLocalHomeSelection(sourceURL: url, graph: evidence.graph, homeName: evidence.name, session: session)
+        try DeviceLocalHomeSelectionJournal(baseDirectory: fixture.directory).select(source)
+        let inbox = try HomeInvitationInbox(url: fixture.inboxURL, containerIdentifier: session.containerIdentifier, environment: session.environment)
+        let entry = try XCTUnwrap(inbox.entries.first { $0.id == fixture.entryID })
+        try HomeReplacementOriginJournal(base: fixture.directory, session: session).save(
+            HomeReplacementOrigin(source: source, invitationID: entry.id, invitation: entry.identity))
+        return (url, evidence)
+    }
+
+    private func waitForReplacementOffer(_ bootstrap: PersistenceBootstrap) async throws -> HomeReplacementProposal {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.replacementOffer == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return try XCTUnwrap(bootstrap.replacementOffer)
+    }
+
+    func testRelaunchRetainsExactPendingReplacementUntilExplicitRetry() async throws {
+        try await assertReplacementRecovery(stage: .cleanupPending)
+    }
+
+    func testResolvedInvitationRecoversInterruptedActivationOnExplicitRetry() async throws {
+        try await assertReplacementRecovery(stage: .activating)
+    }
+
+    func testInterruptedReplacementCanKeepMountedStarterVisibleAndEditable() async throws {
+        try await assertReplacementRecovery(stage: .cleanupPending, keepMounted: true)
+    }
+
+    private func assertReplacementRecovery(stage: HomeReplacementRecord.Stage, keepMounted: Bool = false) async throws {
+        let fixture = try await importedInvitation()
+        let (url, evidence) = try retainedStarter(fixture)
+        let session = try fixture.provider.currentSession()
+        let inbox = try HomeInvitationInbox(url: fixture.inboxURL, containerIdentifier: session.containerIdentifier, environment: session.environment)
+        let entry = try XCTUnwrap(inbox.entries.first { $0.id == fixture.entryID })
+        let proposal = HomeReplacementProposal(id: UUID(), source: evidence, sourceURL: url,
+            invitationID: entry.id, invitation: entry.identity, session: session, navigationIntent: UUID())
+        let local = try PersistenceController(storeURL: url)
+        var command = try await HomeDeletionService(persistence: local).prepare(graph: evidence.graph, scope: nil)
+        command.starterRequirement = evidence
+        local.writer.performAndWait { local.writer.reset() }
+        local.container.viewContext.performAndWait { local.container.viewContext.reset() }
+        for store in local.container.persistentStoreCoordinator.persistentStores {
+            try local.container.persistentStoreCoordinator.remove(store)
+        }
+        let journal = HomeReplacementJournal(url: try session.storeDirectory(in: fixture.directory)
+            .appendingPathComponent("home-replacement.json"), session: session)
+        var record = try journal.confirm(proposal)
+        var next = record
+        next.stage = .joining
+        try journal.update(next, replacing: record); record = next
+        next.stage = .activating
+        next.target = ActiveHomeScope(session: session, graph: fixture.invited)
+        try journal.update(next, replacing: record); record = next
+        if stage == .cleanupPending {
+            next.stage = .targetActivated
+            try journal.update(next, replacing: record); record = next
+            next.stage = .cleanupPending
+            next.deletion = command
+            try journal.update(next, replacing: record)
+            // Crash after retaining exact deletion, before its SQLite save.
+            try LocalHomeDeletionJournal(storeURL: url).retain(command)
+        }
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited || bootstrap.replacementRecord == nil,
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(bootstrap.replacementRecord?.stage, stage)
+        XCTAssertFalse(try LocalHomeDeletionJournal(storeURL: url).statuses().contains { $0.completed },
+                       "Generic recovery must not execute replacement cleanup")
+        if keepMounted {
+            try await bootstrap.openRetainedLocalHome()
+            await bootstrap.runLoadingTransition()
+            let localReady = try await waitForReady(bootstrap)
+            await bootstrap.refreshHomeDeletionStatuses()
+            XCTAssertEqual(localReady.householdID, evidence.graph.householdID)
+            XCTAssertEqual(bootstrap.homeEntry.currentHomeName, evidence.name)
+            try localReady.service.renameLocalHome(name: "Keep this Home", graph: evidence.graph)
+            try await bootstrap.keepStarterAfterInterruptedReplacement()
+            XCTAssertEqual(bootstrap.replacementRecord?.stage, .sourceKept)
+            XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
+            return
+        }
+        try await bootstrap.retryStarterReplacement()
+        XCTAssertEqual(bootstrap.replacementRecord?.stage, .completed)
+        if stage == .cleanupPending {
+            XCTAssertEqual(bootstrap.replacementRecord?.deletion, command)
+            XCTAssertEqual(try LocalHomeDeletionJournal(storeURL: url).statuses().first?.command, command)
+        }
+        XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().first?.completed == true)
+    }
+
+    func testConfirmedStarterReplacementActivatesInvitedHomeBeforeRemovingOnlyLocalStarter() async throws {
+        let fixture = try await importedInvitation()
+        let (url, evidence) = try retainedStarter(fixture)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        let offer = try await waitForReplacementOffer(bootstrap)
+        XCTAssertEqual(offer.source, evidence)
+        XCTAssertNotEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        try await bootstrap.confirmStarterReplacement()
+        XCTAssertEqual(bootstrap.replacementRecord?.stage, .completed)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertNil(bootstrap.homeEntry.retainedLocalHomeName)
+        let status = try XCTUnwrap(LocalHomeDeletionJournal(storeURL: url).statuses().first)
+        XCTAssertTrue(status.completed)
+        XCTAssertEqual(status.command.graph, evidence.graph)
+        XCTAssertTrue(bootstrap.homeCoordinator.homes.contains { $0.graph == fixture.original })
+    }
+
+    func testConcurrentStarterConfirmationHasOneBootstrapOwner() async throws {
+        let fixture = try await importedInvitation()
+        let (url, _) = try retainedStarter(fixture)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        _ = try await waitForReplacementOffer(bootstrap)
+        let first = Task { try await bootstrap.confirmStarterReplacement() }
+        let second = Task { try await bootstrap.confirmStarterReplacement() }
+        var successes = 0
+        var rejectedDuplicates = 0
+        for result in [await first.result, await second.result] {
+            switch result {
+            case .success: successes += 1
+            case .failure(HomeReplacementError.operationInProgress): rejectedDuplicates += 1
+            case .failure(let error): throw error
+            }
+        }
+        XCTAssertEqual(successes, 1)
+        XCTAssertEqual(rejectedDuplicates, 1)
+        XCTAssertEqual(try LocalHomeDeletionJournal(storeURL: url).statuses().count, 1)
+    }
+
+    func testUnrelatedRetainedStarterIsNotOfferedForReplacement() async throws {
+        let fixture = try await importedInvitation()
+        let (url, evidence) = try retainedStarter(fixture)
+        let session = try fixture.provider.currentSession()
+        // This retained source belongs to a different invitation journey.
+        try HomeReplacementOriginJournal(base: fixture.directory, session: session).save(.init(
+            source: .init(sourceURL: url, graph: evidence.graph, homeName: evidence.name, session: session),
+            invitationID: UUID(), invitation: .init(containerIdentifier: session.containerIdentifier,
+                environment: session.environment, share: .init(recordName: "unrelated", zoneName: "other", zoneOwnerName: "owner"))))
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(bootstrap.replacementOffer)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
+    }
+
+    func testKeepStarterOpensInvitationAndNeverWritesDeletion() async throws {
+        let fixture = try await importedInvitation()
+        let (url, _) = try retainedStarter(fixture)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        _ = try await waitForReplacementOffer(bootstrap)
+        bootstrap.keepStarterAndOpenInvitation()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
+        XCTAssertEqual(bootstrap.homeEntry.retainedLocalHomeName, "My Home")
+        XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
+    }
+
+    func testDifferentHomeChoiceInvalidatesOfferedReplacement() async throws {
+        let fixture = try await importedInvitation()
+        let (url, _) = try retainedStarter(fixture)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        _ = try await waitForReplacementOffer(bootstrap)
+        try await bootstrap.selectHome(XCTUnwrap(fixture.original))
+        do { try await bootstrap.confirmStarterReplacement(); XCTFail("New Home choice owns navigation") }
+        catch HomeReplacementError.invalidProposal {}
+        XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.original)
+    }
+
     func testAcceptedInvitationOpensImportedHomeWithoutAnotherOpenChoice() async throws {
         let fixture = try await importedInvitation()
         let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)

@@ -921,13 +921,29 @@ final class NeedService: @unchecked Sendable {
 
     func createLocalHousehold(command: LocalHomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {
         let name = try validatedName(command.name)
-        return try write { context in
-            guard let store = self.persistence.primaryStore,
-                  store.identifier == command.storeIdentifier,
-                  self.persistence.role(of: store) == .local,
-                  self.persistence.personalCartSessionProvider == nil else { throw NeedServiceError.scopeChanged }
-            return try self.replayHousehold(name: name, householdID: command.householdID,
-                listID: command.listID, store: store, context: context)
+        return try persistence.writer.performAndWait {
+            let result = try write { context in
+                guard let store = self.persistence.primaryStore,
+                      store.identifier == command.storeIdentifier,
+                      self.persistence.role(of: store) == .local,
+                      self.persistence.personalCartSessionProvider == nil else { throw NeedServiceError.scopeChanged }
+                let request = Household.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@", command.householdID as CVarArg)
+                let isNew = try context.count(for: request) == 0
+                let ids = try self.replayHousehold(name: name, householdID: command.householdID,
+                    listID: command.listID, store: store, context: context)
+                return (ids, isNew)
+            }
+            if result.1 {
+                // Creation is already durable. An unavailable optional eligibility
+                // record must keep the Home, never make creation retryable.
+                if let url = persistence.primaryStore?.url,
+                   let evidence = try? LocalStarterEligibility.capture(command: command, persistence: persistence,
+                                                                       context: persistence.writer) {
+                    try? LocalStarterJournal(storeURL: url).save(evidence)
+                }
+            }
+            return result.0
         }
     }
 

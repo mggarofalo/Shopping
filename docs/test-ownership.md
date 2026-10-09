@@ -2483,3 +2483,9 @@ leave/delete workflows through Settings → Homes. `PersonalCartUITests` retains
 selection/cart isolation and local/retained Home recovery; its tap paths now use
 the same Homes sheet. `HomeSharingStatusUITests` retains native status navigation
 and actual system text-size changes. Screenshots use isolated SQLite fixtures.
+
+### Starter Home replacement (SHOPPING-221)
+
+- `LocalStarterEvidenceTests` owns positive local creation provenance, historical exclusion, catalog/rename disqualification, durable exact deletion requirements, revocable write authority, and real SQLite removal/reopen.
+- `HomeReplacementCoordinatorTests` owns durable activation/cleanup checkpoints, duplicate callbacks, interruption replay, unavailable target, and account isolation.
+- `HomeAdoptionBootstrapTests` owns invitation-to-replacement composition: keep, replace, concurrent confirmation, newer selection, and explicit retry after activation or retained-deletion interruption. Native share verification is a substituted boundary in these fixtures, not physical CloudKit proof.

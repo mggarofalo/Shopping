@@ -65,6 +65,18 @@ extension EnvironmentValues {
 
 @MainActor
 final class PersistenceBootstrap: ObservableObject {
+    private let retainedLocalStoreAccess = RetainedLocalStoreAccess()
+    @Published private(set) var replacementOffer: HomeReplacementProposal?
+    @Published private(set) var replacementRecord: HomeReplacementRecord?
+    @Published private(set) var replacementError: String?
+    private var replacementChoicesChecked: Set<UUID> = []
+    private var replacementSelectionGeneration: UInt64?
+    private var replacementNavigationAuthority: UICommandAuthority?
+    private var replacementOperationID: UUID?
+    private var replacementConfirmedProposal: HomeReplacementProposal?
+    private var replacementRecoveryAccount: ShopperSession?
+    private var replacementOperation: HomeReplacementCoordinator?
+
     private struct PreparedStore: @unchecked Sendable {
         let configuration: PersistenceConfiguration
         let persistence: PersistenceController
@@ -1107,8 +1119,10 @@ final class PersistenceBootstrap: ObservableObject {
         }
         guard loadingTransitionID == transition.id,
               transition.previous.map({ !mountedPresentations.contains($0.presentation.id) }) ?? true else { return }
-        self.transition = nil
         do {
+            await retainedLocalStoreAccess.drain()
+            guard self.transition?.id == transition.id else { return }
+            self.transition = nil
             try await detachStores(transition.previous)
             pendingRetirement = nil
             transition.action()
@@ -1120,6 +1134,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     private func beginTransition(_ action: @escaping () -> Void) {
         guard transition == nil else { return }
+        replacementOffer = nil
         let previous: ReadyState?
         if case .ready(let ready) = state { previous = ready } else { previous = pendingRetirement }
         pendingRetirement = previous
@@ -1156,7 +1171,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     func applicationDidEnterForeground() {
         guard case .ready = state, transition == nil else { return }
-        Task { await refreshHomeDeletionStatuses() }
+        Task { await loadReplacementRecovery(); await refreshHomeDeletionStatuses() }
         if let accountProvider {
             Task {
                 do { try await retireColdAccountInvalidation() }
@@ -1326,6 +1341,11 @@ final class PersistenceBootstrap: ObservableObject {
             await provider.refresh()
             let session = try verifiedSession(provider)
             let selected = try await selectedLocalSource(ready, session: session)
+            if let invitationID, let entry = invitations?.allEntries.first(where: { $0.id == invitationID }) {
+                let origin = HomeReplacementOrigin(source: selected, invitationID: invitationID, invitation: entry.identity)
+                // This optional evidence never blocks the ordinary keep-and-join path.
+                _ = try? await Task.detached(priority: .utility) { try HomeReplacementOriginJournal(base: base, session: session).save(origin) }.value
+            }
             let prior = try await Task.detached(priority: .userInitiated) {
                 try HomeAdoptionJournal(baseDirectory: base).verifiedRecord()
             }.value
@@ -1548,8 +1568,11 @@ final class PersistenceBootstrap: ObservableObject {
         }
         let capturedGeneration = generation
         let base = try await resolvedAccountDirectory()
+        guard generation == capturedGeneration, transition == nil, deviceLocalHome == record,
+              case .ready(let current) = state,
+              current.persistence.primaryStore?.url?.standardizedFileURL != sourceURL.standardizedFileURL else { return [] }
         let retained = record
-        let statuses = try await Task.detached(priority: .userInitiated) {
+        let statuses = try await retainedLocalStoreAccess.perform {
             let journal = LocalHomeDeletionJournal(storeURL: sourceURL)
             let matches: (HomeDeletionStatus) -> Bool = {
                 $0.command.graph.storeIdentifier == sourceStoreID
@@ -1570,11 +1593,11 @@ final class PersistenceBootstrap: ObservableObject {
                 throw HomeAdoptionJournal.Failure.sourceChanged
             }
             let service = HomeDeletionService(persistence: persistence)
-            for status in initial where !status.completed {
+            for status in initial where !status.completed && status.command.starterRequirement == nil {
                 _ = try await service.reconcile(status.command)
             }
             return try await service.statuses().filter(matches)
-        }.value
+        }
         guard generation == capturedGeneration, deviceLocalHome == record else { return [] }
         return statuses
     }
@@ -2438,7 +2461,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func scheduleAutomaticInvitationOpen() {
-        guard autoJoinInvitations, autoOpeningInvitationID == nil,
+        guard autoJoinInvitations, autoOpeningInvitationID == nil, replacementOffer == nil, replacementOperation == nil,
               pendingColdAccountInvalidation == false,
               pendingAccountNavigationRetirements.isEmpty, verifiedAccountIntentRetirement == nil,
               personalMode,
@@ -2457,6 +2480,8 @@ final class PersistenceBootstrap: ObservableObject {
                 scheduleAutomaticInvitationOpen()
             }
             do {
+                await loadReplacementRecovery()
+                if await offerStarterReplacement(for: entry) { return }
                 // One accepted invitation owns automatic navigation. Earlier
                 // accepted homes remain available through a deliberate Open.
                 try await deferAutomaticInvitationOpens(for: session, except: entry.id)
@@ -2511,6 +2536,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func dismissJoin(_ id: UUID) async throws {
+        if replacementOffer?.invitationID == id { replacementOffer = nil }
         guard let invitations, let entry = invitations.allEntries.first(where: { $0.id == id }) else {
             throw HomeInvitationInbox.Error.invalidState
         }
@@ -2523,6 +2549,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func selectHome(_ graph: HomeGraphIdentity) async throws {
+        replacementOffer = nil
         guard case .ready(let ready) = state, ready.presentation.isActive,
               let session = try accountProvider?.currentSession() else { throw ShopperSessionError.setupRequired }
         let capturedGeneration = generation
@@ -2560,9 +2587,10 @@ final class PersistenceBootstrap: ObservableObject {
         applyHomeSelection(to: ready)
     }
 
+    @discardableResult
     func activateInvitedHome(entryID: UUID, graph: HomeGraphIdentity,
                              expectedSelectionGeneration: UInt64? = nil,
-                             userInitiated: Bool = true) async throws {
+                             userInitiated: Bool = true) async throws -> (generation: UInt64, authority: UICommandAuthority) {
         if userInitiated {
             homeCoordinator.recordExplicitChoice()
             copyPreparation = nil
@@ -2590,6 +2618,7 @@ final class PersistenceBootstrap: ObservableObject {
         let verifier = makeHomeRejoinVerifier(cart)
         let reservationID = UUID()
         var reservedDiscovery = false
+        var committedSelection: (generation: UInt64, authority: UICommandAuthority)?
         func releaseDiscovery() async {
             guard reservedDiscovery, invitationDiscoveryReservations[ready.presentation.id] == reservationID else { return }
             invitationDiscoveryReservations.removeValue(forKey: ready.presentation.id)
@@ -2630,6 +2659,7 @@ final class PersistenceBootstrap: ObservableObject {
                 try validateChoice()
                 guard self.homeCoordinator.reconcile(discovery, request: request) else { throw HomeInvitationInbox.Error.invalidState }
                 try self.homeCoordinator.select(graph, renewingAuthority: true)
+                committedSelection = (self.homeCoordinator.generation, self.homeCoordinator.choiceAuthority)
                 self.applyHomeSelection(to: ready)
                 try await invitationController.resolveActivation(entryID)
             }
@@ -2638,6 +2668,8 @@ final class PersistenceBootstrap: ObservableObject {
             throw error
         }
         await releaseDiscovery()
+        guard let committedSelection else { throw HomeInvitationInbox.Error.invalidState }
+        return committedSelection
     }
 
     func keepCurrentHome(entryID: UUID) async throws {
@@ -3187,6 +3219,11 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     func retryHomeDeletion(_ command: HomeDeletionCommand) async throws {
+        if command.starterRequirement != nil {
+            guard replacementRecord?.deletion == command else { throw HomeReplacementError.invalidProposal }
+            try await retryStarterReplacement()
+            return
+        }
         guard !isDeletingHome, case .ready(let ready) = state,
               homeDeletionStatuses.contains(where: { $0.command == command && !$0.completed }) else { throw HomeDeletionError.scopeChanged }
         isDeletingHome = true
@@ -3231,7 +3268,8 @@ final class PersistenceBootstrap: ObservableObject {
             homeDeletionStatuses = statuses
             homeDeletionStatusError = nil
             if reconcile, !isDeletingHome {
-                for status in statuses where !status.completed && status.command.graph.storeIdentifier == ready.persistence.primaryStore?.identifier {
+                for status in statuses where !status.completed && status.command.starterRequirement == nil
+                    && status.command.graph.storeIdentifier == ready.persistence.primaryStore?.identifier {
                     guard isCurrent() else { return }
                     do { _ = try await service.reconcile(status.command) }
                     catch { homeDeletionStatusError = "Couldn’t check deletion. Try again." }
@@ -3275,7 +3313,7 @@ final class PersistenceBootstrap: ObservableObject {
                 Task { try? await refreshHomes() }
             }
         } else if homeDeletionStatuses.contains(where: {
-            $0.command.graph.householdID == ready.householdID && $0.command.graph.listID == ready.listID
+            $0.blocksHomeUse && $0.command.graph.householdID == ready.householdID && $0.command.graph.listID == ready.listID
         }) {
             if isShowingRetainedLocalHome {
                 deviceLocalHome = nil
@@ -3354,7 +3392,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func resumePendingCart(recheckIfRunning: Bool = false) {
-        Task { await refreshHomeDeletionStatuses() }
+        Task { await loadReplacementRecovery(); await refreshHomeDeletionStatuses() }
         Task { await refreshHomeLeaveStatuses() }
         Task { await refreshHomeAccessAndReplay(recheckIfRunning: recheckIfRunning) }
     }
@@ -3412,3 +3450,292 @@ private struct UITestHomeRejoinVerifier: HomeRejoinVerifying {
     }
 }
 #endif
+
+extension PersistenceBootstrap {
+    private func offerStarterReplacement(for entry: HomeInvitationInbox.Entry) async -> Bool {
+        if replacementOffer?.invitationID == entry.id { return true }
+        guard !replacementChoicesChecked.contains(entry.id), replacementOperation == nil,
+              let retained = deviceLocalHome, let url = retained.sourceURL,
+              let provider = accountProvider, let session = try? verifiedSession(provider),
+              retained.session == session, case .ready(let ready) = state,
+              ready.persistence.primaryStore?.url?.standardizedFileURL != url.standardizedFileURL else { return false }
+        replacementChoicesChecked.insert(entry.id)
+        let selection = homeCoordinator.generation
+        let presentation = ready.presentation.id
+        do {
+            let base = try await resolvedAccountDirectory()
+            guard homeCoordinator.generation == selection, transition == nil,
+                  case .ready(let current) = state, current.presentation.id == presentation,
+                  current.presentation.isActive,
+                  current.persistence.primaryStore?.url?.standardizedFileURL != url.standardizedFileURL else { return false }
+            let evidence = try await retainedLocalStoreAccess.perform {
+                try Self.validateDeviceLocalHome(retained, base: base)
+                guard let origin = try HomeReplacementOriginJournal(base: base, session: session).load(),
+                      origin.invitationID == entry.id, origin.invitation == entry.identity,
+                      origin.source.sourceURL.standardizedFileURL == url.standardizedFileURL,
+                      origin.source.graph.storeIdentifier == retained.storeIdentifier,
+                      origin.source.graph.householdID == retained.householdID,
+                      origin.source.graph.listID == retained.listID,
+                      let evidence = try LocalStarterJournal(storeURL: url).load(),
+                      evidence.graph.storeIdentifier == retained.storeIdentifier,
+                      evidence.graph.householdID == retained.householdID,
+                      evidence.graph.listID == retained.listID else { return nil as LocalStarterEvidence? }
+                let persistence = try PersistenceController(storeURL: url)
+                defer { Self.closeReplacementSource(persistence) }
+                try persistence.writer.performAndWait {
+                    try LocalStarterEligibility.validate(evidence, persistence: persistence, context: persistence.writer)
+                }
+                return evidence
+            }
+            guard let evidence, homeCoordinator.generation == selection,
+                  case .ready(let current) = state, current.presentation.id == presentation,
+                  current.presentation.isActive, transition == nil,
+                  try verifiedSession(provider) == session,
+                  invitations?.allEntries.contains(where: { $0.id == entry.id && $0.openRequested && !$0.activationResolved }) == true else { return false }
+            replacementSelectionGeneration = selection
+            replacementNavigationAuthority = homeCoordinator.choiceAuthority
+            replacementOffer = HomeReplacementProposal(id: UUID(), source: evidence, sourceURL: url,
+                invitationID: entry.id, invitation: entry.identity, session: session, navigationIntent: UUID())
+            return true
+        } catch {
+            // Eligibility is optional. Unproven or busy sources always remain.
+            return false
+        }
+    }
+
+    func keepStarterAndOpenInvitation() {
+        guard replacementOffer != nil else { return }
+        replacementOffer = nil
+        replacementSelectionGeneration = nil
+        scheduleAutomaticInvitationOpen()
+    }
+
+    func confirmStarterReplacement() async throws {
+        guard replacementOperationID == nil else { throw HomeReplacementError.operationInProgress }
+        let operationID = UUID()
+        replacementOperationID = operationID
+        defer { if replacementOperationID == operationID { replacementOperationID = nil } }
+        guard let proposal = replacementOffer else { throw HomeReplacementError.invalidProposal }
+        try validateReplacementIntent(proposal, target: nil)
+        let base = try await resolvedAccountDirectory()
+        try validateReplacementIntent(proposal, target: nil)
+        let journal = HomeReplacementJournal(url: try proposal.session.storeDirectory(in: base)
+            .appendingPathComponent("home-replacement.json"), session: proposal.session)
+        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self))
+        replacementOperation = coordinator
+        defer { replacementOperation = nil; replacementConfirmedProposal = nil }
+        replacementConfirmedProposal = proposal
+        do {
+            replacementRecord = try await coordinator.confirm(proposal)
+            replacementOffer = nil
+            replacementRecord = try await coordinator.resume(proposal.id)
+            replacementError = nil
+            await refreshHomeDeletionStatuses(reconcile: false)
+        } catch {
+            replacementRecord = try? await Task.detached { try journal.records().first(where: { $0.id == proposal.id }) }.value
+            replacementError = error.localizedDescription
+            throw error
+        }
+    }
+
+    func validateReplacementIntent(_ proposal: HomeReplacementProposal, target: ActiveHomeScope?) throws {
+        try replacementNavigationAuthority?.validate()
+        guard replacementNavigationAuthority != nil,
+              replacementOffer == proposal || replacementConfirmedProposal == proposal,
+              let expected = replacementSelectionGeneration, homeCoordinator.generation == expected,
+              transition == nil, !accountLoadInProgress, case .ready(let ready) = state,
+              ready.presentation.isActive, let provider = accountProvider,
+              try verifiedSession(provider) == proposal.session,
+              ready.persistence.personalCartInitialBinding == proposal.session.accountBinding,
+              deviceLocalHome?.sourceURL?.standardizedFileURL == proposal.sourceURL.standardizedFileURL,
+              ready.persistence.primaryStore?.url?.standardizedFileURL != proposal.sourceURL.standardizedFileURL,
+              let entry = invitations?.allEntries.first(where: { $0.id == proposal.invitationID }),
+              entry.identity == proposal.invitation, entry.session == proposal.session,
+              (entry.openRequested && !entry.activationResolved) || (target != nil && ready.homeScope == target && homeCoordinator.activeScope == target) else {
+            throw HomeReplacementError.intentChanged
+        }
+    }
+
+    func replacementTarget(_ proposal: HomeReplacementProposal) throws -> ActiveHomeScope? {
+        try validateReplacementIntent(proposal, target: nil)
+        guard let entry = invitations?.allEntries.first(where: { $0.id == proposal.invitationID }),
+              case .ready(let graph) = entry.state else { return nil }
+        _ = try validateInvitationChoice(entry.id, graph: graph)
+        return ActiveHomeScope(session: proposal.session, graph: graph)
+    }
+
+    func activateReplacementTarget(_ target: ActiveHomeScope, proposal: HomeReplacementProposal) async throws {
+        if let entry = invitations?.allEntries.first(where: { $0.id == proposal.invitationID }), entry.activationResolved {
+            try validateReplacementIntent(proposal, target: target)
+            guard case .ready(let graph) = entry.state, graph == target.graph,
+                  homeCoordinator.activeScope == target else { throw HomeReplacementError.intentChanged }
+            return
+        }
+        try validateReplacementIntent(proposal, target: nil)
+        guard try replacementTarget(proposal) == target else { throw HomeReplacementError.intentChanged }
+        let committedSelection = try await activateInvitedHome(entryID: proposal.invitationID, graph: target.graph,
+            expectedSelectionGeneration: replacementSelectionGeneration, userInitiated: false)
+        // Use the generation captured at selection, before asynchronous inbox
+        // acknowledgement; a newer same-Home choice must still invalidate cleanup.
+        replacementSelectionGeneration = committedSelection.generation
+        replacementNavigationAuthority = committedSelection.authority
+    }
+
+    func prepareReplacementCleanup(_ proposal: HomeReplacementProposal) async throws -> HomeDeletionCommand {
+        guard let scope = homeCoordinator.activeScope else { throw HomeReplacementError.intentChanged }
+        try validateReplacementIntent(proposal, target: scope)
+        return try await withReplacementSource(proposal, target: scope) { persistence in
+            try persistence.writer.performAndWait {
+                try LocalStarterEligibility.validate(proposal.source, persistence: persistence, context: persistence.writer)
+            }
+            var command = try await HomeDeletionService(persistence: persistence).prepare(graph: proposal.source.graph, scope: nil)
+            command.starterRequirement = proposal.source
+            return command
+        }
+    }
+
+    func removeReplacementSource(_ command: HomeDeletionCommand, proposal: HomeReplacementProposal,
+                                 target: ActiveHomeScope) async throws -> HomeDeletionStatus {
+        try validateReplacementIntent(proposal, target: target)
+        guard homeCoordinator.activeScope == target,
+              case .ready(let ready) = state, ready.homeScope == target, let navigation = replacementNavigationAuthority,
+              let provider = accountProvider else { throw HomeReplacementError.intentChanged }
+        let presentation = ready.presentation.commandAuthority
+        let authority = UICommandAuthority {
+            try presentation.validate()
+            try navigation.validate()
+            guard case .ready(let session) = provider.state, session == proposal.session else {
+                throw HomeReplacementError.intentChanged
+            }
+        }
+        return try await withReplacementSource(proposal, target: target) { persistence in
+            try await HomeDeletionService(persistence: persistence).execute(command, authority: authority)
+        }
+    }
+
+    private func withReplacementSource<Value: Sendable>(_ proposal: HomeReplacementProposal,
+        target: ActiveHomeScope, operation: @escaping @Sendable (PersistenceController) async throws -> Value) async throws -> Value {
+        guard let retained = deviceLocalHome else { throw HomeReplacementError.intentChanged }
+        let base = try await resolvedAccountDirectory()
+        try validateReplacementIntent(proposal, target: target)
+        return try await retainedLocalStoreAccess.perform {
+            try Self.validateDeviceLocalHome(retained, base: base)
+            let persistence = try PersistenceController(storeURL: proposal.sourceURL)
+            defer { Self.closeReplacementSource(persistence) }
+            guard persistence.primaryStore?.identifier == proposal.source.graph.storeIdentifier else {
+                throw HomeDeletionError.scopeChanged
+            }
+            return try await operation(persistence)
+        }
+    }
+
+    nonisolated private static func closeReplacementSource(_ persistence: PersistenceController) {
+        persistence.writer.performAndWait { persistence.writer.reset() }
+        persistence.container.viewContext.performAndWait { persistence.container.viewContext.reset() }
+        for store in persistence.container.persistentStoreCoordinator.persistentStores {
+            try? persistence.container.persistentStoreCoordinator.remove(store)
+        }
+    }
+    private func loadReplacementRecovery() async {
+        guard replacementOperation == nil, let provider = accountProvider,
+              let session = try? verifiedSession(provider), replacementRecoveryAccount != session else { return }
+        do {
+            let base = try await resolvedAccountDirectory()
+            let journal = HomeReplacementJournal(url: try session.storeDirectory(in: base)
+                .appendingPathComponent("home-replacement.json"), session: session)
+            let record = try await Task.detached(priority: .utility) {
+                guard var record = try journal.records().last else { return nil as HomeReplacementRecord? }
+                if record.stage == .cleanupPending, let command = record.deletion,
+                   try LocalHomeDeletionJournal(storeURL: command.storeURL).statuses().contains(where: {
+                       $0.command == command && $0.completed
+                   }) {
+                    let previous = record
+                    record.stage = .completed
+                    try journal.update(record, replacing: previous)
+                }
+                return record
+            }.value
+            guard try verifiedSession(provider) == session, replacementOperation == nil else { return }
+            replacementRecoveryAccount = session
+            replacementError = nil
+            replacementRecord = record
+            if let record { replacementChoicesChecked.insert(record.proposal.invitationID) }
+        } catch {
+            replacementError = "Couldn’t check starter Home replacement. Your Homes are kept."
+        }
+    }
+
+    func retryStarterReplacement() async throws {
+        guard replacementOperationID == nil else { throw HomeReplacementError.operationInProgress }
+        let operationID = UUID()
+        replacementOperationID = operationID
+        defer { if replacementOperationID == operationID { replacementOperationID = nil } }
+        guard let record = replacementRecord, !record.isTerminal, replacementOperation == nil,
+              let provider = accountProvider, try verifiedSession(provider) == record.proposal.session else {
+            throw HomeReplacementError.intentChanged
+        }
+        let proposal = record.proposal
+        // Retrying is an explicit new approval in the same account and exact
+        // joined Home. Relaunch alone never grants authority to delete a source.
+        replacementConfirmedProposal = proposal
+        replacementSelectionGeneration = homeCoordinator.generation
+        replacementNavigationAuthority = homeCoordinator.choiceAuthority
+        defer { replacementConfirmedProposal = nil; replacementOperation = nil }
+        try validateReplacementIntent(proposal, target: record.target)
+        let base = try await resolvedAccountDirectory()
+        try validateReplacementIntent(proposal, target: record.target)
+        let journal = HomeReplacementJournal(url: try proposal.session.storeDirectory(in: base)
+            .appendingPathComponent("home-replacement.json"), session: proposal.session)
+        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self))
+        replacementOperation = coordinator
+        do {
+            replacementRecord = try await coordinator.resume(proposal.id)
+            replacementError = nil
+            await refreshHomeDeletionStatuses(reconcile: false)
+        } catch {
+            replacementRecord = try? await Task.detached { try journal.records().first(where: { $0.id == proposal.id }) }.value
+            replacementError = error.localizedDescription
+            throw error
+        }
+    }
+
+    func keepStarterAfterInterruptedReplacement() async throws {
+        guard replacementOperationID == nil, let record = replacementRecord, !record.isTerminal,
+              let provider = accountProvider, try verifiedSession(provider) == record.proposal.session,
+              case .ready(let ready) = state, ready.presentation.isActive, transition == nil else {
+            throw HomeReplacementError.intentChanged
+        }
+        let operationID = UUID()
+        replacementOperationID = operationID
+        defer { if replacementOperationID == operationID { replacementOperationID = nil } }
+        let base = try await resolvedAccountDirectory()
+        guard ready.presentation.isActive, transition == nil,
+              try verifiedSession(provider) == record.proposal.session else { throw HomeReplacementError.intentChanged }
+        if let command = record.deletion {
+            if ready.persistence.primaryStore?.url?.standardizedFileURL == command.storeURL.standardizedFileURL {
+                try await HomeDeletionService(persistence: ready.persistence).cancelUncommittedStarter(command)
+            } else {
+                guard let retained = deviceLocalHome, retained.sourceURL?.standardizedFileURL == command.storeURL.standardizedFileURL else {
+                    throw HomeReplacementError.intentChanged
+                }
+                try await retainedLocalStoreAccess.perform {
+                    try Self.validateDeviceLocalHome(retained, base: base)
+                    let persistence = try PersistenceController(storeURL: command.storeURL)
+                    defer { Self.closeReplacementSource(persistence) }
+                    try await HomeDeletionService(persistence: persistence).cancelUncommittedStarter(command)
+                }
+            }
+        }
+        let journal = HomeReplacementJournal(url: try record.proposal.session.storeDirectory(in: base)
+            .appendingPathComponent("home-replacement.json"), session: record.proposal.session)
+        var kept = record
+        kept.stage = .sourceKept
+        let saved = kept
+        try await Task.detached(priority: .utility) { try journal.update(saved, replacing: record) }.value
+        guard try verifiedSession(provider) == record.proposal.session else { return }
+        replacementRecord = kept
+        replacementError = nil
+        await refreshHomeDeletionStatuses(reconcile: false)
+    }
+
+}

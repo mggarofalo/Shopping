@@ -283,3 +283,11 @@ These sources inform the native components and interaction principles. The speci
 Safari review on October 2 verified the flat two-tap home switch, direct accepted-invitation completion, one-tap first creation, owner deletion confirmation, last-home empty state, and successful retry within the same invitation sheet. The review also caught and corrected a Safari script-name collision and a missing first-create action.
 
 The prototype uses simulated homes and invitation timing. Grocery rows illustrate home context; they do not propose replacing the shared grocery-row layout. Native accessibility, durable operations, real account setup, system invitation delivery, member commands, and CloudKit behavior require the implementation and device checks above.
+
+### Replacing an eligible starter Home
+
+Replacement is optional and applies only to a positively identified, untouched, local-only starter. The app records its first creation and requires the source to contain only its Home and grocery-list roots, with no later persistent transaction. Historical or CloudKit-backed Homes are kept; a visually empty list cannot prove that those Homes contain no other work or pending remote changes (SHOPPING-224).
+
+An accepted invitation must import and pass native access verification before its Home becomes selected. A replacement choice durably captures the exact invitation, account, source graph and store. Activation intent precedes native activation; cleanup intent precedes the source write. The deletion checks source eligibility and revocable navigation/account authority on the writer. Other Homes and personal carts are not cleanup targets. Unmounted source work reserves its store, and a store transition drains that reservation before mounting it.
+
+An interrupted replacement remains visible for explicit retry in its account and joined Home. Generic deletion recovery does not execute starter cleanup. Completed source deletion may be observed after relaunch without repeating it. A newer Home choice, including selecting the same Home again, invalidates queued cleanup.
