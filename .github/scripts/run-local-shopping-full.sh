@@ -10,8 +10,15 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
 commit_sha="$(git rev-parse HEAD)"
+# Fail before simulator startup or compilation when pinned compilers reject this SHA.
+python3 .github/scripts/require-full-preflight.py "$commit_sha"
+if [[ "$(git rev-parse HEAD)" != "$commit_sha" || -n "$(git status --porcelain)" ]]; then
+    echo "Source changed during Full preflight; restart validation." >&2
+    exit 1
+fi
+
+git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
 history_root="$git_common_dir/shopping-test-timings/$commit_sha"
 mkdir -p "$history_root"
 reports="$(mktemp -d "$history_root/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"

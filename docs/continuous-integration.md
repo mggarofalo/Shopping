@@ -79,6 +79,40 @@ Run the tag-filtered critical check:
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingCritical -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
 ```
 
+Before freezing an exhaustive candidate, run the focused UI workflows affected by
+its changes, including recovery, system Settings, and abrupt-exit boundaries when
+applicable. Quick acceptance alone cannot establish a changed workflow outside
+its six selected methods. Record the selection, result bundle, and source SHA in
+the issue; fix failures before committing the candidate.
+
+The candidate gate order is:
+
+```text
+changed-boundary tests → clean committed candidate → push exact branch
+  → manual Swift CI (Build & Test + Release SDK Build)
+  → local ShoppingFull → push unchanged SHA → hosted ShoppingFull
+  → integration → required main CI → signed release
+```
+
+Start the existing compatibility checks early with `gh workflow run swift-ci.yml
+--ref <issue-or-milestone-branch>` after pushing the candidate. Wait for both jobs
+to pass. `run-local-shopping-full.sh` verifies the latest exact-source manual run
+(or main push) before allocating local Full artifacts or touching a simulator.
+It rejects missing, running, failed, skipped, or cancelled proof. Pull-request
+runs compile a synthetic merge commit and do not replace this exact-source gate.
+A source change requires another exact-source check; the preflight never copies
+proof between SHAs. Required PR/main CI and the hosted Full attestation remain.
+
+This reorders the existing manual compatibility check; it adds no compiler job.
+The retained Phase 33 successful manual run took 15m 19s for Build & Test and
+4m 27s for Release SDK Build concurrently. Treat the former as elapsed wait,
+not their sum. If that run was already required, incremental hosted compute is
+zero; otherwise the early gate adds one routine CI run. It avoids the measured
+65m 06s local Full cost when the pinned compiler rejects the candidate. A clean
+release has no demonstrated time saving from this ordering alone. Capture live
+queue time and job duration for subsequent candidates rather than claiming the
+historical sample as a new measurement.
+
 Run exhaustive local coverage:
 
 ```bash
