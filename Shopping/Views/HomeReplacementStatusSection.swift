@@ -58,9 +58,12 @@ struct HomeReplacementStatusSection: View {
     }
 }
 
+#if DEBUG
 #Preview {
     List {
         HomeReplacementStatusSection(bootstrap: PersistenceBootstrap(),
             record: HomeReplacementRecord(proposal: HomeReplacementPreview.proposal, stage: .sourceKept))
     }
 }
+
+#endif

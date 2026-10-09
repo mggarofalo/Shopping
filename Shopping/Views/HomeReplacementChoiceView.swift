@@ -88,13 +88,13 @@ struct HomeReplacementChoiceView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     NavigationStack {
         HomeReplacementChoiceView(bootstrap: PersistenceBootstrap(), proposal: HomeReplacementPreview.proposal)
     }
 }
 
-#if DEBUG
 enum HomeReplacementPreview {
     static let proposal = HomeReplacementProposal(id: UUID(),
         source: LocalStarterEvidence(version: 1, creationID: UUID(),
