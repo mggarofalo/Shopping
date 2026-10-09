@@ -74,6 +74,14 @@ struct PersistenceRootView: View {
                 if case .invitation = sheet { sheet = nil }
             }
         }
+        .onChange(of: bootstrap.homeEntry.root) { previous, root in
+            guard sheet == .homes else { return }
+            if root == .noHomes { sheet = nil; return }
+            switch previous {
+            case .activeHome, .localHome: sheet = nil
+            default: break
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { bootstrap.applicationDidEnterForeground() }
         }

@@ -133,8 +133,8 @@ final class PersonalCartUITests: XCTestCase {
                 if title == "Settings" {
                     let stores = app.buttons["Stores"]
                     XCTAssertTrue(stores.isHittable)
-                    XCTAssertLessThan(stores.frame.minY, app.frame.height / 2,
-                        "Short Settings content must start at the top")
+                    XCTAssertLessThan(app.buttons["shopping.home.scope"].frame.minY, app.frame.height / 2,
+                        "The first Settings section must start at the top; Home names may wrap above Stores")
                     app.swipeUp()
                     XCTAssertTrue(bar.staticTexts[title].isHittable)
                     app.swipeDown()
@@ -223,7 +223,8 @@ final class PersonalCartUITests: XCTestCase {
         app.buttons["shopping.home.createFirst"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["shopping.settings.homeDetails"].tap()
+        app.buttons["shopping.home.scope"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.buttons["shopping.home.useICloud"].exists,
             "The created home must be the local home, not an account-backed fixture")
@@ -243,7 +244,8 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let scope = settingsHomePicker(app)
         XCTAssertTrue((scope.value as? String)?.contains("Cedar Home") == true)
-        app.buttons["shopping.settings.homeDetails"].tap()
+        app.buttons["shopping.home.scope"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
         let delete = app.buttons["shopping.home.delete"]
         XCTAssertTrue(delete.existsOrAppears(timeout: 3))
@@ -350,11 +352,14 @@ final class PersonalCartUITests: XCTestCase {
         let app = launch(personalCart: false, unavailableSetup: true)
         XCTAssertTrue(app.navigationBars["Groceries"].waitForExistence(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        app.buttons["shopping.settings.homeDetails"].tap()
+        app.buttons["shopping.home.scope"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].waitForExistence(timeout: 3))
         app.buttons["shopping.home.useICloud"].tap()
         XCTAssertTrue(app.staticTexts["Your iCloud account is temporarily unavailable. Try again later."].existsOrAppears(timeout: 8))
         XCTAssertTrue(app.navigationBars["Home Settings"].exists)
+        app.navigationBars["Home Settings"].buttons.firstMatch.tap()
+        app.buttons["Done"].tap()
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
         app.terminate()
@@ -472,7 +477,7 @@ final class PersonalCartUITests: XCTestCase {
         choose.tap()
         XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
-            "shopping.home.choice.", "Preview household")).firstMatch.existsOrAppears(timeout: 5))
+            "shopping.home.choice.", "Select Preview household")).firstMatch.existsOrAppears(timeout: 5))
         let original = homeChoice("Preview household", app: app)
         XCTAssertTrue(original.existsOrAppears(timeout: 3))
         original.tap()
@@ -632,7 +637,7 @@ final class PersonalCartUITests: XCTestCase {
         let local = app.buttons["shopping.home.retainedLocal"]
         XCTAssertTrue(local.existsOrAppears(timeout: 3))
         XCTAssertTrue((local.value as? String)?.contains("On This iPhone") == true)
-        app.buttons["shopping.home.settings"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
         XCTAssertTrue(app.buttons["shopping.home.useICloud"].exists)
         XCTAssertFalse(app.buttons["shopping.home.openICloud"].exists)
@@ -656,7 +661,7 @@ final class PersonalCartUITests: XCTestCase {
         openManageHomes(app)
         let local = app.buttons["shopping.home.retainedLocal"]
         XCTAssertTrue(local.existsOrAppears(timeout: 3))
-        app.buttons["shopping.home.settings"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.navigationBars["Home Settings"].existsOrAppears(timeout: 3))
         let useICloud = app.buttons["shopping.home.useICloud"]
         XCTAssertTrue(useICloud.exists)
@@ -686,7 +691,7 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 8))
         XCTAssertTrue((settingsHomePicker(app).value as? String)?.contains("On This iPhone") == true)
         openManageHomes(app)
-        app.buttons["shopping.home.settings"].tap()
+        app.buttons["shopping.home.details.local"].tap()
         XCTAssertTrue(app.buttons["shopping.home.openICloud"].existsOrAppears(timeout: 3),
             "A completed exact copy should open the existing iCloud home rather than create another")
         XCTAssertFalse(app.buttons["shopping.home.useICloud"].exists)
@@ -755,7 +760,7 @@ final class PersonalCartUITests: XCTestCase {
 
     private func homeChoice(_ name: String, app: XCUIApplication) -> XCUIElement {
         let matches = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
-            "shopping.home.choice.", name))
+            "shopping.home.choice.", "Select " + name))
         XCTAssertEqual(matches.count, 1, "The isolated fixture must identify one exact home row")
         return matches.element(boundBy: 0)
     }

@@ -3,13 +3,14 @@ import SwiftUI
 struct HomeSelectionView: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isSelecting = false
     @State private var showingNewHome = false
     @State private var error: String?
 
     private var entry: HomeEntrySnapshot { bootstrap.homeEntry }
     private var localName: String? {
-        entry.retainedLocalHomeName ?? (entry.root == .localHome ? entry.currentHomeName : nil)
+        entry.retainedLocalHomeName ?? (entry.root == .localHome ? (entry.currentHomeName ?? "Home") : nil)
     }
     private var localSelected: Bool { entry.root == .localHome || entry.isShowingRetainedLocalHome }
     private var visibleInvitations: [HomeEntrySnapshot.Invitation] {
@@ -58,55 +59,104 @@ struct HomeSelectionView: View {
         }
     }
 
-    private func homeRow(_ home: HomeEntrySnapshot.Home) -> some View {
-        Button { select(home) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "house")
-                    .foregroundStyle(Color.groceryAccent)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(home.name).foregroundStyle(.primary)
-                    if let context = context(for: home) {
-                        Text(context)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if home.isSelected { Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent) }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+    private var homeRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+    }
+
+    private var detailsLabel: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize { Label("Details", systemImage: "info.circle").labelStyle(.titleAndIcon) }
+            else { Image(systemName: "info.circle") }
         }
-        .disabled(isSelecting || home.access == .unresolved)
-        .accessibilityLabel(home.presentation.title)
-        .accessibilityValue(accessDescription(home.access) + ", "
-            + (home.isSelected ? "Selected" : "Not selected"))
-        .accessibilityIdentifier("shopping.home.choice." + home.id.storeIdentifier + "." + home.id.rootURI)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    private func homeRow(_ home: HomeEntrySnapshot.Home) -> some View {
+        homeRowLayout {
+            Button { select(home) } label: {
+                HStack(spacing: 12) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Image(systemName: "house").foregroundStyle(Color.groceryAccent).frame(width: 24)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(home.name).foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let context = context(for: home) {
+                            Text(context).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if home.isSelected { Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent) }
+                }
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .multilineTextAlignment(.leading)
+            .layoutPriority(1)
+            .disabled(isSelecting || home.access == .unresolved)
+            .accessibilityLabel("Select " + home.presentation.title)
+            .accessibilityValue(accessDescription(home.access) + ", " + (home.isSelected ? "Selected" : "Not selected"))
+            .accessibilityIdentifier("shopping.home.choice." + home.id.storeIdentifier + "." + home.id.rootURI)
+            if let scope = bootstrap.homeDetailsScope(for: home.id) {
+                NavigationLink {
+                    HomeDetailsView(scope: scope, name: home.name,
+                        actions: bootstrap.homeDetailsActions(scope: scope), access: home.access)
+                        .id(scope)
+                } label: {
+                    detailsLabel
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityLabel("Details for " + home.presentation.title)
+                .accessibilityIdentifier("shopping.home.details." + home.id.householdID.uuidString)
+            }
+        }
     }
 
     private func localRow(_ localName: String) -> some View {
-        Button { openRetainedLocalHome() } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "iphone")
-                    .foregroundStyle(Color.groceryAccent)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(localName).foregroundStyle(.primary)
-                    Text("On This iPhone").font(.caption).foregroundStyle(.secondary)
+        homeRowLayout {
+            Button { openRetainedLocalHome() } label: {
+                HStack(spacing: 12) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Image(systemName: "iphone").foregroundStyle(Color.groceryAccent).frame(width: 24)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(localName).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+                        Text("On This iPhone").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if localSelected { Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent) }
                 }
-                Spacer()
-                if localSelected {
-                    Image(systemName: "checkmark").foregroundStyle(Color.groceryAccent)
-                }
+                .frame(minHeight: 44).contentShape(Rectangle())
             }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .multilineTextAlignment(.leading)
+            .layoutPriority(1)
+            .disabled(isSelecting)
+            .accessibilityLabel("Select " + (entry.retainedLocalPresentation?.title ?? localName))
+            .accessibilityValue("On This iPhone" + (localSelected ? ", Selected" : ""))
+            .accessibilityIdentifier("shopping.home.retainedLocal")
+            NavigationLink {
+                if localSelected { LocalHomeSettingsView(bootstrap: bootstrap) }
+                else {
+                    List {
+                        LabeledContent("Name", value: localName)
+                        LabeledContent("Storage", value: "On This iPhone")
+                        Text("Select this Home to manage its local settings.").foregroundStyle(.secondary)
+                    }
+                    .navigationTitle(localName)
+                }
+            } label: { detailsLabel }
+            .buttonStyle(.plain)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel("Details for " + localName + ", On This iPhone")
+            .accessibilityIdentifier("shopping.home.details.local")
         }
-        .disabled(isSelecting)
-        .accessibilityLabel(entry.retainedLocalPresentation?.title ?? localName)
-        .accessibilityValue("On This iPhone" + (localSelected ? ", Selected" : ""))
-        .accessibilityIdentifier("shopping.home.retainedLocal")
     }
 
     @ViewBuilder private var invitationsSection: some View {
@@ -126,7 +176,6 @@ struct HomeSelectionView: View {
     private var actionsSection: some View {
         Section {
             createHomeAction
-            homeSettingsAction
         }
     }
 
@@ -139,27 +188,6 @@ struct HomeSelectionView: View {
                 Label("Create Home", systemImage: "plus")
             }
             .accessibilityIdentifier("shopping.home.create")
-        }
-    }
-
-    @ViewBuilder private var homeSettingsAction: some View {
-        if case .activeHome(let scope) = entry.root {
-            NavigationLink {
-                HomeDetailsView(scope: scope, name: entry.currentHomeName ?? "Home",
-                    actions: bootstrap.homeDetailsActions(scope: scope),
-                    access: entry.homes.first(where: { $0.candidate.graph == scope.graph })?.access)
-                    .id(scope)
-            } label: {
-                Label("Home Settings", systemImage: "gearshape")
-            }
-            .accessibilityIdentifier("shopping.home.settings")
-        } else if localSelected {
-            NavigationLink {
-                LocalHomeSettingsView(bootstrap: bootstrap)
-            } label: {
-                Label("Home Settings", systemImage: "gearshape")
-            }
-            .accessibilityIdentifier("shopping.home.settings")
         }
     }
 

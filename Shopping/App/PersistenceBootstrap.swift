@@ -456,7 +456,9 @@ final class PersistenceBootstrap: ObservableObject {
 
     var sharingStatusPresentation: SharingStatusPresentation { homeSharingStatus.summary }
 
-    var homeSharingStatus: HomeSharingStatus {
+    var homeSharingStatus: HomeSharingStatus { homeSharingStatus(for: nil) }
+
+    func homeSharingStatus(for requestedScope: ActiveHomeScope?) -> HomeSharingStatus {
         let account: HomeSharingStatus.Account
         let currentSession = try? accountProvider?.currentSession()
         let matchesAttachedAccount = activeAccountBinding != nil && currentSession?.accountBinding == activeAccountBinding
@@ -477,7 +479,18 @@ final class PersistenceBootstrap: ObservableObject {
         let canShowAttachedObservations = personalMode && matchesAttachedAccount
         let home: HomeSharingStatus.Home
         if personalMode && !canShowAttachedObservations { home = .unresolved }
-        else {
+        else if let requestedScope {
+            guard let currentSession, ActiveHomeScope(session: currentSession, graph: requestedScope.graph) == requestedScope else {
+                return HomeSharingStatus(input: .init(account: .changed, home: .unresolved, invitation: .none))
+            }
+            switch homeCoordinator.homes.first(where: { $0.graph == requestedScope.graph })?.access {
+            case .owner: home = .availableOwner
+            case .contributor: home = .availableContributor
+            case .restricted: home = .readOnly
+            case .unresolved: home = .unresolved
+            case nil: home = .unavailable
+            }
+        } else {
             switch homeCoordinator.readiness {
             case .accountUnavailable: home = .unresolved
             case .waitingForImport: home = .waitingForImport
@@ -501,7 +514,7 @@ final class PersistenceBootstrap: ObservableObject {
             if let store = ready.persistence.store(for: .participantShared) {
                 input.sharedStore = cloudStatus.snapshot(forStores: [store.identifier])
             }
-            if sharingWorkScope == ready.homeScope, sharingWorkPresentationID == ready.presentation.id,
+            if sharingWorkScope == (requestedScope ?? ready.homeScope), sharingWorkPresentationID == ready.presentation.id,
                let work = sharingWork, work.scope.accountBinding == currentSession?.accountBinding {
                 input.work = .init(pendingCheckout: work.pendingCheckoutCount, pendingUndo: work.pendingUndoCount,
                     retained: work.heldCount, isIncomplete: work.isIncomplete)
@@ -530,13 +543,17 @@ final class PersistenceBootstrap: ObservableObject {
 
     /// Screen appearance reads only the existing local graph. It does not retry
     /// native commands or reload grocery projections.
-    func refreshSharingStatus() async { await performSharingStatusCheck(retry: false) }
+    func refreshSharingStatus(scope: ActiveHomeScope? = nil) async {
+        await performSharingStatusCheck(retry: false, requestedScope: scope)
+    }
 
     /// A user-requested check uses the normal account/access/recovery services.
     /// It never schedules a CloudKit export, resets a store, or waits for a peer.
-    func checkSharingStatus() async { await performSharingStatusCheck(retry: true) }
+    func checkSharingStatus(scope: ActiveHomeScope? = nil) async {
+        await performSharingStatusCheck(retry: true, requestedScope: scope)
+    }
 
-    private func performSharingStatusCheck(retry: Bool) async {
+    private func performSharingStatusCheck(retry: Bool, requestedScope: ActiveHomeScope?) async {
         guard !isCheckingSharingStatus else { return }
         guard !sharingCheck.isRunning else {
             sharingCheckProblem = .alreadyRunning
@@ -549,7 +566,9 @@ final class PersistenceBootstrap: ObservableObject {
         let capturedSession = try? capturedProvider?.currentSession()
         let ready: ReadyState?
         if case .ready(let value) = state { ready = value } else { ready = nil }
-        let scope = ready?.homeScope
+        let scope = requestedScope ?? ready?.homeScope
+        // A requested check may repair unresolved access. Fence target reads
+        // after that safe account/access refresh, not before it can run.
         sharingCheckID = id
         isCheckingSharingStatus = true
         sharingStatusCheckMessage = nil
@@ -615,9 +634,7 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func isCurrentSharingScope(_ ready: ReadyState, scope: ActiveHomeScope) -> Bool {
-        guard ready.presentation.isActive, case .ready(let current) = state else { return false }
-        return current.presentation.id == ready.presentation.id && current.homeScope == scope
-            && homeCoordinator.isCurrent(scope: scope, generation: ready.homeGeneration)
+        (try? validateMembershipPresentation(ready, scope: scope)) != nil
     }
 
     private func clearSharingStatusPresentation() {
@@ -2825,31 +2842,52 @@ final class PersistenceBootstrap: ObservableObject {
     /// Configured entry point for invitation UI and the development sharing harness.
     /// A prepared share is not evidence that its grocery graph has exported.
     func prepareSelectedHomeShare(retryInterrupted: Bool = false) async throws -> PreparedHomeShare {
-        guard !isDeletingHome, case .ready(let ready) = state, let scope = ready.homeScope,
+        guard case .ready(let ready) = state, let scope = ready.homeScope else {
+            throw HomeSharingError.ownerRequired
+        }
+        return try await prepareHomeShare(scope: scope, retryInterrupted: retryInterrupted)
+    }
+
+    private func prepareHomeShare(scope: ActiveHomeScope, retryInterrupted: Bool) async throws -> PreparedHomeShare {
+        let (ready, _, _) = try membershipContext(scope)
+        guard !isDeletingHome,
               homeCoordinator.homes.contains(where: { $0.graph == scope.graph && $0.access == .owner }),
-              let url = ready.persistence.primaryStore?.url else { throw HomeSharingError.ownerRequired }
+              let url = ready.persistence.storeBindings.first(where: {
+                  $0.store.identifier == scope.graph.storeIdentifier
+              })?.store.url else { throw HomeSharingError.ownerRequired }
         let transport = ManagedHomeShareTransport(persistence: ready.persistence,
             authority: ready.presentation.commandAuthority)
         let journalURL = url.deletingLastPathComponent().appendingPathComponent(
             "share-provisioning-" + scope.preferenceNamespace + ".json")
         let result = try await homeShareProvisioner.prepare(scope: scope, journalURL: journalURL,
             transport: transport, retryInterrupted: retryInterrupted)
-        guard ready.presentation.isActive, homeCoordinator.activeScope == scope else {
-            throw HomeSharingError.scopeChanged
-        }
+        try validateMembershipPresentation(ready, scope: scope)
         retryShareAssociations()
         return result
     }
 
+    func homeDetailsScope(for graph: HomeGraphIdentity) -> ActiveHomeScope? {
+        guard let provider = accountProvider, let session = try? provider.currentSession(),
+              homeCoordinator.homes.contains(where: { $0.graph == graph }) else { return nil }
+        return ActiveHomeScope(session: session, graph: graph)
+    }
+
     func homeDetailsActions(scope: ActiveHomeScope) -> HomeDetailsActions {
+        let capturedReady: ReadyState?
+        if case .ready(let ready) = state { capturedReady = ready } else { capturedReady = nil }
+        let validate: () throws -> Void = { [self] in
+            guard let capturedReady else { throw HomeMembershipError.scopeChanged }
+            try validateMembershipPresentation(capturedReady, scope: scope)
+        }
         let named = HomeNamedInvitationActions.managed(scope: scope, coordinator: homeMembershipCoordinator,
             context: { [self] in
+                try validate()
                 let (ready, url, transport) = try membershipContext(scope)
                 let share = try await transport.localInvitationShare(scope: scope)
                 try validateMembershipPresentation(ready, scope: scope)
                 return HomeNamedInvitationActions.Context(journalURL: url, transport: transport, share: share,
                     validate: { try self.validateMembershipPresentation(ready, scope: scope) })
-            }, prepareShare: { [self] retry in _ = try await prepareSelectedHomeShare(retryInterrupted: retry) })
+            }, prepareShare: { [self] retry in try validate(); _ = try await prepareHomeShare(scope: scope, retryInterrupted: retry) })
         let actions = HomeDetailsActions(
             refresh: { [self] in
                 let (ready, url, transport) = try membershipContext(scope)
@@ -2868,7 +2906,7 @@ final class PersistenceBootstrap: ObservableObject {
                 let (ready, url, transport) = try membershipContext(scope)
                 return try await HomeInvitationWorkflow.invite(scope: scope, journalURL: url,
                     coordinator: homeMembershipCoordinator, transport: transport,
-                    prepare: { try await self.prepareSelectedHomeShare(retryInterrupted: retry) },
+                    prepare: { try await self.prepareHomeShare(scope: scope, retryInterrupted: retry) },
                     validatePresentation: { try self.validateMembershipPresentation(ready, scope: scope) })
             },
             resend: { [self] participantID in
@@ -2918,7 +2956,9 @@ final class PersistenceBootstrap: ObservableObject {
                 deletion: homeDeletionActions(scope: scope),
                 preparationNeedsRetry: { [self] in
                     let (ready, _, _) = try membershipContext(scope)
-                    guard let storeURL = ready.persistence.primaryStore?.url else { throw HomeSharingError.unavailable }
+                    guard let storeURL = ready.persistence.storeBindings.first(where: {
+                        $0.store.identifier == scope.graph.storeIdentifier
+                    })?.store.url else { throw HomeSharingError.unavailable }
                     let journalURL = HomeShareProvisioningJournal.location(storeURL: storeURL, scope: scope)
                     let needsRetry = try await Task.detached(priority: .utility) {
                         let intent = try HomeShareProvisioningJournal(url: journalURL).existingIntent(scope: scope)
@@ -2928,17 +2968,17 @@ final class PersistenceBootstrap: ObservableObject {
                     return needsRetry
                 }, namedInvitations: named)
 #if DEBUG
-        if var fixture = homeDetailsFixtures[scope] { fixture.deletion = actions.deletion; return fixture }
+        if var fixture = homeDetailsFixtures[scope] { fixture.deletion = actions.deletion; return fixture.validating(validate) }
         if var fixture = HomeDetailsUITestFixture.make(scope: scope,
             name: homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.name ?? "Current home",
             rename: actions.rename,
             leaveOverride: HomeLeaveRootGoneUITestBackend.isEnabled(ProcessInfo.processInfo.environment) ? actions.leave : nil) {
             fixture.deletion = actions.deletion
             homeDetailsFixtures[scope] = fixture
-            return fixture
+            return fixture.validating(validate)
         }
 #endif
-        return actions
+        return actions.validating(validate)
     }
 
     func prepareHomeLeave(scope: ActiveHomeScope) async throws -> HomeLeaveCommand {
@@ -3080,10 +3120,11 @@ final class PersistenceBootstrap: ObservableObject {
     var hasDeletedHome: Bool { !homeDeletionStatuses.isEmpty }
 
     private func homeDeletionActions(scope: ActiveHomeScope) -> HomeDetailsDeletionActions? {
-        guard case .ready(let ready) = state, ready.homeScope == scope,
+        guard case .ready(let ready) = state,
+              (try? validateMembershipPresentation(ready, scope: scope)) != nil,
               homeCoordinator.homes.first(where: { $0.graph == scope.graph })?.access == .owner,
               let cart = personalService else { return nil }
-        return deletionActions(ready: ready, service: HomeDeletionService(persistence: ready.persistence, cart: cart))
+        return deletionActions(ready: ready, scope: scope, service: HomeDeletionService(persistence: ready.persistence, cart: cart))
     }
 
     func localHomeDeletionActions() -> HomeDetailsDeletionActions? {
@@ -3092,13 +3133,15 @@ final class PersistenceBootstrap: ObservableObject {
         return deletionActions(ready: ready, service: HomeDeletionService(persistence: ready.persistence))
     }
 
-    private func deletionActions(ready: ReadyState, service: HomeDeletionService) -> HomeDetailsDeletionActions {
+    private func deletionActions(ready: ReadyState, scope: ActiveHomeScope? = nil, service: HomeDeletionService) -> HomeDetailsDeletionActions {
         var confirmed: HomeDeletionCommand?
         return HomeDetailsDeletionActions(prepare: { [weak self] in
             guard let self, ready.presentation.isActive, !self.isDeletingHome else { throw HomeDeletionError.scopeChanged }
             let graph: HomeGraphIdentity
-            if let scope = ready.homeScope { graph = scope.graph }
-            else {
+            if let scope {
+                try self.validateMembershipPresentation(ready, scope: scope)
+                graph = scope.graph
+            } else {
                 let discovery = HomeDiscoveryService(persistence: ready.persistence)
                 let homes = try await Task.detached(priority: .utility) { try discovery.discover() }.value
                 guard let home = homes.homes.first(where: { $0.graph.householdID == ready.householdID && $0.graph.listID == ready.listID }) else {
@@ -3106,11 +3149,13 @@ final class PersistenceBootstrap: ObservableObject {
                 }
                 graph = home.graph
             }
-            return try await service.prepare(graph: graph, scope: ready.homeScope, authority: ready.presentation.commandAuthority)
+            return try await service.prepare(graph: graph, scope: scope, authority: ready.presentation.commandAuthority)
         }, confirm: { [weak self] command in
             guard let self, ready.presentation.isActive, !self.isDeletingHome,
-                  command.graph.householdID == ready.householdID, command.graph.listID == ready.listID,
-                  command.scope == ready.homeScope else { throw HomeDeletionError.scopeChanged }
+                  command.graph.householdID == (scope?.graph.householdID ?? ready.householdID),
+                  command.graph.listID == (scope?.graph.listID ?? ready.listID),
+                  command.scope == scope else { throw HomeDeletionError.scopeChanged }
+            if let scope { try self.validateMembershipPresentation(ready, scope: scope) }
             confirmed = command
             self.isDeletingHome = true
             defer { self.isDeletingHome = false }
@@ -3257,8 +3302,16 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func validateMembershipPresentation(_ ready: ReadyState, scope: ActiveHomeScope) throws {
-        guard ready.presentation.isActive, ready.homeScope == scope,
-              homeCoordinator.activeScope == scope else { throw HomeMembershipError.scopeChanged }
+        guard ready.presentation.isActive, case .ready(let current) = state,
+              current.presentation.id == ready.presentation.id, current.persistence === ready.persistence,
+              let provider = accountProvider,
+              let session = try? provider.currentSession(),
+              ActiveHomeScope(session: session, graph: scope.graph) == scope,
+              ready.persistence.personalCartInitialBinding == session.accountBinding,
+              homeCoordinator.homes.contains(where: { $0.graph == scope.graph && $0.access != .unresolved }),
+              ready.persistence.storeBindings.contains(where: { $0.store.identifier == scope.graph.storeIdentifier }) else {
+            throw HomeMembershipError.scopeChanged
+        }
     }
 
     func pendingHomeCreation() async throws -> HomeCreationCommand? {

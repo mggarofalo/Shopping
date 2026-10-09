@@ -377,7 +377,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        let sharingValue = app.buttons["shopping.settings.homeDetails"]
+        let sharingValue = app.buttons["shopping.home.scope"]
         let versionValue = app.staticTexts["shopping.settings.version"]
         XCTAssertTrue(sharingValue.existsOrAppears(timeout: 3))
         let windowTrailingEdge = app.windows.firstMatch.frame.maxX

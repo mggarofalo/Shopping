@@ -26,8 +26,9 @@ final class HomeSharingStatusUITests: XCTestCase {
         app.tabBars.buttons["Settings"].tap()
         XCTAssertFalse(app.buttons["shopping.settings.sharingStatus"].exists)
         XCTAssertFalse(app.buttons["shopping.settings.recovery"].exists)
-        let home = app.buttons["shopping.settings.homeDetails"]
-        reveal(home, in: app)
+        app.buttons["shopping.home.scope"].tap()
+        let home = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.home.details.")).firstMatch
+        XCTAssertTrue(home.existsOrAppears(timeout: 5))
         home.tap()
         XCTAssertTrue(app.navigationBars["Preview household"].existsOrAppears(timeout: 5))
         let status = app.buttons["shopping.home.sharingStatus"]
@@ -68,6 +69,9 @@ final class HomeSharingStatusUITests: XCTestCase {
         capture("Concise Sharing status at Large restored", app: app)
         try textSize.set(.accessibilityXXXL)
         XCTAssertTrue(app.navigationBars["Sharing status"].exists)
+        app.navigationBars["Sharing status"].buttons.firstMatch.tap()
+        app.navigationBars["Preview household"].buttons.firstMatch.tap()
+        app.buttons["Done"].tap()
         app.tabBars.buttons["Groceries"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Groceries"].isSelected)
@@ -98,7 +102,7 @@ final class HomeSharingStatusUITests: XCTestCase {
         // screen at XXXL, especially when returning from its final paragraph.
         for step in 0..<24 {
             let top = app.navigationBars.firstMatch.frame.maxY
-            let bottom = app.tabBars.firstMatch.frame.minY
+            let bottom = app.tabBars.firstMatch.isHittable ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 34
             let viewportHeight = bottom - top
             guard top.isFinite, bottom.isFinite, viewportHeight > 48 else { continue }
             let wholeFrame = element.exists ? element.frame : nil

@@ -137,6 +137,47 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             incompleteUndoCount: 0, unassignedUndoCount: 0)
     }
 
+    func testUnresolvedInspectedHomeStillAllowsAccountAndAccessCheck() async throws {
+        let f = try await open(discover: { service in
+            let result = try await Task.detached { try service.discover() }.value
+            return HomeDiscovery(homes: result.homes.sorted { $0.name < $1.name }.map {
+                HomeCandidate(graph: $0.graph, name: $0.name,
+                    access: $0.name == "Second home" ? .unresolved : .owner)
+            }, hasIncompleteRoots: result.hasIncompleteRoots)
+        })
+        let target = try XCTUnwrap(f.bootstrap.homeCoordinator.homes.first { $0.name == "Second home" })
+        let scope = try XCTUnwrap(f.bootstrap.homeDetailsScope(for: target.graph))
+        let before = await f.account.reads
+        await f.bootstrap.checkSharingStatus(scope: scope)
+        let after = await f.account.reads
+        XCTAssertGreaterThan(after, before)
+        XCTAssertFalse(f.bootstrap.isCheckingSharingStatus)
+    }
+
+    func testInactiveDetailsShowTheirOwnAccessAndReadTheirOwnSavedWork() async throws {
+        let f = try await open(discover: { service in
+            let result = try await Task.detached { try service.discover() }.value
+            return HomeDiscovery(homes: result.homes.sorted { $0.name < $1.name }.map {
+                HomeCandidate(graph: $0.graph, name: $0.name,
+                    access: $0.name == "First home" ? .restricted : .owner)
+            }, hasIncompleteRoots: result.hasIncompleteRoots)
+        }, read: { service, scope in try Self.snapshot(service, scope, count: 7) })
+        let bootstrap = f.bootstrap
+        let original = try await ready(bootstrap)
+        let target = try XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "Second home" })
+        let scope = try XCTUnwrap(bootstrap.homeDetailsScope(for: target.graph))
+        XCTAssertNotEqual(scope, original.homeScope)
+        let selectedHome = try XCTUnwrap(bootstrap.homeSharingStatus.sections.first { $0.id == .home })
+        let inspectedHome = try XCTUnwrap(bootstrap.homeSharingStatus(for: scope).sections.first { $0.id == .home })
+        XCTAssertNotEqual(selectedHome.presentation, inspectedHome.presentation)
+        await bootstrap.refreshSharingStatus(scope: scope)
+        let work = try XCTUnwrap(bootstrap.homeSharingStatus(for: scope).sections.first { $0.id == .savedWork })
+        XCTAssertTrue(work.presentation.details.contains("7"))
+        XCTAssertFalse(try savedWork(bootstrap).contains("7"))
+        let current = try await ready(bootstrap)
+        XCTAssertEqual(current.homeScope, original.homeScope)
+    }
+
     func testAppearanceReadsLocalCountsWithoutAccountLookupAndForwardsHomeObservation() async throws {
         let f = try await open()
         let accountReads = await f.account.reads

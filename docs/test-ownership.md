@@ -2470,3 +2470,16 @@ fixture. Its DEBUG handoff trigger requires an isolated test store and does not
 claim Siri speech recognition. Generated App Intents metadata must contain exactly
 three actions/shortcuts. Actual Siri recognition, native disambiguation and device
 foreground continuation require separate system/device evidence.
+
+
+## Phase 33 · Homes navigation and captured details (SHOPPING-220)
+
+`ActiveHomeBootstrapTests/testInactiveHomeDetailsRenameExactHomeWithoutChangingSelectionAndRejectRetiredActions`
+owns exact inactive-Home rename and retirement. `HomeSharingStatusBootstrapTests`
+owns inspected-Home access/saved-work scoping and retry when access is unresolved.
+`HomeDetailsUITests` owns separate selection/info controls, inactive rename without
+selection changes, relaunch, accessibility XXXL, and existing invitation/removal/
+leave/delete workflows through Settings → Homes. `PersonalCartUITests` retains
+selection/cart isolation and local/retained Home recovery; its tap paths now use
+the same Homes sheet. `HomeSharingStatusUITests` retains native status navigation
+and actual system text-size changes. Screenshots use isolated SQLite fixtures.
