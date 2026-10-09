@@ -120,81 +120,7 @@ struct GroceriesView: View {
 
     private var activeBody: some View {
         NavigationStack(path: $navigation.groceryPath) {
-            groceryContent
-            .navigationTitle("Groceries")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .searchable(text: $navigation.searchText, prompt: "Search groceries")
-            .onSubmit(of: .search, refreshProjection)
-            .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink(value: GroceryDestination.recentlyCleared) {
-                        Label("Recently cleared", systemImage: "clock.arrow.circlepath")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    recoveryLinks
-                        .labelStyle(.iconOnly)
-                }
-                if categoryFillAvailable {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showingCategoryFill = true } label: {
-                            Label("Suggest saved items for \(selectedCategoryName)", systemImage: "sparkles")
-                                .labelStyle(.iconOnly)
-                        }
-                        .accessibilityHint("Choose saved items to add to this category")
-                        .accessibilityIdentifier("shopping.category.fill")
-                    }
-                }
-                if navigation.selectedStoreID != nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        let text = storeShareText
-                        Button {
-                            let currentText = storeShareText
-                            guard !currentText.isEmpty else { return }
-                            storeShare = GroceryStoreShare(text: currentText)
-                        } label: {
-                            Label("Share store list", systemImage: "square.and.arrow.up")
-                                .labelStyle(.iconOnly)
-                        }
-                        .disabled(text.isEmpty)
-                        .accessibilityLabel("Share store list for \(selectedStoreName)")
-                        .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
-                        .accessibilityIdentifier("shopping.grocery.shareStore")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
-                        .disabled(canonicalList == nil)
-                }
-            }
-            .navigationDestination(for: GroceryDestination.self) { destination in
-                switch destination {
-                case .carted:
-                    if let personalCart {
-                        PersonalCartView(cart: personalCart, navigation: navigation)
-                    } else {
-                    CartedGroceriesView(
-                        navigation: navigation,
-                        onEdit: focus,
-                        onUncarted: uncarted,
-                        onRemoved: { operationID, householdID, listID in
-                            removed(operationID, scope: GroceryAddScope(
-                                householdID: householdID,
-                                listID: listID,
-                                selectedStoreID: nil,
-                                selectedStoreName: nil
-                            ))
-                        }
-                    )
-                }
-                case .recentlyCleared:
-                    if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
-                    else { RecentlyClearedView() }
-                }
-            }
+            navigationContent
             .sheet(item: $storeShare) { share in
                 GroceryStoreActivityView(share: share)
             }
@@ -282,6 +208,84 @@ struct GroceriesView: View {
                 completeSaveFeedback()
                 focusRequestedNeed()
                 presentSystemAdd()
+            }
+        }
+    }
+
+    private var navigationContent: some View {
+        groceryContent
+        .navigationTitle("Groceries")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .searchable(text: $navigation.searchText, prompt: "Search groceries")
+        .onSubmit(of: .search, refreshProjection)
+        .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink(value: GroceryDestination.recentlyCleared) {
+                    Label("Recently cleared", systemImage: "clock.arrow.circlepath")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                recoveryLinks
+                    .labelStyle(.iconOnly)
+            }
+            if categoryFillAvailable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingCategoryFill = true } label: {
+                        Label("Suggest saved items for \(selectedCategoryName)", systemImage: "sparkles")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityHint("Choose saved items to add to this category")
+                    .accessibilityIdentifier("shopping.category.fill")
+                }
+            }
+            if navigation.selectedStoreID != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    let text = storeShareText
+                    Button {
+                        let currentText = storeShareText
+                        guard !currentText.isEmpty else { return }
+                        storeShare = GroceryStoreShare(text: currentText)
+                    } label: {
+                        Label("Share store list", systemImage: "square.and.arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(text.isEmpty)
+                    .accessibilityLabel("Share store list for \(selectedStoreName)")
+                    .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
+                    .accessibilityIdentifier("shopping.grocery.shareStore")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
+                    .disabled(canonicalList == nil)
+            }
+        }
+        .navigationDestination(for: GroceryDestination.self) { destination in
+            switch destination {
+            case .carted:
+                if let personalCart {
+                    PersonalCartView(cart: personalCart, navigation: navigation)
+                } else {
+                CartedGroceriesView(
+                    navigation: navigation,
+                    onEdit: focus,
+                    onUncarted: uncarted,
+                    onRemoved: { operationID, householdID, listID in
+                        removed(operationID, scope: GroceryAddScope(
+                            householdID: householdID,
+                            listID: listID,
+                            selectedStoreID: nil,
+                            selectedStoreName: nil
+                        ))
+                    }
+                )
+            }
+            case .recentlyCleared:
+                if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
+                else { RecentlyClearedView() }
             }
         }
     }
