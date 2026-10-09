@@ -2,6 +2,35 @@ import XCTest
 @testable import Shopping
 
 final class HomeReplacementCoordinatorTests: XCTestCase {
+    @MainActor
+    func testRetainedSourceDrainWaitsForOwnerAndAllowsNextOperation() async throws {
+        let access = RetainedLocalStoreAccess()
+        let entered = expectation(description: "Source reserved")
+        let release = AsyncStream<Void>.makeStream()
+        let owner = Task {
+            try await access.perform {
+                entered.fulfill()
+                for await _ in release.stream { break }
+                return 1
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        do {
+            _ = try await access.perform { 2 }
+            XCTFail("An overlapping source operation must be rejected")
+        } catch HomeReplacementError.operationInProgress {}
+        let next = Task {
+            await access.drain()
+            return try await access.perform { 3 }
+        }
+        release.continuation.yield(())
+        release.continuation.finish()
+        let firstValue = try await owner.value
+        let nextValue = try await next.value
+        XCTAssertEqual(firstValue, 1)
+        XCTAssertEqual(nextValue, 3)
+    }
+
     private func fixture() throws -> (HomeReplacementProposal, HomeReplacementJournal, ReplacementEffectsFixture) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         addTeardownBlock { if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) } }

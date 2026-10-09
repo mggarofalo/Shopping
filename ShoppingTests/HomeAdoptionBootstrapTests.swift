@@ -1394,6 +1394,24 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
     }
 
+    func testDeferredReplacementCanReopenFromRetainedLocalStarter() async throws {
+        let fixture = try await importedInvitation()
+        let (url, _) = try retainedStarter(fixture)
+        let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
+        _ = try await waitForReplacementOffer(bootstrap)
+        try await bootstrap.dismissJoin(fixture.entryID)
+        try await bootstrap.openRetainedLocalHome()
+        await bootstrap.runLoadingTransition()
+        _ = try await waitForReady(bootstrap)
+        XCTAssertTrue(bootstrap.isShowingRetainedLocalHome)
+        try await bootstrap.reopenInvitation(fixture.entryID, graph: fixture.invited)
+        if case .loading = bootstrap.state { await bootstrap.runLoadingTransition() }
+        _ = try await waitForReady(bootstrap)
+        let offer = try await waitForReplacementOffer(bootstrap)
+        XCTAssertEqual(offer.invitationID, fixture.entryID)
+        XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().isEmpty)
+    }
+
     func testDifferentHomeChoiceInvalidatesOfferedReplacement() async throws {
         let fixture = try await importedInvitation()
         let (url, _) = try retainedStarter(fixture)

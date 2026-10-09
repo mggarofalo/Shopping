@@ -34,6 +34,9 @@ struct HomeSelectionView: View {
             unavailableSection
             leaveStatusSection
             deletionStatusSection
+            if let record = bootstrap.replacementStatus {
+                HomeReplacementStatusSection(bootstrap: bootstrap, record: record)
+            }
             if let error { Text(error).foregroundStyle(.red) }
         }
         .listStyle(.insetGrouped)

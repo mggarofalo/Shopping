@@ -17,10 +17,13 @@ actor HomeReplacementCoordinator {
     private let journal: HomeReplacementJournal
     private let effects: any HomeReplacementEffects
     private var running = false
+    private let progress: @Sendable (HomeReplacementRecord) async -> Void
 
-    init(journal: HomeReplacementJournal, effects: any HomeReplacementEffects) {
+    init(journal: HomeReplacementJournal, effects: any HomeReplacementEffects,
+         progress: @escaping @Sendable (HomeReplacementRecord) async -> Void = { _ in }) {
         self.journal = journal
         self.effects = effects
+        self.progress = progress
     }
 
     func confirm(_ proposal: HomeReplacementProposal) throws -> HomeReplacementRecord {
@@ -38,7 +41,7 @@ actor HomeReplacementCoordinator {
         do {
             try Task.checkCancellation()
             try await effects.validateIntent(record.proposal, target: record.target)
-            if record.stage == .confirmed { try advance(&record, to: .joining) }
+            if record.stage == .confirmed { try await advance(&record, to: .joining) }
             if record.stage == .joining {
                 try await effects.join(record.proposal)
                 try Task.checkCancellation()
@@ -49,12 +52,13 @@ actor HomeReplacementCoordinator {
                 record.target = target
                 record.stage = .activating
                 try journal.update(record, replacing: previous)
+                await progress(record)
             }
             if record.stage == .activating {
                 guard let target = record.target else { throw HomeReplacementError.invalidProposal }
                 try await effects.activate(target, proposal: record.proposal)
                 try await effects.validateIntent(record.proposal, target: target)
-                try advance(&record, to: .targetActivated)
+                try await advance(&record, to: .targetActivated)
             }
             guard let target = record.target else { throw HomeReplacementError.invalidProposal }
             try Task.checkCancellation()
@@ -66,28 +70,30 @@ actor HomeReplacementCoordinator {
                 record.stage = .cleanupPending
                 try record.validate()
                 try journal.update(record, replacing: previous)
+                await progress(record)
             }
             guard let command = record.deletion else { throw HomeReplacementError.invalidProposal }
             try Task.checkCancellation()
             try await effects.validateIntent(record.proposal, target: target)
             let outcome = try await effects.removeSource(command, proposal: record.proposal, target: target)
             guard outcome.command == command else { throw HomeReplacementError.invalidProposal }
-            if outcome.completed { try advance(&record, to: .completed) }
+            if outcome.completed { try await advance(&record, to: .completed) }
             return record
         } catch HomeReplacementError.intentChanged {
             // No new source effect may start after navigation/account invalidation.
             // A previously pending exact deletion remains reconcilable separately.
-            if record.deletion == nil { try advance(&record, to: .sourceKept) }
+            if record.deletion == nil { try await advance(&record, to: .sourceKept) }
             throw HomeReplacementError.intentChanged
         } catch HomeDeletionError.scopeChanged {
-            if record.deletion == nil { try advance(&record, to: .sourceKept) }
+            if record.deletion == nil { try await advance(&record, to: .sourceKept) }
             throw HomeDeletionError.scopeChanged
         }
     }
 
-    private func advance(_ record: inout HomeReplacementRecord, to stage: HomeReplacementRecord.Stage) throws {
+    private func advance(_ record: inout HomeReplacementRecord, to stage: HomeReplacementRecord.Stage) async throws {
         let previous = record
         record.stage = stage
         try journal.update(record, replacing: previous)
+        await progress(record)
     }
 }

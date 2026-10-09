@@ -4,6 +4,7 @@ import SwiftUI
 struct HomeInvitationsView: View {
     @ObservedObject var bootstrap: PersistenceBootstrap
     let invitationID: UUID
+    var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var isRetrying = false
     @State private var retryError: String?
@@ -15,40 +16,54 @@ struct HomeInvitationsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    Image(systemName: "house")
-                        .font(.system(size: 48, weight: .light))
-                        .foregroundStyle(Color.groceryAccent)
-                        .accessibilityHidden(true)
-                    if let invitation {
-                        content(for: invitation)
-                    } else {
-                        Text("Invitation unavailable")
-                            .font(.title2.weight(.semibold))
-                            .padding(.top, 18)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 24)
+            Group {
+                if let proposal = replacementProposal {
+                    HomeReplacementChoiceView(bootstrap: bootstrap, proposal: proposal).id(proposal.id)
+                } else { invitationContents }
             }
-            .navigationTitle("Invitation")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Not Now") { dismiss() }
+                    Button(bootstrap.replacementInProgress == nil ? "Not Now" : "Close") { if let onClose { onClose() } else { dismiss() } }
                         .accessibilityIdentifier("shopping.invitation.notNow")
                 }
             }
-            .alert("Invitation details", isPresented: $showingDetails) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(detailMessage)
-            }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(replacementProposal == nil ? [.medium, .large] : [.large])
+        .interactiveDismissDisabled(bootstrap.replacementInProgress != nil)
         .presentationDragIndicator(.visible)
+    }
+
+    private var replacementProposal: HomeReplacementProposal? {
+        let candidate = bootstrap.replacementOffer ?? bootstrap.replacementInProgress
+        return candidate?.invitationID == invitationID ? candidate : nil
+    }
+
+    private var invitationContents: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Image(systemName: "house")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(Color.groceryAccent)
+                    .accessibilityHidden(true)
+                if let invitation {
+                    content(for: invitation)
+                } else {
+                    Text("Invitation unavailable")
+                        .font(.title2.weight(.semibold))
+                        .padding(.top, 18)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+        }
+        .navigationTitle("Invitation")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Invitation details", isPresented: $showingDetails) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(detailMessage)
+        }
     }
 
     @ViewBuilder

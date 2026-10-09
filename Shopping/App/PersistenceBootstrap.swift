@@ -72,7 +72,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var replacementChoicesChecked: Set<UUID> = []
     private var replacementSelectionGeneration: UInt64?
     private var replacementNavigationAuthority: UICommandAuthority?
-    private var replacementOperationID: UUID?
+    @Published private var replacementOperationID: UUID?
     private var replacementConfirmedProposal: HomeReplacementProposal?
     private var replacementRecoveryAccount: ShopperSession?
     private var replacementOperation: HomeReplacementCoordinator?
@@ -815,9 +815,15 @@ final class PersistenceBootstrap: ObservableObject {
                         let imported = try inbox.beginImportResolution(id: entry.id,
                             sharedStoreIdentifier: sharedStoreIdentifier)
                         try inbox.markReady(imported, graph: invited.graph)
+                        if let mode = processInfo.environment["SHOPPING_UI_TEST_REPLACEMENT"] {
+                            try HomeReplacementUITestFixture.seed(mode: mode, base: accountDirectory(),
+                                invitation: entry, target: invited.graph,
+                                priorTarget: try HomeDiscoveryService(persistence: environment.persistence).discover().homes.first { $0.graph != invited.graph }?.graph)
+                        }
                         fixtureInvitations = HomeInvitationController(inbox: inbox)
                     }
 #endif
+                    let replacementFixtureSource = try accountDirectory().appendingPathComponent("Starter.sqlite")
                     let bootstrap = PersistenceBootstrap(
                         configuration: { .local(storeURL: storeURL) },
                         preloadedPreviewEnvironment: environment,
@@ -826,7 +832,11 @@ final class PersistenceBootstrap: ObservableObject {
                         invitationShareIdentity: shareLookup, makeHomeLeaveTransport: leaveTransportFactory,
                         makeHomeRejoinVerifier: { service in
 #if DEBUG
-                            if acceptedInvitationFixture { return UITestHomeRejoinVerifier() }
+                            if acceptedInvitationFixture {
+                                return UITestHomeRejoinVerifier(
+                                    sourceToChange: processInfo.environment["SHOPPING_UI_TEST_REPLACEMENT"] == "changed" ? replacementFixtureSource : nil,
+                                    latency: processInfo.environment["SHOPPING_UI_TEST_REPLACEMENT"] == "slow-activation" ? .seconds(5) : .seconds(1))
+                            }
 #endif
                             return ManagedHomeRejoinVerifier(cart: service)
                         },
@@ -2535,8 +2545,33 @@ final class PersistenceBootstrap: ObservableObject {
         scheduleAutomaticInvitationOpen()
     }
 
+    func reopenInvitation(_ id: UUID, graph: HomeGraphIdentity) async throws {
+        // A deferred invitation can be reopened while its local starter is
+        // mounted. Validate identity now; account-store authority is checked
+        // by activateInvitedHome after reconnecting.
+        guard case .ready(let ready) = state, ready.presentation.isActive,
+              let provider = accountProvider, let invitations,
+              let entry = invitations.allEntries.first(where: { $0.id == id }),
+              !entry.activationResolved,
+              !invitations.hasPendingChoiceChange(for: entry.identity),
+              entry.session == (try verifiedSession(provider)),
+              case .ready(let invited) = entry.state, invited == graph,
+              invited.storeIdentifier == entry.sharedStoreIdentifier else {
+            throw HomeInvitationInbox.Error.invalidState
+        }
+        try await joinInvitation(id)
+        if !autoJoinInvitations {
+            guard let entry = invitations.allEntries.first(where: { $0.id == id }) else { throw HomeInvitationInbox.Error.invalidState }
+            if await offerStarterReplacement(for: entry) { return }
+            try await activateInvitedHome(entryID: id, graph: graph)
+        }
+    }
+
     func dismissJoin(_ id: UUID) async throws {
-        if replacementOffer?.invitationID == id { replacementOffer = nil }
+        if replacementOffer?.invitationID == id {
+            replacementOffer = nil
+            replacementChoicesChecked.remove(id)
+        }
         guard let invitations, let entry = invitations.allEntries.first(where: { $0.id == id }) else {
             throw HomeInvitationInbox.Error.invalidState
         }
@@ -3438,6 +3473,8 @@ final class PersistenceBootstrap: ObservableObject {
 
 #if DEBUG
 private struct UITestHomeRejoinVerifier: HomeRejoinVerifying {
+    var sourceToChange: URL? = nil
+    var latency: Duration = .seconds(1)
     func validate(_ identity: HomeNativeAccessIdentity, in repository: PersonalCartRepository) throws {
         guard let provider = repository.persistence.personalCartSessionProvider as? ShopperSessionProvider,
               case .ready(let session) = provider.state, session == repository.session else {
@@ -3446,12 +3483,43 @@ private struct UITestHomeRejoinVerifier: HomeRejoinVerifying {
     }
 
     func refresh(_ identity: HomeNativeAccessIdentity) async throws {
-        try await Task.sleep(for: .seconds(1))
+        try await Task.sleep(for: latency)
+        if let sourceToChange {
+            try await Task.detached {
+                guard let evidence = try LocalStarterJournal(storeURL: sourceToChange).load() else { return }
+                let persistence = try PersistenceController(storeURL: sourceToChange)
+                defer {
+                    persistence.writer.performAndWait { persistence.writer.reset() }
+                    for store in persistence.container.persistentStoreCoordinator.persistentStores {
+                        try? persistence.container.persistentStoreCoordinator.remove(store)
+                    }
+                }
+                try NeedService(persistence: persistence).renameLocalHome(name: "Changed starter", graph: evidence.graph)
+            }.value
+        }
     }
 }
 #endif
 
 extension PersistenceBootstrap {
+    var replacementStatus: HomeReplacementRecord? {
+        guard let record = replacementRecord, (try? accountProvider?.currentSession()) == record.proposal.session else { return nil }
+        return record
+    }
+
+    var replacementInProgress: HomeReplacementProposal? {
+        guard replacementOperationID != nil, let proposal = replacementConfirmedProposal,
+              let provider = accountProvider, (try? verifiedSession(provider)) == proposal.session,
+              case .ready(let ready) = state, ready.presentation.isActive else { return nil }
+        return proposal
+    }
+
+    private func publishReplacementProgress(_ record: HomeReplacementRecord) {
+        guard replacementConfirmedProposal == record.proposal,
+              let provider = accountProvider, (try? verifiedSession(provider)) == record.proposal.session else { return }
+        replacementRecord = record
+    }
+
     private func offerStarterReplacement(for entry: HomeInvitationInbox.Entry) async -> Bool {
         if replacementOffer?.invitationID == entry.id { return true }
         guard !replacementChoicesChecked.contains(entry.id), replacementOperation == nil,
@@ -3510,18 +3578,20 @@ extension PersistenceBootstrap {
         scheduleAutomaticInvitationOpen()
     }
 
-    func confirmStarterReplacement() async throws {
+    func confirmStarterReplacement(expected: HomeReplacementProposal? = nil) async throws {
         guard replacementOperationID == nil else { throw HomeReplacementError.operationInProgress }
         let operationID = UUID()
         replacementOperationID = operationID
         defer { if replacementOperationID == operationID { replacementOperationID = nil } }
-        guard let proposal = replacementOffer else { throw HomeReplacementError.invalidProposal }
+        guard let proposal = replacementOffer, expected == nil || expected == proposal else { throw HomeReplacementError.invalidProposal }
         try validateReplacementIntent(proposal, target: nil)
         let base = try await resolvedAccountDirectory()
         try validateReplacementIntent(proposal, target: nil)
         let journal = HomeReplacementJournal(url: try proposal.session.storeDirectory(in: base)
             .appendingPathComponent("home-replacement.json"), session: proposal.session)
-        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self))
+        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self)) { [weak self] record in
+            await self?.publishReplacementProgress(record)
+        }
         replacementOperation = coordinator
         defer { replacementOperation = nil; replacementConfirmedProposal = nil }
         replacementConfirmedProposal = proposal
@@ -3617,6 +3687,9 @@ extension PersistenceBootstrap {
         target: ActiveHomeScope, operation: @escaping @Sendable (PersistenceController) async throws -> Value) async throws -> Value {
         guard let retained = deviceLocalHome else { throw HomeReplacementError.intentChanged }
         let base = try await resolvedAccountDirectory()
+        // A startup status read may still own the source when Review is tapped.
+        // Wait for its store to close, then recheck authority before admission.
+        await retainedLocalStoreAccess.drain()
         try validateReplacementIntent(proposal, target: target)
         return try await retainedLocalStoreAccess.perform {
             try Self.validateDeviceLocalHome(retained, base: base)
@@ -3686,7 +3759,9 @@ extension PersistenceBootstrap {
         try validateReplacementIntent(proposal, target: record.target)
         let journal = HomeReplacementJournal(url: try proposal.session.storeDirectory(in: base)
             .appendingPathComponent("home-replacement.json"), session: proposal.session)
-        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self))
+        let coordinator = HomeReplacementCoordinator(journal: journal, effects: HomeReplacementAppEffects(bootstrap: self)) { [weak self] record in
+            await self?.publishReplacementProgress(record)
+        }
         replacementOperation = coordinator
         do {
             replacementRecord = try await coordinator.resume(proposal.id)

@@ -19,6 +19,7 @@ struct PersistenceRootView: View {
     @State private var lastSheet: HomeRootSheet?
     @State private var pendingSheet: HomeRootSheet?
     @State private var dismissedInvitationID: UUID?
+    @State private var dismissedReplacementID: UUID?
     @State private var isCreatingFirstHome = false
     @State private var rootError: String?
     @State private var showingJoinDismissError = false
@@ -39,7 +40,20 @@ struct PersistenceRootView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if case .deferred(let invitation) = bootstrap.homeEntry.joinPresentation {
+            if let record = bootstrap.replacementStatus, bootstrap.replacementError != nil,
+               bootstrap.replacementInProgress == nil {
+                Button { present(.homes) } label: {
+                    HStack {
+                        Text(record.stage == .sourceKept
+                            ? "\(record.proposal.source.name) was kept." : "Replacement needs attention.")
+                        Spacer()
+                        Text("Homes")
+                    }
+                    .frame(minHeight: 44).padding(.horizontal, 16)
+                }
+                .background(.regularMaterial)
+                .accessibilityIdentifier("shopping.replacement.notice")
+            } else if case .deferred(let invitation) = bootstrap.homeEntry.joinPresentation {
                 HomeInvitationNotice(bootstrap: bootstrap, invitation: invitation)
             }
         }
@@ -48,7 +62,10 @@ struct PersistenceRootView: View {
             case .homes:
                 HomeSelectionView(bootstrap: bootstrap)
             case .invitation(let id):
-                HomeInvitationsView(bootstrap: bootstrap, invitationID: id)
+                HomeInvitationsView(bootstrap: bootstrap, invitationID: id) {
+                    if bootstrap.replacementInProgress?.invitationID == id { dismissedReplacementID = id }
+                    sheet = nil
+                }
             }
         }
         .alert("Couldn’t pause joining", isPresented: $showingJoinDismissError) {
@@ -65,12 +82,12 @@ struct PersistenceRootView: View {
         .environment(\.homeEditorDraftStore, bootstrap.editorDrafts)
         .environment(\.sharingStatusDescription, bootstrap.sharingStatusDescription)
         .environment(\.sharingStatusPresentation, bootstrap.sharingStatusPresentation)
-        .onChange(of: bootstrap.homeEntry.joinPresentation, initial: true) { _, presentation in
-            switch presentation {
-            case .active(let invitation):
-                if dismissedInvitationID != invitation.id { present(.invitation(invitation.id)) }
-            case .deferred, .none:
+        .onChange(of: requestedInvitationID, initial: true) { _, id in
+            if let id {
+                if dismissedInvitationID != id { present(.invitation(id)) }
+            } else {
                 dismissedInvitationID = nil
+                if case .invitation = pendingSheet { pendingSheet = nil }
                 if case .invitation = sheet { sheet = nil }
             }
         }
@@ -85,6 +102,14 @@ struct PersistenceRootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { bootstrap.applicationDidEnterForeground() }
         }
+    }
+
+    private var requestedInvitationID: UUID? {
+        if let replacement = bootstrap.replacementInProgress, sheet == .invitation(replacement.invitationID) {
+            return replacement.invitationID
+        }
+        if case .active(let invitation) = bootstrap.homeEntry.joinPresentation { return invitation.id }
+        return nil
     }
 
     private var scopeDisplay: HomeScopeDisplay? {
@@ -269,6 +294,11 @@ struct PersistenceRootView: View {
             self.pendingSheet = nil
             lastSheet = pendingSheet
             sheet = pendingSheet
+            return
+        }
+        if case .invitation(let id) = dismissed, dismissedReplacementID == id {
+            dismissedReplacementID = nil
+            dismissedInvitationID = id
             return
         }
         guard case .invitation(let id) = dismissed,

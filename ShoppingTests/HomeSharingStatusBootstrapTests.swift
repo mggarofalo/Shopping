@@ -163,6 +163,12 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             }, hasIncompleteRoots: result.hasIncompleteRoots)
         }, read: { service, scope in try Self.snapshot(service, scope, count: 7) })
         let bootstrap = f.bootstrap
+        // Initial store attachment may publish its raw discovery before the
+        // injected access observation arrives. Select only after that witness.
+        _ = try await ready(bootstrap) { _ in
+            bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.access == .restricted
+        }
+        try await bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.graph))
         let original = try await ready(bootstrap)
         let target = try XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "Second home" })
         let scope = try XCTUnwrap(bootstrap.homeDetailsScope(for: target.graph))
