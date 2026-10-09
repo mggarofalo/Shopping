@@ -496,6 +496,12 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
         replaceText(in: app.textFields["shopping.catalog.name"], with: "Draft granola")
         replaceText(in: app.textFields["shopping.catalog.notes"], with: "Draft note")
+        if app.keyboards.firstMatch.exists {
+            let keyboardDone = app.buttons["shopping.catalog.keyboardDone"]
+            XCTAssertTrue(keyboardDone.existsOrAppears(timeout: 2))
+            keyboardDone.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+        }
         let draftName = app.textFields["shopping.catalog.name"].value as? String
         let draftNotes = app.textFields["shopping.catalog.notes"].value as? String
         XCTAssertNotEqual(draftName, "Granola")
@@ -510,6 +516,9 @@ final class ShoppingLaunchTests: XCTestCase {
         XCTAssertTrue(keepEditing.existsOrAppears(timeout: 2))
         keepEditing.tap()
         XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 2))
+        let nameField = app.textFields["shopping.catalog.name"]
+        for _ in 0..<4 where !nameField.exists { app.swipeDown() }
+        XCTAssertTrue(nameField.existsOrAppears(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, draftName)
         XCTAssertEqual(app.textFields["shopping.catalog.notes"].value as? String, draftNotes)
     }
