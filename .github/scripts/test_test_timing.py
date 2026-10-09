@@ -152,6 +152,7 @@ else:
 
         self.environment = dict(os.environ, PATH=str(self.fakebin) + os.pathsep + os.environ["PATH"],
                                 TMPDIR=self.temporary.name, ORIGINAL_ROOT=str(self.root))
+        self.environment.pop("SHOPPING_FULL_WORKERS", None)
 
     def tool(self, name, text):
         path = self.fakebin / name
@@ -182,6 +183,32 @@ else:
         self.assertEqual([phase["phase"] for phase in report["phases"]],
                          ["snapshot", "simulator", "build", "test", "summary"])
         self.assertEqual(report["phases"][3]["command"][:2], ["xcodebuild", "test-without-building"])
+
+    def assert_workers(self, expected_count, expected_parallel, **environment):
+        result = self.run_local(**environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        attestation = self.attestation().read_text()
+        self.assertIn("workers=" + expected_count + "\n", attestation)
+        report_path = attestation.split("timing_report=", 1)[1].splitlines()[0]
+        report = json.loads(Path(report_path).read_text())
+        command = next(phase["command"] for phase in report["phases"] if phase["phase"] == "test")
+        self.assertEqual(command[command.index("-parallel-testing-enabled") + 1], expected_parallel)
+        self.assertEqual(command[command.index("-parallel-testing-worker-count") + 1], expected_count)
+        self.assertFalse(any(argument.startswith(("-only-testing", "-skip-testing")) for argument in command))
+
+    def test_two_workers_are_recorded_by_default(self):
+        self.assert_workers("2", "YES")
+
+    def test_serial_diagnostic_override_is_recorded(self):
+        self.assert_workers("1", "NO", SHOPPING_FULL_WORKERS="1")
+
+    def test_invalid_worker_count_never_starts_full(self):
+        for value in ("0", "3", "two", "-1"):
+            with self.subTest(value=value):
+                result = self.run_local(SHOPPING_FULL_WORKERS=value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.root / ".git/shopping-test-timings").exists())
+                self.assertFalse(self.attestation().exists())
 
     def test_failed_test_never_attests_and_retains_report(self):
         result = self.run_local(TEST_EXIT="65")

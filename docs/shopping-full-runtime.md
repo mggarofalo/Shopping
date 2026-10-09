@@ -1,5 +1,7 @@
 # ShoppingFull runtime investigation (SHOPPING-108)
 
+The [Phase 33 complete-suite comparison](#phase-33-two-native-workers-on-the-m2-shopping-228) supersedes the historical serial-default recommendation below: two native workers reduce measured local test-command time by 42.5%, with an explicit serial fallback.
+
 This report distinguishes historical full-run evidence from matched optimization benchmarks. Historical timings establish where time goes; matched measurements determine whether a change improves runtime. The committed [benchmark evidence](benchmarks/shopping-108.json) records test identifiers, product revisions, run order, environments, results, and raw artifact paths.
 
 | Baseline | Commit | Xcode | Tests | Result | xcresult wall |
@@ -137,7 +139,7 @@ The longer serial selection passed in 347.79s. Its native two-worker counterpart
 
 ## Workflow recommendations
 
-Keep the existing exact-SHA local-pass requirement and remote attestation preflight. Preserve failed test results, coverage collection and baselines, recovery relaunches, and all assertions. Retain the serial runner. The short two-worker sample was slower, and the longer selection has not established a reliable whole-command improvement despite shorter worker scheduling. Native parallelism remains promising for long suites; reconsider it with repeatable total command measurements and collector overhead reported separately. The intermittent diagnostic timeout also occurs serially, and hosted performance remains toolchain-specific.
+Keep the existing exact-SHA local-pass requirement and remote attestation preflight. Preserve failed test results, coverage collection and baselines, recovery relaunches, and all assertions. The original SHOPPING-108 evidence supported retaining the serial runner; SHOPPING-228 below supersedes that local-default decision. The short two-worker sample was slower, and the longer selection has not established a reliable whole-command improvement despite shorter worker scheduling. Native parallelism remains promising for long suites; reconsider it with repeatable total command measurements and collector overhead reported separately. The intermittent diagnostic timeout also occurs serially, and hosted performance remains toolchain-specific.
 
 A GitHub Actions matrix would multiply hosted runner allocation and repeat setup/build work unless build products were explicitly transferred. Treat expansion to multiple hosted jobs, automatic exhaustive runs on every push, or removal of the local exhaustive gate as separate workflow-policy proposals requiring approval. This issue provides no evidence supporting those policy changes. Prefer the existing infrequent exact-commit remote confirmation while collecting timing history.
 
@@ -152,3 +154,30 @@ The exact local candidate `97370ca3e29cc36c48189858b1db147a68d381e5` completed w
 `ShoppingLaunchTests.testDirtyArchivedCatalogRestoreConfirmationCancelKeepsEditorDraft` tapped a Restore row at `(201,493)` while the keyboard toolbar occupied y491–539. The helper's fixed keyboard inset incorrectly accepted the row as unobstructed. The correction dismisses the keyboard using the editor's Done control, waits for disappearance, and then performs the single Restore tap. Cancellation leaves the name field offscreen, so a bounded scroll exposes it before the original exact draft-value assertions. The corrected workflow passed in 27.348 seconds in `/tmp/shopping-phase33-ui-boundaries-fixed.xcresult`; the earlier keyboard-only attempt's offscreen-field failure remains in `/tmp/shopping-phase33-restore-keyboard-fixed.xcresult`.
 
 These are correctness experiments, not runtime improvements or suite-wide speed comparisons. The final consecutive selection passed all three workflows (Homes accessibility, sharing-status text transitions, and restore cancellation) in `/tmp/shopping-phase33-ui-boundaries-final.xcresult`, with 210.925 seconds of summed test duration and 227.118 seconds of test-session elapsed time. The new exact-commit local/hosted full results and release receipts are recorded in SHOPPING-219 so the attested candidate can remain unchanged.
+
+## Phase 33: two native workers on the M2 (SHOPPING-228)
+
+The complete matched comparison supports two workers for the maintained local Full runner. On this Mac14,9 with 10 CPU cores and 16 GiB RAM, test-command wall time fell from **64m49s to 37m17s**, saving **27m32s (42.5%)**. Both runs passed the same **917 unique tests: 797 Fast and 120 UI, with no failures or skips**. The [benchmark record](benchmarks/shopping-228.json) preserves complete identifiers, commands, source/environment metadata, phase timings, coverage and sampled resource costs.
+
+| Measurement | Two workers | Serial |
+| --- | ---: | ---: |
+| Test command, including startup and teardown | 2,236.780s | 3,888.536s |
+| Requested base simulator preparation | 0.121s | 5.989s |
+| Shopping.app covered lines | 42,709 / 49,612 (86.086%) | 42,707 / 49,612 (86.082%) |
+| UI test-bundle covered lines | 7,962 / 8,559 | 7,962 / 8,559 |
+| Sampled host free-memory percentage range | 27–57% | 41–74% |
+| Sampled host swap-out counter increase | 222,552 pages | 0 pages |
+
+Source was clean `39026e31478945fbf149585992f1946c89f24e3c`, Xcode 27.0 (27A266a), iOS 26.5 (23F77), with the same requested iPhone 17 Pro destination. One fresh DerivedData build-for-testing took **38.976s**, then both runs reused those products with test-without-building. Build time is separate and was not repeated for the serial comparator. This is a warm-host experiment, not a cold-machine compilation benchmark. The parallel run was first, followed immediately by serial; one fixed-order pair establishes an observed improvement, not a distribution of runtime or failure probability.
+
+The parallel command explicitly enabled two workers; serial explicitly disabled parallel testing. Native Xcode scheduling used separate simulator clones, with one result bundle and merged coverage. UI class durations sum to approximately 2,073s and 1,769s in the two worker groups. These sums are not elapsed time; the measured whole command includes Fast execution, clone startup, scheduling and diagnostic collection. The separately timed bootstatus call concerns the requested base destination, not the clones. Neither completed command exhibited the historical ten-minute post-test diagnostic stall; diagnostics remain enabled.
+
+UUID fixture stores, same-store relaunch without reseeding, abrupt termination, app/runner ownership and native Settings changes remain intact. Both full runs passed the Settings/recovery workflows. No test plan, selected identifier, assertion, timeout or fixture setup changed in this comparison. It does not prove that historical intermittent Settings failures are solved.
+
+The 30-second resource samples cover most, but not the exact endpoints, of each command. Whole-host VM counters use 16 KiB pages; swap activity is not an exact per-process allocation or measured disk-byte total. Serial followed parallel without a memory reset. Samples observed at most one xcodebuild process, but do not inventory every background service. The higher pressure is a reason to keep **two** workers, preserve a serial fallback, and avoid competing local workloads. It does not support four workers.
+
+The local runner now defaults to two native workers and records the choice in phase commands and the SHA attestation. Use `SHOPPING_FULL_WORKERS=1 .github/scripts/run-local-shopping-full.sh` for serial diagnosis; other counts are rejected before expensive validation. The runner still uses an isolated clean-source snapshot, a fresh build, coverage, exact-source compiler preflight, unchanged-source checks, and failure-preserving reporting. No attestation was created from these research commands. The final integrated candidate must pass the maintained gates on its own SHA.
+
+This change is local to the M2 runner. Hosted Xcode 16.4 / iOS 18.5 performance has not been measured with two workers, so hosted defaults stay as they are. Native scheduling provides the measured benefit without custom shards, repeated builds or manual result aggregation. Remaining class imbalance suggests a smaller possible optimization, but does not justify more scheduling machinery now.
+
+Raw result bundles, logs, phase records, coverage exports and resource samples are retained in `/tmp/shopping-228-39026e3/`. Product hashes were captured during the serial run after parallel completed; they identify retained artifacts and are not a before/after product-integrity audit. The actual commands establish reuse of the same DerivedData directory without an intervening build. Naturally required final Full runs should extend the timing history; do not run extra suites just to manufacture a reliability sample.

@@ -122,6 +122,8 @@ Run exhaustive local coverage:
 .github/scripts/dispatch-remote-shopping-full.sh
 ```
 
+The local Full runner uses two native simulator workers by default. The [complete M2 comparison](shopping-full-runtime.md#phase-33-two-native-workers-on-the-m2-shopping-228) saved 27m32s with all 917 tests passing, at higher memory pressure. Keep local validation exclusive. Use `SHOPPING_FULL_WORKERS=1 .github/scripts/run-local-shopping-full.sh` for serial diagnosis; other worker counts are rejected. Commands and attestations record the selected count. Hosted worker defaults are unchanged.
+
 The first command refuses a dirty worktree, exports the exact `HEAD` commit to an isolated temporary source snapshot, runs `ShoppingFull` there on the pinned local simulator, and records a pass only if the original worktree still has the same clean `HEAD` afterward. Push that unchanged commit before running the second command. The dispatch command refuses a missing local pass, a dirty worktree, or a remote branch whose head differs from the attested SHA. It publishes the `local/ShoppingFull` status on that exact commit and explicitly dispatches the hosted workflow. The hosted preflight independently requires a successful status on its exact workflow SHA before allocating the macOS exhaustive runner.
 
 Run the performance plan only when measuring a stable environment:
