@@ -27,18 +27,22 @@ struct GroceryCatalogAddView: View {
     @State private var personID: UUID?
     @State private var personSelectionWasChanged = false
     let scope: GroceryAddScope
+    let initialCreationName: String?
+    @State private var deliveredInitialCreation = false
     let onCompleted: (GroceryCatalogAddCompletion) -> Void
     let onOneTime: (String, UUID?) -> Void
 
     init(
         scope: GroceryAddScope,
+        initialCreationName: String? = nil,
         onCompleted: @escaping (GroceryCatalogAddCompletion) -> Void,
         onOneTime: @escaping (String, UUID?) -> Void
     ) {
         self.scope = scope
+        self.initialCreationName = initialCreationName
         self.onCompleted = onCompleted
         self.onOneTime = onOneTime
-        _searchText = State(initialValue: scope.textFilter)
+        _searchText = State(initialValue: initialCreationName ?? scope.textFilter)
     }
 
     private var canonicalList: GroceryList? {
@@ -204,6 +208,11 @@ struct GroceryCatalogAddView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .task {
+                guard !deliveredInitialCreation, initialCreationName != nil else { return }
+                deliveredInitialCreation = true
+                createCatalogItem()
+            }
             .navigationTitle("Add to Groceries")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(

@@ -2067,6 +2067,39 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    func catalogActionItems(householdID: UUID, listID: UUID) throws -> [CatalogActionItem] {
+        try readOnWriter { context in
+            try self.commandAuthority?.validate()
+            let session = try self.persistence.personalCartSessionProvider?.currentSession()
+            guard session?.accountBinding == self.persistence.personalCartInitialBinding else {
+                throw PersonalCartError.accountChanged
+            }
+            let household = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "household == %@ AND isArchived == NO", household)
+            request.relationshipKeyPathsForPrefetching = ["category", "stores"]
+            let items = try self.validCatalogItems(context.fetch(request)).filter {
+                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+            }
+            let result = items.compactMap { item -> CatalogActionItem? in
+                let stores = Array(item.stores ?? [])
+                guard stores.allSatisfy({ $0.id != PersistenceModel.unsetID && self.belongs($0, to: household) }),
+                      item.category.map({ $0.id != PersistenceModel.unsetID && self.belongs($0, to: household) }) ?? true,
+                      !CatalogProjection.normalizedName(item.name).isEmpty else { return nil }
+                return CatalogActionItem(id: item.id, revision: item.revision, name: item.name,
+                    category: item.category?.name ?? "Uncategorized",
+                    purchaseRules: CatalogSuggestionPurchaseSummary.text(anyStore: item.anyStore,
+                        savedStoreLabels: stores.map { $0.name + ($0.isArchived ? " (archived)" : "") },
+                        hasSavedStores: !stores.isEmpty))
+            }
+            try self.commandAuthority?.validate()
+            guard try self.persistence.personalCartSessionProvider?.currentSession() == session else {
+                throw PersonalCartError.accountChanged
+            }
+            return result
+        }
+    }
+
     func catalogSuggestionNames(householdID: UUID) throws -> [String] {
         try readOnWriter { context in
             guard try self.household(id: householdID, in: context) != nil else {

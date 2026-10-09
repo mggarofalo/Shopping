@@ -13,12 +13,19 @@ final class GroceryNavigationState: ObservableObject {
     @Published var categoryID: UUID? { didSet { persist() } }
     @Published var searchText = ""
     @Published var systemAddRequestID: UUID?
+    private(set) var systemNewItemName: String?
     @Published var systemCatalogRequestID: UUID?
     private(set) var systemCatalogQuery = ""
 
     func requestSystemAction(_ destination: ShoppingActionDestination) {
         switch destination {
         case .addItem:
+            systemNewItemName = nil
+            groceryPath = []
+            selectedTab = .groceries
+            systemAddRequestID = UUID()
+        case .createItem(let name):
+            systemNewItemName = name
             groceryPath = []
             selectedTab = .groceries
             systemAddRequestID = UUID()

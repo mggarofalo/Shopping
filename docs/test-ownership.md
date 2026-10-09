@@ -2457,3 +2457,16 @@ recovery behavior. The failed baseline is retained in the validation record.
 ## Phase 33 system actions (SHOPPING-217)
 
 `ShoppingActionTests` owns pending-request exclusivity, expiry/cancellation, Home/presentation invalidation, the three quick-action identities and concurrent background startup without a mounted view. Existing `ActiveHomeBootstrapTests` and presentation-retirement tests retain account/store lifecycle proof. `SystemActionUITests/testHomeScreenAddOpensCatalogAddWithoutChangingList` owns actual SpringBoard quick-action delivery into the existing grocery add sheet. Existing catalog save/add tests retain persistence and duplicate-add proof.
+
+
+## Phase 33 · Siri catalog actions (SHOPPING-218)
+
+`CatalogActionTests` owns normalized matching, snapshot eligibility, revision and
+presentation fencing, duplicate/carted add preservation, permission failure,
+cancellation before dispatch, scoped entity identity and unsaved creation handoff.
+`CatalogActionUITests` owns the prefilled editor, cancellation without records,
+explicit Save and Add, and persistence across relaunch, using an isolated local
+fixture. Its DEBUG handoff trigger requires an isolated test store and does not
+claim Siri speech recognition. Generated App Intents metadata must contain exactly
+three actions/shortcuts. Actual Siri recognition, native disambiguation and device
+foreground continuation require separate system/device evidence.

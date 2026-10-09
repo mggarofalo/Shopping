@@ -36,3 +36,20 @@ The framework distinctions and foreground handoff are documented by Apple:
 [App Shortcuts](https://developer.apple.com/design/human-interface-guidelines/app-shortcuts),
 and [ForegroundContinuableIntent](https://developer.apple.com/documentation/appintents/foregroundcontinuableintent).
 Use APIs available to iOS 17 and the pinned Xcode 16.4 compiler.
+
+The three App Shortcuts use app-qualified phrases, such as “Add an item in
+Milk & Bananas”. Add asks for an item name when none is supplied; Shortcuts can
+also supply text or a remembered catalog entity. Matching folds case, diacritics,
+width and whitespace. Duplicate matches present numbered native choices with
+category and purchase rules. More than twenty matches requests a narrower name;
+no candidate is silently chosen or truncated. Archived items, one-time needs and
+unresolved catalog relationships do not become suggestions. Entity identities
+include the captured local Home graph, so reimported or other-Home entities must
+be selected again. No command crosses an account or Home change during dialogue.
+
+All three intents require device authentication. Catalog reads use the existing
+writer and return immutable values. The add captures catalog and need revisions
+before disambiguation, then uses the existing duplicate-safe catalog-add command.
+Cancellation is checked before command dispatch. Success dialogue follows the
+durable save; existing needs report “already on your grocery list”. There is no
+invented native grocery-list integration or unrestricted natural-language parser.

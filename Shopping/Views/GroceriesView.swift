@@ -37,6 +37,7 @@ struct GroceriesView: View {
     @State private var storeShare: GroceryStoreShare?
     @State private var showingCategoryFill = false
     @State private var addPickerScope: GroceryAddScope?
+    @State private var systemCreationName: String?
     @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
     @State private var pendingCatalogScope: GroceryAddScope?
     @State private var pendingOneTimeTarget: GroceryEditorTarget?
@@ -233,6 +234,7 @@ struct GroceriesView: View {
             .sheet(item: $addPickerScope, onDismiss: completeCatalogAdd) { scope in
                 GroceryCatalogAddView(
                     scope: scope,
+                    initialCreationName: systemCreationName,
                     onCompleted: {
                         pendingCatalogCompletion = $0
                         pendingCatalogScope = scope
@@ -428,6 +430,7 @@ struct GroceriesView: View {
     private func presentSystemAdd() {
         guard navigation.systemAddRequestID != nil else { return }
         navigation.systemAddRequestID = nil
+        systemCreationName = navigation.systemNewItemName
         addPickerScope = GroceryAddScope(
             householdID: selection.householdID, listID: selection.listID,
             selectedStoreID: nil, selectedStoreName: nil
@@ -435,6 +438,7 @@ struct GroceriesView: View {
     }
 
     private func presentAdd() {
+        systemCreationName = nil
         guard let canonicalList, let householdID = canonicalList.household?.id else { return }
         let selectedStore = activeStores.first { $0.id == navigation.selectedStoreID }
         addPickerScope = GroceryAddScope(

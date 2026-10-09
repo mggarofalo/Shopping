@@ -54,6 +54,9 @@ struct ShoppingApp: App {
     var body: some Scene {
         WindowGroup {
             PersistenceRootView(bootstrap: bootstrap)
+                #if DEBUG
+                .task { await SystemActionUITestFixture.deliver(runtime: ShoppingApplicationRuntime.shared) }
+                #endif
                 .tint(.groceryAccent)
                 .environment(\.defaultMinListRowHeight, ShoppingListMetrics.minimumListRowHeight)
                 .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)

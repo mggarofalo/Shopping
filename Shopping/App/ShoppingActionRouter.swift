@@ -2,6 +2,7 @@ import Foundation
 
 enum ShoppingActionDestination: Equatable {
     case addItem
+    case createItem(String)
     case groceries
     case catalog(String)
 
