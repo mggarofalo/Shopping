@@ -53,3 +53,9 @@ before disambiguation, then uses the existing duplicate-safe catalog-add command
 Cancellation is checked before command dispatch. Success dialogue follows the
 durable save; existing needs report “already on your grocery list”. There is no
 invented native grocery-list integration or unrestricted natural-language parser.
+
+## Validation evidence
+
+On October 9, Xcode 27 / iPhone 18 Pro simulator iOS 27.0 (24A434), an isolated AppIntentsTesting probe queried `CatalogItemEntity` for the seeded Bananas item and executed all three intents through Apple's native out-of-process interface. The query returned one entity; Add completed, Search opened Catalog, and Open returned to Groceries. `/tmp/shopping-phase33-native-intents-seeded.xcresult` passed 1/1 without skips. The SDK 27-only diagnostic was not added to the iOS 17/Xcode 16.4 CI sources.
+
+Siri invocation remains a separate unverified boundary. `XCUIDevice.siriService` with “Open my grocery list in Milk and Bananas” opened Siri but did not bring the app foreground within 20 seconds on iOS 26.5 or27 simulators. Failed artifacts remain `/tmp/shopping-phase33-siri-capability.xcresult` and `/tmp/shopping-phase33-native-siri27.xcresult`. These runs do not establish spoken recognition, native ambiguity prompts, or real-device foreground continuation. Domain and isolated editor tests cover their app-owned behavior; physical Siri acceptance still needs to be recorded.
