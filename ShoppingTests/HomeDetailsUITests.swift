@@ -3,7 +3,7 @@ import XCTest
 final class HomeDetailsUITests: XCTestCase {
     func testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails() throws {
         let app = launch(role: "owner", secondHome: true, systemTextSize: true)
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         XCTAssertTrue(app.buttons["shopping.home.choose"].existsOrAppears(timeout: 8))
         app.buttons["shopping.home.choose"].tap()
         try textSize.set(.accessibilityXXXL)
@@ -150,6 +150,11 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         let chooseHome = app.buttons["Homes"]
         XCTAssertTrue(chooseHome.existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.navigationBars[homeName].waitForNonExistence(timeout: 5),
+                      "The departing Home details sheet must finish dismissing")
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isHittable == true"), object: chooseHome)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 5), .completed)
         XCTAssertTrue(chooseHome.isHittable)
         XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists)
         chooseHome.tap()
@@ -397,20 +402,20 @@ final class HomeDetailsUITests: XCTestCase {
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
         continueAfterFailure = false
         let app = launch(role: "restricted", systemTextSize: true)
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         openHomeDetails(app)
         let homeName = "Preview household"
         let home = app.staticTexts["shopping.home.membersHeading"]
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         let witnesses: [(String, XCUIElement)] = [
-            ("headline", home),
+            ("section heading", home),
             ("subheadline", app.staticTexts["Read-only access"]),
             ("body", longName)
         ]
         func measure(_ phase: String) -> [String: CGRect] {
             var frames: [String: CGRect] = [:]
             for (role, element) in witnesses {
-                reveal(element, in: app, towardTop: role == "headline")
+                reveal(element, in: app, towardTop: role == "section heading")
                 frames[role] = element.frame
                 let screenshot = XCTAttachment(screenshot: app.screenshot())
                 screenshot.name = "Home members \(phase) \(role) fully visible"
@@ -424,7 +429,10 @@ final class HomeDetailsUITests: XCTestCase {
             // retained destination/home, without reopening it or scrolling.
             XCTAssertTrue(app.navigationBars[homeName].exists)
             XCTAssertTrue(home.exists)
-            XCTAssertEqual(home.label, "Members")
+            // Native section headers are uppercase on iOS 18.5 and title case
+            // on iOS 26.5. Keep exact text for both observed presentations.
+            XCTAssertTrue(["Members", "MEMBERS"].contains(home.label),
+                "The retained destination must expose the native Members heading")
             XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         }
         let baseline = measure("Large")
@@ -570,7 +578,7 @@ final class HomeDetailsUITests: XCTestCase {
         if inviteFailure { app.launchEnvironment["SHOPPING_UI_TEST_HOME_INVITE_FAILURE"] = "1" }
         if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
-        if systemTextSize { SystemTextSizeSettings.configure(app) }
+        if systemTextSize { SystemTextSize.configure(app) }
         addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app

@@ -100,7 +100,7 @@ jobs:
           .github/scripts/test-timing.py run \
             --phases ExhaustivePhases.jsonl --phase test --record-command \
             --log ExhaustiveTest.log --seconds ExhaustiveTestSeconds.txt -- \
-          xcodebuild test-without-building \
+          .github/scripts/with-system-text-size.py -- xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
             -testPlan "$TEST_PLAN" \

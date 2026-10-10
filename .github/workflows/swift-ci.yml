@@ -64,6 +64,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_full_preflight.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_exhaustive_contract.py
 
+      - name: Validate system text-size driver
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_system_text_size.py
+
       - name: Validate TestFlight workflow
         run: .github/scripts/test-testflight-workflow.sh
 
@@ -155,7 +158,7 @@ jobs:
           .github/scripts/test-timing.py run \
             --phases AcceptancePhases.jsonl --phase test --record-command \
             --log AcceptanceTest.log --seconds AcceptanceTestSeconds.txt -- \
-          xcodebuild test-without-building \
+          .github/scripts/with-system-text-size.py -- xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
             -testPlan ShoppingAcceptance \

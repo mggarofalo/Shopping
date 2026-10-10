@@ -181,3 +181,99 @@ The local runner now defaults to two native workers and records the choice in ph
 This change is local to the M2 runner. Hosted Xcode 16.4 / iOS 18.5 performance has not been measured with two workers, so hosted defaults stay as they are. Native scheduling provides the measured benefit without custom shards, repeated builds or manual result aggregation. Remaining class imbalance suggests a smaller possible optimization, but does not justify more scheduling machinery now.
 
 Raw result bundles, logs, phase records, coverage exports and resource samples are retained in `/tmp/shopping-228-39026e3/`. Product hashes were captured during the serial run after parallel completed; they identify retained artifacts and are not a before/after product-integrity audit. The actual commands establish reuse of the same DerivedData directory without an intervening build. Naturally required final Full runs should extend the timing history; do not run extra suites just to manufacture a reliability sample.
+
+
+## Pinned release UI diagnostics (SHOPPING-219)
+
+Candidate `1f4d289e93746be65ee19752eab6004cc23ff031` passed local Full with 917 unique tests, zero failures/skips, in 2,127.300 seconds of test-command time. [Hosted Full 38080343221](https://github.com/mggarofalo/Shopping/actions/runs/38080343221) completed its inventory in 57m35s: 908 passes, nine UI failures, zero skips, and passing coverage. Raw result, log, and summary artifacts survived; this was a test failure, not a timeout. The local pass does not establish pinned-runtime compatibility.
+
+Six failures requested native Settings slider position 100% and stopped at 45–55%. The remaining failures involved a departing Home sheet still covering the Homes button, a native category Menu reporting non-hittable despite a working touch, and a quantity sheet whose visible field was incorrectly bounded by the background tab bar. Corrections wait for the actual departing sheet, prove Menu reachability through one touch and its exact destination, and exclude a non-foreground tab bar from the sheet viewport. They retain selection, recovery, and full-frame visibility checks.
+
+The first slider experiment used one native adjustment per category; 27% to 36% overshot to 45% locally. Its synthesized motion lasted only 47 ms after a 250 ms hold, disproving slow movement alone as the explanation. The second experiment used a direct no-hold drag for all positions: it reached 100% and the exact app XXXL category, but returning to 27% landed at 18%. Neither experiment is release proof. Results remain in `/tmp/shopping-phase33-focused-local/` and `/tmp/shopping-phase33-nohold-local/`; the first was stopped after its failure. [Focused hosted run 38085111373](https://github.com/mggarofalo/Shopping/actions/runs/38085111373) was cancelled when the first local experiment failed.
+
+The endpoint-only no-hold candidate `a47ee29` passed all nine focused workflows locally (598.307 seconds, no skips), plus 797 Fast and six acceptance tests in [hosted CI 38085897761](https://github.com/mggarofalo/Shopping/actions/runs/38085897761). Its focused hosted selection passed the three non-slider workflows but failed the six Settings workflows. The first endpoint reached 100%; the native return stopped at 64%, and later endpoint gestures also stopped at 64%. Videos show identical successful and failed endpoint coordinates/timing, with the failed control changing layout during the drag. A later 10,000-point/second local gesture was ignored entirely. These results reject the all-position/high-velocity variants. The endpoint-only gesture remained in the next midpoint experiment and was ultimately discarded with it.
+
+A Settings-only Large launch override was also rejected: it made the slider display the overridden value while Shopping retained XXXL, and the exact restoration assertion failed. That experiment and its resulting simulator-state cleanup are retained in `/tmp/shopping-phase33-stable-settings.xcresult`. There is no Settings launch override in the candidate.
+
+Recorded thumb centers motivated a centered 2,500-point/second experiment; it reached the endpoint but continued to the minimum after release on return. Adding a destination hold changed the endpoint to 91%, exposing the control's pressed-state geometry. These empirical interior-targeting changes were discarded; recordings remain in `/tmp/shopping-phase33-centered-large-baseline.xcresult` and `/tmp/shopping-phase33-held-large-baseline.xcresult`.
+
+The midpoint candidate `ff7c609` selected Large through the standard range (range off, position 0.5), retaining the endpoint-only gesture for XXXL. One local status workflow passed in 119.860 seconds, but the other five produced four passes and one failure: Home replacement returned to actual UIKit XL despite Settings showing the Large midpoint. The retained process, fresh sequence and video agree. Hosted diagnostic [38088316424](https://github.com/mggarofalo/Shopping/actions/runs/38088316424) failed at the XXXL endpoint before the midpoint transition. Both required CI jobs passed separately. These failed experiments are retained, not counted as release validation.
+
+### Supported Simulator system driver (SHOPPING-219)
+
+The repair separates test transport from app observations. `with-system-text-size.py` supervises one xcodebuild invocation; `SimulatorTextSizeDriver` submits unique, expiring requests from the actual runner UDID, including native parallel-worker clones. The host serializes supported `simctl ui <UDID> content_size` commands and requires exact named-category readback. `SystemTextSize` still backgrounds Shopping, activates its retained process and requires nonce, process, sequence, uptime and exact UIKit category before the original UI/layout assertions. It first checks the original global category against Shopping, then restores and observes that same category after the test.
+
+A private per-run directory, lease identity, atomic acknowledgments and poisoned failed leases prevent cross-test/stale commands. Teardown restoration follows any in-flight setter; host cleanup restores abandoned leases and forces a nonzero result. Missing transport fails explicitly. There are no launch overrides, skips, retries or product-code changes.
+
+This deliberately replaces proof of Apple's Settings navigation, range toggle and slider fidelity with proof of actual Simulator OS category changes and app response. It does not claim physical-device behavior or exact Settings range-toggle restoration. The first local status experiment passed in 49.350 seconds at iOS 26.5, compared with the preceding midpoint experiment's 119.860 seconds for the same method; this is a focused mechanism comparison, not a suite-wide speedup or final-source attestation. Raw results: `/tmp/shopping-phase33-host-driver.xcresult`. Focused multi-worker/pinned and final exact-source results follow separately.
+
+The first six-method native-worker run failed before any global mutation: the runner correctly supplied clone `A00CF711-93BC-491B-ACF2-C4AADAB543E0`, but the host looked in the default device set. That clone belongs to Xcode's `XCTestDevices` set. The driver now takes the runner's `SIMULATOR_SHARED_RESOURCES_DIRECTORY`, validates its `UDID/data` suffix and binds the derived device set into every lease/request/acknowledgment. Commands explicitly use `simctl --set`; neither base-device inference nor `booted` is used. The failed result is retained at `/tmp/shopping-phase33-host-driver-six.xcresult`.
+
+The corrected local six-method selection passed in two actual clones, with six
+unique passes, no failures/skips, 33 unique requests and six exact original-size
+restorations. xcodebuild reported 228.951 seconds testing-operation elapsed.
+The invocation began before the tested source was committed as `a698da1`; it is
+focused equivalent-source evidence, not a clean exact-SHA Full attestation.
+Both independent reviewers cleared the implementation and the artifact audit.
+
+Hosted [38089915219](https://github.com/mggarofalo/Shopping/actions/runs/38089915219)
+on clean `a698da1` passed both required CI jobs, but its separate six-method
+selection produced one pass and five failed methods. Home replacement completed
+all system transitions and restoration. Three host commands exceeded the new
+five-second cap (one readback, one setter and its restoration); the retained
+lease correctly blocked subsequent tests, and emergency restoration succeeded.
+The restricted-member method reached its app checks and exposed iOS 18.5's
+native uppercase `MEMBERS` section heading versus iOS 26.5's `Members`.
+Raw results are retained at `/tmp/shopping-phase33-a698-hosted/FocusedResults.xcresult`.
+
+The follow-up allows 15 seconds per host command and one shared 75-second
+request budget for two serialized set/readback pairs plus IPC, records command
+durations, and accepts exactly the two evidenced native heading labels.
+Eight-second app-observation bounds, category/process/freshness predicates,
+heading identity, growth/wrapping/restoration assertions and lease poisoning
+remain unchanged. Seventeen driver contracts include subprocess cancellation,
+abandoned leases and preservation of direct child signal status. Timeout
+adequacy still needs hosted proof; no failed run is a release attestation.
+
+The next clean candidate `1da5e0a` passed its two changed local UI boundaries
+with exact original-size restoration; the longest individual host command was
+0.508 seconds. Hosted [38091030781](https://github.com/mggarofalo/Shopping/actions/runs/38091030781)
+passed the release SDK build but exposed a separate Fast fixture race: 796 passes,
+one timeout, zero skips, and passing coverage. `open()` selected a Home before
+startup discovery necessarily completed, invalidating the injected restricted
+access result that the test then awaited. The test now explicitly requests fresh
+discovery after that selection before its existing access witness. Production
+fences, timeouts and all access/saved-work assertions remain intact. Both reviewers
+cleared the ordering correction; all 11 Home-sharing status bootstrap tests passed
+locally (14.748 seconds test-operation elapsed). Failed raw results remain at
+`/tmp/shopping-phase33-1da-ci-failure/FastResults.xcresult`; the focused local pass
+is `/tmp/shopping-phase33-home-discovery-order.xcresult`.
+
+The same `1da5e0a` hosted diagnostic completed five of six UI workflows. All 30
+host requests succeeded, all six original categories were restored, and the
+longest command took 11.344 seconds. The sole failure preceded the first setter:
+XCTest still reported foreground eight seconds after Home was pressed, while
+the retained video already showed SpringBoard. The recording and timeout
+attachment are retained in `/tmp/shopping-phase33-1da-background/`, and the raw
+bundle in `/tmp/shopping-phase33-1da-hosted/FocusedResults.xcresult`.
+
+The existing DEBUG-only, explicitly opted-in runtime probe now also records
+connected scenes' actual UIKit activation states and observes
+[`UIScene.didEnterBackgroundNotification`](https://developer.apple.com/documentation/uikit/uiscene/didenterbackgroundnotification).
+Background proof requires the same process and nonce, a later sequence, an
+observation after the Home action, and a nonempty set of entirely background
+scenes. Foreground proof keeps the existing category, process, time and XCTest
+checks and additionally requires a foreground-active scene. The eight-second
+bound remains unchanged. An already-observed background state permits failure
+teardown to restore the OS; normal roundtrips always begin with the preceding
+fresh foreground observation. This replaces XCTest's stale passive background
+observation with actual app lifecycle evidence, not a longer timeout or retry.
+Both independent reviewers cleared the correction. No shipped app behavior or
+font environment changes.
+
+The scene-observation repair passed both local changed workflows (Home details
+and the repeated sharing-status roundtrip), zero failures/skips, in 146.304
+seconds test-operation elapsed. Two workers were permitted; Xcode scheduled both
+methods on one actual clone. Raw evidence is
+`/tmp/shopping-phase33-scene-lifecycle.xcresult`. Hosted confirmation remains
+required before integration and final Full validation.

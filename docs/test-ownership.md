@@ -2512,3 +2512,31 @@ an incidental polling delay with the actual resulting-state assertion.
 
 No tests are retired and no fixture contents are changed. Runtime benefit must
 come from matched measurements, not a reduction in proof inventory.
+
+
+## SHOPPING-219: Actual Simulator text-size transitions
+
+This supersedes the Settings-slider transport described above. The same six
+Home details, Home replacement, Sharing status and Personal Cart UI methods
+retain their entire app-interaction inventory and screen/layout assertions.
+`SystemTextSize` uses a host driver for the actual global OS category, with
+explicit background/foreground transitions of the same Shopping process.
+Original global and UIKit categories must agree. Each transition still requires
+fresh nonce-bound sequence/uptime and exact UIKit category; normal restoration
+requires both host readback and a fresh observation in the retained app.
+
+The host uses Apple's supported `simctl ui <actual runner UDID> content_size`
+command. Per-run directories, expiring request IDs and exclusive per-test leases
+isolate parallel simulator clones. Failed leases allow restoration only; an
+abandoned lease or failed host operation prevents a successful run/attestation.
+The host drains serialized operations before cleanup and restores originals if
+a test runner dies. Seventeen deterministic driver contracts cover identity,
+expiration, duplicate requests, wrong readback, independent devices, poisoned
+leases, failed/abandoned restoration, child exit status and cancellation.
+
+This owns real Simulator OS changes and app response, not interaction with
+Apple's Settings UI. It no longer proves range-toggle/slider fidelity or exact
+range-toggle restoration, and it is not physical-device evidence. No app
+preference override or product-side mutation seam is used. Full runners wrap
+xcodebuild automatically; focused commands for these methods need the same
+`with-system-text-size.py` wrapper. Missing transport is a failure, never a skip.

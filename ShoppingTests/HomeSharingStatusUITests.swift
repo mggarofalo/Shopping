@@ -13,9 +13,9 @@ final class HomeSharingStatusUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
-        SystemTextSizeSettings.configure(app)
+        SystemTextSize.configure(app)
         app.launch()
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         try textSize.set(.accessibilityXXXL)
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         let groceries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row."))

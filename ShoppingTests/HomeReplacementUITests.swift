@@ -102,7 +102,7 @@ final class HomeReplacementUITests: XCTestCase {
     func testSameNamedHomesRemainDistinctAtAccessibilityTextSize() throws {
         let app = launch(mode: "same-name", systemTextSize: true)
         XCTAssertTrue(app.buttons["shopping.replacement.replace"].existsOrAppears(timeout: 10))
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         try textSize.set(.accessibilityXXXL)
         let replace = app.buttons["shopping.replacement.replace"]
         reveal(replace, app)
@@ -125,7 +125,7 @@ final class HomeReplacementUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_ACCEPTED_INVITATION"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_REPLACEMENT"] = mode
-        if systemTextSize { SystemTextSizeSettings.configure(app) }
+        if systemTextSize { SystemTextSize.configure(app) }
         addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app

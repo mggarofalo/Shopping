@@ -119,7 +119,7 @@ class LocalGateTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repository"
         scripts = self.root / ".github/scripts"
         scripts.mkdir(parents=True)
-        for name in ("test-timing.py", "run-local-shopping-full.sh", "summarize-xcresult.sh", "require-full-preflight.py"):
+        for name in ("test-timing.py", "run-local-shopping-full.sh", "summarize-xcresult.sh", "require-full-preflight.py", "with-system-text-size.py"):
             shutil.copy2(SCRIPT.with_name(name), scripts / name)
         (self.root / "source.txt").write_text("original\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "fixture")):
@@ -182,7 +182,8 @@ else:
         self.assertFalse(report["metadata"]["dirty"])
         self.assertEqual([phase["phase"] for phase in report["phases"]],
                          ["snapshot", "simulator", "build", "test", "summary"])
-        self.assertEqual(report["phases"][3]["command"][:2], ["xcodebuild", "test-without-building"])
+        self.assertEqual(report["phases"][3]["command"][:4],
+                         [".github/scripts/with-system-text-size.py", "--", "xcodebuild", "test-without-building"])
 
     def assert_workers(self, expected_count, expected_parallel, **environment):
         result = self.run_local(**environment)

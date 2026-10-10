@@ -55,10 +55,10 @@ final class PersonalCartUITests: XCTestCase {
             .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
-        SystemTextSizeSettings.configure(app)
+        SystemTextSize.configure(app)
         app.launch()
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
-        for size in [SystemTextSizeSettings.Size.large, .accessibilityXXXL] {
+        let textSize = try SystemTextSize(test: self, app: app)
+        for size in [SystemTextSize.Size.large, .accessibilityXXXL] {
             try textSize.set(size)
             let picker = app.buttons["shopping.store.menu"]
             XCTAssertTrue(picker.existsOrAppears(timeout: 5))
@@ -114,10 +114,10 @@ final class PersonalCartUITests: XCTestCase {
             .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
-        SystemTextSizeSettings.configure(app)
+        SystemTextSize.configure(app)
         app.launch()
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
-        for size in [SystemTextSizeSettings.Size.large, .accessibilityXXXL] {
+        let textSize = try SystemTextSize(test: self, app: app)
+        for size in [SystemTextSize.Size.large, .accessibilityXXXL] {
             try textSize.set(size)
             for title in ["Groceries", "Catalog", "Settings"] {
                 app.tabBars.buttons[title].tap()
