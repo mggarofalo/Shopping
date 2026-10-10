@@ -408,14 +408,14 @@ final class HomeDetailsUITests: XCTestCase {
         let home = app.staticTexts["shopping.home.membersHeading"]
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         let witnesses: [(String, XCUIElement)] = [
-            ("headline", home),
+            ("section heading", home),
             ("subheadline", app.staticTexts["Read-only access"]),
             ("body", longName)
         ]
         func measure(_ phase: String) -> [String: CGRect] {
             var frames: [String: CGRect] = [:]
             for (role, element) in witnesses {
-                reveal(element, in: app, towardTop: role == "headline")
+                reveal(element, in: app, towardTop: role == "section heading")
                 frames[role] = element.frame
                 let screenshot = XCTAttachment(screenshot: app.screenshot())
                 screenshot.name = "Home members \(phase) \(role) fully visible"
@@ -429,7 +429,10 @@ final class HomeDetailsUITests: XCTestCase {
             // retained destination/home, without reopening it or scrolling.
             XCTAssertTrue(app.navigationBars[homeName].exists)
             XCTAssertTrue(home.exists)
-            XCTAssertEqual(home.label, "Members")
+            // Native section headers are uppercase on iOS 18.5 and title case
+            // on iOS 26.5. Keep exact text for both observed presentations.
+            XCTAssertTrue(["Members", "MEMBERS"].contains(home.label),
+                "The retained destination must expose the native Members heading")
             XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         }
         let baseline = measure("Large")

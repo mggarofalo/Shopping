@@ -150,6 +150,8 @@ class WrapperLifecycleTests(unittest.TestCase):
 import json, os, sys
 from pathlib import Path
 state = Path(os.environ['FAKE_SYSTEM_SIZE'])
+assert sys.argv[1:4] == ['simctl', '--set', '/simulators']
+assert sys.argv[4] == 'ui' and sys.argv[6] == 'content_size'
 if len(sys.argv) == 8:
     state.write_text(json.dumps(sys.argv[7]))
 else:
@@ -161,6 +163,7 @@ else:
 from pathlib import Path
 root = Path(os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_ROOT'])
 token = os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TOKEN']
+assert os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT'] == '75'
 device, lease = str(uuid.uuid4()), str(uuid.uuid4())
 for operation, category in [('acquire', None), ('set', 'small')]:
     identity = str(uuid.uuid4())
@@ -178,6 +181,8 @@ for operation, category in [('acquire', None), ('set', 'small')]:
 Path(os.environ['FAKE_READY']).write_text('ready')
 if sys.argv[1] == 'wait':
     signal.pause()
+elif sys.argv[1] == 'signal':
+    os.kill(os.getpid(), signal.SIGTERM)
 else:
     sys.exit(int(sys.argv[1]))
 """)
@@ -206,6 +211,9 @@ else:
 
     def test_child_failure_is_preserved_after_cleanup(self):
         self.assertEqual(self.run_wrapper(7), 7)
+
+    def test_child_signal_status_is_preserved_after_cleanup(self):
+        self.assertEqual(self.run_wrapper("signal"), 128 + signal.SIGTERM)
 
     def test_cancellation_restores_and_preserves_signal_failure(self):
         self.assertEqual(self.run_wrapper(), 128 + signal.SIGTERM)

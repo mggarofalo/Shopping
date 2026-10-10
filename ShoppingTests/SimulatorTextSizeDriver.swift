@@ -30,6 +30,7 @@ final class SimulatorTextSizeDriver {
     private let token: String
     private let device: String
     private let deviceSet: String
+    private let timeout: TimeInterval
     private let lease = UUID().uuidString
 
     init() throws {
@@ -37,12 +38,15 @@ final class SimulatorTextSizeDriver {
         guard let path = environment["SHOPPING_SYSTEM_TEXT_SIZE_ROOT"],
               let token = environment["SHOPPING_SYSTEM_TEXT_SIZE_TOKEN"],
               let device = environment["SIMULATOR_UDID"], UUID(uuidString: device) != nil,
-              let resources = environment["SIMULATOR_SHARED_RESOURCES_DIRECTORY"] else {
+              let resources = environment["SIMULATOR_SHARED_RESOURCES_DIRECTORY"],
+              let timeoutValue = environment["SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT"],
+              let timeout = TimeInterval(timeoutValue), timeout.isFinite, timeout > 0 else {
             XCTFail("Run system text-size UI tests through .github/scripts/with-system-text-size.py -- xcodebuild …")
             throw Failure.unavailable
         }
         root = URL(fileURLWithPath: path, isDirectory: true)
         self.token = token
+        self.timeout = timeout
         self.device = device
         let data = URL(fileURLWithPath: resources, isDirectory: true)
         guard data.lastPathComponent == "data",
@@ -70,14 +74,14 @@ final class SimulatorTextSizeDriver {
         let id = UUID().uuidString
         let request = Request(id: id, token: token, lease: lease, device: device, deviceSet: deviceSet,
                               operation: operation, category: category,
-                              expires: Date().timeIntervalSince1970 + 15)
+                              expires: Date().timeIntervalSince1970 + timeout)
         let requestURL = root.appendingPathComponent("\(id).request.json")
         let responseURL = root.appendingPathComponent("\(id).response.json")
         try JSONEncoder().encode(request).write(to: requestURL, options: .atomic)
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: responseURL.path)
         }, object: nil)
-        guard XCTWaiter.wait(for: [ready], timeout: 16) == .completed else {
+        guard XCTWaiter.wait(for: [ready], timeout: timeout + 1) == .completed else {
             XCTFail("Host system text-size request timed out: \(operation), \(device), \(id)")
             throw Failure.timeout
         }

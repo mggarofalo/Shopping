@@ -2530,7 +2530,7 @@ command. Per-run directories, expiring request IDs and exclusive per-test leases
 isolate parallel simulator clones. Failed leases allow restoration only; an
 abandoned lease or failed host operation prevents a successful run/attestation.
 The host drains serialized operations before cleanup and restores originals if
-a test runner dies. Sixteen deterministic driver contracts cover identity,
+a test runner dies. Seventeen deterministic driver contracts cover identity,
 expiration, duplicate requests, wrong readback, independent devices, poisoned
 leases, failed/abandoned restoration, child exit status and cancellation.
 

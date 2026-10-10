@@ -10,6 +10,12 @@ import tempfile
 import time
 import uuid
 
+# Hosted simctl operations exceeded five seconds even when their resulting
+# categories were correct. Bound each command at 15 seconds; allow two workers'
+# serialized set/readback pairs plus IPC within one 75-second request budget.
+COMMAND_TIMEOUT_SECONDS = 15
+REQUEST_TIMEOUT_SECONDS = 75
+
 CATEGORIES = {
     "extra-small", "small", "medium", "large", "extra-large", "extra-extra-large",
     "extra-extra-extra-large", "accessibility-medium", "accessibility-large",
@@ -22,7 +28,15 @@ def simulator_size(device, category=None, *, device_set):
     command = ["xcrun", "simctl", "--set", device_set, "ui", device, "content_size"]
     if category is not None:
         command.append(category)
-    result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=True)
+    started = time.monotonic()
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=COMMAND_TIMEOUT_SECONDS, check=True)
+    finally:
+        print("Simulator text-size command: " + json.dumps({
+            "device": device, "category": category,
+            "seconds": round(time.monotonic() - started, 3),
+        }), flush=True)
     if category is None:
         value = result.stdout.strip()
         if value not in CATEGORIES:
@@ -53,7 +67,7 @@ class Driver:
             if request["id"] in self.seen:
                 raise ValueError("Duplicate request")
             self.seen.add(request["id"])
-            if not time.time() < request["expires"] <= time.time() + 30:
+            if not time.time() < request["expires"] <= time.time() + REQUEST_TIMEOUT_SECONDS:
                 raise ValueError("Expired or invalid request deadline")
             device, lease, operation = request["device"], request["lease"], request["operation"]
             device_set = request["deviceSet"]
@@ -138,7 +152,8 @@ def main(command):
         with tempfile.TemporaryDirectory(prefix="shopping-system-text-size-") as directory:
             root = Path(directory)
             env = dict(os.environ, TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_ROOT=directory,
-                       TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TOKEN=token)
+                       TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TOKEN=token,
+                       TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT=str(REQUEST_TIMEOUT_SECONDS))
             process = subprocess.Popen(command, env=env, start_new_session=True)
             while process.poll() is None:
                 if cancelled is not None:
@@ -165,7 +180,11 @@ def main(command):
                 time.sleep(0.05)
             code = process.wait()
             driver.cleanup()
-            return (128 + cancelled) if cancelled else (code if code > 0 else (1 if code < 0 or driver.failed else 0))
+            if cancelled:
+                return 128 + cancelled
+            if code:
+                return code if code > 0 else 128 - code
+            return 1 if driver.failed else 0
     finally:
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)

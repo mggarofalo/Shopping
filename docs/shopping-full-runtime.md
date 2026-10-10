@@ -208,3 +208,29 @@ A private per-run directory, lease identity, atomic acknowledgments and poisoned
 This deliberately replaces proof of Apple's Settings navigation, range toggle and slider fidelity with proof of actual Simulator OS category changes and app response. It does not claim physical-device behavior or exact Settings range-toggle restoration. The first local status experiment passed in 49.350 seconds at iOS 26.5, compared with the preceding midpoint experiment's 119.860 seconds for the same method; this is a focused mechanism comparison, not a suite-wide speedup or final-source attestation. Raw results: `/tmp/shopping-phase33-host-driver.xcresult`. Focused multi-worker/pinned and final exact-source results follow separately.
 
 The first six-method native-worker run failed before any global mutation: the runner correctly supplied clone `A00CF711-93BC-491B-ACF2-C4AADAB543E0`, but the host looked in the default device set. That clone belongs to Xcode's `XCTestDevices` set. The driver now takes the runner's `SIMULATOR_SHARED_RESOURCES_DIRECTORY`, validates its `UDID/data` suffix and binds the derived device set into every lease/request/acknowledgment. Commands explicitly use `simctl --set`; neither base-device inference nor `booted` is used. The failed result is retained at `/tmp/shopping-phase33-host-driver-six.xcresult`.
+
+The corrected local six-method selection passed in two actual clones, with six
+unique passes, no failures/skips, 33 unique requests and six exact original-size
+restorations. xcodebuild reported 228.951 seconds testing-operation elapsed.
+The invocation began before the tested source was committed as `a698da1`; it is
+focused equivalent-source evidence, not a clean exact-SHA Full attestation.
+Both independent reviewers cleared the implementation and the artifact audit.
+
+Hosted [38089915219](https://github.com/mggarofalo/Shopping/actions/runs/38089915219)
+on clean `a698da1` passed both required CI jobs, but its separate six-method
+selection produced one pass and five failed methods. Home replacement completed
+all system transitions and restoration. Three host commands exceeded the new
+five-second cap (one readback, one setter and its restoration); the retained
+lease correctly blocked subsequent tests, and emergency restoration succeeded.
+The restricted-member method reached its app checks and exposed iOS 18.5's
+native uppercase `MEMBERS` section heading versus iOS 26.5's `Members`.
+Raw results are retained at `/tmp/shopping-phase33-a698-hosted/FocusedResults.xcresult`.
+
+The follow-up allows 15 seconds per host command and one shared 75-second
+request budget for two serialized set/readback pairs plus IPC, records command
+durations, and accepts exactly the two evidenced native heading labels.
+Eight-second app-observation bounds, category/process/freshness predicates,
+heading identity, growth/wrapping/restoration assertions and lease poisoning
+remain unchanged. Seventeen driver contracts include subprocess cancellation,
+abandoned leases and preservation of direct child signal status. Timeout
+adequacy still needs hosted proof; no failed run is a release attestation.
