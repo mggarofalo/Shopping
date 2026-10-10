@@ -234,3 +234,17 @@ heading identity, growth/wrapping/restoration assertions and lease poisoning
 remain unchanged. Seventeen driver contracts include subprocess cancellation,
 abandoned leases and preservation of direct child signal status. Timeout
 adequacy still needs hosted proof; no failed run is a release attestation.
+
+The next clean candidate `1da5e0a` passed its two changed local UI boundaries
+with exact original-size restoration; the longest individual host command was
+0.508 seconds. Hosted [38091030781](https://github.com/mggarofalo/Shopping/actions/runs/38091030781)
+passed the release SDK build but exposed a separate Fast fixture race: 796 passes,
+one timeout, zero skips, and passing coverage. `open()` selected a Home before
+startup discovery necessarily completed, invalidating the injected restricted
+access result that the test then awaited. The test now explicitly requests fresh
+discovery after that selection before its existing access witness. Production
+fences, timeouts and all access/saved-work assertions remain intact. Both reviewers
+cleared the ordering correction; all 11 Home-sharing status bootstrap tests passed
+locally (14.748 seconds test-operation elapsed). Failed raw results remain at
+`/tmp/shopping-phase33-1da-ci-failure/FastResults.xcresult`; the focused local pass
+is `/tmp/shopping-phase33-home-discovery-order.xcresult`.

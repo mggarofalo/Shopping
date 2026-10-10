@@ -163,8 +163,9 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             }, hasIncompleteRoots: result.hasIncompleteRoots)
         }, read: { service, scope in try Self.snapshot(service, scope, count: 7) })
         let bootstrap = f.bootstrap
-        // Initial store attachment may publish its raw discovery before the
-        // injected access observation arrives. Select only after that witness.
+        // open() selects a Home, which can invalidate startup discovery.
+        // Request access for that presentation before waiting for its witness.
+        try await bootstrap.refreshHomes()
         _ = try await ready(bootstrap) { _ in
             bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.access == .restricted
         }
