@@ -291,3 +291,17 @@ Independent review cleared the correction; all three helper callers passed
 locally in 15.492 seconds test-operation elapsed. Raw failure and focused pass:
 `/tmp/shopping-phase33-a26-ci-failure/FastResults.xcresult` and
 `/tmp/shopping-phase33-recovery-acknowledgement.xcresult`.
+
+PR CI [38093371531](https://github.com/mggarofalo/Shopping/actions/runs/38093371531)
+on `3389e52` exposed a second Home-adoption fixture omission: the held-copy
+invitation test saw one published Home instead of two immediately after copy
+consumer completion (796 Fast passes, one failure). A newer discovery can
+supersede the consumer's refresh and publish afterward. This test now uses the
+existing `waitForCopiedHomeRoster` witness, as neighboring copy scenarios already
+do, before its unchanged count, selection, copied-state and invitation checks.
+Both reviewers audited the shared barriers and found no further confirmed gaps;
+generic mounted-state readiness remains unchanged because other tests deliberately
+hold background work. All 50 Home-adoption tests passed locally in 48.846 seconds
+test-operation elapsed. Failure and pass are retained at
+`/tmp/shopping-phase33-3389-pr-failure/FastResults.xcresult` and
+`/tmp/shopping-phase33-home-adoption-barriers.xcresult`.

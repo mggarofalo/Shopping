@@ -568,6 +568,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await gate.release()
         try await bootstrap.refreshHomes()
         await self.waitForRetainedConversionCompletion(bootstrap)
+        try await waitForCopiedHomeRoster(bootstrap)
         XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
         XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
         XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
