@@ -10,11 +10,11 @@ import tempfile
 import time
 import uuid
 
-# Hosted simctl operations exceeded five seconds even when their resulting
-# categories were correct. Bound each command at 15 seconds; allow two workers'
-# serialized set/readback pairs plus IPC within one 75-second request budget.
-COMMAND_TIMEOUT_SECONDS = 15
-REQUEST_TIMEOUT_SECONDS = 75
+# Cold hosted Simulator commands exceeded 15 seconds before any app mutation.
+# This host-infrastructure allowance is separate from the unchanged eight-second
+# app observation bound. Two workers can queue two set/readback pairs plus IPC.
+COMMAND_TIMEOUT_SECONDS = 60
+REQUEST_TIMEOUT_SECONDS = 4 * COMMAND_TIMEOUT_SECONDS + 15
 
 CATEGORIES = {
     "extra-small", "small", "medium", "large", "extra-large", "extra-extra-large",

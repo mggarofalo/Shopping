@@ -305,3 +305,24 @@ hold background work. All 50 Home-adoption tests passed locally in 48.846 second
 test-operation elapsed. Failure and pass are retained at
 `/tmp/shopping-phase33-3389-pr-failure/FastResults.xcresult` and
 `/tmp/shopping-phase33-home-adoption-barriers.xcresult`.
+
+The `a26ea2e` focused job logged five successful UI methods and one first-method
+failure: its cold `simctl ui` read exceeded 15 seconds before acquiring a lease
+or mutating the OS. All remaining 51 commands completed in 1.029–13.433 seconds,
+and all five acquired leases restored their original category. Simulator setup
+took 4m46s and compilation consumed much of the 25-minute step limit; that limit
+interrupted final result-bundle writing after test execution. The retained raw
+bundle lacks `Info.plist`, so the five passes are log evidence, not a finalized
+suite attestation. See `/tmp/shopping-phase33-a26-hosted-job.log` and the
+`focused-release-38092422700` artifact.
+
+The host-infrastructure command limit is now 60 seconds, with a derived
+255-second request budget for two workers' serialized set/readback pairs plus
+IPC. Exact readback, lease poisoning, cleanup and the separate eight-second
+actual-app observation bound remain unchanged. Independent review found no
+proof relaxation; adequacy still requires hosted evidence. The temporary
+branch-only diagnostic selects the failed Home-details method, retaining all six
+methods in ShoppingFull. Its step/job caps are 35/45 minutes to leave space for
+cold compilation and artifact collection; these temporary caps are not integrated
+into the permanent CI/Full workflows. The previous five logged UI passes cover
+unchanged scene checks, but do not replace final exact-source Full validation.
