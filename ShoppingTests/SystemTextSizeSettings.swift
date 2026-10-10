@@ -203,10 +203,12 @@ final class SystemTextSizeSettings {
 
     func set(_ size: Size) throws {
         settings.activate()
-        // Keep one range throughout the workflow. Large is the fourth of the
-        // twelve system sizes; XXXL is the final accessibility size. The slider
-        // API is best effort, so actual UIKit observations remain authoritative.
-        try setControls(toggleValue: "1", position: size == .large ? CGFloat(3) / 11 : 1)
+        // Large is the midpoint of the seven standard sizes. Use that native
+        // range instead of an interior position in the accessibility range.
+        // XXXL is the accessibility endpoint; actual UIKit observations remain
+        // authoritative for both transitions.
+        try setControls(toggleValue: size == .large ? "0" : "1",
+                        position: size == .large ? 0.5 : 1)
         let controls = try readControls()
         attach("Settings controls for \(size)", text: controls.description)
         let observed = try activateRetainedApp(category: size.category)

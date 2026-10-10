@@ -277,7 +277,7 @@ jobs:
           xcrun simctl bootstatus "$simulator_id" -b
           xcrun simctl spawn "$simulator_id" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true
           echo "udid=$simulator_id" >> "$GITHUB_OUTPUT"
-      - name: Run nine failed UI boundaries
+      - name: Run retained text-size round trips
         timeout-minutes: 25
         run: |
           set -euo pipefail
@@ -286,15 +286,7 @@ jobs:
             -destination 'platform=iOS Simulator,id=${{ steps.focused-simulator.outputs.udid }}' \
             -derivedDataPath FocusedDerivedData -resultBundlePath FocusedResults.xcresult \
             -parallel-testing-enabled NO \
-            -only-testing:ShoppingTests/HomeDetailsUITests/testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails \
-            -only-testing:ShoppingTests/HomeDetailsUITests/testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize \
-            -only-testing:ShoppingTests/HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughHomes \
-            -only-testing:ShoppingTests/HomeReplacementUITests/testSameNamedHomesRemainDistinctAtAccessibilityTextSize \
             -only-testing:ShoppingTests/HomeSharingStatusUITests/testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize \
-            -only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL \
-            -only-testing:ShoppingTests/PersonalCartUITests/testTabHeadersStayVisibleAndSettingsStartAtTop \
-            -only-testing:ShoppingTests/ShoppingAppearanceUITests/testManagementRowsKeepSharedSpacingWhenSelecting \
-            -only-testing:ShoppingTests/ShoppingDeviceUITests/testLongNameAtLargestTextKeepsSeparateShoppingControlsReachable \
             2>&1 | tee FocusedTests.log
       - name: Preserve focused diagnostics
         if: always()
