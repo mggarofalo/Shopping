@@ -181,3 +181,38 @@ The JSON report uses `schema_version: 1`. `phases[].wall_seconds` is monotonic e
 External Actions use full commit SHAs, with readable version comments. Weekly Dependabot PRs propose GitHub Actions updates; they receive the same required CI and independent review. `ruby .github/scripts/check-action-pins.rb` rejects mutable references across every workflow. Never automatically merge dependency updates solely because a newer version exists.
 
 The [CI startup experiment](cicd-startup.md) records why the overlap candidate was rejected: its combined startup/build interval took 9m 35s versus 7m 26s for the fresh serial baseline. Routine CI retains serial setup and compilation.
+
+### Hosted Full cancellation evidence (SHOPPING-232)
+
+Run [37997790146](https://github.com/mggarofalo/Shopping/actions/runs/37997790146)
+on `527ea1766e781b80958e92462ed7e064461db73e` exhausted the 90-minute job
+budget: 9m47s before testing and 80m28s in the test step. The simulator took
+182.254s and build took 390.845s. The retained summary could not read the
+incomplete xcresult; quiet output did not establish completed inventory or
+whether execution or finalization stalled. Do not count this run as passing.
+
+The job ceiling remains 90 minutes. Explicit step ceilings allocate 19 minutes
+to checkout/toolchain/metadata/simulator/build (2/1/1/5/10), 60 minutes to tests,
+and eight minutes to raw logs/raw results/coverage/summary/timing/summary upload
+(1/3/1/1/1/1), leaving three minutes for orchestration overhead. These are
+failure bounds, not measured completion targets. The 60-minute test ceiling is
+a diagnostic tradeoff: it can stop a progressing suite earlier than the previous
+job-wide limit, but reserves time to retain its evidence. This does not establish
+that hosted Full fits the budget. Choose a later budget correction from actual
+progress and result evidence; do not infer hosted speed from the local M2.
+
+The hosted test command emits normal Xcode progress. Before any xcresult reader,
+`always()` uploads small raw logs and then the raw bundle as separate artifacts
+(`exhaustive-logs-*`, `exhaustive-results-*`, 14 days). This also retains evidence
+if later coverage or reporting fails after passing tests. Bundle compression is
+disabled to bound CPU overhead; successful runs now also retain the raw bundle,
+which adds storage/upload cost. Missing files after setup failure are reported
+as warnings; failures and cancellations remain failures/cancellations. Report
+steps each have a one-minute ceiling; summaries retain their existing 30 days.
+
+This is best-effort evidence retention, not a guarantee after runner loss or
+force cancellation. GitHub's [cancellation procedure](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation)
+can forcibly terminate work. The separate small log upload prevents a large or
+incomplete bundle from being the only source of diagnostic evidence. No test
+selection, worker count, fixture, assertion, coverage baseline, or exact-SHA
+attestation rule changes.
