@@ -256,3 +256,54 @@ jobs:
             DerivedData/Build/Products/*.xctestrun
           if-no-files-found: warn
           retention-days: 14
+
+  # Temporary SHOPPING-219 diagnostic job; omitted from milestone integration.
+  focused-release-validation:
+    name: Focused release UI diagnostics
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/shopping-219-hosted-validation'
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Select pinned Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Prepare isolated pinned simulator
+        id: focused-simulator
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          simulator_id="$(xcrun simctl create 'Shopping focused release' com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro com.apple.CoreSimulator.SimRuntime.iOS-18-5)"
+          xcrun simctl boot "$simulator_id"
+          xcrun simctl bootstatus "$simulator_id" -b
+          xcrun simctl spawn "$simulator_id" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true
+          echo "udid=$simulator_id" >> "$GITHUB_OUTPUT"
+      - name: Run nine failed UI boundaries
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          xcodebuild test -project Shopping.xcodeproj -scheme Shopping \
+            -testPlan ShoppingFull \
+            -destination 'platform=iOS Simulator,id=${{ steps.focused-simulator.outputs.udid }}' \
+            -derivedDataPath FocusedDerivedData -resultBundlePath FocusedResults.xcresult \
+            -parallel-testing-enabled NO \
+            -only-testing:ShoppingTests/HomeDetailsUITests/testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails \
+            -only-testing:ShoppingTests/HomeDetailsUITests/testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/HomeDetailsUITests/testSubmittedLeaveWithMissingRootKeepsStatusReachableThroughHomes \
+            -only-testing:ShoppingTests/HomeReplacementUITests/testSameNamedHomesRemainDistinctAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/HomeSharingStatusUITests/testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL \
+            -only-testing:ShoppingTests/PersonalCartUITests/testTabHeadersStayVisibleAndSettingsStartAtTop \
+            -only-testing:ShoppingTests/ShoppingAppearanceUITests/testManagementRowsKeepSharedSpacingWhenSelecting \
+            -only-testing:ShoppingTests/ShoppingDeviceUITests/testLongNameAtLargestTextKeepsSeparateShoppingControlsReachable \
+            2>&1 | tee FocusedTests.log
+      - name: Preserve focused diagnostics
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: focused-release-${{ github.run_id }}
+          path: |
+            FocusedTests.log
+            FocusedResults.xcresult
+          compression-level: 0
+          retention-days: 14

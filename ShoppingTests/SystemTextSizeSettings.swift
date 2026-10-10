@@ -223,12 +223,37 @@ final class SystemTextSizeSettings {
         }
         if controls.rangeValue != toggleValue { controls.rangeSwitch.tap() }
         try wait("Settings range switch") { controls.rangeValue == toggleValue }
-        // Changing the range may rebuild the slider. Re-resolve its unique
-        // query and bounded readiness before the one adjustment.
-        let adjusted = try readControls()
-        try wait("Settings slider must be hittable after the range change") { adjusted.slider.isHittable }
-        adjusted.slider.adjust(toNormalizedSliderPosition: position)
-        try wait("Settings text size slider") { abs(adjusted.slider.normalizedSliderPosition - position) <= 0.001 }
+        try adjustSlider(to: position, intervals: toggleValue == "1" ? 11 : 6)
+    }
+
+    private func adjustSlider(to position: CGFloat, intervals: Int) throws {
+        // Settings changes its own layout as text size changes. On iOS 18.5,
+        // a drag across several categories can lose tracking during that layout.
+        // Complete each discrete category change before beginning the next.
+        let initial = try readControls()
+        let divisions = CGFloat(intervals)
+        try wait("Settings slider must expose a discrete category after the range change") {
+            let value = initial.slider.normalizedSliderPosition
+            return initial.slider.isHittable && abs(value - (value * divisions).rounded() / divisions) <= 0.001
+        }
+        let start = Int((initial.slider.normalizedSliderPosition * divisions).rounded())
+        let destination = Int((position * divisions).rounded())
+        guard (0...intervals).contains(destination),
+              abs(position - CGFloat(destination) / divisions) <= 0.001 else {
+            XCTFail("Requested Settings text size must be an exact system category")
+            throw Failure.missingControls
+        }
+        guard start != destination else { return }
+        let direction = start < destination ? 1 : -1
+        for index in stride(from: start + direction, through: destination, by: direction) {
+            let controls = try readControls()
+            try wait("Settings slider must be hittable before its next category change") { controls.slider.isHittable }
+            let target = CGFloat(index) / divisions
+            controls.slider.adjust(toNormalizedSliderPosition: target)
+            try wait("Settings text size slider category \(index) of \(intervals)") {
+                abs(controls.slider.normalizedSliderPosition - target) <= 0.001
+            }
+        }
     }
 
     private func activateRetainedApp(category: String) throws -> Metadata {

@@ -329,8 +329,13 @@ final class ShoppingAppearanceUITests: XCTestCase {
                 XCTAssertEqual(selectedCell.frame.height, height, accuracy: 1,
                                "Entering selection must not change row padding")
                 selectedCell.tap()
-                XCTAssertTrue(app.buttons["shopping.\(prefix).batchDelete"].isHittable)
-                XCTAssertTrue(app.buttons["shopping.\(prefix).batchDelete"].isEnabled)
+                let delete = app.buttons["shopping.\(prefix).batchDelete"]
+                XCTAssertTrue(delete.isEnabled)
+                if screen == "Categories" {
+                    assertCategoryDeleteMenuReachable(delete, in: app)
+                } else {
+                    XCTAssertTrue(delete.isHittable)
+                }
                 app.buttons["shopping.\(prefix).done"].tap()
                 app.navigationBars[screen].buttons.firstMatch.tap()
                 XCTAssertTrue(app.navigationBars["Settings"].existsOrAppears(timeout: 3))
@@ -373,6 +378,31 @@ final class ShoppingAppearanceUITests: XCTestCase {
         if app.state == .notRunning { app.launch() }
         openSettings(app)
         app.segmentedControls["shopping.appearance"].buttons[appearance].tap()
+    }
+
+    private func assertCategoryDeleteMenuReachable(_ delete: XCUIElement, in app: XCUIApplication) {
+        // Referenced categories expose a native Menu. iOS 18.5 reports its
+        // button as non-hittable even when a real touch opens the visible menu.
+        // Prove reachability through that interaction and its exact destination.
+        XCTAssertTrue(delete.existsOrAppears(timeout: 3))
+        let frame = delete.frame
+        XCTAssertFalse(frame.isNull || frame.isEmpty)
+        XCTAssertTrue(app.frame.contains(frame))
+        XCTAssertGreaterThanOrEqual(frame.height, 44)
+        let navigationBar = app.navigationBars["1 Selected"]
+        XCTAssertTrue(navigationBar.existsOrAppears(timeout: 3))
+        let dismissalFrame = navigationBar.frame
+        XCTAssertTrue(app.frame.contains(dismissalFrame))
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        let destination = app.buttons["shopping.categories.deleteUncategorized"]
+        XCTAssertTrue(destination.existsOrAppears(timeout: 3))
+        XCTAssertTrue(destination.isHittable)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dismissalFrame.midX, dy: dismissalFrame.midY)).tap()
+        XCTAssertTrue(destination.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["1 Selected"].exists)
+        XCTAssertTrue(delete.isEnabled)
     }
 
     private func attach(_ name: String, _ app: XCUIApplication) {

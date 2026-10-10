@@ -150,6 +150,11 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         let chooseHome = app.buttons["Homes"]
         XCTAssertTrue(chooseHome.existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.navigationBars[homeName].waitForNonExistence(timeout: 5),
+                      "The departing Home details sheet must finish dismissing")
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isHittable == true"), object: chooseHome)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 5), .completed)
         XCTAssertTrue(chooseHome.isHittable)
         XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists)
         chooseHome.tap()
