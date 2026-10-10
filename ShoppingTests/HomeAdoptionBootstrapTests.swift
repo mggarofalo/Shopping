@@ -1295,8 +1295,13 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         }
         let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited || bootstrap.replacementRecord == nil,
+        // Selection is published before durable invitation acknowledgement.
+        // This scenario retries an already-resolved invitation after both finish.
+        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited
+                || bootstrap.replacementRecord == nil
+                || bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
               ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
         XCTAssertEqual(bootstrap.replacementRecord?.stage, stage)
         XCTAssertFalse(try LocalHomeDeletionJournal(storeURL: url).statuses().contains { $0.completed },
                        "Generic recovery must not execute replacement cleanup")

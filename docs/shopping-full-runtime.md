@@ -277,3 +277,17 @@ seconds test-operation elapsed. Two workers were permitted; Xcode scheduled both
 methods on one actual clone. Raw evidence is
 `/tmp/shopping-phase33-scene-lifecycle.xcresult`. Hosted confirmation remains
 required before integration and final Full validation.
+
+The `a26ea2e` repair-branch Fast run exposed one more fixture barrier race
+([38092422700](https://github.com/mggarofalo/Shopping/actions/runs/38092422700)):
+796 passes and one `invalidState` in interrupted-invitation recovery. The same
+app/test source passed Fast in integrated `3149675`, so that pass alone did not
+resolve the failure. Automatic target selection publishes before its durable
+invitation acknowledgement finishes. The recovery fixture now waits for the
+exact invitation's `activationResolved` witness as well as the selected target
+and replacement record before explicit retry. The existing five-second bound,
+production choice guards and all cleanup/recovery assertions are unchanged.
+Independent review cleared the correction; all three helper callers passed
+locally in 15.492 seconds test-operation elapsed. Raw failure and focused pass:
+`/tmp/shopping-phase33-a26-ci-failure/FastResults.xcresult` and
+`/tmp/shopping-phase33-recovery-acknowledgement.xcresult`.
