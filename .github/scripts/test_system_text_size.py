@@ -163,7 +163,7 @@ else:
 from pathlib import Path
 root = Path(os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_ROOT'])
 token = os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TOKEN']
-assert os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT'] == '75'
+assert os.environ['TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT'] == '255'
 device, lease = str(uuid.uuid4()), str(uuid.uuid4())
 for operation, category in [('acquire', None), ('set', 'small')]:
     identity = str(uuid.uuid4())
