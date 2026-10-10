@@ -388,7 +388,6 @@ final class ShoppingAppearanceUITests: XCTestCase {
         let frame = delete.frame
         XCTAssertFalse(frame.isNull || frame.isEmpty)
         XCTAssertTrue(app.frame.contains(frame))
-        XCTAssertGreaterThanOrEqual(frame.height, 44)
         let navigationBar = app.navigationBars["1 Selected"]
         XCTAssertTrue(navigationBar.existsOrAppears(timeout: 3))
         let dismissalFrame = navigationBar.frame

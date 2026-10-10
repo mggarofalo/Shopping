@@ -223,36 +223,45 @@ final class SystemTextSizeSettings {
         }
         if controls.rangeValue != toggleValue { controls.rangeSwitch.tap() }
         try wait("Settings range switch") { controls.rangeValue == toggleValue }
-        try adjustSlider(to: position, intervals: toggleValue == "1" ? 11 : 6)
+        try adjustSlider(to: position)
     }
 
-    private func adjustSlider(to position: CGFloat, intervals: Int) throws {
-        // Settings changes its own layout as text size changes. On iOS 18.5,
-        // a drag across several categories can lose tracking during that layout.
-        // Complete each discrete category change before beginning the next.
-        let initial = try readControls()
-        let divisions = CGFloat(intervals)
-        try wait("Settings slider must expose a discrete category after the range change") {
-            let value = initial.slider.normalizedSliderPosition
-            return initial.slider.isHittable && abs(value - (value * divisions).rounded() / divisions) <= 0.001
+    private func adjustSlider(to position: CGFloat) throws {
+        let controls = try readControls()
+        try wait("Settings slider must be hittable after the range change") { controls.slider.isHittable }
+        let current = controls.slider.normalizedSliderPosition
+        guard abs(current - position) > 0.001 else { return }
+        // Interior categories use XCTest's native thumb geometry. The direct
+        // endpoint gesture below avoids holding while traversing every category.
+        guard position == 1 else {
+            controls.slider.adjust(toNormalizedSliderPosition: position)
+            try wait("Settings text size slider") {
+                abs(controls.slider.normalizedSliderPosition - position) <= 0.001
+            }
+            return
         }
-        let start = Int((initial.slider.normalizedSliderPosition * divisions).rounded())
-        let destination = Int((position * divisions).rounded())
-        guard (0...intervals).contains(destination),
-              abs(position - CGFloat(destination) / divisions) <= 0.001 else {
-            XCTFail("Requested Settings text size must be an exact system category")
+        let frame = controls.slider.frame
+        // The native slider frame includes the two end labels. These track
+        // insets are observed on the pinned iPhone 16/17 Pro fixtures, not a
+        // UIKit geometry contract. Exact Settings and app observations below
+        // must reject a changed layout or a missed gesture.
+        guard (300...380).contains(frame.width), (60...70).contains(frame.height),
+              settings.frame.contains(frame), (0...1).contains(current),
+              (0...1).contains(position) else {
+            XCTFail("Unsupported native Settings slider geometry: \(frame)")
             throw Failure.missingControls
         }
-        guard start != destination else { return }
-        let direction = start < destination ? 1 : -1
-        for index in stride(from: start + direction, through: destination, by: direction) {
-            let controls = try readControls()
-            try wait("Settings slider must be hittable before its next category change") { controls.slider.isHittable }
-            let target = CGFloat(index) / divisions
-            controls.slider.adjust(toNormalizedSliderPosition: target)
-            try wait("Settings text size slider category \(index) of \(intervals)") {
-                abs(controls.slider.normalizedSliderPosition - target) <= 0.001
-            }
+        let start = controls.slider.coordinate(withNormalizedOffset:
+            CGVector(dx: 0.1 + 0.8 * current, dy: 0.5))
+        let destination = controls.slider.coordinate(withNormalizedOffset:
+            CGVector(dx: 0.1 + 0.8 * position, dy: 0.5))
+        // XCTest's native adjustment holds the thumb for 250 ms before moving;
+        // the recorded control expands during that hold and can overshoot.
+        // Send one direct drag without the hold, then require the exact value.
+        start.press(forDuration: 0, thenDragTo: destination,
+                    withVelocity: .fast, thenHoldForDuration: 0)
+        try wait("Settings text size slider") {
+            abs(controls.slider.normalizedSliderPosition - position) <= 0.001
         }
     }
 
