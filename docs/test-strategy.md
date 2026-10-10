@@ -171,3 +171,10 @@ readback mismatch or failed cleanup fail the run. Local/hosted Full and hosted
 acceptance already include the wrapper; other suites do not require it unless
 they select these methods. This does not automate Apple's Settings slider or
 provide physical-device evidence.
+
+The opt-in DEBUG runtime probe also observes actual connected-scene activation
+states. System text-size background transitions require fresh same-process
+metadata with every connected scene in the background; foreground observations
+require an active scene as well as exact category and freshness. This avoids
+relying on XCTest's asynchronously cached background state. Failure teardown
+still restores the host's captured original category.

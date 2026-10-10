@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Exercises real system text-size changes through the supported Simulator driver.
@@ -18,6 +19,11 @@ final class SystemTextSize {
         let observedUptime: TimeInterval
         let process: String
         let category: String
+        let sceneStates: [String: Int]
+
+        var isBackground: Bool {
+            !sceneStates.isEmpty && sceneStates.values.allSatisfy { $0 == UIScene.ActivationState.background.rawValue }
+        }
     }
     private enum Failure: Error { case metadata, timeout, appStopped }
     private unowned let test: XCTestCase
@@ -98,9 +104,18 @@ final class SystemTextSize {
             attach("Stopped app during system text-size transition", text: "appState=\(app.state.rawValue)")
             throw Failure.appStopped
         }
+        let previous = try Self.readMetadata(fileURL: fileURL, nonce: nonce)
+        // Teardown may follow a failure after backgrounding already succeeded.
+        // This is the same process's actual UIKit scene state, not XCTest's
+        // asynchronously cached application-state observation.
+        guard previous.process == original.process else { throw Failure.appStopped }
+        if previous.isBackground { return }
+        let backgroundStarted = ProcessInfo.processInfo.systemUptime
         XCUIDevice.shared.press(.home)
-        try wait("Shopping must remain running in the background during the system change") {
-            self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended
+        try wait("Fresh background scene observation from the retained process; transition began at \(backgroundStarted)") {
+            guard let metadata = try? Self.readMetadata(fileURL: self.fileURL, nonce: self.nonce) else { return false }
+            return metadata.process == self.original.process && metadata.isBackground
+                && metadata.sequence > previous.sequence && metadata.observedUptime >= backgroundStarted
         }
     }
 
@@ -117,6 +132,7 @@ final class SystemTextSize {
             guard let metadata = try? Self.readMetadata(fileURL: self.fileURL, nonce: self.nonce),
                   self.app.state == .runningForeground,
                   metadata.process == self.original.process, metadata.category == category,
+                  metadata.sceneStates.values.contains(UIScene.ActivationState.foregroundActive.rawValue),
                   metadata.sequence > previous.sequence, metadata.observedUptime >= activationStarted
             else { return false }
             accepted = metadata

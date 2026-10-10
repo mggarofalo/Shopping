@@ -248,3 +248,32 @@ cleared the ordering correction; all 11 Home-sharing status bootstrap tests pass
 locally (14.748 seconds test-operation elapsed). Failed raw results remain at
 `/tmp/shopping-phase33-1da-ci-failure/FastResults.xcresult`; the focused local pass
 is `/tmp/shopping-phase33-home-discovery-order.xcresult`.
+
+The same `1da5e0a` hosted diagnostic completed five of six UI workflows. All 30
+host requests succeeded, all six original categories were restored, and the
+longest command took 11.344 seconds. The sole failure preceded the first setter:
+XCTest still reported foreground eight seconds after Home was pressed, while
+the retained video already showed SpringBoard. The recording and timeout
+attachment are retained in `/tmp/shopping-phase33-1da-background/`, and the raw
+bundle in `/tmp/shopping-phase33-1da-hosted/FocusedResults.xcresult`.
+
+The existing DEBUG-only, explicitly opted-in runtime probe now also records
+connected scenes' actual UIKit activation states and observes
+[`UIScene.didEnterBackgroundNotification`](https://developer.apple.com/documentation/uikit/uiscene/didenterbackgroundnotification).
+Background proof requires the same process and nonce, a later sequence, an
+observation after the Home action, and a nonempty set of entirely background
+scenes. Foreground proof keeps the existing category, process, time and XCTest
+checks and additionally requires a foreground-active scene. The eight-second
+bound remains unchanged. An already-observed background state permits failure
+teardown to restore the OS; normal roundtrips always begin with the preceding
+fresh foreground observation. This replaces XCTest's stale passive background
+observation with actual app lifecycle evidence, not a longer timeout or retry.
+Both independent reviewers cleared the correction. No shipped app behavior or
+font environment changes.
+
+The scene-observation repair passed both local changed workflows (Home details
+and the repeated sharing-status roundtrip), zero failures/skips, in 146.304
+seconds test-operation elapsed. Two workers were permitted; Xcode scheduled both
+methods on one actual clone. Raw evidence is
+`/tmp/shopping-phase33-scene-lifecycle.xcresult`. Hosted confirmation remains
+required before integration and final Full validation.
