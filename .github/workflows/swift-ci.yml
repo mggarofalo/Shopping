@@ -64,6 +64,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_full_preflight.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_exhaustive_contract.py
 
+      - name: Validate system text-size driver
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_system_text_size.py
+
       - name: Validate TestFlight workflow
         run: .github/scripts/test-testflight-workflow.sh
 
@@ -155,7 +158,7 @@ jobs:
           .github/scripts/test-timing.py run \
             --phases AcceptancePhases.jsonl --phase test --record-command \
             --log AcceptanceTest.log --seconds AcceptanceTestSeconds.txt -- \
-          xcodebuild test-without-building \
+          .github/scripts/with-system-text-size.py -- xcodebuild test-without-building \
             -project Shopping.xcodeproj \
             -scheme Shopping \
             -testPlan ShoppingAcceptance \
@@ -281,12 +284,17 @@ jobs:
         timeout-minutes: 25
         run: |
           set -euo pipefail
-          xcodebuild test -project Shopping.xcodeproj -scheme Shopping \
+          .github/scripts/with-system-text-size.py -- xcodebuild test -project Shopping.xcodeproj -scheme Shopping \
             -testPlan ShoppingFull \
             -destination 'platform=iOS Simulator,id=${{ steps.focused-simulator.outputs.udid }}' \
             -derivedDataPath FocusedDerivedData -resultBundlePath FocusedResults.xcresult \
             -parallel-testing-enabled NO \
             -only-testing:ShoppingTests/HomeSharingStatusUITests/testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/HomeDetailsUITests/testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails \
+            -only-testing:ShoppingTests/HomeDetailsUITests/testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/HomeReplacementUITests/testSameNamedHomesRemainDistinctAtAccessibilityTextSize \
+            -only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL \
+            -only-testing:ShoppingTests/PersonalCartUITests/testTabHeadersStayVisibleAndSettingsStartAtTop \
             2>&1 | tee FocusedTests.log
       - name: Preserve focused diagnostics
         if: always()

@@ -216,3 +216,12 @@ can forcibly terminate work. The separate small log upload prevents a large or
 incomplete bundle from being the only source of diagnostic evidence. No test
 selection, worker count, fixture, assertion, coverage baseline, or exact-SHA
 attestation rule changes.
+
+
+The exhaustive and acceptance test commands run through
+`.github/scripts/with-system-text-size.py`. It supervises the unchanged
+xcodebuild selection, drives real global text size on the actual runner
+simulator, and restores outstanding leases before returning. Failed driver
+operations or cleanup force failure even if xcodebuild exits zero. Timing/log
+capture, raw-result retention, coverage and exact-SHA attestations remain in
+the outer existing workflow. Deterministic driver contracts also run in CI.

@@ -3,7 +3,7 @@ import XCTest
 final class HomeDetailsUITests: XCTestCase {
     func testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails() throws {
         let app = launch(role: "owner", secondHome: true, systemTextSize: true)
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         XCTAssertTrue(app.buttons["shopping.home.choose"].existsOrAppears(timeout: 8))
         app.buttons["shopping.home.choose"].tap()
         try textSize.set(.accessibilityXXXL)
@@ -402,7 +402,7 @@ final class HomeDetailsUITests: XCTestCase {
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
         continueAfterFailure = false
         let app = launch(role: "restricted", systemTextSize: true)
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         openHomeDetails(app)
         let homeName = "Preview household"
         let home = app.staticTexts["shopping.home.membersHeading"]
@@ -575,7 +575,7 @@ final class HomeDetailsUITests: XCTestCase {
         if inviteFailure { app.launchEnvironment["SHOPPING_UI_TEST_HOME_INVITE_FAILURE"] = "1" }
         if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
-        if systemTextSize { SystemTextSizeSettings.configure(app) }
+        if systemTextSize { SystemTextSize.configure(app) }
         addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app

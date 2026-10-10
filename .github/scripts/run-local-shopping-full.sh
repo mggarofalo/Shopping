@@ -75,7 +75,7 @@ summary="$snapshot_root/.github/scripts/summarize-xcresult.sh"
     -derivedDataPath "$snapshot_root/DerivedData"
 "$timing" run --phases "$phases" --phase test --record-command \
     --log "$artifacts/Test.log" --seconds "$artifacts/TestSeconds.txt" -- \
-    xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping \
+    .github/scripts/with-system-text-size.py -- xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping \
     -testPlan ShoppingFull -destination "platform=iOS Simulator,id=${simulator_id}" \
     -derivedDataPath "$snapshot_root/DerivedData" -resultBundlePath "$result_bundle" \
     -parallel-testing-enabled "$parallel_testing" -parallel-testing-worker-count "$worker_count"

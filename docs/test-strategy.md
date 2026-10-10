@@ -148,3 +148,26 @@ Validate reporting and the local attestation runner without a simulator:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_test_timing.py'
 ```
+
+
+### Live system text-size UI tests
+
+The six UI workflows using `SystemTextSize` need the host Simulator driver:
+
+```sh
+.github/scripts/with-system-text-size.py -- xcodebuild test \
+  -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull \
+  -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C' \
+  -only-testing:ShoppingTests/HomeSharingStatusUITests/testStatusCheckAndReturnKeepSavedHomeAtAccessibilityTextSize
+```
+
+The wrapper forwards its private request directory to each runner using
+`TEST_RUNNER_` variables and targets that runner's own `SIMULATOR_UDID`, including
+parallel clones. It sets the real OS category with `simctl ui`, verifies it and
+restores the captured original. Tests independently verify fresh UIKit category
+and unchanged process identity after each background/return. Run these methods
+with exclusive ownership of their simulator. Missing driver, stale commands,
+readback mismatch or failed cleanup fail the run. Local/hosted Full and hosted
+acceptance already include the wrapper; other suites do not require it unless
+they select these methods. This does not automate Apple's Settings slider or
+provide physical-device evidence.
