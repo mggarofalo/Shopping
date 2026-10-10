@@ -51,11 +51,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        timeout-minutes: 2
 
       - name: Select Xcode version
+        timeout-minutes: 1
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
 
       - name: Capture timing metadata
+        timeout-minutes: 1
         run: .github/scripts/test-timing.py init --plan "$TEST_PLAN" --json ExhaustiveTimingMetadata.json
 
       - name: Start pinned iOS simulator
@@ -78,6 +81,7 @@ jobs:
           SH
 
       - name: Build exhaustive test products
+        timeout-minutes: 10
         run: |
           .github/scripts/test-timing.py run \
             --phases ExhaustivePhases.jsonl --phase build --record-command \
@@ -91,6 +95,7 @@ jobs:
             -quiet
 
       - name: Run exhaustive tests
+        timeout-minutes: 60
         run: |
           .github/scripts/test-timing.py run \
             --phases ExhaustivePhases.jsonl --phase test --record-command \
@@ -101,10 +106,37 @@ jobs:
             -testPlan "$TEST_PLAN" \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -resultBundlePath ExhaustiveResults.xcresult \
-            -quiet
+            -resultBundlePath ExhaustiveResults.xcresult
+
+      # Preserve logs first, then the bundle, before any xcresult reader can stall.
+      # always() includes cancellation and also protects later coverage/report failures.
+      - name: Upload exhaustive raw logs
+        if: always()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: exhaustive-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ExhaustiveBuild.log
+            ExhaustiveTest.log
+            ExhaustivePhases.jsonl
+            ExhaustiveTimingMetadata.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload exhaustive raw results
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: exhaustive-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ExhaustiveResults.xcresult
+          compression-level: 0
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Export full-plan coverage
+        timeout-minutes: 1
         if: always() && env.TEST_PLAN == 'ShoppingFull' && hashFiles('ExhaustiveResults.xcresult/**') != ''
         run: |
           set +e
@@ -120,6 +152,7 @@ jobs:
           exit "$exit_code"
 
       - name: Publish exhaustive test summary
+        timeout-minutes: 1
         if: always()
         run: |
           .github/scripts/test-timing.py run --phases ExhaustivePhases.jsonl --phase summary -- \
@@ -135,6 +168,7 @@ jobs:
           cat ExhaustiveSummary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish exhaustive timing report
+        timeout-minutes: 1
         if: always()
         run: |
           .github/scripts/test-timing.py report \
@@ -144,6 +178,7 @@ jobs:
           cat ExhaustiveTiming.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exhaustive summary
+        timeout-minutes: 1
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -160,15 +195,3 @@ jobs:
             ExhaustiveCoverage.raw.json
           if-no-files-found: error
           retention-days: 30
-
-      - name: Upload exhaustive failure results
-        if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: exhaustive-failure-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ExhaustiveResults.xcresult
-            ExhaustiveBuild.log
-            ExhaustiveTest.log
-          if-no-files-found: warn
-          retention-days: 14
