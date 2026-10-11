@@ -19,11 +19,11 @@ class ExhaustiveContractTests(unittest.TestCase):
         cls.named = {s.get("name"): s for s in cls.steps}
 
     def test_all_steps_fit_job_with_orchestration_headroom(self):
-        self.assertEqual(self.job["timeout-minutes"], 90)
+        self.assertEqual(self.job["timeout-minutes"], 105)
         limits = [s["timeout-minutes"] for s in self.steps]
         self.assertTrue(all(isinstance(n, int) and n > 0 for n in limits))
         self.assertLessEqual(sum(limits), self.job["timeout-minutes"] - 3)
-        self.assertEqual(self.named["Run exhaustive tests"]["timeout-minutes"], 60)
+        self.assertEqual(self.named["Run exhaustive tests"]["timeout-minutes"], 75)
 
     def test_logs_and_incomplete_bundle_survive_before_any_result_reader(self):
         logs = self.named["Upload exhaustive raw logs"]

@@ -191,12 +191,12 @@ budget: 9m47s before testing and 80m28s in the test step. The simulator took
 incomplete xcresult; quiet output did not establish completed inventory or
 whether execution or finalization stalled. Do not count this run as passing.
 
-The job ceiling remains 90 minutes. Explicit step ceilings allocate 19 minutes
+The initial diagnostic job ceiling was 90 minutes. Explicit step ceilings allocated 19 minutes
 to checkout/toolchain/metadata/simulator/build (2/1/1/5/10), 60 minutes to tests,
 and eight minutes to raw logs/raw results/coverage/summary/timing/summary upload
 (1/3/1/1/1/1), leaving three minutes for orchestration overhead. These are
-failure bounds, not measured completion targets. The 60-minute test ceiling is
-a diagnostic tradeoff: it can stop a progressing suite earlier than the previous
+failure bounds, not measured completion targets. The initial 60-minute test ceiling was
+a diagnostic tradeoff: it could stop a progressing suite earlier than the previous
 job-wide limit, but reserves time to retain its evidence. This does not establish
 that hosted Full fits the budget. Choose a later budget correction from actual
 progress and result evidence; do not infer hosted speed from the local M2.
@@ -225,3 +225,30 @@ simulator, and restores outstanding leases before returning. Failed driver
 operations or cleanup force failure even if xcodebuild exits zero. Timing/log
 capture, raw-result retention, coverage and exact-SHA attestations remain in
 the outer existing workflow. Deterministic driver contracts also run in CI.
+
+
+### Evidence-based Full budget correction (SHOPPING-219)
+
+Run [38097940439](https://github.com/mggarofalo/Shopping/actions/runs/38097940439)
+on `7165c81e8c3a3cb4ca0350ddf4dcecc16ca003ac` reached that 60-minute test
+ceiling while ordinary UI actions were still progressing. Its retained log records
+843 XCTest passes and 57 Swift Testing passes: 900 total, including 103 of 120 UI
+methods, with no failed test assertions. One UI method was active and 16 had not
+started. The incomplete result bundle cannot establish a Full pass or coverage.
+Raw logs, the incomplete bundle, and bounded summaries were retained successfully.
+
+The same remaining 17 methods took 343.819 seconds in the earlier hosted run
+38080343221. Across 94 UI methods passing in both runs, summed durations rose from
+2491.993 to 2952.752 seconds (18.5%). Applying that observed ratio to the remaining
+inventory suggests about 407 seconds of work; this is an estimate, not a completed
+measurement. Delays were spread across suites. The real-text-size driver's 60
+commands totaled 91.693 seconds, with a maximum of 5.276 seconds; they were not a
+stalled command or the dominant suite cost.
+
+The test ceiling is now 75 minutes and the job ceiling 105 minutes. This retains
+19 minutes for setup/build, eight for artifacts/reporting, and three for
+orchestration, while allowing a progressing suite to finish near the observed
+65–67-minute estimate with bounded headroom. Test inventory, assertions, serial
+hosted execution, coverage baselines, and exact-SHA local attestation are unchanged.
+The corrected candidate must complete the existing validation sequence; this
+budget change does not convert the canceled run into passing evidence.
