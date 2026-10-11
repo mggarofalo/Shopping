@@ -8,6 +8,7 @@ import UIKit
         let nonce: String
         let process: String
         let category: String
+        let sceneStates: [String: Int]
         let sequence: UInt64
         let observedUptime: TimeInterval
     }
@@ -33,6 +34,7 @@ import UIKit
         self.fileURL = fileURL
         super.init()
         for name in [UIWindow.didBecomeKeyNotification, UIScene.didActivateNotification,
+                     UIScene.didEnterBackgroundNotification, UIScene.willDeactivateNotification,
                      UIContentSizeCategory.didChangeNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: name, object: nil)
         }
@@ -42,7 +44,10 @@ import UIKit
     @objc private func refresh() {
         sequence += 1
         let observation = Observation(nonce: nonce, process: Self.processID,
-            category: UIApplication.shared.preferredContentSizeCategory.rawValue, sequence: sequence,
+            category: UIApplication.shared.preferredContentSizeCategory.rawValue,
+            sceneStates: Dictionary(uniqueKeysWithValues: UIApplication.shared.connectedScenes.map {
+                ($0.session.persistentIdentifier, $0.activationState.rawValue)
+            }), sequence: sequence,
             observedUptime: ProcessInfo.processInfo.systemUptime)
         let destination = fileURL
         writer.async {

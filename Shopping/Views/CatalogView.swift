@@ -21,6 +21,7 @@ struct CatalogView: View {
     @FetchRequest(fetchRequest: PurchaseRulesStoreScope.listsRequest()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var searchText = ""
+    @State private var searchPresented = false
     @State private var filters = CatalogFilterState()
     @State private var projectedIDs: Set<UUID> = []
     @State private var refreshTask: Task<Void, Never>?
@@ -79,6 +80,15 @@ struct CatalogView: View {
             categories: scopedCategories,
             household: household
         )
+    }
+
+    private func presentSystemSearch() {
+        guard navigation.systemCatalogRequestID != nil else { return }
+        navigation.systemCatalogRequestID = nil
+        clearSelection()
+        filters = CatalogFilterState()
+        searchText = navigation.systemCatalogQuery
+        searchPresented = true
     }
 
     private var hasNarrowing: Bool {
@@ -146,7 +156,7 @@ struct CatalogView: View {
             .environment(\.editMode, $editMode)
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
-            .searchable(text: $searchText, prompt: "Search catalog")
+            .searchable(text: $searchText, isPresented: $searchPresented, prompt: "Search catalog")
             .toolbar {
                 ShoppingCollectionToolbar(
                     isSelecting: editMode.isEditing, allSelected: selectedIDs == visibleItemIDs,
@@ -254,7 +264,8 @@ struct CatalogView: View {
             } message: {
                 Text(errorMessage ?? "Unknown error")
             }
-            .onAppear(perform: refresh)
+            .onAppear { refresh(); presentSystemSearch() }
+            .onChange(of: navigation.systemCatalogRequestID) { _, _ in presentSystemSearch() }
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: catalogRefreshKeys) { _, _ in refreshAndSanitizeSelection() }

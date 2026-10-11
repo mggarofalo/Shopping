@@ -79,12 +79,50 @@ Run the tag-filtered critical check:
 xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingCritical -destination 'platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C'
 ```
 
+Before freezing an exhaustive candidate, run the focused UI workflows affected by
+its changes, including recovery, system Settings, and abrupt-exit boundaries when
+applicable. Quick acceptance alone cannot establish a changed workflow outside
+its six selected methods. Record the selection, result bundle, and source SHA in
+the issue; fix failures before committing the candidate.
+
+The candidate gate order is:
+
+```text
+changed-boundary tests → clean committed candidate → push exact branch
+  → manual Swift CI (Build & Test + Release SDK Build)
+  → local ShoppingFull → push unchanged SHA → hosted ShoppingFull
+  → integration → required main CI → signed release
+```
+
+Start the existing compatibility checks early with `gh workflow run swift-ci.yml
+--ref <issue-or-milestone-branch>` after pushing the candidate. Wait for both jobs
+to pass. `run-local-shopping-full.sh` verifies the latest exact-source manual run
+(or main push) before allocating local Full artifacts or touching a simulator.
+It rejects missing, running, failed, skipped, or cancelled proof. For a partial
+rerun, it checks the most recent execution of each required job within that same
+exact-source run; an older success never overrides a newer failure or skip. Pull-request
+runs compile a synthetic merge commit and do not replace this exact-source gate.
+A source change requires another exact-source check; the preflight never copies
+proof between SHAs. Required PR/main CI and the hosted Full attestation remain.
+
+This reorders the existing manual compatibility check; it adds no compiler job.
+The retained Phase 33 successful manual run took 15m 19s for Build & Test and
+4m 27s for Release SDK Build concurrently. Treat the former as elapsed wait,
+not their sum. If that run was already required, incremental hosted compute is
+zero; otherwise the early gate adds one routine CI run. It avoids the measured
+65m 06s local Full cost when the pinned compiler rejects the candidate. A clean
+release has no demonstrated time saving from this ordering alone. Capture live
+queue time and job duration for subsequent candidates rather than claiming the
+historical sample as a new measurement.
+
 Run exhaustive local coverage:
 
 ```bash
 .github/scripts/run-local-shopping-full.sh
 .github/scripts/dispatch-remote-shopping-full.sh
 ```
+
+The local Full runner uses two native simulator workers by default. The [complete M2 comparison](shopping-full-runtime.md#phase-33-two-native-workers-on-the-m2-shopping-228) saved 27m32s with all 917 tests passing, at higher memory pressure. Keep local validation exclusive. Use `SHOPPING_FULL_WORKERS=1 .github/scripts/run-local-shopping-full.sh` for serial diagnosis; other worker counts are rejected. Commands and attestations record the selected count. Hosted worker defaults are unchanged.
 
 The first command refuses a dirty worktree, exports the exact `HEAD` commit to an isolated temporary source snapshot, runs `ShoppingFull` there on the pinned local simulator, and records a pass only if the original worktree still has the same clean `HEAD` afterward. Push that unchanged commit before running the second command. The dispatch command refuses a missing local pass, a dirty worktree, or a remote branch whose head differs from the attested SHA. It publishes the `local/ShoppingFull` status on that exact commit and explicitly dispatches the hosted workflow. The hosted preflight independently requires a successful status on its exact workflow SHA before allocating the macOS exhaustive runner.
 
@@ -143,3 +181,74 @@ The JSON report uses `schema_version: 1`. `phases[].wall_seconds` is monotonic e
 External Actions use full commit SHAs, with readable version comments. Weekly Dependabot PRs propose GitHub Actions updates; they receive the same required CI and independent review. `ruby .github/scripts/check-action-pins.rb` rejects mutable references across every workflow. Never automatically merge dependency updates solely because a newer version exists.
 
 The [CI startup experiment](cicd-startup.md) records why the overlap candidate was rejected: its combined startup/build interval took 9m 35s versus 7m 26s for the fresh serial baseline. Routine CI retains serial setup and compilation.
+
+### Hosted Full cancellation evidence (SHOPPING-232)
+
+Run [37997790146](https://github.com/mggarofalo/Shopping/actions/runs/37997790146)
+on `527ea1766e781b80958e92462ed7e064461db73e` exhausted the 90-minute job
+budget: 9m47s before testing and 80m28s in the test step. The simulator took
+182.254s and build took 390.845s. The retained summary could not read the
+incomplete xcresult; quiet output did not establish completed inventory or
+whether execution or finalization stalled. Do not count this run as passing.
+
+The initial diagnostic job ceiling was 90 minutes. Explicit step ceilings allocated 19 minutes
+to checkout/toolchain/metadata/simulator/build (2/1/1/5/10), 60 minutes to tests,
+and eight minutes to raw logs/raw results/coverage/summary/timing/summary upload
+(1/3/1/1/1/1), leaving three minutes for orchestration overhead. These are
+failure bounds, not measured completion targets. The initial 60-minute test ceiling was
+a diagnostic tradeoff: it could stop a progressing suite earlier than the previous
+job-wide limit, but reserves time to retain its evidence. This does not establish
+that hosted Full fits the budget. Choose a later budget correction from actual
+progress and result evidence; do not infer hosted speed from the local M2.
+
+The hosted test command emits normal Xcode progress. Before any xcresult reader,
+`always()` uploads small raw logs and then the raw bundle as separate artifacts
+(`exhaustive-logs-*`, `exhaustive-results-*`, 14 days). This also retains evidence
+if later coverage or reporting fails after passing tests. Bundle compression is
+disabled to bound CPU overhead; successful runs now also retain the raw bundle,
+which adds storage/upload cost. Missing files after setup failure are reported
+as warnings; failures and cancellations remain failures/cancellations. Report
+steps each have a one-minute ceiling; summaries retain their existing 30 days.
+
+This is best-effort evidence retention, not a guarantee after runner loss or
+force cancellation. GitHub's [cancellation procedure](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation)
+can forcibly terminate work. The separate small log upload prevents a large or
+incomplete bundle from being the only source of diagnostic evidence. No test
+selection, worker count, fixture, assertion, coverage baseline, or exact-SHA
+attestation rule changes.
+
+
+The exhaustive and acceptance test commands run through
+`.github/scripts/with-system-text-size.py`. It supervises the unchanged
+xcodebuild selection, drives real global text size on the actual runner
+simulator, and restores outstanding leases before returning. Failed driver
+operations or cleanup force failure even if xcodebuild exits zero. Timing/log
+capture, raw-result retention, coverage and exact-SHA attestations remain in
+the outer existing workflow. Deterministic driver contracts also run in CI.
+
+
+### Evidence-based Full budget correction (SHOPPING-219)
+
+Run [38097940439](https://github.com/mggarofalo/Shopping/actions/runs/38097940439)
+on `7165c81e8c3a3cb4ca0350ddf4dcecc16ca003ac` reached that 60-minute test
+ceiling while ordinary UI actions were still progressing. Its retained log records
+843 XCTest passes and 57 Swift Testing passes: 900 total, including 103 of 120 UI
+methods, with no failed test assertions. One UI method was active and 16 had not
+started. The incomplete result bundle cannot establish a Full pass or coverage.
+Raw logs, the incomplete bundle, and bounded summaries were retained successfully.
+
+The same remaining 17 methods took 343.819 seconds in the earlier hosted run
+38080343221. Across 94 UI methods passing in both runs, summed durations rose from
+2491.993 to 2952.752 seconds (18.5%). Applying that observed ratio to the remaining
+inventory suggests about 407 seconds of work; this is an estimate, not a completed
+measurement. Delays were spread across suites. The real-text-size driver's 60
+commands totaled 91.693 seconds, with a maximum of 5.276 seconds; they were not a
+stalled command or the dominant suite cost.
+
+The test ceiling is now 75 minutes and the job ceiling 105 minutes. This retains
+19 minutes for setup/build, eight for artifacts/reporting, and three for
+orchestration, while allowing a progressing suite to finish near the observed
+65–67-minute estimate with bounded headroom. Test inventory, assertions, serial
+hosted execution, coverage baselines, and exact-SHA local attestation are unchanged.
+The corrected candidate must complete the existing validation sequence; this
+budget change does not convert the canceled run into passing evidence.

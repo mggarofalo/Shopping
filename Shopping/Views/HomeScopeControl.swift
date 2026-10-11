@@ -43,35 +43,37 @@ struct HomeScopeControl: View {
     @Environment(\.presentHomes) private var presentHomes
 
     var body: some View {
-        if let scope, allowsSwitching || scope.showsContext {
-            if allowsSwitching {
-                Button(action: presentHomes) {
-                    HStack(spacing: 7) {
-                        homeLabel(scope)
-                        Image(systemName: "chevron.down")
-                            .font(.caption.weight(.semibold))
-                        Spacer(minLength: 0)
+        if allowsSwitching {
+            Button(action: presentHomes) {
+                HStack(spacing: 7) {
+                    Image(systemName: "house")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Homes").foregroundStyle(.primary)
+                        Text(scope?.name ?? "Choose a Home").font(.subheadline).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.groceryAccent)
-                .accessibilityLabel("Choose home")
-                .accessibilityValue(scope.name
-                    + (scope.isLocal && !scope.name.hasSuffix("On This iPhone") ? ", On This iPhone" : "")
-                    + ", Selected")
-                .accessibilityIdentifier("shopping.home.scope")
-            } else {
-                homeLabel(scope)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Home")
-                    .accessibilityValue(scope.name)
-                    .accessibilityIdentifier("shopping.home.context")
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.groceryAccent)
+            .accessibilityLabel("Homes")
+            .accessibilityValue(scope.map {
+                $0.name + ($0.isLocal && !$0.name.hasSuffix("On This iPhone") ? ", On This iPhone" : "") + ", Selected"
+            } ?? "Choose a Home")
+            .accessibilityIdentifier("shopping.home.scope")
+        } else if let scope, scope.showsContext {
+            homeLabel(scope)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Home")
+                .accessibilityValue(scope.name)
+                .accessibilityIdentifier("shopping.home.context")
         }
     }
 

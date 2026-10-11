@@ -46,7 +46,7 @@ enum HomeDeletionPersistencePolicy {
                   let url = store.url, let storeID = store.identifier else { continue }
             let graph = HomeGraphIdentity(storeIdentifier: storeID, rootURI: home.objectID.uriRepresentation().absoluteString,
                 householdID: home.id, listID: list.id)
-            guard try !LocalHomeDeletionJournal(storeURL: url).contains(graph) else { throw HomeDeletionError.scopeChanged }
+            guard try !LocalHomeDeletionJournal(storeURL: url).blocksUse(graph) else { throw HomeDeletionError.scopeChanged }
         }
     }
 }

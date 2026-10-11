@@ -164,7 +164,7 @@ struct LocalHomeSettingsView: View {
         Task {
             defer { isConnecting = false }
             do { try await bootstrap.homeEntryCommands.connectBackToAccount() }
-            catch { connectionError = "Couldn’t open iCloud homes. Try again." }
+            catch { connectionError = HomeSharingErrorPresentation.message(error) }
         }
     }
 
@@ -175,7 +175,7 @@ struct LocalHomeSettingsView: View {
         Task {
             defer { isConnecting = false }
             do { try await bootstrap.homeEntryCommands.useICloudForRetainedLocalHome() }
-            catch { connectionError = "Couldn’t copy this home. Try again." }
+            catch { connectionError = HomeSharingErrorPresentation.message(error) }
         }
     }
 
@@ -186,7 +186,7 @@ struct LocalHomeSettingsView: View {
         Task {
             defer { isConnecting = false }
             do { try await bootstrap.homeEntryCommands.useICloudForLocalHome() }
-            catch { connectionError = "Couldn’t copy this home. Try again." }
+            catch { connectionError = HomeSharingErrorPresentation.message(error) }
         }
     }
 

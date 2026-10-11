@@ -24,11 +24,16 @@ People without an available iCloud account can continue using their existing loc
 
 ### Put the active home in the interface
 
-Keep native page titles pinned and inline. Groceries puts one `house` + home name + `chevron.down` button in its first scroll-content row. That button is the home switcher, including when there is only one home. Do not repeat it in the navigation bar or above the content.
+Phase 33 (1.6.0) keeps native page titles and makes Settings the Home switching entry point. Groceries, Catalog and My Cart retain passive Home context when several Homes exist or a retained local Home is in use.
 
-Catalog and the current My Cart show a passive `house` + home name row only when several homes exist or a retained local home is in use. My Cart is reached from Groceries, not a separate tab. Settings has one Home row, labeled with the current home name, that opens Home Settings. Home Settings keeps its own title without another switcher. Saved carts from other homes always show their captured home name as static context; the currently selected home must never label a saved cart from a different home. Editors continue to target their captured home. A background home change must never redirect an existing edit.
+Catalog and the current My Cart show a passive `house` + home name row only when several homes exist or a retained local home is in use. My Cart is reached from Groceries, not a separate tab. Settings has one first-section Homes row with the selected Home name as secondary text. It opens Homes. Stores, Categories and People are grouped under the selected Home name; Appearance and About are app settings. Home Settings keeps its own title without another switcher. Saved carts from other homes always show their captured home name as static context; the currently selected home must never label a saved cart from a different home. Editors continue to target their captured home. A background home change must never redirect an existing edit.
 
-The Groceries button opens a flat Homes sheet. A checked row identifies the selected home. Tapping another home selects it and dismisses the sheet. The sheet also has `Create Home` and `Home Settings`. In no-home states, use the native readiness content without a blank home row, extra top inset, or separator.
+The Homes sheet uses a native NavigationStack and grouped List. Each row has a selection button and a separate info-circle details link with distinct accessible labels and 44-point targets. A checkmark identifies the selected Home. Selecting a name dismisses the sheet; inspecting details does not select it. Create Home follows the Homes section. There is no global Home Settings row. Details Back returns to Homes; Done dismisses the sheet. In no-home states, use the native readiness content without a blank home row, extra top inset, or separator.
+
+Inactive account Homes support the same permission-aware details actions without
+selection changes. A retained local Home that is not mounted exposes its saved
+name and On This iPhone context; select it to manage local settings through the
+existing store lifecycle. Viewing that summary never mounts a competing store.
 
 Use a native sheet with a List because the collection may grow and include retained local homes. Do not build a nested menu tree. Show `On This iPhone` only for a retained local home. Show Owner or Member in settings, where the distinction changes available actions.
 
@@ -98,11 +103,11 @@ Use short labels for actions and recognizable symbols for navigation. Keep visib
 | --- | --- | --- |
 | Ordinary first launch | `Create a Home` | `Create Home`; house |
 | Invitation hint on first launch | `Invited? Open your invite link.` | No extra setup button |
-| Groceries first content row | Current home name | house; chevron.down opens Homes |
+| Groceries context | Current Home name when needed | Passive house label |
 | Catalog and current cart context | Current home name when several homes exist or local home is retained | Passive house label |
-| Settings Home row | `Home` and current home name | Opens Home Settings |
+| Settings first row | `Homes` and current Home name | Opens Homes |
 | Saved cart from another home | Captured home name | Passive house label |
-| Homes selector | Home names | Checkmark selected; plus for Create Home |
+| Homes selector | Home names | Checkmark selected; separate info link; plus for Create Home |
 | New additional home | `New Home`; `Name` | Cancel; Create |
 | Invitation before acceptance | Home name; `[name] invited you` | Join Home; Not Now |
 | Accepted invitation | Home name; `Joining…` | Progress indicator; dismiss |
@@ -138,11 +143,11 @@ Count both app screens and any system acceptance surface when measuring invitati
 | App receives already accepted invite | Zero additional acceptance taps; opens list when ready |
 | App receives unaccepted invite | One Join Home tap; no later Open or Done requirement |
 | Return to deferred invitation | One visible invitation action, then the same join sheet |
-| Switch home from Groceries | Tap first-row home control, tap home: 2 taps |
-| Switch from Catalog or cart | Return to Groceries, then use its first-row home control |
+| Switch Home | Settings → Homes → Home name |
+| Switch from Catalog or cart | Settings → Homes → Home name |
 | First explicit creation | One Create Home tap using My Home |
 | Additional home | Homes → Create Home → Name form; Create completes |
-| Open Home Settings | Groceries home control → Home Settings, or Settings → Home |
+| Open Home details | Settings → Homes → info beside the exact Home |
 | Invite from Home Settings | One Invite tap to the system share sheet |
 | Delete or leave | One action plus one destructive confirmation |
 
@@ -278,3 +283,15 @@ These sources inform the native components and interaction principles. The speci
 Safari review on October 2 verified the flat two-tap home switch, direct accepted-invitation completion, one-tap first creation, owner deletion confirmation, last-home empty state, and successful retry within the same invitation sheet. The review also caught and corrected a Safari script-name collision and a missing first-create action.
 
 The prototype uses simulated homes and invitation timing. Grocery rows illustrate home context; they do not propose replacing the shared grocery-row layout. Native accessibility, durable operations, real account setup, system invitation delivery, member commands, and CloudKit behavior require the implementation and device checks above.
+
+### Replacing an eligible starter Home
+
+Replacement is optional and applies only to a positively identified, untouched, local-only starter. The app records its first creation and requires the source to contain only its Home and grocery-list roots, with no later persistent transaction. Historical or CloudKit-backed Homes are kept; a visually empty list cannot prove that those Homes contain no other work or pending remote changes (SHOPPING-224).
+
+An accepted invitation must import and pass native access verification before its Home becomes selected. A replacement choice durably captures the exact invitation, account, source graph and store. Activation intent precedes native activation; cleanup intent precedes the source write. The deletion checks source eligibility and revocable navigation/account authority on the writer. Other Homes and personal carts are not cleanup targets. Unmounted source work reserves its store, and a store transition drains that reservation before mounting it.
+
+An interrupted replacement remains visible for explicit retry in its account and joined Home. Generic deletion recovery does not execute starter cleanup. Completed source deletion may be observed after relaunch without repeating it. A newer Home choice, including selecting the same Home again, invalidates queued cleanup.
+
+The existing invitation sheet presents the two Home names, Replace, Keep Both, and Not Now. Replace asks for a separate native confirmation before joining/removing. Same-name Homes include their local/invited role in confirmation. Not Now preserves the source and permits reopening the same invitation; Close during a confirmed operation dismisses progress without cancelling it. The sheet displays durable activation/cleanup stages. Partial results link to Homes, where explicit Review Again revalidates removal and Keep preserves the source. Recovery never presents a second invitation sheet over Homes.
+
+Simulator evidence for SHOPPING-222 includes default and accessibility XXXL screenshots, the confirmation, changed-source preservation, and recovery after relaunch. This establishes the isolated local UI workflow, not cross-account CloudKit convergence or spoken Siri behavior.

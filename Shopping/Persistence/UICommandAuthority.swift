@@ -9,6 +9,11 @@ final class UICommandAuthority: @unchecked Sendable {
     }
     private let lock = NSLock()
     private var active = true
+    private let additionalValidation: @Sendable () throws -> Void
+
+    init(validating additionalValidation: @escaping @Sendable () throws -> Void = {}) {
+        self.additionalValidation = additionalValidation
+    }
 
     var isActive: Bool { lock.withLock { active } }
 
@@ -16,5 +21,6 @@ final class UICommandAuthority: @unchecked Sendable {
 
     func validate() throws {
         guard isActive else { throw Failure.retired }
+        try additionalValidation()
     }
 }

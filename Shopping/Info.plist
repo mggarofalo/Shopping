@@ -2,6 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>UIApplicationShortcutItems</key>
+    <array>
+        <dict>
+            <key>UIApplicationShortcutItemType</key><string>com.mggarofalo.shopping.add</string>
+            <key>UIApplicationShortcutItemTitle</key><string>Add item</string>
+            <key>UIApplicationShortcutItemIconSymbolName</key><string>plus</string>
+        </dict>
+        <dict>
+            <key>UIApplicationShortcutItemType</key><string>com.mggarofalo.shopping.groceries</string>
+            <key>UIApplicationShortcutItemTitle</key><string>Open grocery list</string>
+            <key>UIApplicationShortcutItemIconSymbolName</key><string>list.bullet</string>
+        </dict>
+        <dict>
+            <key>UIApplicationShortcutItemType</key><string>com.mggarofalo.shopping.catalog</string>
+            <key>UIApplicationShortcutItemTitle</key><string>Search catalog</string>
+            <key>UIApplicationShortcutItemIconSymbolName</key><string>magnifyingglass</string>
+        </dict>
+    </array>
     <key>CKSharingSupported</key>
     <true/>
     <key>ShoppingCloudKitContainerIdentifier</key>

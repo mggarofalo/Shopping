@@ -2453,3 +2453,90 @@ lost receipt after durable save, immediate and delayed successful rereads,
 retained cancellation feedback, and authority cleanup. Its existing
 `testCommittedAddReadFailureReconcilesWithoutReexecuting` retains no-descendant
 recovery behavior. The failed baseline is retained in the validation record.
+
+## Phase 33 system actions (SHOPPING-217)
+
+`ShoppingActionTests` owns pending-request exclusivity, expiry/cancellation, Home/presentation invalidation, the three quick-action identities and concurrent background startup without a mounted view. Existing `ActiveHomeBootstrapTests` and presentation-retirement tests retain account/store lifecycle proof. `SystemActionUITests/testHomeScreenAddOpensCatalogAddWithoutChangingList` owns actual SpringBoard quick-action delivery into the existing grocery add sheet. Existing catalog save/add tests retain persistence and duplicate-add proof.
+
+
+## Phase 33 · Siri catalog actions (SHOPPING-218)
+
+`CatalogActionTests` owns normalized matching, snapshot eligibility, revision and
+presentation fencing, duplicate/carted add preservation, permission failure,
+cancellation before dispatch, scoped entity identity and unsaved creation handoff.
+`CatalogActionUITests` owns the prefilled editor, cancellation without records,
+explicit Save and Add, and persistence across relaunch, using an isolated local
+fixture. Its DEBUG handoff trigger requires an isolated test store and does not
+claim Siri speech recognition. Generated App Intents metadata must contain exactly
+three actions/shortcuts. Actual Siri recognition, native disambiguation and device
+foreground continuation require separate system/device evidence.
+
+
+## Phase 33 · Homes navigation and captured details (SHOPPING-220)
+
+`ActiveHomeBootstrapTests/testInactiveHomeDetailsRenameExactHomeWithoutChangingSelectionAndRejectRetiredActions`
+owns exact inactive-Home rename and retirement. `HomeSharingStatusBootstrapTests`
+owns inspected-Home access/saved-work scoping and retry when access is unresolved.
+`HomeDetailsUITests` owns separate selection/info controls, inactive rename without
+selection changes, relaunch, accessibility XXXL, and existing invitation/removal/
+leave/delete workflows through Settings → Homes. `PersonalCartUITests` retains
+selection/cart isolation and local/retained Home recovery; its tap paths now use
+the same Homes sheet. `HomeSharingStatusUITests` retains native status navigation
+and actual system text-size changes. Screenshots use isolated SQLite fixtures.
+
+### Starter Home replacement (SHOPPING-221)
+
+- `LocalStarterEvidenceTests` owns positive local creation provenance, historical exclusion, catalog/rename disqualification, durable exact deletion requirements, revocable write authority, and real SQLite removal/reopen.
+- `HomeReplacementCoordinatorTests` owns durable activation/cleanup checkpoints, duplicate callbacks, interruption replay, unavailable target, and account isolation.
+- `HomeAdoptionBootstrapTests` owns invitation-to-replacement composition: keep, replace, concurrent confirmation, newer selection, and explicit retry after activation or retained-deletion interruption. Native share verification is a substituted boundary in these fixtures, not physical CloudKit proof.
+
+### Starter replacement interaction (SHOPPING-222)
+
+`HomeReplacementUITests` owns the native decision/confirmation, Cancel/Keep Both, Not Now/reopen, Close during confirmed progress, changed-source notice, ineligible-source omission, explicit recovery after relaunch, and same-name accessibility XXXL interaction. Each scenario uses its own UUID store and the isolated `HomeReplacementUITestFixture`; relaunch removes the seed environment. `HomeAdoptionBootstrapTests.testDeferredReplacementCanReopenFromRetainedLocalStarter` covers the separate local-store reconnect boundary. Eligibility, durable cleanup, and account/navigation races remain owned by the SHOPPING-221 fast tests. Navigation waits for the invitation control to disappear before tapping the destination tab; a background Groceries title alone does not establish dismissal.
+
+## Personal Cart positive waits (SHOPPING-229)
+
+The same 19 `PersonalCartUITests` workflows retain every UI assertion, fixture,
+Settings transition and recovery boundary. Thirty-eight positive existence
+assertions use the shared `existsOrAppears` contract with unchanged timeout
+fallbacks. The query still has to resolve the original element; no first-match,
+expected-value filter, or fixture shortcut is added. Existing uniqueness, value,
+hittability, geometry and disappearance checks remain distinct.
+
+After discarding legacy cart status, the feedback message and removal of the
+Strawberries row are independently observed. The view publishes its feedback
+before awaiting list refresh, so the row has its own bounded disappearance wait.
+The workflow still verifies that earlier recovery history remains reachable and
+restorable after a same-store relaunch without fixture reseeding. This replaces
+an incidental polling delay with the actual resulting-state assertion.
+
+No tests are retired and no fixture contents are changed. Runtime benefit must
+come from matched measurements, not a reduction in proof inventory.
+
+
+## SHOPPING-219: Actual Simulator text-size transitions
+
+This supersedes the Settings-slider transport described above. The same six
+Home details, Home replacement, Sharing status and Personal Cart UI methods
+retain their entire app-interaction inventory and screen/layout assertions.
+`SystemTextSize` uses a host driver for the actual global OS category, with
+explicit background/foreground transitions of the same Shopping process.
+Original global and UIKit categories must agree. Each transition still requires
+fresh nonce-bound sequence/uptime and exact UIKit category; normal restoration
+requires both host readback and a fresh observation in the retained app.
+
+The host uses Apple's supported `simctl ui <actual runner UDID> content_size`
+command. Per-run directories, expiring request IDs and exclusive per-test leases
+isolate parallel simulator clones. Failed leases allow restoration only; an
+abandoned lease or failed host operation prevents a successful run/attestation.
+The host drains serialized operations before cleanup and restores originals if
+a test runner dies. Seventeen deterministic driver contracts cover identity,
+expiration, duplicate requests, wrong readback, independent devices, poisoned
+leases, failed/abandoned restoration, child exit status and cancellation.
+
+This owns real Simulator OS changes and app response, not interaction with
+Apple's Settings UI. It no longer proves range-toggle/slider fidelity or exact
+range-toggle restoration, and it is not physical-device evidence. No app
+preference override or product-side mutation seam is used. Full runners wrap
+xcodebuild automatically; focused commands for these methods need the same
+`with-system-text-size.py` wrapper. Missing transport is a failure, never a skip.

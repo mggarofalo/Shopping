@@ -46,6 +46,7 @@ final class ActiveHomeCoordinator: ObservableObject {
     /// Changes only when a person explicitly chooses to keep, open, or leave a home.
     /// Discovery and store rebinding can renew command authority without replacing that choice.
     private(set) var choiceRevision: UInt64 = 0
+    private(set) var choiceAuthority = UICommandAuthority()
     private var requestSequence: UInt64 = 0
     private var session: ShopperSession?
     private var savedScope: ActiveHomeScope?
@@ -61,6 +62,8 @@ final class ActiveHomeCoordinator: ObservableObject {
 
     func bind(_ session: ShopperSession?) {
         guard self.session != session else { return }
+        choiceAuthority.retire()
+        choiceAuthority = UICommandAuthority()
         generation &+= 1
         self.session = session
         homes = []
@@ -119,7 +122,7 @@ final class ActiveHomeCoordinator: ObservableObject {
         guard let session, homes.contains(where: { $0.graph == graph && $0.access != .unresolved }) else {
             throw NeedServiceError.scopeChanged
         }
-        if recordingChoice { choiceRevision &+= 1 }
+        if recordingChoice { recordExplicitChoice() }
         guard activeScope?.graph != graph || renewingAuthority else { return }
         generation &+= 1
         activate(graph, session: session)
@@ -129,12 +132,14 @@ final class ActiveHomeCoordinator: ObservableObject {
     /// Later discovery must not interpret the sole accepted home as an implicit choice.
     func deferSelection() {
         guard let session else { return }
-        choiceRevision &+= 1
+        recordExplicitChoice()
         selectionDeferred = true
         defaults.set(true, forKey: key(session) + ".deferred")
     }
 
     func recordExplicitChoice() {
+        choiceAuthority.retire()
+        choiceAuthority = UICommandAuthority()
         choiceRevision &+= 1
     }
 
@@ -149,7 +154,7 @@ final class ActiveHomeCoordinator: ObservableObject {
               scope.containerIdentifier == session.containerIdentifier,
               scope.environment == session.environment,
               savedScope == scope else { return false }
-        choiceRevision &+= 1
+        recordExplicitChoice()
         generation &+= 1
         requestSequence &+= 1
         savedScope = nil

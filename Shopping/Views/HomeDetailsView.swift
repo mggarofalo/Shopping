@@ -8,6 +8,7 @@ struct HomeDetailsView: View {
     @State private var preparedInvitation: UUID?
     @State private var showingSharingStatus = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var bootstrap: PersistenceBootstrap
     @State private var showingInviteRequirement = false
     @State private var showingNameEditor = false
@@ -27,7 +28,7 @@ struct HomeDetailsView: View {
         model.snapshot?.canEditName ?? (initialAccess == .owner || initialAccess == .contributor)
     }
     private var cloudNeedsAttention: Bool {
-        bootstrap.homeSharingStatus.activity.notices.contains { $0.id != .invitation }
+        bootstrap.homeSharingStatus(for: model.scope).activity.notices.contains { $0.id != .invitation }
     }
     private var cloudIsWorking: Bool {
         bootstrap.cloudStatus.isWorking
@@ -146,13 +147,18 @@ struct HomeDetailsView: View {
                 invitations.retire()
             }
         }
+        .onChange(of: bootstrap.homeDeletionStatuses.contains(where: {
+            $0.completed && $0.command.graph == model.scope.graph
+        })) { _, deleted in
+            if deleted && bootstrap.homeEntry.root != .noHomes { dismiss() }
+        }
         .onChange(of: bootstrap.homeEntry.root) { _, root in
             if root != .activeHome(model.scope) { model.retire(); invitations.retire() }
         }
         .navigationDestination(item: $selectedInvitation) { route in
             HomeInvitationDetailView(route: route, invitations: invitations, details: model)
         }
-        .navigationDestination(isPresented: $showingSharingStatus) { HomeSharingStatusView() }
+        .navigationDestination(isPresented: $showingSharingStatus) { HomeSharingStatusView(scope: model.scope) }
         .sheet(isPresented: $showingInvitationName, onDismiss: {
             if let id = preparedInvitation { selectedInvitation = .named(id); preparedInvitation = nil }
         }) {

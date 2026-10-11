@@ -51,7 +51,7 @@ final class HomeDiscoveryService: @unchecked Sendable {
                 if persistence.role(of: store) == .local, let url = store.url {
                     let graph = HomeGraphIdentity(storeIdentifier: storeID, rootURI: root.objectID.uriRepresentation().absoluteString,
                         householdID: root.id, listID: list.id)
-                    if try LocalHomeDeletionJournal(storeURL: url).contains(graph) { continue }
+                    if try LocalHomeDeletionJournal(storeURL: url).blocksUse(graph) { continue }
                 }
                 homes.append(HomeCandidate(graph: HomeGraphIdentity(storeIdentifier: storeID,
                     rootURI: root.objectID.uriRepresentation().absoluteString,

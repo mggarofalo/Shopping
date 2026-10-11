@@ -1,0 +1,474 @@
+{
+  "issue": "SHOPPING-229",
+  "change": "38 positive existence polls use the existing immediate-exists helper with unchanged fallback timeout; legacy-discard disappearance is explicitly bounded at 3 seconds after asynchronous refresh.",
+  "selection": [
+    "ShoppingTests/PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting",
+    "ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL",
+    "ShoppingTests/PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch",
+    "ShoppingTests/PersonalCartUITests/testLegacyCartRequiresExplicitClaim",
+    "ShoppingTests/PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch",
+    "ShoppingTests/PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute",
+    "ShoppingTests/PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway",
+    "ShoppingTests/PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain",
+    "ShoppingTests/PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears"
+  ],
+  "run_order": [
+    "before",
+    "after"
+  ],
+  "paired_samples": 1,
+  "runs": {
+    "before": {
+      "schema_version": 1,
+      "generated_at": "2026-10-09T21:02:48.531445+00:00",
+      "metadata": {
+        "commit_sha": "39026e31478945fbf149585992f1946c89f24e3c",
+        "dirty": false,
+        "captured_at": "2026-10-09T20:57:27.329814+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull: nine changed PersonalCart workflows",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0.1",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "result_bundle_path": "/private/tmp/shopping-229-before/Results.xcresult",
+      "counts": {
+        "totalTestCount": 9,
+        "passedTests": 9,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_wall_seconds": 280.4760000705719,
+      "summed_test_seconds": 278.36676597595215,
+      "phases": [
+        {
+          "phase": "build",
+          "started_at": "2026-10-09T20:57:27.460635+00:00",
+          "finished_at": "2026-10-09T20:58:06.261674+00:00",
+          "wall_seconds": 38.800891,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-229-before/build.log",
+          "command": [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-229-before/DerivedData",
+            "-quiet"
+          ]
+        },
+        {
+          "phase": "test",
+          "started_at": "2026-10-09T20:58:06.311669+00:00",
+          "finished_at": "2026-10-09T21:02:48.227270+00:00",
+          "wall_seconds": 281.915084,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-229-before/test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-229-before/DerivedData",
+            "-quiet",
+            "-parallel-testing-enabled",
+            "NO",
+            "-resultBundlePath",
+            "/tmp/shopping-229-before/Results.xcresult",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testLegacyCartRequiresExplicitClaim",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch()",
+          "name": "testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 19.822147965431213,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testLegacyCartRequiresExplicitClaim()",
+          "name": "testLegacyCartRequiresExplicitClaim()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 18.20328199863434,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute()",
+          "name": "testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 29.62355101108551,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway()",
+          "name": "testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 17.43361794948578,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch()",
+          "name": "testPersonalCheckoutAndRecoverySurviveRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 28.696829080581665,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain()",
+          "name": "testPurchasedRememberedItemCanBeRequestedAgain()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 13.43180799484253,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears()",
+          "name": "testRetainedCartCanBeRemovedAfterHouseholdDisappears()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 15.228307962417603,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL()",
+          "name": "testStorePickerCountsAtSystemLargeAndAccessibilityXXXL()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 88.80234599113464,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting()",
+          "name": "testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 47.12487602233887,
+          "duration_precision": "exact"
+        }
+      ],
+      "suites": [
+        {
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "test_count": 9,
+          "summed_test_seconds": 278.36676597595215,
+          "untimed_test_count": 0
+        }
+      ],
+      "failures": [],
+      "warnings": []
+    },
+    "after": {
+      "schema_version": 1,
+      "generated_at": "2026-10-09T21:07:55.385739+00:00",
+      "metadata": {
+        "commit_sha": "064e4651bdeebd64d22e6cfd9db83d0772ba5d86",
+        "dirty": false,
+        "captured_at": "2026-10-09T21:03:15.882497+00:00",
+        "xcode": "Xcode 27.0\nBuild version 27A266a",
+        "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+        "architecture": "arm64",
+        "plan": "ShoppingFull: nine changed PersonalCart workflows",
+        "run_url": null,
+        "run_attempt": null,
+        "environment": "ShoppingFull \u00b7 Built with macOS 27.0.1",
+        "devices": [
+          {
+            "architecture": "arm64",
+            "deviceId": "15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "deviceName": "iPhone 17 Pro",
+            "modelName": "iPhone 17 Pro",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          }
+        ]
+      },
+      "result": "Passed",
+      "result_bundle_path": "/private/tmp/shopping-229-after/Results.xcresult",
+      "counts": {
+        "totalTestCount": 9,
+        "passedTests": 9,
+        "failedTests": 0,
+        "skippedTests": 0
+      },
+      "result_bundle_wall_seconds": 239.49900007247925,
+      "summed_test_seconds": 237.13660717010498,
+      "phases": [
+        {
+          "phase": "build",
+          "started_at": "2026-10-09T21:03:15.999989+00:00",
+          "finished_at": "2026-10-09T21:03:53.911831+00:00",
+          "wall_seconds": 37.911708,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-229-after/build.log",
+          "command": [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-229-after/DerivedData",
+            "-quiet"
+          ]
+        },
+        {
+          "phase": "test",
+          "started_at": "2026-10-09T21:03:53.965385+00:00",
+          "finished_at": "2026-10-09T21:07:55.100141+00:00",
+          "wall_seconds": 241.134114,
+          "exit_code": 0,
+          "log_path": "/private/tmp/shopping-229-after/test.log",
+          "command": [
+            "xcodebuild",
+            "test-without-building",
+            "-project",
+            "Shopping.xcodeproj",
+            "-scheme",
+            "Shopping",
+            "-testPlan",
+            "ShoppingFull",
+            "-destination",
+            "platform=iOS Simulator,id=15066BE0-662A-4573-AA67-12E84FA0C39C",
+            "-derivedDataPath",
+            "/tmp/shopping-229-after/DerivedData",
+            "-quiet",
+            "-parallel-testing-enabled",
+            "NO",
+            "-resultBundlePath",
+            "/tmp/shopping-229-after/Results.xcresult",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testLegacyCartRequiresExplicitClaim",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain",
+            "-only-testing:ShoppingTests/PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "identifier": "PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch()",
+          "name": "testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 17.530853033065796,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testLegacyCartRequiresExplicitClaim()",
+          "name": "testLegacyCartRequiresExplicitClaim()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 13.848392009735107,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute()",
+          "name": "testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 25.998764038085938,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway()",
+          "name": "testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 11.72844398021698,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch()",
+          "name": "testPersonalCheckoutAndRecoverySurviveRelaunch()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 19.44033110141754,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain()",
+          "name": "testPurchasedRememberedItemCanBeRequestedAgain()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 10.38562798500061,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears()",
+          "name": "testRetainedCartCanBeRemovedAfterHouseholdDisappears()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 10.724117994308472,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL()",
+          "name": "testStorePickerCountsAtSystemLargeAndAccessibilityXXXL()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 83.89167606830597,
+          "duration_precision": "exact"
+        },
+        {
+          "identifier": "PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting()",
+          "name": "testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting()",
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "result": "Passed",
+          "duration_seconds": 43.58840095996857,
+          "duration_precision": "exact"
+        }
+      ],
+      "suites": [
+        {
+          "bundle": "ShoppingTests",
+          "suite": "PersonalCartUITests",
+          "test_count": 9,
+          "summed_test_seconds": 237.13660717010498,
+          "untimed_test_count": 0
+        }
+      ],
+      "failures": [],
+      "warnings": []
+    }
+  },
+  "cases": [
+    {
+      "identifier": "PersonalCartUITests/testHouseholdSetupAccountFailureKeepsVisibleGroceriesAfterRelaunch()",
+      "before_seconds": 19.822147965431213,
+      "after_seconds": 17.530853033065796,
+      "saved_seconds": 2.2912949323654175
+    },
+    {
+      "identifier": "PersonalCartUITests/testLegacyCartRequiresExplicitClaim()",
+      "before_seconds": 18.20328199863434,
+      "after_seconds": 13.848392009735107,
+      "saved_seconds": 4.354889988899231
+    },
+    {
+      "identifier": "PersonalCartUITests/testLegacyDiscardRemovesPendingCardAfterRelaunchAndKeepsEarlierHistoryRoute()",
+      "before_seconds": 29.62355101108551,
+      "after_seconds": 25.998764038085938,
+      "saved_seconds": 3.6247869729995728
+    },
+    {
+      "identifier": "PersonalCartUITests/testOtherPurchaseKeepsOwnEntryUntilExplicitBuyAnyway()",
+      "before_seconds": 17.43361794948578,
+      "after_seconds": 11.72844398021698,
+      "saved_seconds": 5.705173969268799
+    },
+    {
+      "identifier": "PersonalCartUITests/testPersonalCheckoutAndRecoverySurviveRelaunch()",
+      "before_seconds": 28.696829080581665,
+      "after_seconds": 19.44033110141754,
+      "saved_seconds": 9.256497979164124
+    },
+    {
+      "identifier": "PersonalCartUITests/testPurchasedRememberedItemCanBeRequestedAgain()",
+      "before_seconds": 13.43180799484253,
+      "after_seconds": 10.38562798500061,
+      "saved_seconds": 3.046180009841919
+    },
+    {
+      "identifier": "PersonalCartUITests/testRetainedCartCanBeRemovedAfterHouseholdDisappears()",
+      "before_seconds": 15.228307962417603,
+      "after_seconds": 10.724117994308472,
+      "saved_seconds": 4.504189968109131
+    },
+    {
+      "identifier": "PersonalCartUITests/testStorePickerCountsAtSystemLargeAndAccessibilityXXXL()",
+      "before_seconds": 88.80234599113464,
+      "after_seconds": 83.89167606830597,
+      "saved_seconds": 4.910669922828674
+    },
+    {
+      "identifier": "PersonalCartUITests/testStorePickerCountsIgnoreSelectionAndSearchThenRefreshAfterCarting()",
+      "before_seconds": 47.12487602233887,
+      "after_seconds": 43.58840095996857,
+      "saved_seconds": 3.5364750623703003
+    }
+  ],
+  "comparison": {
+    "before_test_command_seconds": 281.915084,
+    "after_test_command_seconds": 241.134114,
+    "saved_seconds": 40.78096999999997,
+    "saved_percent": 14.46569279705515
+  },
+  "limitations": [
+    "One before/after pair on local Xcode 27/iOS 26.5, not a reliability distribution or hosted estimate.",
+    "Fresh separate DerivedData builds, recorded separately from test commands.",
+    "Same nine complete workflows, serial workers, coverage-enabled Full plan; no test or assertion retired.",
+    "This focused change does not establish the earlier hypothetical 3\u20138 minute whole-suite saving."
+  ]
+}

@@ -1,6 +1,70 @@
 import XCTest
 
 final class HomeDetailsUITests: XCTestCase {
+    func testHomesAtAccessibilityTextSizeKeepSeparateSelectionAndDetails() throws {
+        let app = launch(role: "owner", secondHome: true, systemTextSize: true)
+        let textSize = try SystemTextSize(test: self, app: app)
+        XCTAssertTrue(app.buttons["shopping.home.choose"].existsOrAppears(timeout: 8))
+        app.buttons["shopping.home.choose"].tap()
+        try textSize.set(.accessibilityXXXL)
+        let name = app.buttons["Select Preview household"]
+        let detail = app.buttons["Details for Preview household"]
+        XCTAssertTrue(name.isHittable)
+        XCTAssertTrue(detail.isHittable)
+        XCTAssertGreaterThanOrEqual(name.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(detail.frame.height, 44)
+        XCTAssertLessThanOrEqual(name.frame.maxY, detail.frame.minY)
+        attachScreenshot("Homes at accessibility XXXL", app: app)
+        detail.tap()
+        XCTAssertTrue(app.navigationBars["Preview household"].existsOrAppears(timeout: 5))
+        app.navigationBars["Preview household"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
+        XCTAssertTrue((name.value as? String)?.contains("Not selected") == true)
+        try textSize.set(.large)
+    }
+
+    func testInspectAndRenameInactiveHomeKeepsSelectedHome() throws {
+        let app = launch(role: "owner", secondHome: true)
+        XCTAssertTrue(app.buttons["shopping.home.choose"].existsOrAppears(timeout: 8))
+        app.buttons["shopping.home.choose"].tap()
+        app.buttons["Select Preview household"].tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+        app.tabBars.buttons["Settings"].tap()
+        let homes = app.buttons["shopping.home.scope"]
+        XCTAssertEqual(homes.label, "Homes")
+        XCTAssertFalse(app.buttons["shopping.settings.homeDetails"].exists)
+        attachScreenshot("Settings with one Homes entry", app: app)
+        homes.tap()
+        XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
+        XCTAssertFalse(app.buttons["shopping.home.settings"].exists)
+        attachScreenshot("Homes with separate selection and details", app: app)
+        let detail = app.buttons["Details for Second home"]
+        XCTAssertTrue(detail.isHittable)
+        XCTAssertGreaterThanOrEqual(detail.frame.height, 44)
+        detail.tap()
+        XCTAssertTrue(app.navigationBars["Second home"].existsOrAppears(timeout: 5))
+        app.buttons["shopping.home.rename"].tap()
+        let name = app.textFields["shopping.home.nameEditor"]
+        XCTAssertTrue(name.existsOrAppears(timeout: 5))
+        name.tap()
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Second home".count) + "Cedar Home")
+        app.buttons["Save home name"].tap()
+        XCTAssertTrue(app.navigationBars["Cedar Home"].existsOrAppears(timeout: 5))
+        attachScreenshot("Inactive Home renamed without switching", app: app)
+        app.navigationBars["Cedar Home"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
+        XCTAssertTrue((app.buttons["Select Preview household"].value as? String)?.contains("Selected") == true)
+        XCTAssertTrue(app.buttons["Select Cedar Home"].existsOrAppears(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue((homes.value as? String)?.contains("Preview household") == true)
+        app.terminate()
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue((homes.value as? String)?.contains("Preview household") == true)
+    }
+
     func testOwnerDeleteRequiresExactHomeConfirmationAndCanRecreateAfterRelaunch() throws {
         let app = launch(role: "owner")
         openHomeDetails(app)
@@ -86,12 +150,17 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         let chooseHome = app.buttons["Homes"]
         XCTAssertTrue(chooseHome.existsOrAppears(timeout: 8))
+        XCTAssertTrue(app.navigationBars[homeName].waitForNonExistence(timeout: 5),
+                      "The departing Home details sheet must finish dismissing")
+        let reachable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isHittable == true"), object: chooseHome)
+        XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 5), .completed)
         XCTAssertTrue(chooseHome.isHittable)
         XCTAssertTrue(app.buttons["shopping.home.savedCarts"].exists)
         chooseHome.tap()
         XCTAssertTrue(app.navigationBars["Homes"].existsOrAppears(timeout: 5))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
-            "shopping.home.choice.", homeName)).element.exists,
+            "shopping.home.choice.", "Select " + homeName)).element.exists,
             "The deleted shared root must not remain available as a home choice")
         let retainedStatus = app.staticTexts.matching(NSPredicate(format:
             "identifier BEGINSWITH %@", "shopping.home.leaveStatus.")).element
@@ -251,6 +320,8 @@ final class HomeDetailsUITests: XCTestCase {
         returnToHomeDetails(app)
         assertMembership(app, contributor: true, invitation: false)
         XCTAssertTrue(app.staticTexts["Morgan · You"].exists)
+        app.navigationBars["Preview household"].buttons.firstMatch.tap()
+        app.buttons["Done"].tap()
         app.tabBars.buttons["Groceries"].tap()
         let preserved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             Set(rows.allElementsBoundByIndex.map(\.identifier)) == savedGroceries
@@ -331,20 +402,20 @@ final class HomeDetailsUITests: XCTestCase {
     func testRestrictedMembershipAndLongNamesRemainReadableAtAccessibilityTextSize() throws {
         continueAfterFailure = false
         let app = launch(role: "restricted", systemTextSize: true)
-        let textSize = try SystemTextSizeSettings(test: self, app: app)
+        let textSize = try SystemTextSize(test: self, app: app)
         openHomeDetails(app)
         let homeName = "Preview household"
         let home = app.staticTexts["shopping.home.membersHeading"]
         let longName = app.staticTexts["Alexandra Penelope Montgomery-Wellington"]
         let witnesses: [(String, XCUIElement)] = [
-            ("headline", home),
+            ("section heading", home),
             ("subheadline", app.staticTexts["Read-only access"]),
             ("body", longName)
         ]
         func measure(_ phase: String) -> [String: CGRect] {
             var frames: [String: CGRect] = [:]
             for (role, element) in witnesses {
-                reveal(element, in: app, towardTop: role == "headline")
+                reveal(element, in: app, towardTop: role == "section heading")
                 frames[role] = element.frame
                 let screenshot = XCTAttachment(screenshot: app.screenshot())
                 screenshot.name = "Home members \(phase) \(role) fully visible"
@@ -358,7 +429,10 @@ final class HomeDetailsUITests: XCTestCase {
             // retained destination/home, without reopening it or scrolling.
             XCTAssertTrue(app.navigationBars[homeName].exists)
             XCTAssertTrue(home.exists)
-            XCTAssertEqual(home.label, "Members")
+            // Native section headers are uppercase on iOS 18.5 and title case
+            // on iOS 26.5. Keep exact text for both observed presentations.
+            XCTAssertTrue(["Members", "MEMBERS"].contains(home.label),
+                "The retained destination must expose the native Members heading")
             XCTAssertFalse(app.buttons["shopping.home.invite"].exists)
         }
         let baseline = measure("Large")
@@ -491,7 +565,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["shopping.home.memberCounts"].exists)
     }
 
-    private func launch(role: String, systemTextSize: Bool = false, rootGoneLeave: Bool = false, delayedRefresh: Bool = false, inviteFailure: Bool = false) -> XCUIApplication {
+    private func launch(role: String, secondHome: Bool = false, systemTextSize: Bool = false, rootGoneLeave: Bool = false, delayedRefresh: Bool = false, inviteFailure: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -500,10 +574,11 @@ final class HomeDetailsUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
         app.launchEnvironment["SHOPPING_UI_TEST_HOME_MEMBERS"] = role
+        if secondHome { app.launchEnvironment["SHOPPING_UI_TEST_SECOND_HOME"] = "1" }
         if inviteFailure { app.launchEnvironment["SHOPPING_UI_TEST_HOME_INVITE_FAILURE"] = "1" }
         if delayedRefresh { app.launchEnvironment["SHOPPING_UI_TEST_HOME_REFRESH_DELAY"] = "1" }
         if rootGoneLeave { app.launchEnvironment["SHOPPING_UI_TEST_HOME_LEAVE_ROOT_GONE"] = "1" }
-        if systemTextSize { SystemTextSizeSettings.configure(app) }
+        if systemTextSize { SystemTextSize.configure(app) }
         addTeardownBlock { app.terminate(); try? FileManager.default.removeItem(at: directory) }
         app.launch()
         return app
@@ -512,8 +587,9 @@ final class HomeDetailsUITests: XCTestCase {
     private func openHomeDetails(_ app: XCUIApplication, name: String = "Preview household") {
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 8))
         app.tabBars.buttons["Settings"].tap()
-        let details = app.buttons["shopping.settings.homeDetails"]
-        reveal(details, in: app)
+        app.buttons["shopping.home.scope"].tap()
+        let details = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.home.details.")).firstMatch
+        XCTAssertTrue(details.existsOrAppears(timeout: 5))
         details.tap()
         XCTAssertTrue(app.navigationBars[name].existsOrAppears(timeout: 5),
             "The selected home's name is the page title")
@@ -534,7 +610,7 @@ final class HomeDetailsUITests: XCTestCase {
                         file: StaticString = #filePath, line: UInt = #line) {
         for _ in 0..<10 {
             let top = app.navigationBars.firstMatch.frame.maxY
-            let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
+            let bottom = app.tabBars.firstMatch.isHittable ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
             if element.exists, element.isHittable, element.frame.minY >= top, element.frame.maxY <= bottom { break }
             if element.exists {
                 // Page swipes can oscillate past a short witness after layout reflow.
@@ -552,7 +628,7 @@ final class HomeDetailsUITests: XCTestCase {
         XCTAssertTrue(element.existsOrAppears(timeout: 3), file: file, line: line)
         XCTAssertTrue(element.isHittable, file: file, line: line)
         let top = app.navigationBars.firstMatch.frame.maxY
-        let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
+        let bottom = app.tabBars.firstMatch.isHittable ? app.tabBars.firstMatch.frame.minY : app.frame.maxY - 20
         let frame = element.frame
         XCTAssertGreaterThanOrEqual(frame.minY, top, "The complete control must be below the navigation bar", file: file, line: line)
         XCTAssertLessThanOrEqual(frame.maxY, bottom, "The complete control must be above the tab bar", file: file, line: line)

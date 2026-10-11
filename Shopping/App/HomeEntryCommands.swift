@@ -31,7 +31,7 @@ struct HomeEntryCommands {
     }
 
     func openInvitation(_ id: UUID, graph: HomeGraphIdentity) async throws {
-        try await bootstrap.activateInvitedHome(entryID: id, graph: graph)
+        try await bootstrap.reopenInvitation(id, graph: graph)
     }
 
     func joinInvitation(_ id: UUID) async throws { try await bootstrap.joinInvitation(id) }
@@ -55,4 +55,20 @@ struct HomeEntryCommands {
     }
 
     func useICloudForLocalHome() async throws { try await bootstrap.useICloudForLocalHome() }
+    func replaceStarter(_ proposal: HomeReplacementProposal) async throws {
+        try await bootstrap.confirmStarterReplacement(expected: proposal)
+    }
+
+    func keepBothHomes() { bootstrap.keepStarterAndOpenInvitation() }
+
+    func reviewReplacement(_ id: UUID) async throws {
+        guard bootstrap.replacementRecord?.id == id else { throw HomeReplacementError.intentChanged }
+        try await bootstrap.retryStarterReplacement()
+    }
+
+    func keepStarter(_ id: UUID) async throws {
+        guard bootstrap.replacementRecord?.id == id else { throw HomeReplacementError.intentChanged }
+        try await bootstrap.keepStarterAfterInterruptedReplacement()
+    }
+
 }

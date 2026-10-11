@@ -51,6 +51,22 @@ final class HomeDeletionService: @unchecked Sendable {
         }.value
     }
 
+    func cancelUncommittedStarter(_ command: HomeDeletionCommand) async throws {
+        guard command.isLocal, command.starterRequirement != nil else { throw HomeDeletionError.scopeChanged }
+        try await Task.detached(priority: .userInitiated) {
+            try self.persistence.writer.performAndWait {
+                let context = self.persistence.writer
+                context.reset()
+                let store = try self.store(command.graph, scope: nil)
+                guard store.url?.standardizedFileURL == command.storeURL.standardizedFileURL else {
+                    throw HomeDeletionError.scopeChanged
+                }
+                _ = try Self.root(command.graph, store: store, context: context)
+                try LocalHomeDeletionJournal(storeURL: command.storeURL).cancelUncommittedStarter(command)
+            }
+        }.value
+    }
+
     func reconcile(_ command: HomeDeletionCommand) async throws -> HomeDeletionStatus {
         try command.validate()
         guard try await status(command) != nil else { throw HomeDeletionError.scopeChanged }
@@ -245,11 +261,17 @@ final class HomeDeletionService: @unchecked Sendable {
                     try journal.complete(command)
                     return HomeDeletionStatus(command: command, submitted: true, completed: true)
                 }
+                guard command.starterRequirement == nil || authority != nil else { throw HomeDeletionError.scopeChanged }
                 try authority?.validate()
                 let objects = try self.objects(command, context: context)
+                if let requirement = command.starterRequirement {
+                    try LocalStarterEligibility.validate(requirement, persistence: self.persistence, context: context)
+                }
+                try authority?.validate()
                 try journal.retain(command)
                 try self.remove(objects, command: command, context: context)
                 try self.persistence.prepareForSave(context)
+                try authority?.validate()
                 try context.save()
                 try journal.complete(command)
                 return HomeDeletionStatus(command: command, submitted: true, completed: true)

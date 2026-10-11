@@ -10,8 +10,22 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+worker_count="${SHOPPING_FULL_WORKERS:-2}"
+case "$worker_count" in
+    1) parallel_testing=NO ;;
+    2) parallel_testing=YES ;;
+    *) echo "SHOPPING_FULL_WORKERS must be 1 or 2." >&2; exit 1 ;;
+esac
+
 commit_sha="$(git rev-parse HEAD)"
+# Fail before simulator startup or compilation when pinned compilers reject this SHA.
+python3 .github/scripts/require-full-preflight.py "$commit_sha"
+if [[ "$(git rev-parse HEAD)" != "$commit_sha" || -n "$(git status --porcelain)" ]]; then
+    echo "Source changed during Full preflight; restart validation." >&2
+    exit 1
+fi
+
+git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
 history_root="$git_common_dir/shopping-test-timings/$commit_sha"
 mkdir -p "$history_root"
 reports="$(mktemp -d "$history_root/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")"
@@ -61,9 +75,10 @@ summary="$snapshot_root/.github/scripts/summarize-xcresult.sh"
     -derivedDataPath "$snapshot_root/DerivedData"
 "$timing" run --phases "$phases" --phase test --record-command \
     --log "$artifacts/Test.log" --seconds "$artifacts/TestSeconds.txt" -- \
-    xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping \
+    .github/scripts/with-system-text-size.py -- xcodebuild test-without-building -project Shopping.xcodeproj -scheme Shopping \
     -testPlan ShoppingFull -destination "platform=iOS Simulator,id=${simulator_id}" \
-    -derivedDataPath "$snapshot_root/DerivedData" -resultBundlePath "$result_bundle"
+    -derivedDataPath "$snapshot_root/DerivedData" -resultBundlePath "$result_bundle" \
+    -parallel-testing-enabled "$parallel_testing" -parallel-testing-worker-count "$worker_count"
 
 cd "$repository_root"
 if [[ "$(git rev-parse HEAD)" != "$commit_sha" || -n "$(git status --porcelain)" ]]; then
@@ -76,6 +91,7 @@ mkdir -p "$attestation_directory"
 {
     echo "sha=$commit_sha"
     echo "simulator=$simulator_id"
+    echo "workers=$worker_count"
     echo "xcode=$(xcodebuild -version | tr '\n' ' ')"
     echo "passed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "result_bundle=$result_bundle"

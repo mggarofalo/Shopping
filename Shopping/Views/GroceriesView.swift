@@ -37,6 +37,7 @@ struct GroceriesView: View {
     @State private var storeShare: GroceryStoreShare?
     @State private var showingCategoryFill = false
     @State private var addPickerScope: GroceryAddScope?
+    @State private var systemCreationName: String?
     @State private var pendingCatalogCompletion: GroceryCatalogAddCompletion?
     @State private var pendingCatalogScope: GroceryAddScope?
     @State private var pendingOneTimeTarget: GroceryEditorTarget?
@@ -118,82 +119,8 @@ struct GroceriesView: View {
     }
 
     private var activeBody: some View {
-        NavigationStack {
-            groceryContent
-            .navigationTitle("Groceries")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .searchable(text: $navigation.searchText, prompt: "Search groceries")
-            .onSubmit(of: .search, refreshProjection)
-            .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink(value: GroceryDestination.recentlyCleared) {
-                        Label("Recently cleared", systemImage: "clock.arrow.circlepath")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    recoveryLinks
-                        .labelStyle(.iconOnly)
-                }
-                if categoryFillAvailable {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showingCategoryFill = true } label: {
-                            Label("Suggest saved items for \(selectedCategoryName)", systemImage: "sparkles")
-                                .labelStyle(.iconOnly)
-                        }
-                        .accessibilityHint("Choose saved items to add to this category")
-                        .accessibilityIdentifier("shopping.category.fill")
-                    }
-                }
-                if navigation.selectedStoreID != nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        let text = storeShareText
-                        Button {
-                            let currentText = storeShareText
-                            guard !currentText.isEmpty else { return }
-                            storeShare = GroceryStoreShare(text: currentText)
-                        } label: {
-                            Label("Share store list", systemImage: "square.and.arrow.up")
-                                .labelStyle(.iconOnly)
-                        }
-                        .disabled(text.isEmpty)
-                        .accessibilityLabel("Share store list for \(selectedStoreName)")
-                        .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
-                        .accessibilityIdentifier("shopping.grocery.shareStore")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
-                        .disabled(canonicalList == nil)
-                }
-            }
-            .navigationDestination(for: GroceryDestination.self) { destination in
-                switch destination {
-                case .carted:
-                    if let personalCart {
-                        PersonalCartView(cart: personalCart, navigation: navigation)
-                    } else {
-                    CartedGroceriesView(
-                        navigation: navigation,
-                        onEdit: focus,
-                        onUncarted: uncarted,
-                        onRemoved: { operationID, householdID, listID in
-                            removed(operationID, scope: GroceryAddScope(
-                                householdID: householdID,
-                                listID: listID,
-                                selectedStoreID: nil,
-                                selectedStoreName: nil
-                            ))
-                        }
-                    )
-                }
-                case .recentlyCleared:
-                    if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
-                    else { RecentlyClearedView() }
-                }
-            }
+        NavigationStack(path: $navigation.groceryPath) {
+            navigationContent
             .sheet(item: $storeShare) { share in
                 GroceryStoreActivityView(share: share)
             }
@@ -233,6 +160,7 @@ struct GroceriesView: View {
             .sheet(item: $addPickerScope, onDismiss: completeCatalogAdd) { scope in
                 GroceryCatalogAddView(
                     scope: scope,
+                    initialCreationName: systemCreationName,
                     onCompleted: {
                         pendingCatalogCompletion = $0
                         pendingCatalogScope = scope
@@ -255,6 +183,7 @@ struct GroceriesView: View {
             .onAppear {
                 completeSaveFeedback()
                 focusRequestedNeed()
+                presentSystemAdd()
             }
             .task(id: "\(selection.householdID?.uuidString ?? "nil")-\(selection.listID?.uuidString ?? "nil")") {
                 configureAndRefresh()
@@ -268,6 +197,7 @@ struct GroceriesView: View {
             .onChange(of: needs.count) { _, _ in refreshProjection() }
             .onChange(of: personalCart?.cartedNeedIDs) { _, _ in refreshProjection() }
             .onChange(of: personalCart?.outstandingNeedIDs) { _, _ in refreshProjection() }
+            .onChange(of: navigation.systemAddRequestID) { _, _ in presentSystemAdd() }
             .onChange(of: navigation.pendingNeedFocusID) { _, _ in focusRequestedNeed() }
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
@@ -277,6 +207,85 @@ struct GroceriesView: View {
                 configureAndRefresh()
                 completeSaveFeedback()
                 focusRequestedNeed()
+                presentSystemAdd()
+            }
+        }
+    }
+
+    private var navigationContent: some View {
+        groceryContent
+        .navigationTitle("Groceries")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .searchable(text: $navigation.searchText, prompt: "Search groceries")
+        .onSubmit(of: .search, refreshProjection)
+        .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink(value: GroceryDestination.recentlyCleared) {
+                    Label("Recently cleared", systemImage: "clock.arrow.circlepath")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                recoveryLinks
+                    .labelStyle(.iconOnly)
+            }
+            if categoryFillAvailable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingCategoryFill = true } label: {
+                        Label("Suggest saved items for \(selectedCategoryName)", systemImage: "sparkles")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityHint("Choose saved items to add to this category")
+                    .accessibilityIdentifier("shopping.category.fill")
+                }
+            }
+            if navigation.selectedStoreID != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    let text = storeShareText
+                    Button {
+                        let currentText = storeShareText
+                        guard !currentText.isEmpty else { return }
+                        storeShare = GroceryStoreShare(text: currentText)
+                    } label: {
+                        Label("Share store list", systemImage: "square.and.arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(text.isEmpty)
+                    .accessibilityLabel("Share store list for \(selectedStoreName)")
+                    .accessibilityHint("Shares all outstanding items for this store, ignoring search and other filters")
+                    .accessibilityIdentifier("shopping.grocery.shareStore")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                ShoppingAddButton(title: "Add item", identifier: "shopping.addGrocery", action: presentAdd)
+                    .disabled(canonicalList == nil)
+            }
+        }
+        .navigationDestination(for: GroceryDestination.self) { destination in
+            switch destination {
+            case .carted:
+                if let personalCart {
+                    PersonalCartView(cart: personalCart, navigation: navigation)
+                } else {
+                CartedGroceriesView(
+                    navigation: navigation,
+                    onEdit: focus,
+                    onUncarted: uncarted,
+                    onRemoved: { operationID, householdID, listID in
+                        removed(operationID, scope: GroceryAddScope(
+                            householdID: householdID,
+                            listID: listID,
+                            selectedStoreID: nil,
+                            selectedStoreName: nil
+                        ))
+                    }
+                )
+            }
+            case .recentlyCleared:
+                if let personalCart { PersonalPurchaseHistoryView(cart: personalCart) }
+                else { RecentlyClearedView() }
             }
         }
     }
@@ -422,7 +431,18 @@ struct GroceriesView: View {
             : "Try All, another store, search, or filters. Your shared grocery list is unchanged."
     }
 
+    private func presentSystemAdd() {
+        guard navigation.systemAddRequestID != nil else { return }
+        navigation.systemAddRequestID = nil
+        systemCreationName = navigation.systemNewItemName
+        addPickerScope = GroceryAddScope(
+            householdID: selection.householdID, listID: selection.listID,
+            selectedStoreID: nil, selectedStoreName: nil
+        )
+    }
+
     private func presentAdd() {
+        systemCreationName = nil
         guard let canonicalList, let householdID = canonicalList.household?.id else { return }
         let selectedStore = activeStores.first { $0.id == navigation.selectedStoreID }
         addPickerScope = GroceryAddScope(
