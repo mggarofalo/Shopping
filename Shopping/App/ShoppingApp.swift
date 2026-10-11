@@ -48,12 +48,15 @@ struct ShoppingApp: App {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
-        _bootstrap = StateObject(wrappedValue: .application())
+        _bootstrap = StateObject(wrappedValue: ShoppingApplicationRuntime.shared.bootstrap)
     }
 
     var body: some Scene {
         WindowGroup {
             PersistenceRootView(bootstrap: bootstrap)
+                #if DEBUG
+                .task { await SystemActionUITestFixture.deliver(runtime: ShoppingApplicationRuntime.shared) }
+                #endif
                 .tint(.groceryAccent)
                 .environment(\.defaultMinListRowHeight, ShoppingListMetrics.minimumListRowHeight)
                 .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)

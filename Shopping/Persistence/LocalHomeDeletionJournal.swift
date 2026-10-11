@@ -40,8 +40,31 @@ final class LocalHomeDeletionJournal: @unchecked Sendable {
     }
 
     func contains(storeIdentifier: String, householdID: UUID, listID: UUID) throws -> Bool {
-        try statuses().contains { $0.command.graph.storeIdentifier == storeIdentifier
+        try !matching(storeIdentifier: storeIdentifier, householdID: householdID, listID: listID).isEmpty
+    }
+
+    func blocksUse(_ graph: HomeGraphIdentity) throws -> Bool {
+        try matching(storeIdentifier: graph.storeIdentifier, householdID: graph.householdID,
+                     listID: graph.listID).contains(where: \.blocksHomeUse)
+    }
+
+    private func matching(storeIdentifier: String, householdID: UUID, listID: UUID) throws -> [HomeDeletionStatus] {
+        // Stable identities also fence recreation under a new Core Data object URI.
+        try statuses().filter { $0.command.graph.storeIdentifier == storeIdentifier
             && $0.command.graph.householdID == householdID && $0.command.graph.listID == listID }
+    }
+
+    /// Caller must prove the exact source root still exists on its writer queue.
+    /// A local SQLite delete is atomic, so that proof excludes a committed delete.
+    func cancelUncommittedStarter(_ command: HomeDeletionCommand) throws {
+        try Self.lock.withLock {
+            guard command.starterRequirement != nil else { throw HomeDeletionError.scopeChanged }
+            var records = try load()
+            guard let index = records.firstIndex(where: { $0.command == command }) else { return }
+            guard !records[index].completed else { throw HomeDeletionError.scopeChanged }
+            records.remove(at: index)
+            try save(records)
+        }
     }
 
     private func load() throws -> [Record] {

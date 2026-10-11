@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.homeScopeDisplay) private var homeScope
 
     var body: some View {
         NavigationStack {
@@ -11,9 +12,11 @@ struct SettingsView: View {
                 Section {
                     HomeScopeControl()
                 }
-                NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
-                NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
-                NavigationLink { PersonManagementView() } label: { Label("People", systemImage: "person.2") }
+                Section(homeScope?.name ?? "Home settings") {
+                    NavigationLink { StoreManagementView() } label: { Label("Stores", systemImage: "storefront") }
+                    NavigationLink { CategoryManagementView() } label: { Label("Categories", systemImage: "square.grid.2x2") }
+                    NavigationLink { PersonManagementView() } label: { Label("People", systemImage: "person.2") }
+                }
                 Section("Appearance") {
                     if dynamicTypeSize.isAccessibilitySize {
                         appearancePicker.pickerStyle(.menu)
@@ -21,7 +24,6 @@ struct SettingsView: View {
                         appearancePicker.pickerStyle(.segmented)
                     }
                 }
-                HouseholdSettingsSection()
                 Section("About") {
                     LabeledContent("App Version") {
                         Text(AppVersion.current.displayValue)

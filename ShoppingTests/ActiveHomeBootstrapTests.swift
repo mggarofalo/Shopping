@@ -103,6 +103,27 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         return ready
     }
 
+    func testInactiveHomeDetailsRenameExactHomeWithoutChangingSelectionAndRejectRetiredActions() async throws {
+        let bootstrap = try await makeBootstrap(homeCount: 2)
+        let homes = bootstrap.homeCoordinator.homes
+        XCTAssertEqual(homes.count, 2)
+        try await bootstrap.homeEntryCommands.select(homes[0].graph)
+        let selected = try ready(bootstrap)
+        let scope = try XCTUnwrap(bootstrap.homeDetailsScope(for: homes[1].graph))
+        let actions = bootstrap.homeDetailsActions(scope: scope)
+        try await actions.rename("Other renamed")
+        XCTAssertEqual(try ready(bootstrap).homeScope, selected.homeScope)
+        let persistence = selected.persistence
+        let discovery = try await Task.detached {
+            try HomeDiscoveryService(persistence: persistence).discover()
+        }.value
+        XCTAssertEqual(discovery.homes.first(where: { $0.graph == homes[1].graph })?.name, "Other renamed")
+        XCTAssertEqual(discovery.homes.first(where: { $0.graph == homes[0].graph })?.name, homes[0].name)
+        try await bootstrap.homeEntryCommands.select(homes[1].graph)
+        do { try await actions.rename("Stale rename"); XCTFail("Retired detail actions must fail") }
+        catch { XCTAssertEqual(error as? HomeMembershipError, .scopeChanged) }
+    }
+
     func testColdInvitationDoesNotCreateAnEmptyLocalHomeBeforeAccountSetup() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "ColdHomeInvitation." + UUID().uuidString

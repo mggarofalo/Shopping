@@ -3,13 +3,14 @@ import SwiftUI
 import UIKit
 
 struct HomeSharingStatusView: View {
+    var scope: ActiveHomeScope? = nil
     @EnvironmentObject private var bootstrap: PersistenceBootstrap
     @Environment(\.openURL) private var openURL
     @Environment(\.presentHomes) private var presentHomes
     @Environment(\.presentInvitation) private var presentInvitation
     @State private var announcements = HomeSharingStatusAnnouncements()
 
-    private var activity: HomeSharingActivity { bootstrap.homeSharingStatus.activity }
+    private var activity: HomeSharingActivity { bootstrap.homeSharingStatus(for: scope).activity }
     private var notices: [HomeSharingActivity.Notice] {
         activity.notices.filter { $0.id != .localCheck || bootstrap.sharingStatusCheckProblem == nil }
     }
@@ -39,7 +40,7 @@ struct HomeSharingStatusView: View {
             }
         }
         .navigationTitle("Sharing status")
-        .task { await bootstrap.refreshSharingStatus() }
+        .task { await bootstrap.refreshSharingStatus(scope: scope) }
         .onChange(of: notices, initial: true) { _, notices in
             let titles = notices.map(\.title).joined(separator: ". ")
             if let message = announcements.observe(title: titles), !message.isEmpty { announce(message) }
@@ -73,7 +74,7 @@ struct HomeSharingStatusView: View {
 
     private var checkStatusButton: some View {
         HomeSharingCheckButton(isChecking: bootstrap.isCheckingSharingStatus) {
-            Task { await bootstrap.checkSharingStatus() }
+            Task { await bootstrap.checkSharingStatus(scope: scope) }
         }
     }
 

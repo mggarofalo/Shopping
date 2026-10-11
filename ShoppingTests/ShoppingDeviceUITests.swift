@@ -377,7 +377,7 @@ final class ShoppingDeviceUITests: XCTestCase {
         app.buttons["shopping.grocery.cancel"].tap()
 
         app.tabBars.buttons["Settings"].tap()
-        let sharingValue = app.buttons["shopping.settings.homeDetails"]
+        let sharingValue = app.buttons["shopping.home.scope"]
         let versionValue = app.staticTexts["shopping.settings.version"]
         XCTAssertTrue(sharingValue.existsOrAppears(timeout: 3))
         let windowTrailingEdge = app.windows.firstMatch.frame.maxX
@@ -558,11 +558,16 @@ final class ShoppingDeviceUITests: XCTestCase {
             let window = app.frame
             let navigationBar = app.navigationBars.firstMatch
             let navigationFrame = navigationBar.frame
-            let tabBarFrame = app.tabBars.firstMatch.frame
-            guard usable(window), usable(navigationFrame), usable(tabBarFrame) else { continue }
+            let tabBar = app.tabBars.firstMatch
+            let tabBarIsForeground = tabBar.exists && tabBar.isHittable
+            let tabBarFrame = tabBarIsForeground ? tabBar.frame : .null
+            guard usable(window), usable(navigationFrame),
+                  !tabBarIsForeground || usable(tabBarFrame) else { continue }
             let targetIsInNavigationBar = contains(element, in: navigationBar)
             let top = targetIsInNavigationBar ? window.minY : navigationFrame.maxY
-            let bottom = tabBarFrame.minY
+            // A presented sheet can expose the underlying tab bar in the AX
+            // tree. Only a foreground bar bounds the visible sheet content.
+            let bottom = tabBarIsForeground ? tabBarFrame.minY : window.maxY
             guard bottom - top > 48 else { continue }
             let frame = element.exists ? element.frame : .null
             let targetExists = element.exists

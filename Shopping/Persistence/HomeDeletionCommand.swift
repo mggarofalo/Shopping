@@ -11,6 +11,7 @@ struct HomeDeletionCommand: Codable, Equatable, Identifiable, Sendable {
     let homeName: String
     let preparedAt: Date
     let objectURIs: Set<String>
+    var starterRequirement: LocalStarterEvidence? = nil
 
     var isLocal: Bool { if case .local = target { true } else { false } }
     var scope: ActiveHomeScope? { if case .owned(let scope, _, _) = target { scope } else { nil } }
@@ -28,6 +29,10 @@ struct HomeDeletionCommand: Codable, Equatable, Identifiable, Sendable {
               URL(string: graph.rootURI)?.scheme == "x-coredata", storeURL.isFileURL,
               objectURIs.contains(graph.rootURI), objectURIs.allSatisfy({ URL(string: $0)?.scheme == "x-coredata" }),
               preparedAt.timeIntervalSinceReferenceDate.isFinite else { throw PersonalCartError.corruptRecord }
+        if let starterRequirement {
+            guard isLocal, starterRequirement.version == 1, starterRequirement.graph == graph,
+                  starterRequirement.name == homeName else { throw PersonalCartError.corruptRecord }
+        }
         if let scope {
             guard !scope.accountBinding.isEmpty, !scope.containerIdentifier.isEmpty, !scope.environment.isEmpty else {
                 throw PersonalCartError.corruptRecord
@@ -54,6 +59,7 @@ struct HomeDeletionStatus: Equatable, Identifiable, Sendable {
     let completed: Bool
     var id: UUID { command.id }
     var requiresResolution: Bool { !completed }
+    var blocksHomeUse: Bool { command.starterRequirement == nil || completed }
 }
 
 /// A confirmed home deletion includes later imported children of that same home.

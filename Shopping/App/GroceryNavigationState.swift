@@ -5,12 +5,40 @@ final class GroceryNavigationState: ObservableObject {
     enum Tab: Hashable { case groceries, catalog, settings }
 
     @Published var selectedTab: Tab = .groceries
+    @Published var groceryPath: [GroceryDestination] = []
     @Published var selectedStoreID: UUID? { didSet { persist() } }
     @Published var includedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var excludedStoreIDs: Set<UUID> { didSet { persist() } }
     @Published var urgentOnly: Bool { didSet { persist() } }
     @Published var categoryID: UUID? { didSet { persist() } }
     @Published var searchText = ""
+    @Published var systemAddRequestID: UUID?
+    private(set) var systemNewItemName: String?
+    @Published var systemCatalogRequestID: UUID?
+    private(set) var systemCatalogQuery = ""
+
+    func requestSystemAction(_ destination: ShoppingActionDestination) {
+        switch destination {
+        case .addItem:
+            systemNewItemName = nil
+            groceryPath = []
+            selectedTab = .groceries
+            systemAddRequestID = UUID()
+        case .createItem(let name):
+            systemNewItemName = name
+            groceryPath = []
+            selectedTab = .groceries
+            systemAddRequestID = UUID()
+        case .groceries:
+            groceryPath = []
+            selectedTab = .groceries
+        case .catalog(let query):
+            systemCatalogQuery = query
+            selectedTab = .catalog
+            systemCatalogRequestID = UUID()
+        }
+    }
+
     @Published private(set) var pendingNeedFocusID: UUID?
 
     private struct SavedFilter: Codable, Equatable {

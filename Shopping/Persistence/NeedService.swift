@@ -921,13 +921,29 @@ final class NeedService: @unchecked Sendable {
 
     func createLocalHousehold(command: LocalHomeCreationCommand) throws -> (householdID: UUID, listID: UUID) {
         let name = try validatedName(command.name)
-        return try write { context in
-            guard let store = self.persistence.primaryStore,
-                  store.identifier == command.storeIdentifier,
-                  self.persistence.role(of: store) == .local,
-                  self.persistence.personalCartSessionProvider == nil else { throw NeedServiceError.scopeChanged }
-            return try self.replayHousehold(name: name, householdID: command.householdID,
-                listID: command.listID, store: store, context: context)
+        return try persistence.writer.performAndWait {
+            let result = try write { context in
+                guard let store = self.persistence.primaryStore,
+                      store.identifier == command.storeIdentifier,
+                      self.persistence.role(of: store) == .local,
+                      self.persistence.personalCartSessionProvider == nil else { throw NeedServiceError.scopeChanged }
+                let request = Household.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@", command.householdID as CVarArg)
+                let isNew = try context.count(for: request) == 0
+                let ids = try self.replayHousehold(name: name, householdID: command.householdID,
+                    listID: command.listID, store: store, context: context)
+                return (ids, isNew)
+            }
+            if result.1 {
+                // Creation is already durable. An unavailable optional eligibility
+                // record must keep the Home, never make creation retryable.
+                if let url = persistence.primaryStore?.url,
+                   let evidence = try? LocalStarterEligibility.capture(command: command, persistence: persistence,
+                                                                       context: persistence.writer) {
+                    try? LocalStarterJournal(storeURL: url).save(evidence)
+                }
+            }
+            return result.0
         }
     }
 
@@ -2064,6 +2080,39 @@ final class NeedService: @unchecked Sendable {
             )
             item.isArchived = isArchived
             try self.advanceRevision(of: item)
+        }
+    }
+
+    func catalogActionItems(householdID: UUID, listID: UUID) throws -> [CatalogActionItem] {
+        try readOnWriter { context in
+            try self.commandAuthority?.validate()
+            let session = try self.persistence.personalCartSessionProvider?.currentSession()
+            guard session?.accountBinding == self.persistence.personalCartInitialBinding else {
+                throw PersonalCartError.accountChanged
+            }
+            let household = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
+            let request = Item.fetchRequest()
+            request.predicate = NSPredicate(format: "household == %@ AND isArchived == NO", household)
+            request.relationshipKeyPathsForPrefetching = ["category", "stores"]
+            let items = try self.validCatalogItems(context.fetch(request)).filter {
+                $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore
+            }
+            let result = items.compactMap { item -> CatalogActionItem? in
+                let stores = Array(item.stores ?? [])
+                guard stores.allSatisfy({ $0.id != PersistenceModel.unsetID && self.belongs($0, to: household) }),
+                      item.category.map({ $0.id != PersistenceModel.unsetID && self.belongs($0, to: household) }) ?? true,
+                      !CatalogProjection.normalizedName(item.name).isEmpty else { return nil }
+                return CatalogActionItem(id: item.id, revision: item.revision, name: item.name,
+                    category: item.category?.name ?? "Uncategorized",
+                    purchaseRules: CatalogSuggestionPurchaseSummary.text(anyStore: item.anyStore,
+                        savedStoreLabels: stores.map { $0.name + ($0.isArchived ? " (archived)" : "") },
+                        hasSavedStores: !stores.isEmpty))
+            }
+            try self.commandAuthority?.validate()
+            guard try self.persistence.personalCartSessionProvider?.currentSession() == session else {
+                throw PersonalCartError.accountChanged
+            }
+            return result
         }
     }
 

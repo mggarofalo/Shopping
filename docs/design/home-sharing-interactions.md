@@ -4,6 +4,16 @@ Approved October 6, 2026. Phase 28 implements the Home Settings proposal through
 SHOPPING-202 (presentation state), SHOPPING-203 (private invitation records),
 SHOPPING-204 (screen and journeys), and SHOPPING-205 (physical evidence).
 
+## Phase 33 route contract (1.6.0)
+
+Settings → Homes is the single entry. A Home name selects it; its separate info
+link opens that exact Home's details without selecting it. Details Back returns
+to Homes, and Done dismisses the sheet. There is no global Home Settings row.
+Inactive account Home commands retain their own graph identity and the captured
+account/store presentation. Share preparation, rename, invitations, leave and
+deletion never substitute the currently selected Home. Retiring the captured
+presentation invalidates its commands.
+
 ## Presentation contract
 
 Home Settings uses the custom home name as its native large navigation title,

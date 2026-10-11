@@ -23,6 +23,7 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(GroceryNavigationState.Tab.settings)
         }
+        .modifier(ShoppingActionDelivery(router: ShoppingApplicationRuntime.shared.actions, navigation: navigation))
         .tint(.groceryAccent)
         .overlay(alignment: .bottom) {
             ShoppingToastHost(center: toastCenter)
