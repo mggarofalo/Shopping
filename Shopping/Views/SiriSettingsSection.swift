@@ -2,11 +2,8 @@ import AppIntents
 import SwiftUI
 
 struct SiriSettingsSection: View {
-    @AppStorage("shopping.siri.showAddTip") private var showAddTip = true
-
     var body: some View {
         Section {
-            SiriTipView(intent: AddGroceryIntent(), isVisible: $showAddTip)
             ShortcutsLink()
                 .accessibilityIdentifier("shopping.siri.shortcuts")
         } header: {

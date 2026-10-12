@@ -83,7 +83,15 @@ adapter was discarded. The candidate instead follows the current
 [create-reminder schema](https://developer.apple.com/documentation/appintents/appschema/remindersintent/createreminder).
 This establishes the API choice, not proof that Siri routes the user’s phrase.
 
-Settings embeds Apple's SiriTipView and ShortcutsLink. The app's spoken name is
+Settings provides written invocation instructions and Apple's ShortcutsLink.
+It does not construct SiriTipView: exact-source CI 38320208353 observed the
+unselected Settings tab contacting `com.apple.linkd.autoShortcut` during grocery
+presentation retirement, followed by a 167-second test and a missing-shortcut
+warning while the service indexed unrelated system apps. The existing five-second
+retirement assertion failed and remains unchanged. Removing the redundant tip
+keeps system phrase lookup out of this screen's construction; this does not prove
+spoken Siri routing or fix the separately recorded older-runtime provider failure.
+The app's spoken name is
 Milk and Bananas. These make invocation discoverable but are not evidence that
 Siri recognized a physical user's voice. Apple documents entity phrase parameters
 and refresh requirements in [Dive into App Shortcuts](https://developer.apple.com/videos/play/wwdc2023/10102/).
