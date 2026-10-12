@@ -132,3 +132,13 @@ fresh iOS 27 simulator (`/tmp/shopping-241-system-baseline.log` and
 SpringBoard-idle wait before tapping Add item. SHOPPING-242 tracks this unresolved
 system/SDK boundary; neither source comparison nor screenshots prove that real
 device behavior is unaffected. The maintained assertion remains unchanged.
+
+The modern action also passed out-of-process execution with an inactive catalog
+item, both shopping-list aliases and a repeated-add identity check
+(`/tmp/shopping-241-modern-system-add-fixed.xcresult`, 7.068 seconds). The final
+combined selection passed all 22 tests without skips
+(`/tmp/shopping-241-combined-final.xcresult`); hosted CI enforces its 15 + 6 + 1
+manifest. This does not establish actual Siri routing or the modern adapter’s
+`needsToContinueInForegroundError` unknown-item continuation. The legacy adapter’s
+separate system Shortcuts/editor path passed in
+`/tmp/shopping-241-shortcuts-final.xcresult` (39.845 seconds).

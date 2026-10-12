@@ -2593,3 +2593,10 @@ shared publication and preserves the replacement after undo.
 `SystemActionUITests` retains system Shortcuts invocation and foreground editor
 wiring. Those taps do not establish spoken Siri routing. The archive metadata
 guard has independent negative fixtures in `test-siri-metadata.py`.
+
+`SystemActionUITests/testModernSiriActionReturnsSavedEntityThroughSystemExecution`
+uses Apple’s iOS 27 out-of-process App Intents API to resolve both requested
+shopping-list aliases, invoke the modern action for an inactive catalog item,
+read its returned entity and verify duplicate identity. It runs in the current
+SDK job alongside the focused persistence suites. This is action execution proof,
+not Siri speech or app-selection proof.

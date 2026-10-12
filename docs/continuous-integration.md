@@ -257,7 +257,9 @@ budget change does not convert the canceled run into passing evidence.
 
 `Release SDK Build` uses the standard `xcode-27` runner and Xcode 27.0 to archive
 the iPhone/Watch pair and check the generated Siri metadata. It also runs
-`CatalogActionTests` and `SpokenGrocerySchemaTests` on iOS 27. The older Xcode 16.4
+`CatalogActionTests`, `SpokenGrocerySchemaTests`, and the single modern
+out-of-process action test from `SystemActionUITests` on iOS 27. This targeted
+selection uses the Full plan but is not an exhaustive Full run or attestation. The older Xcode 16.4
 `Build & Test` job retains compatibility and coverage ownership; compiler-gated
 iOS 27 code is not validated by that older job. Neither job proves Siri routing
 or Apple Intelligence availability. Those require a real system invocation.
