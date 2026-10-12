@@ -24,6 +24,11 @@ struct CatalogItemEntity: AppEntity {
 }
 
 struct CatalogItemEntityQuery: EntityStringQuery {
+    private let runtime: ShoppingApplicationRuntime?
+
+    init() { runtime = nil }
+    init(runtime: ShoppingApplicationRuntime) { self.runtime = runtime }
+
     @MainActor
     func entities(for identifiers: [String]) async throws -> [CatalogItemEntity] {
         let context = try await context()
@@ -40,14 +45,20 @@ struct CatalogItemEntityQuery: EntityStringQuery {
 
     @MainActor
     func suggestedEntities() async throws -> [CatalogItemEntity] {
-        let context = try await context()
-        return try await context.items().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            .prefix(50).map { CatalogItemEntity(item: $0, context: context) }
+        do {
+            let context = try await context()
+            return try await context.items().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                .map { CatalogItemEntity(item: $0, context: context) }
+        } catch ShoppingActionError.homeUnavailable {
+            return []
+        } catch ShoppingActionError.scopeChanged {
+            return []
+        }
     }
 
     @MainActor
     private func context() async throws -> CatalogActionContext {
-        let runtime = ShoppingApplicationRuntime.shared
+        let runtime = runtime ?? ShoppingApplicationRuntime.shared
         return try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
     }
 }

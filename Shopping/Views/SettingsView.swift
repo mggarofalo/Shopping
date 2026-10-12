@@ -24,6 +24,7 @@ struct SettingsView: View {
                         appearancePicker.pickerStyle(.segmented)
                     }
                 }
+                SiriSettingsSection()
                 Section("About") {
                     LabeledContent("App Version") {
                         Text(AppVersion.current.displayValue)

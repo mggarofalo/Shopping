@@ -10,16 +10,13 @@
             <key>UIApplicationShortcutItemIconSymbolName</key><string>plus</string>
         </dict>
         <dict>
-            <key>UIApplicationShortcutItemType</key><string>com.mggarofalo.shopping.groceries</string>
-            <key>UIApplicationShortcutItemTitle</key><string>Open grocery list</string>
-            <key>UIApplicationShortcutItemIconSymbolName</key><string>list.bullet</string>
-        </dict>
-        <dict>
             <key>UIApplicationShortcutItemType</key><string>com.mggarofalo.shopping.catalog</string>
             <key>UIApplicationShortcutItemTitle</key><string>Search catalog</string>
             <key>UIApplicationShortcutItemIconSymbolName</key><string>magnifyingglass</string>
         </dict>
     </array>
+    <key>CFBundleSpokenName</key>
+    <string>Milk and Bananas</string>
     <key>CKSharingSupported</key>
     <true/>
     <key>ShoppingCloudKitContainerIdentifier</key>

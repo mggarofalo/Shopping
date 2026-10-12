@@ -47,6 +47,19 @@ struct CatalogActionContext {
         return items
     }
 
+    /// Saved shortcuts retain identity across renames, but never across Homes.
+    func resolve(entityID: String, matching name: String? = nil) async throws -> CatalogActionItem {
+        let current = try await items()
+        guard let item = current.first(where: { self.entityID(for: $0.id) == entityID }) else {
+            throw ShoppingActionError.scopeChanged
+        }
+        if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !CatalogActionMatcher.matches(name, in: current).contains(where: { $0.id == item.id }) {
+            throw CatalogActionError.conflictingSelection
+        }
+        return item
+    }
+
     func capture(_ items: [CatalogActionItem]) async throws -> CatalogAddToken {
         try validate()
         let service = ready.service, householdID = householdID, listID = listID

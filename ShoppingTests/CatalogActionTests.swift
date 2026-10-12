@@ -1,6 +1,7 @@
 import CoreData
 import Foundation
 import Testing
+import XCTest
 @testable import Shopping
 
 @Suite("Catalog system actions", .tags(.integration, .critical))
@@ -152,6 +153,85 @@ struct CatalogActionTests {
         }
         #expect(try service.allActiveNeedIDs(householdID: ids.householdID).isEmpty)
         #expect(try await context.items().map(\.id) == [itemID])
+    }
+
+    @Test func savedEntityUsesCurrentNameAndRejectsArchivedOrForeignIdentity() async throws {
+        let (environment, context) = try await fixture()
+        let id = try create("Milk", in: environment)
+        let entityID = context.entityID(for: id)
+        try environment.service.saveCatalogItem(itemID: id, householdID: context.householdID,
+            values: CatalogItemValues(name: "Oat milk", notes: "", categoryID: nil, anyStore: true, storeIDs: []))
+        #expect(try await context.resolve(entityID: entityID).name == "Oat milk")
+        let (_, otherHome) = try await fixture()
+        await #expect(throws: ShoppingActionError.scopeChanged) { try await otherHome.resolve(entityID: entityID) }
+        try environment.service.setCatalogItemArchived(itemID: id, householdID: context.householdID, archived: true)
+        await #expect(throws: ShoppingActionError.scopeChanged) { try await context.resolve(entityID: entityID) }
+        #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
+    }
+
+    @Test func conflictingSavedShortcutInputsFailWithoutAddingAnotherItem() async throws {
+        let (environment, context) = try await fixture()
+        let milk = try create("Oat milk", in: environment)
+        _ = try create("Bread", in: environment)
+        let entityID = context.entityID(for: milk)
+        #expect(try await context.resolve(entityID: entityID, matching: "milk").id == milk)
+        await #expect(throws: CatalogActionError.conflictingSelection) {
+            try await context.resolve(entityID: entityID, matching: "Bread")
+        }
+        _ = try create("Milk", in: environment)
+        await #expect(throws: CatalogActionError.conflictingSelection) {
+            try await context.resolve(entityID: entityID, matching: "Milk")
+        }
+        #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
+    }
+
+    @Test func systemSuggestionsIncludeCatalogBeyondFiftyAndRetireWithScope() async throws {
+        let (environment, context) = try await fixture()
+        for index in 0..<55 { _ = try create(String(format: "Item %02d", index), in: environment) }
+        let zucchini = try create("Zucchini", in: environment)
+        let query = CatalogItemEntityQuery(runtime: context.runtime)
+        let suggestions = try await query.suggestedEntities()
+        #expect(suggestions.count == 56)
+        #expect(suggestions.last?.id == context.entityID(for: zucchini))
+        #expect(try await query.entities(matching: "Zucchini").map(\.id) == [context.entityID(for: zucchini)])
+        context.ready.presentation.retire()
+        #expect(try await query.suggestedEntities().isEmpty)
+        await #expect(throws: ShoppingActionError.homeUnavailable) {
+            try await query.entities(for: [context.entityID(for: zucchini)])
+        }
+    }
+
+    @Test func shortcutRefreshCoalescesOwnCatalogAndIgnoresUnrelatedStores() async throws {
+        let (environment, context) = try await fixture()
+        let (otherEnvironment, _) = try await fixture()
+        var updates = 0
+        var expectation: XCTestExpectation?
+        let registration = ShoppingShortcutsRegistration(bootstrap: context.runtime.bootstrap) {
+            updates += 1
+            expectation?.fulfill()
+        }
+        #expect(updates == 1)
+        let unrelated = XCTestExpectation(description: "Unrelated store must not publish suggestions")
+        unrelated.isInverted = true
+        expectation = unrelated
+        _ = try create("Other Home milk", in: otherEnvironment)
+        #expect(await XCTWaiter.fulfillment(of: [unrelated], timeout: 0.4) == .completed)
+
+        let refreshed = XCTestExpectation(description: "Committed catalog changes refresh suggestions")
+        expectation = refreshed
+        let id = try create("Milk", in: environment)
+        try environment.service.saveCatalogItem(itemID: id, householdID: context.householdID,
+            values: CatalogItemValues(name: "Oat milk", notes: "", categoryID: nil, anyStore: true, storeIDs: []))
+        #expect(await XCTWaiter.fulfillment(of: [refreshed], timeout: 2) == .completed)
+        #expect(updates == 2)
+
+        let retired = XCTestExpectation(description: "Retired scope clears system suggestions")
+        expectation = retired
+        context.ready.presentation.retire()
+        context.runtime.bootstrap.objectWillChange.send()
+        #expect(await XCTWaiter.fulfillment(of: [retired], timeout: 2) == .completed)
+        #expect(updates == 3)
+        withExtendedLifetime(registration) {}
     }
 
     private func fixture() async throws -> (ShoppingPreviewEnvironment, CatalogActionContext) {

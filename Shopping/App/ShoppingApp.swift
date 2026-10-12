@@ -45,10 +45,14 @@ extension EnvironmentValues {
 struct ShoppingApp: App {
     @UIApplicationDelegateAdaptor(ShoppingApplicationDelegate.self) private var applicationDelegate
     @StateObject private var bootstrap: PersistenceBootstrap
+    @Environment(\.scenePhase) private var scenePhase
+    private let shortcutsRegistration: ShoppingShortcutsRegistration
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
-        _bootstrap = StateObject(wrappedValue: ShoppingApplicationRuntime.shared.bootstrap)
+        let bootstrap = ShoppingApplicationRuntime.shared.bootstrap
+        _bootstrap = StateObject(wrappedValue: bootstrap)
+        shortcutsRegistration = ShoppingShortcutsRegistration(bootstrap: bootstrap)
     }
 
     var body: some Scene {
@@ -57,6 +61,9 @@ struct ShoppingApp: App {
                 #if DEBUG
                 .task { await SystemActionUITestFixture.deliver(runtime: ShoppingApplicationRuntime.shared) }
                 #endif
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { shortcutsRegistration.refresh() }
+                }
                 .tint(.groceryAccent)
                 .environment(\.defaultMinListRowHeight, ShoppingListMetrics.minimumListRowHeight)
                 .preferredColorScheme(AppearancePreference(rawValue: appearance)?.colorScheme)
