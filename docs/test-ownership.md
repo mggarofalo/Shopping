@@ -2540,3 +2540,43 @@ range-toggle restoration, and it is not physical-device evidence. No app
 preference override or product-side mutation seam is used. Full runners wrap
 xcodebuild automatically; focused commands for these methods need the same
 `with-system-text-size.py` wrapper. Missing transport is a failure, never a skip.
+
+## Phase 35 · Siri discovery repair (SHOPPING-240)
+
+`CatalogActionTests` additionally owns renamed entity resolution, conflicting
+text/entity inputs (including a competing exact name), suggestions beyond fifty
+items, retired-Home suggestions, and coalesced registration scoped to the active
+store. Existing revision, authorization, ambiguity and duplicate tests retain
+write-policy proof.
+
+`SystemActionUITests/testSettingsFindsShortcutsAndSystemAddResolvesAnExistingItem`
+owns the native Settings link into the system Shortcuts app, the two advertised
+actions, the system item-name prompt, an existing-need response, and unknown-name
+foreground continuation into a prefilled editor. It dismisses system responses
+before interacting with the app. The icon-menu test now asserts
+Add/Search and the absence of Open grocery list. Existing saved Open intent
+compatibility remains owned by routing tests; its implementation is retained.
+The Phase 33 three-shortcut metadata expectation is superseded by two advertised
+shortcuts plus the retained legacy intent. No test claims physical voice proof.
+
+The first iOS 27 candidate UI run is retained at
+`/tmp/shopping-240-system-ui.xcresult`: a baseline diagnostic had left a SpringBoard
+result dialog open, obscuring both unrelated toolbar interactions. Its recordings
+show that dialog. The new shortcut test also needed its Add button scoped to the
+parameterless action because entity suggestions now have their own Add buttons.
+The dedicated simulator was restarted and result-dialog dismissal added; no app
+assertions were removed or retry wrapper introduced.
+
+The corrected three-test run `/tmp/shopping-240-system-ui-fixed.xcresult` passed
+3/3. The added unknown-name boundary first reached the prefilled editor but its
+Cancel tap was obscured by the final system response
+(`/tmp/shopping-240-system-handoff.xcresult`, failed assertion retained). The test
+now explicitly dismisses that response before asserting editor cancellation.
+Post-test `simctl diagnose` collection was terminated for these two runs after
+all tests finished; result bundles, screenshots, assertions and exit statuses
+were retained. No test process was terminated or failure converted to success.
+
+The final expanded system workflow passed 1/1 in
+`/tmp/shopping-240-system-handoff-final.xcresult` (36.619 seconds for the test).
+Xcode's post-test diagnostics took another ten minutes; the final command exited
+zero with the complete result bundle. Physical voice acceptance remains separate.

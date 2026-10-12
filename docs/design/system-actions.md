@@ -1,7 +1,7 @@
-# System actions · 1.6.0
+# System actions · 1.6.2
 
-Milk & Bananas exposes three actions: Add item, Open grocery list, and Search
-catalog. The icon menu is a UIKit Home Screen Quick Action surface. Siri and
+Milk & Bananas advertises two actions: Add item and Search catalog. The
+Open grocery list intent remains callable for existing saved shortcuts. The icon menu is a UIKit Home Screen Quick Action surface. Siri and
 Shortcuts use App Intents. Both enter the same app-owned routing and persistence
 lifecycle; neither owns another Core Data stack.
 
@@ -37,8 +37,10 @@ The framework distinctions and foreground handoff are documented by Apple:
 and [ForegroundContinuableIntent](https://developer.apple.com/documentation/appintents/foregroundcontinuableintent).
 Use APIs available to iOS 17 and the pinned Xcode 16.4 compiler.
 
-The three App Shortcuts use app-qualified phrases, such as “Add an item in
-Milk & Bananas”. Add asks for an item name when none is supplied; Shortcuts can
+The two App Shortcuts use app-qualified phrases, such as “Add an item in
+Milk and Bananas”. A catalog entity phrase also supports “Add milk to Milk and
+Bananas” when Milk is a saved catalog item. Unknown items use the name prompt;
+App Shortcut phrases cannot interpolate an unrestricted String parameter. Add asks for an item name when none is supplied; Shortcuts can
 also supply text or a remembered catalog entity. Matching folds case, diacritics,
 width and whitespace. Duplicate matches present numbered native choices with
 category and purchase rules. More than twenty matches requests a narrower name;
@@ -54,8 +56,39 @@ Cancellation is checked before command dispatch. Success dialogue follows the
 durable save; existing needs report “already on your grocery list”. There is no
 invented native grocery-list integration or unrestricted natural-language parser.
 
+## System registration and discovery
+
+A single registration owner refreshes App Shortcut parameters at startup and
+activation, after the ready Home presentation changes, and after committed Item,
+Category or Store changes from that presentation's writer or imported view-context
+merge. Notifications coalesce before refreshing. Queries return every eligible
+catalog item; an unavailable Home returns no suggestions. Cached system entities
+never authorize a write: execution resolves current Home-qualified identity,
+checks any supplied name against the complete catalog's matching precedence,
+and retains the existing revision and presentation fences.
+
+Settings embeds Apple's SiriTipView and ShortcutsLink. The app's spoken name is
+Milk and Bananas. These make invocation discoverable but are not evidence that
+Siri recognized a physical user's voice. Apple documents entity phrase parameters
+and refresh requirements in [Dive into App Shortcuts](https://developer.apple.com/videos/play/wwdc2023/10102/).
+
 ## Validation evidence
 
 On October 9, Xcode 27 / iPhone 18 Pro simulator iOS 27.0 (24A434), an isolated AppIntentsTesting probe queried `CatalogItemEntity` for the seeded Bananas item and executed all three intents through Apple's native out-of-process interface. The query returned one entity; Add completed, Search opened Catalog, and Open returned to Groceries. `/tmp/shopping-phase33-native-intents-seeded.xcresult` passed 1/1 without skips. The SDK 27-only diagnostic was not added to the iOS 17/Xcode 16.4 CI sources.
 
 Siri invocation remains a separate unverified boundary. `XCUIDevice.siriService` with “Open my grocery list in Milk and Bananas” opened Siri but did not bring the app foreground within 20 seconds on iOS 26.5 or27 simulators. Failed artifacts remain `/tmp/shopping-phase33-siri-capability.xcresult` and `/tmp/shopping-phase33-native-siri27.xcresult`. These runs do not establish spoken recognition, native ambiguity prompts, or real-device foreground continuation. Domain and isolated editor tests cover their app-owned behavior; physical Siri acceptance still needs to be recorded.
+
+On October 11, the unchanged 1.6.0 implementation appeared in Shortcuts → Apps →
+Milk & Bananas on a clean iPhone 16 Pro / iOS 27 simulator, and its Add action
+prompted for Bananas and returned the existing-need dialogue. The retained bundle
+is `/tmp/shopping-240-shortcuts-add-confirm.xcresult`. This disproves a universal
+registration failure; it does not explain the reported physical-device discovery
+failure or prove the unregistered “Add milk…” phrase worked in 1.6.0.
+
+The 1.6.2 simulator run `/tmp/shopping-240-system-ui-fixed.xcresult` passed the
+icon-menu, editor persistence, and real system Shortcuts prompt/response tests.
+The expanded `/tmp/shopping-240-system-handoff-final.xcresult` passed the actual
+unknown-name foreground-continuation path, including prefilled editor and Cancel,
+after explicitly dismissing the final system result. The test itself took 37
+seconds; Xcode then spent ten minutes collecting simulator diagnostics. This is
+system execution evidence, not physical Siri speech evidence.
