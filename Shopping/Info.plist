@@ -17,6 +17,8 @@
     </array>
     <key>CFBundleSpokenName</key>
     <string>Milk and Bananas</string>
+    <key>INAlternativeAppNames</key>
+    <array><dict><key>INAlternativeAppName</key><string>Milk and Bananas</string></dict></array>
     <key>CKSharingSupported</key>
     <true/>
     <key>ShoppingCloudKitContainerIdentifier</key>

@@ -91,6 +91,8 @@ python3 "$SCRIPT_DIR/release-evidence.py" run archive "$TEMP_ROOT/archive.log" x
     DEVELOPMENT_TEAM=649367BDD4 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_CERTIFICATE" \
     SHOPPING_IPHONE_PROFILE_UUID="$IPHONE_PROFILE_UUID" SHOPPING_WATCH_PROFILE_UUID="$WATCH_PROFILE_UUID" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+python3 "$SCRIPT_DIR/validate-siri-metadata.py" "$ARCHIVE_PATH/Products/Applications/Shopping.app"
+
 python3 "$SCRIPT_DIR/release-evidence.py" run export "$TEMP_ROOT/export.log" xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist "$TEMP_ROOT/ExportOptions.plist"
 shopt -s nullglob
 ipa_paths=("$EXPORT_PATH"/*.ipa)

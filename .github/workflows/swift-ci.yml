@@ -20,13 +20,13 @@ concurrency:
 jobs:
   release-build:
     name: Release SDK Build
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Select upload Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+        run: sudo xcode-select -s /Applications/Xcode_27.0.app
 
       - name: Compile unsigned release archive
         run: >-
@@ -38,6 +38,26 @@ jobs:
           -archivePath "$RUNNER_TEMP/Shopping.xcarchive"
           -derivedDataPath "$RUNNER_TEMP/ReleaseDerivedData"
           CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify exported Siri schema
+        run: python3 .github/scripts/validate-siri-metadata.py "$RUNNER_TEMP/Shopping.xcarchive/Products/Applications/Shopping.app"
+
+      - name: Test current Siri schema contracts
+        run: |
+          simulator_id="$(xcrun simctl create 'Shopping Siri schema' com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
+          trap 'xcrun simctl shutdown "$simulator_id" || true; xcrun simctl delete "$simulator_id" || true' EXIT
+          xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFast \
+            -destination "platform=iOS Simulator,id=$simulator_id" -parallel-testing-enabled NO \
+            -only-testing:ShoppingPersistenceTests/SpokenGrocerySchemaTests \
+            -only-testing:ShoppingPersistenceTests/CatalogActionTests \
+            -resultBundlePath "$RUNNER_TEMP/SiriSchema.xcresult"
+
+      - name: Retain Siri schema test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: siri-schema-results
+          path: ${{ runner.temp }}/SiriSchema.xcresult
 
   build:
     name: Build & Test

@@ -2580,3 +2580,16 @@ The final expanded system workflow passed 1/1 in
 `/tmp/shopping-240-system-handoff-final.xcresult` (36.619 seconds for the test).
 Xcode's post-test diagnostics took another ten minutes; the final command exited
 zero with the complete result bundle. Physical voice acceptance remains separate.
+
+## Spoken grocery schema (SHOPPING-241)
+
+`SpokenGrocerySchemaTests` owns free-form lookup, captured ambiguity choices,
+unknown-item cancellation, Home scoping, unsupported reminder details and the
+returned saved-need identity. `CatalogActionTests` retains the old saved-shortcut
+contract and verifies that catalog edits do not refresh phrase registration.
+`PersonalCartServiceTests/testRememberedReaddAfterPrivateIntentBeforePublicationUsesNewOccurrence`
+also verifies that the Siri need query excludes fulfilled occurrences before
+shared publication and preserves the replacement after undo.
+`SystemActionUITests` retains system Shortcuts invocation and foreground editor
+wiring. Those taps do not establish spoken Siri routing. The archive metadata
+guard has independent negative fixtures in `test-siri-metadata.py`.

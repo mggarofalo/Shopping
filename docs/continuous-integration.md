@@ -252,3 +252,12 @@ orchestration, while allowing a progressing suite to finish near the observed
 hosted execution, coverage baselines, and exact-SHA local attestation are unchanged.
 The corrected candidate must complete the existing validation sequence; this
 budget change does not convert the canceled run into passing evidence.
+
+## Current Siri schema validation (SHOPPING-241)
+
+`Release SDK Build` uses the standard `xcode-27` runner and Xcode 27.0 to archive
+the iPhone/Watch pair and check the generated Siri metadata. It also runs
+`CatalogActionTests` and `SpokenGrocerySchemaTests` on iOS 27. The older Xcode 16.4
+`Build & Test` job retains compatibility and coverage ownership; compiler-gated
+iOS 27 code is not validated by that older job. Neither job proves Siri routing
+or Apple Intelligence availability. Those require a real system invocation.

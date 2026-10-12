@@ -37,13 +37,14 @@ secrets.each { |name| check(upload.fetch("env")[name] == "${{ secrets.#{name} }}
 preflight = jobs["preflight"]["steps"].find { |step| step["run"] == "ruby .github/scripts/preflight-testflight.rb" }
 check(preflight["run"] == "ruby .github/scripts/preflight-testflight.rb", "preflight entrypoint")
 check(preflight["env"].keys.grep(/CERTIFICATE|PROVISIONING/).empty?, "preflight receives no signing assets")
-check(jobs["upload"]["steps"].any? { |step| step["run"] == "sudo xcode-select -s /Applications/Xcode_26.3.app" }, "release SDK pin")
+check(jobs["upload"]["steps"].any? { |step| step["run"] == "sudo xcode-select -s /Applications/Xcode_27.0.app" }, "release SDK pin")
+check(jobs["upload"]["runs-on"] == "xcode-27", "Siri schema requires current SDK runner")
 script = File.read("#{root}/.github/scripts/upload-testflight.sh")
 check(!script.include?("PROVISIONING_PROFILE_SPECIFIER="), "no global profile override")
 check(script.include?('SHOPPING_IPHONE_PROFILE_UUID="$IPHONE_PROFILE_UUID"') && script.include?('SHOPPING_WATCH_PROFILE_UUID="$WATCH_PROFILE_UUID"'), "per-target overrides")
 check(script.index("require-release-ci.py") < script.index("security import"), "CI before signing")
 check(script.index('RELEASE_MODE=upload ruby') < script.index('xcrun altool --upload-app'), "collision recheck before upload")
-%w[validate-cloudkit-sharing.py validate-release-identity.py].each { |name| check(script.index(name) < script.index('xcrun altool --upload-app'), "#{name} before upload") }
+%w[validate-cloudkit-sharing.py validate-release-identity.py validate-siri-metadata.py].each { |name| check(script.index(name) < script.index('xcrun altool --upload-app'), "#{name} before upload") }
 project = File.read("#{root}/Shopping.xcodeproj/project.pbxproj")
 check(project.scan('PROVISIONING_PROFILE_SPECIFIER = "$(SHOPPING_IPHONE_PROFILE_UUID)"').length == 1, "iPhone release binding")
 check(project.scan('PROVISIONING_PROFILE_SPECIFIER = "$(SHOPPING_WATCH_PROFILE_UUID)"').length == 1, "Watch release binding")

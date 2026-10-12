@@ -107,3 +107,12 @@ SHOPPING-240 investigates the shipped Shortcuts/Siri discovery failure and remov
 the redundant Open Grocery List action. System discovery and physical spoken
 invocation require evidence beyond native intent execution; SHOPPING-225 retains
 physical voice acceptance.
+
+## Phase 36: Spoken grocery requests
+
+Module `7432dde3-628a-4be1-99a6-03f7147cfdd2` targets patch **1.6.3**.
+SHOPPING-241 repairs the existing voice-add capability with a free-form title
+through the iOS 27 Reminders App Intent schema. Catalog matching happens only
+after invocation; App Shortcut registration never expands by catalog item.
+Shared catalog dialogue preserves Home, revision, authentication and duplicate
+guards. Actual Siri routing remains a separate release acceptance gate.

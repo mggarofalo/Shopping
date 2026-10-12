@@ -4,7 +4,7 @@ SHOPPING-94 defines the release automation before the Apple signing account is r
 
 ## Rollout
 
-The upload workflow pins Xcode 26.3 on macos-15 independently of test CI.
+The upload workflow pins Xcode 27.0 on GitHub’s `xcode-27` runner independently of the older compatibility test job. The archive metadata guard requires the iOS 27 Siri schema, device authentication, two static App Shortcuts, and the spoken app-name synonym before export.
 Apple requires Xcode 26 or later and the iOS 26 SDK or later for uploads
 since April 28, 2026; the older Xcode 16.4 CI pin is not suitable for release
 uploads. See [Apple's SDK requirements](https://developer.apple.com/news/upcoming-requirements/?id=04282026a).
