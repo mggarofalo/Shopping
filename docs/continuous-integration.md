@@ -258,8 +258,15 @@ budget change does not convert the canceled run into passing evidence.
 `Release SDK Build` uses the standard `xcode-27` runner and Xcode 27.0 to archive
 the iPhone/Watch pair and check the generated Siri metadata. It also runs
 `CatalogActionTests`, `SpokenGrocerySchemaTests`, and the single modern
-out-of-process action test from `SystemActionUITests` on iOS 27. This targeted
-selection uses the Full plan but is not an exhaustive Full run or attestation. The older Xcode 16.4
+out-of-process action test from `ModernSiriActionTests` on iOS 27. The dedicated
+`ShoppingSiri` scheme/plan with the three explicit `-only-testing` selections
+requires all 22 cases to pass. Running the plan without those filters additionally
+runs the broader persistence suite. Its `ShoppingSiriTests`
+UI target requires iOS 27 and exclusively links AppIntentsTesting, whose SDK
+framework cannot load on the pinned iOS 26.5 Full runtime. Existing Full and
+Acceptance UI targets retain their previous workflows without that dependency.
+ShoppingSiri is separate required modern-system evidence, not a Full attestation.
+The older Xcode 16.4
 `Build & Test` job retains compatibility and coverage ownership; compiler-gated
 iOS 27 code is not validated by that older job. Neither job proves Siri routing
 or Apple Intelligence availability. Those require a real system invocation.

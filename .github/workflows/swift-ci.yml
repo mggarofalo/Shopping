@@ -46,11 +46,11 @@ jobs:
         run: |
           simulator_id="$(xcrun simctl create 'Shopping Siri schema' com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
           trap 'xcrun simctl shutdown "$simulator_id" || true; xcrun simctl delete "$simulator_id" || true' EXIT
-          xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingFull \
+          xcodebuild test -project Shopping.xcodeproj -scheme ShoppingSiri -testPlan ShoppingSiri \
             -destination "platform=iOS Simulator,id=$simulator_id" -parallel-testing-enabled NO \
             -only-testing:ShoppingPersistenceTests/SpokenGrocerySchemaTests \
             -only-testing:ShoppingPersistenceTests/CatalogActionTests \
-            -only-testing:ShoppingTests/SystemActionUITests/testModernSiriActionReturnsSavedEntityThroughSystemExecution \
+            -only-testing:ShoppingSiriTests/ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution \
             -resultBundlePath "$RUNNER_TEMP/SiriSchema.xcresult"
           xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/SiriSchema.xcresult" --format json > "$RUNNER_TEMP/SiriSchemaTests.json"
           jq -e '
@@ -58,7 +58,7 @@ jobs:
             ($tests | length == 22) and all($tests[]; .result == "Passed") and
             ([$tests[] | select(.nodeIdentifier | startswith("CatalogActionTests/"))] | length == 15) and
             ([$tests[] | select(.nodeIdentifier | startswith("SpokenGrocerySchemaTests/"))] | length == 6) and
-            ([$tests[] | select(.nodeIdentifier == "SystemActionUITests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()")] | length == 1)
+            ([$tests[] | select(.nodeIdentifier == "ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()")] | length == 1)
           ' "$RUNNER_TEMP/SiriSchemaTests.json"
 
       - name: Retain Siri schema test evidence

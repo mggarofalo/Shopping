@@ -2594,9 +2594,35 @@ shared publication and preserves the replacement after undo.
 wiring. Those taps do not establish spoken Siri routing. The archive metadata
 guard has independent negative fixtures in `test-siri-metadata.py`.
 
-`SystemActionUITests/testModernSiriActionReturnsSavedEntityThroughSystemExecution`
+`ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution`
 uses Apple’s iOS 27 out-of-process App Intents API to resolve both requested
 shopping-list aliases, invoke the modern action for an inactive catalog item,
 read its returned entity and verify duplicate identity. It runs in the current
 SDK job alongside the focused persistence suites. This is action execution proof,
 not Siri speech or app-selection proof.
+
+The modern system test lives in the iOS 27-only `ShoppingSiriTests` target and
+`ShoppingSiri` scheme/plan. Its fixture and assertions are unchanged by this
+separation. It is required by the current-SDK CI job, independently of Full.
+The first local Full candidate `0569de0` failed loading the UI bundle because
+AppIntentsTesting hard-depends on AppIntentsTypeSupport, absent on iOS 26.5.
+A weak-import experiment also failed at that same loader boundary; neither
+result is a Full pass. Removing that dependency from the existing UI target
+retains every pre-existing Full workflow. Logs/result bundles are retained at
+`/tmp/shopping-241-local-full.log` and `/tmp/shopping-241-weak-import.xcresult`.
+
+The first separated-target probe passed its one modern UI case but the attempted
+plan-level Swift Testing suite selection selected zero persistence cases
+(`/tmp/shopping-241-isolated-modern.xcresult`). It is not 22-case proof. The plan
+now leaves persistence selection to the existing explicit CI `-only-testing`
+arguments and exact 22-case result guard.
+
+The corrected explicit selection passed all 22 cases, zero failures/skips, in
+`/tmp/shopping-241-isolated-22.xcresult`; the same CI inventory guard passed.
+The iOS 26.5 existing UI bundle now loads, but its system Shortcuts invocation
+fails with “Could not find AppShortcutsProvider” before the Item name prompt.
+Unchanged released source `1063484` reproduces that exact runtime error under
+the same Xcode 27/iOS 26.5 pairing. Candidate and baseline result bundles are
+`/tmp/shopping-241-isolated-old.xcresult` and
+`/tmp/shopping-241-baseline-old.xcresult`. SHOPPING-243 tracks this separate
+compatibility blocker. No Full pass or remote dispatch follows those failures.
