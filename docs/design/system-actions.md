@@ -121,7 +121,14 @@ The exact-phrase Siri probe failed (`/tmp/shopping-241-voice-probe.xcresult`): S
 showed “Sorry, something went wrong. Please try again.” A separate time-query
 probe did not retain a useful answer and is inconclusive, regardless of its
 negative-error assertion passing. Neither is voice routing evidence. The first
-combined follow-up was interrupted after the failed Siri session left a keyboard
+combined follow-up was interrupted while an unexpected keyboard appeared
 over the Home Screen; its screenshot and log are retained under
 `/tmp/shopping-241-system-and-capability.*`. Diagnostic probes are excluded from
 the maintained test suite, rather than represented as passing product coverage.
+
+The Home Screen long-press stall also reproduced on unchanged `1063484` with a
+fresh iOS 27 simulator (`/tmp/shopping-241-system-baseline.log` and
+`/tmp/shopping-241-baseline-menu.png`). Both runs stopped inside XCTest’s
+SpringBoard-idle wait before tapping Add item. SHOPPING-242 tracks this unresolved
+system/SDK boundary; neither source comparison nor screenshots prove that real
+device behavior is unaffected. The maintained assertion remains unchanged.
