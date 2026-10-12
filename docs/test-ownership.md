@@ -2626,3 +2626,17 @@ the same Xcode 27/iOS 26.5 pairing. Candidate and baseline result bundles are
 `/tmp/shopping-241-isolated-old.xcresult` and
 `/tmp/shopping-241-baseline-old.xcresult`. SHOPPING-243 tracks this separate
 compatibility blocker. No Full pass or remote dispatch follows those failures.
+
+Hosted PR run 38314866318 on `e9f19f0` passed the archive metadata guard and
+21 persistence checks, then failed the modern system test before action
+execution: AppIntentsServicesMetadataErrorDomain 400 reported the installed app
+was not present. The job subsequently reached its limit during diagnostics; its
+uploaded xcresult lacks Info.plist and is not a readable result manifest. The
+job log is retained at `/tmp/shopping-241-pr-sdk.log`. An unchanged fresh local
+simulator passed the same modern test in `/tmp/shopping-241-isolated-cold.xcresult`;
+this does not explain or override the hosted failure.
+
+The next diagnostic candidate retains targeted registration logs and installed
+intent metadata while preserving test exit status and all assertions. Four
+stubbed cases verified preservation of test and manifest failures, including
+diagnostic failure. No metadata-readiness workaround or test retry was added.

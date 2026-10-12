@@ -270,3 +270,10 @@ The older Xcode 16.4
 `Build & Test` job retains compatibility and coverage ownership; compiler-gated
 iOS 27 code is not validated by that older job. Neither job proves Siri routing
 or Apple Intelligence availability. Those require a real system invocation.
+
+The schema job retains installed Debug intent metadata and focused system
+registration logs with 20-second command bounds on simulator operations. It
+preserves the original test/manifest exit status. Verbose post-failure sysdiagnose
+is disabled for this focused job; ordinary xcresult evidence and the exact
+22-case assertion remain required. This addresses diagnostic loss, not a test
+failure or a proof of metadata readiness.
