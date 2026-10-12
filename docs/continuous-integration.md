@@ -272,8 +272,15 @@ iOS 27 code is not validated by that older job. Neither job proves Siri routing
 or Apple Intelligence availability. Those require a real system invocation.
 
 The schema job retains installed Debug intent metadata and focused system
-registration logs with 20-second command bounds on simulator operations. It
-preserves the original test/manifest exit status. Verbose post-failure sysdiagnose
+registration logs with 20-second command bounds on simulator operations. Capture runs in a separate `always` step, leaving the preceding test/manifest
+verdict untouched. Each capture command status is retained, including errors. Verbose post-failure sysdiagnose
 is disabled for this focused job; ordinary xcresult evidence and the exact
 22-case assertion remain required. This addresses diagnostic loss, not a test
 failure or a proof of metadata readiness.
+
+The combined archive-and-schema job has a 25-minute budget. The previous
+15-minute budget expired after an observed six-minute simulator startup, before
+the modern test ran (38316984917). This budget covers setup and artifact
+collection; no per-test timeout, assertion, selection or retry policy changes.
+The capture step has its own three-minute limit and restarts an already-created
+simulator when necessary to read retained logs.

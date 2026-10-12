@@ -2640,3 +2640,20 @@ The next diagnostic candidate retains targeted registration logs and installed
 intent metadata while preserving test exit status and all assertions. Four
 stubbed cases verified preservation of test and manifest failures, including
 diagnostic failure. No metadata-readiness workaround or test retry was added.
+
+Diagnostic run 38316984917 on `9a51738` passed archive checks and 21 persistence
+cases but hit the job budget before the modern UI test. Build completed at
+22:39:53Z; persistence execution started at 22:46:22Z. Its incomplete xcresult is
+not 22-case proof. Hard cancellation bypassed the shell EXIT trap, so targeted
+capture now runs in its own bounded `always` step. The combined job budget is
+25 minutes; test limits, assertions and retry policy are unchanged. A matching
+fresh local iPhone 18 Pro sequence passed 22/22 with no skips on `9a51738`, in
+`/tmp/shopping-241-hosted-sequence-local.xcresult`; it does not explain or override
+the preceding hosted metadata lookup failure.
+
+The same hosted run completed compatibility CI: 801 Fast tests and all six
+acceptance workflows passed without failures/skips. Summaries are retained under
+`/tmp/shopping-241-diagnostic-compat/fast-summary-38316984917-1/`. The revised
+separate capture step passed four stubbed failure-path checks and independent
+review. Capture timestamps distinguish post-test/reboot observations from the
+original test failure; a hard job cancellation can still truncate evidence.
