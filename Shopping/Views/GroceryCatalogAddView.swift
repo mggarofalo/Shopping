@@ -20,6 +20,7 @@ struct GroceryCatalogAddView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @State private var searchText: String
+    @State private var searchPresented = false
     @State private var catalogEditor: CatalogEditSession?
     @State private var pendingCompletion: GroceryCatalogAddCompletion?
     @State private var isSelecting = false
@@ -28,7 +29,7 @@ struct GroceryCatalogAddView: View {
     @State private var personSelectionWasChanged = false
     let scope: GroceryAddScope
     let initialCreationName: String?
-    @State private var deliveredInitialCreation = false
+    @State private var deliveredInitialPresentation = false
     let onCompleted: (GroceryCatalogAddCompletion) -> Void
     let onOneTime: (String, UUID?) -> Void
 
@@ -209,19 +210,27 @@ struct GroceryCatalogAddView: View {
             }
             .listStyle(.insetGrouped)
             .task {
-                guard !deliveredInitialCreation, initialCreationName != nil else { return }
-                deliveredInitialCreation = true
-                createCatalogItem()
+                guard !deliveredInitialPresentation else { return }
+                deliveredInitialPresentation = true
+                if initialCreationName != nil {
+                    createCatalogItem()
+                } else {
+                    searchPresented = true
+                }
             }
             .navigationTitle("Add to Groceries")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(
                 text: $searchText,
+                isPresented: $searchPresented,
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "Search catalog"
             )
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("shopping.grocery.catalogCancel")
+                }
             }
             .sheet(item: $catalogEditor, onDismiss: finishPendingCompletion) { session in
                 CatalogEditorView(

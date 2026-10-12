@@ -27,7 +27,17 @@ final class SystemActionUITests: XCTestCase {
         action.tap()
         XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 10))
         XCTAssertTrue(app.searchFields["Search catalog"].exists)
-        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        // Active native search hides the sheet toolbar until search is dismissed.
+        let closeSearch = app.buttons["Close"]
+        if closeSearch.existsOrAppears(timeout: 2) {
+            closeSearch.tap()
+        } else {
+            app.buttons["Cancel"].tap()
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.grocery.catalogCancel"].existsOrAppears(timeout: 3))
+        app.buttons["shopping.grocery.catalogCancel"].tap()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
     }
 }

@@ -130,7 +130,22 @@ final class CatalogRefreshUITests: XCTestCase {
         app.tabBars.buttons["Groceries"].tap()
 
         openCatalogChooser(in: app)
-        searchFor("Oat", in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        // Active native search hides the sheet toolbar until search is dismissed.
+        let closeSearch = app.buttons["Close"]
+        if closeSearch.exists {
+            closeSearch.tap()
+        } else {
+            app.buttons["Cancel"].tap()
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["shopping.grocery.catalogCancel"].existsOrAppears(timeout: 3))
+        app.buttons["shopping.grocery.catalogCancel"].tap()
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].waitForNonExistence(timeout: 3))
+        openCatalogChooser(in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        app.typeText("Oat")
+        XCTAssertEqual(app.searchFields["Search catalog"].value as? String, "Oat")
         let result = app.buttons.matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.grocery.catalogResult.", "Oat milk"
@@ -140,7 +155,9 @@ final class CatalogRefreshUITests: XCTestCase {
         XCTAssertTrue(groceryRow(named: "Oat milk", in: app).existsOrAppears(timeout: 3))
 
         openCatalogChooser(in: app)
-        searchFor("Oat", in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        app.typeText("Oat")
+        XCTAssertEqual(app.searchFields["Search catalog"].value as? String, "Oat")
         XCTAssertTrue(result.existsOrAppears(timeout: 2))
         result.tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
