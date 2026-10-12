@@ -93,3 +93,17 @@ Phase 1 and Phase 2 local foundation work merged through PR 1 (`c74cae8`). Phase
 ## Phase 33: App Intents, Siri and Home Experience
 
 Module `32925179-3c3d-4115-9dfb-954a07313718` targets minor release **1.6.0**. SHOPPING-217 establishes shared system-action routing; SHOPPING-218 adds catalog-aware Siri and Shortcuts. SHOPPING-220 consolidates Home navigation; SHOPPING-221/222 add safe replacement of an empty, unshared starter Home while joining. Other Homes are kept. SHOPPING-223 owns physical Home validation; SHOPPING-219 owns release evidence. Broader SHOPPING-42 query/Spotlight work remains deferred and is not a dependency of this deterministic system-action slice.
+
+## Phase 34: Grocery add search focus
+
+Module `64432e46-7a50-42e4-8e9d-e45044f9e7aa` delivers SHOPPING-239 as patch
+**1.6.1**: grocery + immediately activates native catalog search. The direct
+unknown-item creation handoff retains editor focus. No persistence/schema changes.
+
+## Phase 35: Discoverable Siri grocery actions
+
+Module `89ae7ac9-a7eb-45b5-8b68-2d0d8832dc1c` targets patch **1.6.2**.
+SHOPPING-240 investigates the shipped Shortcuts/Siri discovery failure and removes
+the redundant Open Grocery List action. System discovery and physical spoken
+invocation require evidence beyond native intent execution; SHOPPING-225 retains
+physical voice acceptance.
