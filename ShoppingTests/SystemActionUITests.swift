@@ -1,6 +1,8 @@
 import XCTest
 
 final class SystemActionUITests: XCTestCase {
+
+
     func testHomeScreenAddOpensCatalogAddWithoutChangingList() throws {
         continueAfterFailure = false
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

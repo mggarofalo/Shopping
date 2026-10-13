@@ -289,9 +289,13 @@ final class PersonalCartServiceTests: XCTestCase {
         let entry = try add(f)
         let capture = try f.cart.prepareCheckout(tokens: [entry.token])
         let operationID = UUID()
+        XCTAssertEqual(try f.service.groceryActionNeeds(ids: [f.needID], householdID: f.householdID,
+            listID: f.listID).map(\.id), [f.needID])
         f.cart.failurePoint = { if $0 == "afterIntent" { throw Injected.stopped } }
         XCTAssertThrowsError(try f.cart.checkout(capture, operationID: operationID))
         f.cart.failurePoint = nil
+        XCTAssertTrue(try f.service.groceryActionNeeds(ids: [f.needID], householdID: f.householdID,
+            listID: f.listID).isEmpty)
         let replacement = try f.service.addRememberedNeed(itemID: f.itemID, listID: f.listID,
             householdID: f.householdID, quantity: 3)
         XCTAssertNotEqual(replacement, f.needID)
@@ -299,6 +303,8 @@ final class PersonalCartServiceTests: XCTestCase {
         let outstanding = try f.cart.outstandingNeedIDs(householdID: f.householdID, listID: f.listID)
         XCTAssertTrue(outstanding.contains(replacement))
         XCTAssertFalse(outstanding.contains(f.needID))
+        XCTAssertEqual(try f.service.groceryActionNeeds(ids: [f.needID, replacement], householdID: f.householdID,
+            listID: f.listID).map(\.id), [replacement])
     }
 
     final class PrivateWritePolicy: PersistencePermissionPolicy {

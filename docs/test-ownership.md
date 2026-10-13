@@ -2580,3 +2580,80 @@ The final expanded system workflow passed 1/1 in
 `/tmp/shopping-240-system-handoff-final.xcresult` (36.619 seconds for the test).
 Xcode's post-test diagnostics took another ten minutes; the final command exited
 zero with the complete result bundle. Physical voice acceptance remains separate.
+
+## Spoken grocery schema (SHOPPING-241)
+
+`SpokenGrocerySchemaTests` owns free-form lookup, captured ambiguity choices,
+unknown-item cancellation, Home scoping, unsupported reminder details and the
+returned saved-need identity. `CatalogActionTests` retains the old saved-shortcut
+contract and verifies that catalog edits do not refresh phrase registration.
+`PersonalCartServiceTests/testRememberedReaddAfterPrivateIntentBeforePublicationUsesNewOccurrence`
+also verifies that the Siri need query excludes fulfilled occurrences before
+shared publication and preserves the replacement after undo.
+`SystemActionUITests` retains system Shortcuts invocation and foreground editor
+wiring. Those taps do not establish spoken Siri routing. The archive metadata
+guard has independent negative fixtures in `test-siri-metadata.py`.
+
+`ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution`
+uses Apple’s iOS 27 out-of-process App Intents API to resolve both requested
+shopping-list aliases, invoke the modern action for an inactive catalog item,
+read its returned entity and verify duplicate identity. It runs in the current
+SDK job alongside the focused persistence suites. This is action execution proof,
+not Siri speech or app-selection proof.
+
+The modern system test lives in the iOS 27-only `ShoppingSiriTests` target and
+`ShoppingSiri` scheme/plan. Its fixture and assertions are unchanged by this
+separation. It is required by the current-SDK CI job, independently of Full.
+The first local Full candidate `0569de0` failed loading the UI bundle because
+AppIntentsTesting hard-depends on AppIntentsTypeSupport, absent on iOS 26.5.
+A weak-import experiment also failed at that same loader boundary; neither
+result is a Full pass. Removing that dependency from the existing UI target
+retains every pre-existing Full workflow. Logs/result bundles are retained at
+`/tmp/shopping-241-local-full.log` and `/tmp/shopping-241-weak-import.xcresult`.
+
+The first separated-target probe passed its one modern UI case but the attempted
+plan-level Swift Testing suite selection selected zero persistence cases
+(`/tmp/shopping-241-isolated-modern.xcresult`). It is not 22-case proof. The plan
+now leaves persistence selection to the existing explicit CI `-only-testing`
+arguments and exact 22-case result guard.
+
+The corrected explicit selection passed all 22 cases, zero failures/skips, in
+`/tmp/shopping-241-isolated-22.xcresult`; the same CI inventory guard passed.
+The iOS 26.5 existing UI bundle now loads, but its system Shortcuts invocation
+fails with “Could not find AppShortcutsProvider” before the Item name prompt.
+Unchanged released source `1063484` reproduces that exact runtime error under
+the same Xcode 27/iOS 26.5 pairing. Candidate and baseline result bundles are
+`/tmp/shopping-241-isolated-old.xcresult` and
+`/tmp/shopping-241-baseline-old.xcresult`. SHOPPING-243 tracks this separate
+compatibility blocker. No Full pass or remote dispatch follows those failures.
+
+Hosted PR run 38314866318 on `e9f19f0` passed the archive metadata guard and
+21 persistence checks, then failed the modern system test before action
+execution: AppIntentsServicesMetadataErrorDomain 400 reported the installed app
+was not present. The job subsequently reached its limit during diagnostics; its
+uploaded xcresult lacks Info.plist and is not a readable result manifest. The
+job log is retained at `/tmp/shopping-241-pr-sdk.log`. An unchanged fresh local
+simulator passed the same modern test in `/tmp/shopping-241-isolated-cold.xcresult`;
+this does not explain or override the hosted failure.
+
+The next diagnostic candidate retains targeted registration logs and installed
+intent metadata while preserving test exit status and all assertions. Four
+stubbed cases verified preservation of test and manifest failures, including
+diagnostic failure. No metadata-readiness workaround or test retry was added.
+
+Diagnostic run 38316984917 on `9a51738` passed archive checks and 21 persistence
+cases but hit the job budget before the modern UI test. Build completed at
+22:39:53Z; persistence execution started at 22:46:22Z. Its incomplete xcresult is
+not 22-case proof. Hard cancellation bypassed the shell EXIT trap, so targeted
+capture now runs in its own bounded `always` step. The combined job budget is
+25 minutes; test limits, assertions and retry policy are unchanged. A matching
+fresh local iPhone 18 Pro sequence passed 22/22 with no skips on `9a51738`, in
+`/tmp/shopping-241-hosted-sequence-local.xcresult`; it does not explain or override
+the preceding hosted metadata lookup failure.
+
+The same hosted run completed compatibility CI: 801 Fast tests and all six
+acceptance workflows passed without failures/skips. Summaries are retained under
+`/tmp/shopping-241-diagnostic-compat/fast-summary-38316984917-1/`. The revised
+separate capture step passed four stubbed failure-path checks and independent
+review. Capture timestamps distinguish post-test/reboot observations from the
+original test failure; a hard job cancellation can still truncate evidence.

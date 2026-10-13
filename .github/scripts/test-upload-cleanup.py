@@ -29,7 +29,7 @@ class CleanupTests(unittest.TestCase):
                     '    action, *args = sys.argv[1:]\n    if action == "collect": sys.exit(31)'))
             (scripts / "validate-release-source.sh").write_text("exit 0\n")
             (scripts / "require-release-ci.py").write_text("pass\n")
-            for name in ("validate-cloudkit-sharing.py", "validate-release-identity.py"):
+            for name in ("validate-cloudkit-sharing.py", "validate-release-identity.py", "validate-siri-metadata.py"):
                 (scripts / name).write_text("pass\n")
             (scripts / "preflight-testflight.rb").write_text("exit 0\n")
             pair = {target: guards.profile(bundle, f"00000000-0000-0000-0000-00000000000{index}") for index, (target, bundle) in enumerate(guards.profiles.TARGETS.items())}

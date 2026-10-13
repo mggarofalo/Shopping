@@ -24,42 +24,27 @@ struct AddGroceryIntent: ForegroundContinuableIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let runtime = ShoppingApplicationRuntime.shared
         let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
-        let candidates: [CatalogActionItem]
-        if let catalogItem {
-            candidates = [try await context.resolve(entityID: catalogItem.id, matching: name)]
-        } else {
-            let spoken: String
-            if let name { spoken = name }
-            else { spoken = try await $name.requestValue("What would you like to add?") }
-            let query = spoken.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
-            guard !query.isEmpty else { throw NeedServiceError.invalidName }
-            try context.validate()
-            candidates = CatalogActionMatcher.matches(query, in: try await context.items())
-            if candidates.isEmpty {
-                try await requestToContinueInForeground("No catalog match for \(query). Continue in Milk & Bananas to create it?") {
-                    try context.createInApp(name: query)
-                }
-                return .result(dialog: "Review \(query) in the app, then save and add it.")
+        let spoken: String?
+        if catalogItem != nil || name != nil { spoken = name }
+        else { spoken = try await $name.requestValue("What would you like to add?") }
+        let dialogue = try await CatalogAddDialogue(context: context, name: spoken, entityID: catalogItem?.id)
+        if dialogue.candidates.isEmpty {
+            try await requestToContinueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?") {
+                try dialogue.createInApp()
             }
+            return .result(dialog: "Review \(dialogue.name) in the app, then save and add it.")
         }
-        guard candidates.count <= 20 else { throw CatalogActionError.tooManyMatches }
-        let token = try await context.capture(candidates)
-        let item: CatalogActionItem
-        if candidates.count == 1 {
-            item = candidates[0]
+        let selectedID: String
+        if dialogue.candidates.count == 1 {
+            selectedID = context.entityID(for: dialogue.candidates[0].id)
         } else {
-            let choices = candidates.enumerated().map {
+            let choices = dialogue.candidates.enumerated().map {
                 CatalogItemEntity(item: $0.element, context: context, choiceNumber: $0.offset + 1)
             }
-            let selected = try await $catalogItem.requestDisambiguation(among: choices,
-                                                                        dialog: "Which catalog item do you mean?")
-            try context.validate()
-            guard let choice = candidates.first(where: { context.entityID(for: $0.id) == selected.id }) else {
-                throw ShoppingActionError.scopeChanged
-            }
-            item = choice
+            selectedID = try await $catalogItem.requestDisambiguation(
+                among: choices, dialog: "Which catalog item do you mean?").id
         }
-        let added = try await context.add(itemID: item.id, using: token)
+        let (item, _, added) = try await dialogue.add(entityID: selectedID)
         let dialog: IntentDialog = added
             ? "Added \(item.name) to your grocery list."
             : "\(item.name) is already on your grocery list."

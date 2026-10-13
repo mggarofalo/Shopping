@@ -2083,6 +2083,31 @@ final class NeedService: @unchecked Sendable {
         }
     }
 
+    func groceryActionNeeds(ids: Set<UUID>, householdID: UUID, listID: UUID) throws -> [GroceryActionNeed] {
+        guard !ids.isEmpty else { return [] }
+        return try readOnWriter { context in
+            try self.commandAuthority?.validate()
+            let session = try self.persistence.personalCartSessionProvider?.currentSession()
+            guard session?.accountBinding == self.persistence.personalCartInitialBinding else {
+                throw PersonalCartError.accountChanged
+            }
+            let household = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(format: "id IN %@ AND list.id == %@ AND list.household == %@ AND archived == NO",
+                                            Array(ids) as NSArray, listID as CVarArg, household)
+            let result = try self.outstanding(context.fetch(request), in: context).filter {
+                $0.objectID.persistentStore == household.objectID.persistentStore &&
+                ($0.item.map { $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore } ?? true)
+            }.map { GroceryActionNeed(id: $0.id, title: $0.kind == NeedKind.oneTime.rawValue ? $0.title : ($0.item?.name ?? $0.title), notes: $0.notes,
+                                      urgent: $0.urgency == NeedUrgency.urgent.rawValue) }
+            try self.commandAuthority?.validate()
+            guard try self.persistence.personalCartSessionProvider?.currentSession() == session else {
+                throw PersonalCartError.accountChanged
+            }
+            return result
+        }
+    }
+
     func catalogActionItems(householdID: UUID, listID: UUID) throws -> [CatalogActionItem] {
         try readOnWriter { context in
             try self.commandAuthority?.validate()

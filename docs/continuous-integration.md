@@ -252,3 +252,35 @@ orchestration, while allowing a progressing suite to finish near the observed
 hosted execution, coverage baselines, and exact-SHA local attestation are unchanged.
 The corrected candidate must complete the existing validation sequence; this
 budget change does not convert the canceled run into passing evidence.
+
+## Current Siri schema validation (SHOPPING-241)
+
+`Release SDK Build` uses the standard `xcode-27` runner and Xcode 27.0 to archive
+the iPhone/Watch pair and check the generated Siri metadata. It also runs
+`CatalogActionTests`, `SpokenGrocerySchemaTests`, and the single modern
+out-of-process action test from `ModernSiriActionTests` on iOS 27. The dedicated
+`ShoppingSiri` scheme/plan with the three explicit `-only-testing` selections
+requires all 22 cases to pass. Running the plan without those filters additionally
+runs the broader persistence suite. Its `ShoppingSiriTests`
+UI target requires iOS 27 and exclusively links AppIntentsTesting, whose SDK
+framework cannot load on the pinned iOS 26.5 Full runtime. Existing Full and
+Acceptance UI targets retain their previous workflows without that dependency.
+ShoppingSiri is separate required modern-system evidence, not a Full attestation.
+The older Xcode 16.4
+`Build & Test` job retains compatibility and coverage ownership; compiler-gated
+iOS 27 code is not validated by that older job. Neither job proves Siri routing
+or Apple Intelligence availability. Those require a real system invocation.
+
+The schema job retains installed Debug intent metadata and focused system
+registration logs with 20-second command bounds on simulator operations. Capture runs in a separate `always` step, leaving the preceding test/manifest
+verdict untouched. Each capture command status is retained, including errors. Verbose post-failure sysdiagnose
+is disabled for this focused job; ordinary xcresult evidence and the exact
+22-case assertion remain required. This addresses diagnostic loss, not a test
+failure or a proof of metadata readiness.
+
+The combined archive-and-schema job has a 25-minute budget. The previous
+15-minute budget expired after an observed six-minute simulator startup, before
+the modern test ran (38316984917). This budget covers setup and artifact
+collection; no per-test timeout, assertion, selection or retry policy changes.
+The capture step has its own three-minute limit and restarts an already-created
+simulator when necessary to read retained logs.

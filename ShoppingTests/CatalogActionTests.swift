@@ -185,14 +185,13 @@ struct CatalogActionTests {
         #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
     }
 
-    @Test func systemSuggestionsIncludeCatalogBeyondFiftyAndRetireWithScope() async throws {
+    @Test func systemSuggestionsStayEmptyWhileExplicitCatalogLookupStillWorks() async throws {
         let (environment, context) = try await fixture()
         for index in 0..<55 { _ = try create(String(format: "Item %02d", index), in: environment) }
         let zucchini = try create("Zucchini", in: environment)
         let query = CatalogItemEntityQuery(runtime: context.runtime)
         let suggestions = try await query.suggestedEntities()
-        #expect(suggestions.count == 56)
-        #expect(suggestions.last?.id == context.entityID(for: zucchini))
+        #expect(suggestions.isEmpty)
         #expect(try await query.entities(matching: "Zucchini").map(\.id) == [context.entityID(for: zucchini)])
         context.ready.presentation.retire()
         #expect(try await query.suggestedEntities().isEmpty)
@@ -201,36 +200,21 @@ struct CatalogActionTests {
         }
     }
 
-    @Test func shortcutRefreshCoalescesOwnCatalogAndIgnoresUnrelatedStores() async throws {
+    @Test func catalogChangesDoNotTriggerShortcutRegistration() async throws {
         let (environment, context) = try await fixture()
-        let (otherEnvironment, _) = try await fixture()
         var updates = 0
-        var expectation: XCTestExpectation?
-        let registration = ShoppingShortcutsRegistration(bootstrap: context.runtime.bootstrap) {
+        let unexpected = XCTestExpectation(description: "Catalog changes do not publish Siri phrases")
+        unexpected.isInverted = true
+        let registration = ShoppingShortcutsRegistration {
             updates += 1
-            expectation?.fulfill()
+            if updates > 1 { unexpected.fulfill() }
         }
         #expect(updates == 1)
-        let unrelated = XCTestExpectation(description: "Unrelated store must not publish suggestions")
-        unrelated.isInverted = true
-        expectation = unrelated
-        _ = try create("Other Home milk", in: otherEnvironment)
-        #expect(await XCTWaiter.fulfillment(of: [unrelated], timeout: 0.4) == .completed)
-
-        let refreshed = XCTestExpectation(description: "Committed catalog changes refresh suggestions")
-        expectation = refreshed
-        let id = try create("Milk", in: environment)
-        try environment.service.saveCatalogItem(itemID: id, householdID: context.householdID,
-            values: CatalogItemValues(name: "Oat milk", notes: "", categoryID: nil, anyStore: true, storeIDs: []))
-        #expect(await XCTWaiter.fulfillment(of: [refreshed], timeout: 2) == .completed)
-        #expect(updates == 2)
-
-        let retired = XCTestExpectation(description: "Retired scope clears system suggestions")
-        expectation = retired
+        _ = try create("Milk", in: environment)
         context.ready.presentation.retire()
         context.runtime.bootstrap.objectWillChange.send()
-        #expect(await XCTWaiter.fulfillment(of: [retired], timeout: 2) == .completed)
-        #expect(updates == 3)
+        #expect(await XCTWaiter.fulfillment(of: [unexpected], timeout: 0.4) == .completed)
+        #expect(updates == 1)
         withExtendedLifetime(registration) {}
     }
 

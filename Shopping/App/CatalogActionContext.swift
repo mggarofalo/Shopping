@@ -76,6 +76,10 @@ struct CatalogActionContext {
     }
 
     func add(itemID: UUID, using token: CatalogAddToken) async throws -> Bool {
+        try await addReceipt(itemID: itemID, using: token).added
+    }
+
+    func addReceipt(itemID: UUID, using token: CatalogAddToken) async throws -> (needID: UUID, added: Bool) {
         try validate()
         guard token.householdID == householdID, token.listID == listID,
               let entry = token.entries.first(where: { $0.itemID == itemID }),
@@ -93,9 +97,19 @@ struct CatalogActionContext {
               result.archivedCount == 0, result.ineligibleCount == 0 else {
             throw ShoppingActionError.scopeChanged
         }
-        if result.addedNeedIDs.count == 1 { return true }
-        if result.existingNeedIDs.count == 1 { return false }
+        if let id = result.addedNeedIDs.first, result.addedNeedIDs.count == 1 { return (id, true) }
+        if let id = result.existingNeedIDs.first, result.existingNeedIDs.count == 1 { return (id, false) }
         throw ShoppingActionError.scopeChanged
+    }
+
+    func groceryNeeds(ids: Set<UUID>) async throws -> [GroceryActionNeed] {
+        try validate()
+        let service = ready.service, householdID = householdID, listID = listID
+        let needs = try await Task.detached(priority: .userInitiated) {
+            try service.groceryActionNeeds(ids: ids, householdID: householdID, listID: listID)
+        }.value
+        try validate()
+        return needs
     }
 
     func entityID(for itemID: UUID) -> String { namespace + ":" + itemID.uuidString.lowercased() }

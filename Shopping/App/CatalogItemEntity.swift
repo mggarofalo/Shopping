@@ -45,15 +45,9 @@ struct CatalogItemEntityQuery: EntityStringQuery {
 
     @MainActor
     func suggestedEntities() async throws -> [CatalogItemEntity] {
-        do {
-            let context = try await context()
-            return try await context.items().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                .map { CatalogItemEntity(item: $0, context: context) }
-        } catch ShoppingActionError.homeUnavailable {
-            return []
-        } catch ShoppingActionError.scopeChanged {
-            return []
-        }
+        // Saved shortcuts can still resolve identifiers or explicitly search. Do not enumerate
+        // the catalog for Siri discovery: spoken names are resolved after invoking Add.
+        []
     }
 
     @MainActor
