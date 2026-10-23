@@ -2657,3 +2657,16 @@ acceptance workflows passed without failures/skips. Summaries are retained under
 separate capture step passed four stubbed failure-path checks and independent
 review. Capture timestamps distinguish post-test/reboot observations from the
 original test failure; a hard job cancellation can still truncate evidence.
+
+
+## SHOPPING-244: imported occurrence identity
+
+`ImportedNeedReconciliationTests` owns exact physical Need duplication after a
+normal local insert, stable cloud-record selection in both physical orders,
+relaunch/idempotence, unchanged personal-cart membership, divergent fields and
+relationships, missing/cloud-zone identity, local-store exclusion, deferred
+permission denial with history progress, account changes, and split-transaction
+relationship imports. It uses isolated SQLite stores and injected native identity
+and completed-sync evidence. It does not claim to simulate CloudKit transport or
+unseen offline edits racing cloud deletion. Existing `GroceryNeedTests` retains
+strict ambiguous-identity command and projection assertions.
