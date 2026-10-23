@@ -118,6 +118,24 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         throw Failure.timeout
     }
 
+    private func awaitAccess(_ fixture: Fixture, graph: HomeGraphIdentity, access: HomeCandidate.Access) async throws {
+        // Selection invalidates startup discovery. Await a fresh operation and
+        // its exact account/presentation witness, not an arbitrary ready store.
+        let session = try fixture.provider.currentSession()
+        let bootstrap = fixture.bootstrap
+        let presentation = try await ready(bootstrap).presentation.id
+        try await bootstrap.refreshHomes()
+        try await FixtureReadiness.wait(changes: [bootstrap.objectWillChange.eraseToAnyPublisher()]) {
+            if case .failed(let error) = bootstrap.state { throw error }
+            guard try fixture.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
+            guard case .ready(let current) = bootstrap.state else { return ["ready presentation for \(graph)"] }
+            guard current.presentation.id == presentation else { throw UICommandAuthority.Failure.retired }
+            return [FixtureReadiness.mismatch("access for \(graph)",
+                actual: bootstrap.homeCoordinator.homes.first { $0.graph == graph }?.access,
+                expected: access)].compactMap { $0 }
+        }
+    }
+
     private func drain(_ bootstrap: PersistenceBootstrap) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while bootstrap.hasOutstandingSharingStatusCheck, ContinuousClock.now < deadline {
@@ -135,6 +153,66 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             householdID: scope.graph.householdID, listID: scope.graph.listID),
             pendingCheckoutCount: count, pendingUndoCount: 0, heldCheckoutCount: 0, heldUndoCount: 0,
             incompleteUndoCount: 0, unassignedUndoCount: 0)
+    }
+
+    func testAccessFixtureWaitsForDiscoveryAfterSelection() async throws {
+        let gate = Gate(), started = expectation(description: "fresh discovery held")
+        let fixture = try await open(discover: { service in
+            if DiscoveryRequest.mode == .heldSuccess { started.fulfill(); await gate.wait() }
+            return try await Task.detached { try service.discover() }.value
+        })
+        let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
+        var nextActionRan = false
+        let barrier = Task {
+            try await DiscoveryRequest.$mode.withValue(.heldSuccess) {
+                try await self.awaitAccess(fixture, graph: graph, access: .owner)
+            }
+            nextActionRan = true
+        }
+        await fulfillment(of: [started], timeout: 2)
+        // The old ready-store predicate already passes while discovery is held.
+        do { _ = try await ready(fixture.bootstrap) }
+        catch { await gate.open(); _ = try? await barrier.value; throw error }
+        XCTAssertFalse(nextActionRan)
+        await gate.open()
+        try await barrier.value
+        XCTAssertTrue(nextActionRan)
+    }
+
+    func testAccessFixtureRejectsHomeSwitchDuringHeldDiscovery() async throws {
+        let gate = Gate(), started = expectation(description: "old presentation discovery held")
+        let fixture = try await open(discover: { service in
+            let snapshot = try await Task.detached { try service.discover() }.value
+            if DiscoveryRequest.mode == .heldSuccess { started.fulfill(); await gate.wait() }
+            return snapshot
+        })
+        let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
+        let other = try XCTUnwrap(fixture.bootstrap.homeCoordinator.homes.first { $0.graph != graph }?.graph)
+        let barrier = Task {
+            try await DiscoveryRequest.$mode.withValue(.heldSuccess) {
+                try await self.awaitAccess(fixture, graph: graph, access: .owner)
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        do { try await fixture.bootstrap.selectHome(other) }
+        catch { await gate.open(); _ = try? await barrier.value; throw error }
+        await gate.open()
+        do { try await barrier.value; XCTFail("A fresh Home cannot authorize the old fixture action") }
+        catch { XCTAssertEqual(error as? UICommandAuthority.Failure, .retired) }
+    }
+
+    func testAccessFixturePropagatesDiscoveryFailure() async throws {
+        let fixture = try await open(discover: { service in
+            if DiscoveryRequest.mode == .failure { throw Failure.expected }
+            return try await Task.detached { try service.discover() }.value
+        })
+        let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
+        do {
+            try await DiscoveryRequest.$mode.withValue(.failure) {
+                try await awaitAccess(fixture, graph: graph, access: .owner)
+            }
+            XCTFail("Discovery failure cannot satisfy fixture readiness")
+        } catch { XCTAssertTrue(error is Failure) }
     }
 
     func testUnresolvedInspectedHomeStillAllowsAccountAndAccessCheck() async throws {
@@ -163,12 +241,8 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
             }, hasIncompleteRoots: result.hasIncompleteRoots)
         }, read: { service, scope in try Self.snapshot(service, scope, count: 7) })
         let bootstrap = f.bootstrap
-        // open() selects a Home, which can invalidate startup discovery.
-        // Request access for that presentation before waiting for its witness.
-        try await bootstrap.refreshHomes()
-        _ = try await ready(bootstrap) { _ in
-            bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.access == .restricted
-        }
+        let observedHome = try XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.graph)
+        try await awaitAccess(f, graph: observedHome, access: .restricted)
         try await bootstrap.selectHome(XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "First home" }?.graph))
         let original = try await ready(bootstrap)
         let target = try XCTUnwrap(bootstrap.homeCoordinator.homes.first { $0.name == "Second home" })
