@@ -201,6 +201,32 @@ final class ImportedNeedReconciliationTests: XCTestCase {
         XCTAssertTrue(requested, "Completion must queue a retry before deferred state returns from the writer")
     }
 
+    func testImportWinningDeletionRaceIsPreservedWithoutFailingHistory() async throws {
+        let policy = RepairPermission()
+        let fixture = try makeFixture(permissionPolicy: policy)
+        let imported = lifetime.own(fixture.persistence.simulationContext())
+        policy.beforeDeletionSave = { context in
+            let id = try XCTUnwrap(context.deletedObjects.first?.objectID)
+            try imported.performAndWait {
+                let need = try XCTUnwrap(imported.existingObject(with: id) as? Need)
+                need.notes = "Arrived during reconciliation"
+                need.revision += 1
+                imported.transactionAuthor = "NSCloudKitMirroringDelegate.import"
+                try imported.save()
+            }
+        }
+        let history = PersistentHistoryConsumer(persistence: fixture.persistence,
+            checkpoints: FileHistoryCheckpointStore(directory: try lifetime.makeDirectory()),
+            needRecordIdentity: { fixture.records[$0] }, needSyncBoundary: { _, _ in .distantFuture })
+        _ = try await history.consume()
+        XCTAssertEqual(try count(fixture), 2)
+        try fixture.persistence.writer.performAndWait {
+            fixture.persistence.writer.reset()
+            XCTAssertTrue(try fixture.persistence.writer.fetch(Need.fetchRequest())
+                .contains { $0.notes == "Arrived during reconciliation" && $0.revision == 1 })
+        }
+    }
+
     private func count(_ fixture: Fixture) throws -> Int {
         try fixture.persistence.writer.performAndWait {
             fixture.persistence.writer.reset()
@@ -210,8 +236,10 @@ final class ImportedNeedReconciliationTests: XCTestCase {
 
     private final class RepairPermission: PersistencePermissionPolicy {
         var denied = false
+        var beforeDeletionSave: ((NSManagedObjectContext) throws -> Void)?
         func validateChanges(in context: NSManagedObjectContext, controller: PersistenceController) throws {
             if denied && !context.deletedObjects.isEmpty { throw PersistencePermissionError.deleteDenied }
+            if !context.deletedObjects.isEmpty { try beforeDeletionSave?(context) }
         }
     }
 

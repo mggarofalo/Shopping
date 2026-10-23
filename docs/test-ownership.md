@@ -2666,7 +2666,8 @@ normal local insert, stable cloud-record selection in both physical orders,
 relaunch/idempotence, unchanged personal-cart membership, divergent fields and
 relationships, missing/cloud-zone identity, local-store exclusion, deferred
 permission denial with history progress, account changes, and split-transaction
-relationship imports. It uses isolated SQLite stores and injected native identity
+relationship imports. A concurrent import winning the optimistic deletion save
+is retained without failing history. It uses isolated SQLite stores and injected native identity
 and completed-sync evidence. It does not claim to simulate CloudKit transport or
 unseen offline edits racing cloud deletion. Existing `GroceryNeedTests` retains
 strict ambiguous-identity command and projection assertions.

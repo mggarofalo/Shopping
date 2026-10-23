@@ -100,11 +100,19 @@ final class ImportedNeedReconciler {
                 return remaining > 0
             } catch {
                 context.rollback()
+                try self.validateAuthority(store: store, session: session)
                 // Cleanup is optional; a Home that no longer permits writes must
                 // not prevent imports for other Homes from being merged/checkpointed.
                 if case PersistencePermissionError.updateDenied = error { return true }
                 if case PersistencePermissionError.deleteDenied = error { return true }
                 if case HomeDeletionError.scopeChanged = error { return true }
+                let cocoa = error as NSError
+                if cocoa.domain == NSCocoaErrorDomain &&
+                    [NSManagedObjectMergeError, NSPersistentStoreSaveConflictsError].contains(cocoa.code) {
+                    // An import won the race after comparison. Preserve it and
+                    // re-evaluate from a fresh context on the next history pass.
+                    return true
+                }
                 throw error
             }
         }

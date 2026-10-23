@@ -76,7 +76,7 @@ Startup, subsequent history passes, and successful sync-completion notifications
 retry pending cleanup, including duplicates checkpointed
 by earlier builds. A later successful sync cycle may be necessary before repair.
 
-Normal save authority and permissions still apply. Write denial rolls back
+Normal save authority and permissions still apply. Write denial or an optimistic-save conflict with a concurrent import rolls back
 cleanup while allowing ordinary history merging/checkpointing to continue.
 Account changes and detached stores abort the stale operation. No schema change,
 cloud record rewrite, or uniqueness constraint is introduced.
@@ -94,11 +94,12 @@ an explicit investigation boundary tracked in SHOPPING-248.
 - Red regression: observed duplicate import fails grocery projection and relaunch.
 - Initial focused selection: 48 tests passed across reconciliation, grocery needs,
   persistence-container and replica-contract suites.
-- Reviewed boundary selection: nine reconciliation tests passed, including cart
+- Reviewed boundary selection: ten reconciliation tests passed, including cart
   preservation, conflicts, cloud identity/zone guards, denied cleanup retry,
   account changes, delayed relationship import, completed-cycle selection and
   completion during a held reconciliation pass. Checkout and restore preserve
-  the original occurrence after repair.
+  the original occurrence after repair. A separate-context import that changes
+  the deletion candidate during save wins safely and remains in the store.
 - One intermediate test attempt failed before test execution because SpringBoard
   rejected launch as busy. After explicitly booting the documented simulator,
   the selected tests passed with parallel testing disabled. Both results remain.
@@ -109,4 +110,6 @@ an explicit investigation boundary tracked in SHOPPING-248.
 - Two independent adversarial reviewers confirmed all reported findings resolved.
 - The local Catalog Save and Add UI workflow failed before saving: its keyboard
   Done button produced hit point {-1, -1}, and the keyboard remained visible.
-  Base comparison and pinned CI evidence are recorded with the PR.
+  The unchanged base passed on iOS 26.5; the patch passed on iOS 27. The initial
+  failure is retained and not attributed to this persistence change. Pinned CI
+  evidence is recorded with the PR.
