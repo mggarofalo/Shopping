@@ -2684,8 +2684,10 @@ Changed-helper caller inventory:
 The October 28 follow-up preserves the selected scope and explicit-choice
 authority across discovery, while requiring the resulting active presentation
 to match the coordinator generation. `testAccessFixtureAcceptsFreshAccessThatRenewsTheSameHomePresentation`
-forces an owner-to-restricted result and verifies that discovery retires the old
-presentation without replacing the Home choice. The pre-fix helper fails this
+holds its fixture-owned discovery after the helper captures authority, then
+releases an owner-to-restricted result and verifies that discovery retires the
+old presentation without replacing the Home choice. Task-local request identity
+keeps startup discovery from consuming or publishing this access change. The pre-fix helper fails this
 case with `retired`. `testAccessFixtureRejectsRenewedChoiceOfSameHomeDuringHeldDiscovery`
 and `testAccessFixtureRejectsAccountChangeDuringHeldDiscovery` retain rejection
 of changed authority even when the graph is unchanged. No production authority
@@ -2698,6 +2700,15 @@ source diffs, timing metadata and exact manifests are retained at
 `/tmp/shopping-234-retired-fixture/`. Cold baseline versus incremental repaired
 build costs are not a speed comparison or pinned-runtime proof. The original
 hosted failure remains recorded in routine run 40691576008.
+
+Review found the first positive proof allowed startup discovery to publish the
+access change before the helper captured its witness. The task-local gate now
+orders those events explicitly. The first review validation also exposed startup
+discovery superseding the failure-propagation test's request; that test now
+observes startup discovery entry before issuing its deliberate failure. Both
+failed review runs are retained as `ReviewBaseline` and `ReviewFinal`; the
+subsequent corrected-order negative and repaired inventories are `Review2Baseline`
+and `Review2Final`. These are source changes between runs, not retries to green.
 
 Generic store-ready and replacement-offer helpers are not broadened into global
 quiescence checks: their callers include tests deliberately observing pending

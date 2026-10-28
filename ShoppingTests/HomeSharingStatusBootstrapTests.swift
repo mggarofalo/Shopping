@@ -17,10 +17,6 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         func current() -> String { reads += 1; return name }
         func change() { name = "account-B" }
     }
-    private actor DiscoveryAccess {
-        var value: HomeCandidate.Access = .owner
-        func restrict() { value = .restricted }
-    }
     private actor Gate {
         var continuation: CheckedContinuation<Void, Never>?
         var opened = false
@@ -222,19 +218,35 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
     }
 
     func testAccessFixtureAcceptsFreshAccessThatRenewsTheSameHomePresentation() async throws {
-        let access = DiscoveryAccess()
+        let gate = Gate(), started = expectation(description: "access-changing fixture discovery held")
+        let startup = expectation(description: "startup discovery has begun")
         let fixture = try await open(discover: { service in
             let snapshot = try await Task.detached { try service.discover() }.value
-            let value = await access.value
+            guard DiscoveryRequest.mode == .heldSuccess else {
+                startup.fulfill()
+                return snapshot
+            }
+            started.fulfill()
+            await gate.wait()
             return HomeDiscovery(homes: snapshot.homes.map {
-                HomeCandidate(graph: $0.graph, name: $0.name, access: value)
+                HomeCandidate(graph: $0.graph, name: $0.name, access: .restricted)
             }, hasIncompleteRoots: snapshot.hasIncompleteRoots)
         })
+        await fulfillment(of: [startup], timeout: 2)
         let before = try await ready(fixture.bootstrap)
         let scope = try XCTUnwrap(before.homeScope)
         let choice = fixture.bootstrap.homeCoordinator.choiceAuthority
-        await access.restrict()
-        try await awaitAccess(fixture, graph: scope.graph, access: .restricted)
+        let barrier = Task {
+            try await DiscoveryRequest.$mode.withValue(.heldSuccess) {
+                try await self.awaitAccess(fixture, graph: scope.graph, access: .restricted)
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        // Only this request can change access, after awaitAccess captured its witnesses.
+        // Startup discovery always returns the original owner access.
+        XCTAssertTrue(before.presentation.isActive)
+        await gate.open()
+        try await barrier.value
         let after = try await ready(fixture.bootstrap)
         XCTAssertEqual(after.homeScope, scope)
         XCTAssertTrue(choice.isActive, "Discovery cannot replace the explicit Home choice")
@@ -289,10 +301,15 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
     }
 
     func testAccessFixturePropagatesDiscoveryFailure() async throws {
+        let startup = expectation(description: "startup discovery has begun")
         let fixture = try await open(discover: { service in
             if DiscoveryRequest.mode == .failure { throw Failure.expected }
+            startup.fulfill()
             return try await Task.detached { try service.discover() }.value
         })
+        // The explicit failure must be newer than startup discovery: production
+        // correctly discards failures from superseded discovery requests.
+        await fulfillment(of: [startup], timeout: 2)
         let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
         do {
             try await DiscoveryRequest.$mode.withValue(.failure) {
