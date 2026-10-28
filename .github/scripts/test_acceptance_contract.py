@@ -100,6 +100,26 @@ class AcceptanceContractTests(unittest.TestCase):
         self.assertEqual(steps["Publish fast timing report"]["if"], "always()")
         self.assertIn("release-build", workflow["jobs"])
 
+    def test_only_routine_acceptance_disables_automatic_diagnostic_collection(self):
+        workflow = self.workflow()
+        configured = []
+        for job_name, job in workflow["jobs"].items():
+            for step in job.get("steps", []):
+                command = step.get("run", "")
+                if "-collect-test-diagnostics" not in command:
+                    continue
+                tokens = shlex.split(command)
+                configured.append((job_name, step.get("name")))
+                self.assertEqual(tokens.count("-collect-test-diagnostics"), 1)
+                self.assertEqual(tokens[tokens.index("-collect-test-diagnostics") + 1], "never")
+                self.assertIn("xcodebuild", tokens)
+                self.assertIn("test-without-building", tokens)
+                self.assertEqual(tokens[tokens.index("-resultBundlePath") + 1], "AcceptanceResults.xcresult")
+                self.assertEqual(tokens[tokens.index("--log") + 1], "AcceptanceTest.log")
+                self.assertNotIn("-disableDiagnosticWarnings", tokens)
+                self.assertNotIn("-enableMainThreadChecker", tokens)
+        self.assertEqual(configured, [("build", "Run acceptance UI workflows")])
+
     def test_built_selection_rejects_missing_broadened_or_excluded_ui(self):
         fast = plan("ShoppingFast")["testTargets"][0]
         ui = {"BlueprintName": "ShoppingTests", "OnlyTestIdentifiers": list(acceptance.selected_tests())}

@@ -133,7 +133,7 @@ xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingD
 CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job boots one iPhone 16 Pro/iOS 18.5 simulator, uses `build-for-testing -testPlan ShoppingAcceptance` once, and reuses that `DerivedData` for two `test-without-building` commands:
 
 1. `-testPlan ShoppingFast` writes `FastResults.xcresult`; only this bundle feeds the existing coverage gate.
-2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
+2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO -collect-test-diagnostics never` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
 
 The built `.xctestrun` selection is checked before either run. After UI execution, the timing report must contain exactly the selected six passing methods, with no skipped, duplicate, or additional tests. These checks prevent a renamed selection silently disappearing or a target filter accidentally broadening to the exhaustive UI suite. Contract tests also protect plan membership, trigger ownership, shared build products, failure propagation, and the independent Fast coverage source:
 
@@ -274,8 +274,8 @@ The combined archive-and-schema job has a 25-minute budget. The previous
 15-minute budget expired after an observed six-minute simulator startup, before
 the modern test ran (38316984917). This budget covers setup and artifact
 collection; no per-test timeout, assertion, selection or retry policy changes.
-The capture step has its own three-minute limit and restarts an already-created
-simulator when necessary to read retained logs.
+The capture step has its own three-minute limit. It observes the existing simulator
+state and skips live capture if it is shut down; diagnostics never boot it.
 
 ## Compatibility canary (SHOPPING-236)
 
@@ -539,3 +539,75 @@ The three-minute early upload allocation is therefore best-effort retention,
 not a guarantee after force cancellation, runner loss, or a large artifact that
 cannot finish within its bound. Small logs are attempted first so an incomplete
 bundle upload cannot be the only source of progress evidence.
+
+
+### Routine acceptance diagnostic collection (SHOPPING-145)
+
+Only the routine acceptance invocation disables Xcode's automatic diagnostic
+collector with `-collect-test-diagnostics never`. The [single-workflow
+comparison](shopping-full-runtime.md#routine-acceptance-diagnostic-tail-shopping-145)
+reproduced a 600-second collector timeout after a passing test, then retained
+the same runtime warning without that tail when collection was disabled.
+This is a collection-policy change, not a fix for the warning or collector.
+
+Test progress, runtime warnings, assertions, failure screenshots/attachments,
+coverage and xcresult writing retain their existing settings. Automatic
+simulator diagnostic archives are no longer collected for routine acceptance;
+that evidence tradeoff does not disable XCTest warning detection. The existing
+SHOPPING-251 one-minute raw-log and two-minute available-result uploads retain
+failure/cancellation evidence before readers, including incomplete bundles.
+They remain best effort. No extra post-test collector is introduced.
+
+The exact six workflows, serial execution, native assertion timeouts, 30-minute
+job ceiling, failure/cancellation propagation and no-retry policy are unchanged.
+Fast, Siri diagnostics, compatibility canaries and local/hosted Full retain their
+existing collection settings and validation gates. Pinned hosted acceptance
+must validate this policy on its own candidate; the local one-test comparison
+is not evidence of a whole-suite or hosted time saving.
+
+
+### Isolate Siri hosted and UI sessions (SHOPPING-249)
+
+Run `40779521379` passed the 21 hosted contracts, but the subsequent UI launch
+requested a background assertion for retired host PID 50365 after Xcode launched
+new app PID 51058. The old host had already exited successfully; the assertion was
+rejected in 8 ms, before Siri action execution. Passing runs `40776593934` and
+`40774419389` either started with no app PID or cleared an intermediate PID before
+asserting the current process. These traces identify stale process selection,
+but do not establish where the delayed state originated.
+
+The controlled candidate builds the three explicit selections once, then runs the
+21 hosted contracts and one native UI test in separate `test-without-building`
+invocations. Both use the same owned simulator, serial execution, plan, and
+explicit DerivedData directory. This changes IDE session lifetime while holding
+simulator state and test inventory fixed. It adds no retry, sleep, or relaxed
+timeout. A successful experiment establishes compatibility, not a reliability
+cure. It does not address the separate hosted service-hub delay observed in
+`40780173582` or the earlier Accessibility bootstrap timeout.
+
+`SiriRegistration/Verdict.json` records each phase command, exit status and elapsed
+time. Build and hosted logs and all raw phase result bundles stay under
+`SiriRegistration`, which both workflow callers already retain. The native stream
+remains `SiriSchema.log`; launch observation applies only to that invocation.
+A failed phase stops subsequent execution and preserves its exit status even if
+inventory export fails. Inventory exports and result merging use the same process-
+group supervisor as test execution, with their existing 20-second command bound;
+SIGINT/SIGTERM cleans owned children and returns 130/143. Cancellation stops later
+phases. If a test already failed before export was cancelled, that original test
+failure remains authoritative. Worker-thread launch sampling keeps its existing
+bounded diagnostic path, which does not install main-thread signal handlers.
+Each test phase must contain exactly its passing selection, with no skips or
+duplicates. After both pass, `xcresulttool merge` produces `SiriSchema.xcresult`;
+its 22-case inventory must equal the union of the two executed manifests. Merge
+or inventory failure fails validation. Partial raw bundles remain available if
+no combined bundle can be produced. Independent review and a declared native
+diagnostic are required before adopting this candidate; no native result is yet
+claimed for the split.
+
+The first split-session hosted diagnostic, run `40783837065` on clean
+`fff80fb111c417fd93af91a3485abe4f999b0a7e`, passed all 21 hosted and one native
+case with zero skips. Per-phase and merged-inventory guards passed. Build took
+96.360 seconds, hosted execution 306.465 seconds, and native execution 242.730
+seconds. This validates native invocation and merge compatibility on that SHA;
+it does not establish a speedup or cure the intermittent stale-process failure.
+The final integrated candidate still requires ordinary CI.

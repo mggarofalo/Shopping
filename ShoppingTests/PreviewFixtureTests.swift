@@ -164,6 +164,62 @@ final class PreviewFixtureTests: XCTestCase {
         }
     }
 
+    func testClearInterruptionFixturePersistsOnlyIsolatedPreCheckoutState() throws {
+        var householdIDs = Set<UUID>()
+        var needIDs = Set<UUID>()
+        for _ in 0..<2 {
+            let url = temporaryURL("clear-interruption.sqlite")
+            let ids: ShoppingPreviewIDs
+            do {
+                let fixture = try ShoppingPreviewFixtures.make(.clearInterruption, storeURL: url)
+                ids = fixture.ids
+                XCTAssertNil(ids.clearOperationID)
+                XCTAssertTrue(ids.itemIDs.isEmpty)
+                XCTAssertEqual(ids.needIDs.count, 1)
+            }
+            XCTAssertTrue(householdIDs.insert(ids.householdID).inserted)
+            let needID = try XCTUnwrap(ids.needIDs["oneTime"])
+            XCTAssertTrue(needIDs.insert(needID).inserted)
+            XCTAssertThrowsError(try ShoppingPreviewFixtures.make(.clearInterruption, storeURL: url)) {
+                XCTAssertEqual($0 as? ShoppingPreviewFixtureError, .storeAlreadyExists)
+            }
+            let reopened = try PersistenceController(storeURL: url)
+            XCTAssertFalse(reopened.personalCartsEnabled)
+            XCTAssertNil(reopened.personalCartSessionProvider)
+            XCTAssertEqual(reopened.role(of: try XCTUnwrap(reopened.primaryStore)), .local)
+            let service = NeedService(persistence: reopened)
+            XCTAssertEqual(try service.firstHouseholdSelection()?.householdID, ids.householdID)
+            XCTAssertEqual(try service.firstHouseholdSelection()?.listID, ids.listID)
+            XCTAssertEqual(try service.allActiveNeedIDs(householdID: ids.householdID), [needID])
+            XCTAssertTrue(try service.allCatalogItemIDs(householdID: ids.householdID).isEmpty)
+            XCTAssertTrue(try service.catalogSuggestionNames(householdID: ids.householdID).isEmpty)
+            let context = reopened.simulationContext()
+            try context.performAndWait {
+                XCTAssertEqual(try context.count(for: Household.fetchRequest()), 1)
+                XCTAssertEqual(try context.count(for: GroceryList.fetchRequest()), 1)
+                XCTAssertEqual(try context.count(for: Need.fetchRequest()), 1)
+                XCTAssertEqual(try context.count(for: ClearOperation.fetchRequest()), 0)
+                let current = try need(needID, in: context)
+                XCTAssertEqual(current.title, "Fresh ice")
+                XCTAssertEqual(current.notes, "Keep cold")
+                XCTAssertEqual(current.kind, NeedKind.oneTime.rawValue)
+                XCTAssertNil(current.quantity)
+                XCTAssertEqual(current.urgency, NeedUrgency.normal.rawValue)
+                XCTAssertTrue(current.carted)
+                XCTAssertFalse(current.archived)
+                XCTAssertNil(current.clearOperationID)
+                XCTAssertNil(current.item)
+                XCTAssertNil(current.person)
+                XCTAssertTrue(current.oneTimeAnyStore)
+                XCTAssertNil(current.oneTimeCategory)
+                XCTAssertTrue(current.oneTimeStores?.isEmpty ?? true)
+                XCTAssertEqual(current.list?.id, ids.listID)
+                XCTAssertEqual(current.list?.household?.id, ids.householdID)
+                XCTAssertEqual(current.list?.household?.groceryList, current.list)
+            }
+        }
+    }
+
     func testInactiveSuggestionFixtureHasSavedDetailsWithoutCreatingACurrentNeed() throws {
         let fixture = try ShoppingPreviewFixtures.make(.inactiveCatalogSuggestion)
         XCTAssertTrue(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).isEmpty)

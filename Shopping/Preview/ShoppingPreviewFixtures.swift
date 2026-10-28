@@ -13,6 +13,7 @@ enum ShoppingPreviewCase: String, CaseIterable {
     case promotionLinkExisting
     case promotionConflict
     case inactiveCatalogSuggestion
+    case clearInterruption
     case performance
     case stress
 }
@@ -68,6 +69,8 @@ enum ShoppingPreviewFixtures {
             )
         } else if fixture == .promotionLinkExisting || fixture == .promotionConflict {
             try populatePromotion(service: service, hasActiveMatch: fixture == .promotionConflict, ids: &ids)
+        } else if fixture == .clearInterruption {
+            try populateClearInterruption(service: service, ids: &ids)
         } else if fixture == .inactiveCatalogSuggestion {
             ids.itemIDs["cafe"] = try service.createItem(
                 name: "Café au lait",
@@ -92,6 +95,14 @@ enum ShoppingPreviewFixtures {
             try insertPendingRelationship(in: persistence, householdID: ids.householdID, listID: ids.listID)
         }
         return ShoppingPreviewEnvironment(persistence: persistence, service: service, ids: ids)
+    }
+
+    private static func populateClearInterruption(service: NeedService, ids: inout ShoppingPreviewIDs) throws {
+        let needID = try service.addOneTimeNeed(
+            title: "Fresh ice", notes: "Keep cold", anyStore: true, listID: ids.listID
+        )
+        try service.setCarted(true, needID: needID)
+        ids.needIDs["oneTime"] = needID
     }
 
     private static func populate(

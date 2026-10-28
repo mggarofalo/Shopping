@@ -275,7 +275,8 @@ jobs:
             -parallel-testing-enabled NO \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -resultBundlePath AcceptanceResults.xcresult
+            -resultBundlePath AcceptanceResults.xcresult \
+            -collect-test-diagnostics never
 
       # Retain raw evidence before a reader can stall on an incomplete result.
       # Explicit status conditions also run when the native job is cancelled.
