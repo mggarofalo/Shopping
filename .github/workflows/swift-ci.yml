@@ -341,17 +341,17 @@ jobs:
     name: Cart scheduling diagnosis (not required CI)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.cart_diagnostic }}
     runs-on: macos-15
-    # Two independent cases: bounded boot, build, test, and retained evidence.
-    timeout-minutes: 75
+    # One unchanged-source predecessor case with retained scheduling evidence.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Select pinned Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
-      - name: Compare unchanged main and recovery candidate
+      - name: Exercise mounted-window predecessors before cart tests
         run: python3 .github/scripts/diagnose-cart-responsiveness.py
-      - name: Retain both outcomes and scheduling evidence
+      - name: Retain outcome and scheduling evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

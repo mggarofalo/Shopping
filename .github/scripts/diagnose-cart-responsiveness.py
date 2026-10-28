@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One controlled SHOPPING-250 baseline/candidate comparison; never CI proof."""
+"""One controlled SHOPPING-250 predecessor experiment; never CI proof."""
 import json
 import pathlib
 import subprocess
@@ -7,10 +7,13 @@ import time
 
 ROOT = pathlib.Path.cwd()
 EVIDENCE = ROOT / 'CartDiagnostic'
-SELECTION = 'ShoppingPersistenceTests/PersonalCartPresentationTests'
+SELECTION = (
+    'ShoppingPersistenceTests/PersistenceContainerTests/testActivationRetiresMountedGroceriesBeforeInvalidatingFetchedObjects',
+    'ShoppingPersistenceTests/PersistenceContainerTests/testRetiredMountedCartIgnoresContextInvalidationNotifications',
+    'ShoppingPersistenceTests/PersonalCartPresentationTests',
+)
 CASES = (
     ('main', '95aa72a06d9f4433366b8668b87e3b419af8126f'),
-    ('recovery', 'dff6d78c3d81cc5f65f1cd39b3f3fc681bcc5d33'),
 )
 MARKER = 'testBlockedWriterDoesNotBlockMainActorDuringCartCommand]'
 
@@ -38,7 +41,7 @@ def run_case(label, revision):
             '-scheme', 'Shopping', '-testPlan', 'ShoppingFast',
             '-destination', 'platform=iOS Simulator,id=' + simulator,
             '-derivedDataPath', str(products), '-parallel-testing-enabled', 'NO',
-            '-only-testing:' + SELECTION]
+            *['-only-testing:' + selection for selection in SELECTION]]
     try:
         started = time.monotonic()
         subprocess.run(['xcrun', 'simctl', 'boot', simulator], check=True, timeout=60)
