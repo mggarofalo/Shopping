@@ -61,6 +61,26 @@ class FullPreflightTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             preflight.require_jobs(preflight.latest_required_jobs(1, lambda _: [build, build, release]))
 
+    def test_staged_preflight_ignores_only_named_diagnostics_not_newer_normal_failures(self):
+        old = self.run_record(id=1)
+        diagnostic = self.run_record(id=3, display_title='Shopping compatibility canary')
+        self.assertEqual(preflight.successful_candidate([old, diagnostic], 'candidate', True), old)
+        for status, conclusion in [('completed', 'failure'), ('completed', 'cancelled'), ('in_progress', None)]:
+            newer = self.run_record(id=2, status=status, conclusion=conclusion, display_title='Shopping routine CI')
+            with self.assertRaises(ValueError):
+                preflight.successful_candidate([old, newer, diagnostic], 'candidate', True)
+        unknown = self.run_record(id=4, conclusion='failure', display_title='Unrecognized diagnostic')
+        with self.assertRaises(ValueError):
+            preflight.successful_candidate([old, unknown], 'candidate', True)
+
+    def test_staged_preflight_requires_native_jobs_as_well_as_aggregates(self):
+        names = preflight.REQUIRED_JOBS + preflight.NATIVE_JOBS
+        jobs = [dict(name=name, status='completed', conclusion='success') for name in names]
+        preflight.require_jobs(jobs, names)
+        for native in preflight.NATIVE_JOBS:
+            with self.assertRaises(ValueError):
+                preflight.require_jobs([job for job in jobs if job['name'] != native], names)
+
     def test_preflight_precedes_expensive_operations(self):
         runner = Path(__file__).with_name('run-local-shopping-full.sh').read_text()
         self.assertLess(runner.index('require-full-preflight.py'), runner.index('mktemp'))

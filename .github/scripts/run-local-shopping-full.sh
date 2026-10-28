@@ -19,7 +19,9 @@ esac
 
 commit_sha="$(git rev-parse HEAD)"
 # Fail before simulator startup or compilation when pinned compilers reject this SHA.
-python3 .github/scripts/require-full-preflight.py "$commit_sha"
+python3 .github/scripts/staged_validation.py gate
+python3 .github/scripts/staged_validation.py local "$commit_sha"
+python3 .github/scripts/require-full-preflight.py "$commit_sha" --pinned-canary
 if [[ "$(git rev-parse HEAD)" != "$commit_sha" || -n "$(git status --porcelain)" ]]; then
     echo "Source changed during Full preflight; restart validation." >&2
     exit 1

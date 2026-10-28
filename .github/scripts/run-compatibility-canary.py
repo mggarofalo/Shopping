@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import sys
@@ -145,6 +146,8 @@ def main():
         verify_products(artifacts / 'DerivedData/Build/Products', plan_name=PLAN)
         for path in (artifacts / 'DerivedData/Build/Products').glob('*.xctestrun'):
             shutil.copyfile(path, artifacts / path.name)
+            if plistlib.loads(path.read_bytes()).get('TestPlan', {}).get('Name') == PLAN:
+                shutil.copyfile(path, artifacts / 'BuiltSelection.xctestrun')
         def test():
             phase('test', [sys.executable, SCRIPTS / 'with-system-text-size.py', '--'] + base +
                   ['test-without-building', '-resultBundlePath', artifacts / 'Results.xcresult'])
@@ -164,6 +167,8 @@ def main():
         if source_identity() != source:
             raise ValueError('Source changed during canary')
         (artifacts / 'SourceVerified.json').write_text(json.dumps({'commit_sha': source, 'clean_unchanged': True}) + '\n')
+        from staged_validation import make_receipt
+        make_receipt(artifacts, source, 'canary', 'pinned' if os.environ.get('GITHUB_ACTIONS') == 'true' else 'local')
     except BaseException as error:
         (artifacts / 'Failure.json').write_text(json.dumps({'type': type(error).__name__, 'error': str(error)}) + '\n')
         raise

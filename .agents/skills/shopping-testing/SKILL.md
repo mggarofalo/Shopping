@@ -36,3 +36,21 @@ Use focused benchmarks during exploration. When the final candidate requires rem
 Use the maintained quick acceptance plan for routine PR feedback and the full plan for the broader required validation. Adding a test to quick acceptance requires a representative workflow reason and measured cost; related rule permutations belong in the fast layer. Keep abrupt termination, ordinary relaunch, accessibility and appearance boundaries distinct.
 
 For an independent evidence review when delegation is authorized, use the repository's `shopping-test-reviewer` agent. Supply the diff and artifact paths; it reviews without launching tests or dispatching workflows.
+
+## Staged experiment protocol
+
+Before a native or hosted experiment, classify the failure as product, fixture,
+automation, environment, or cancellation. Name the first failed boundary, retain
+its evidence, and state one falsifiable hypothesis and the smallest discriminating
+check. Change one variable and declare the selection, source SHA, toolchain/runtime,
+worker count, simulator ownership, phase budgets and at most three unchanged trials.
+Stop at the first unexplained failure; repeated failure at the same boundary calls
+for diagnosis or escalation, not another identical run counted as success.
+
+Audit callers of any changed shared helper and obtain independent review before
+expensive confirmation. Use the [staged receipt sequence](../../../docs/continuous-integration.md#staged-validation-receipts-shopping-237).
+Local receipts are integrity checks, not hosted authentication. Do not copy proof
+across SHAs or treat fake protocol checks as native compatibility evidence. Use a
+focused diagnostic while testing a hypothesis, then one normal exact-source manual
+CI run for the unchanged candidate; do not also open a PR merely to trigger the
+same broad CI. Preserve the existing manual CI → local Full → remote Full order.

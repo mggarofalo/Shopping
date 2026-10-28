@@ -28,6 +28,10 @@ if [[ "$remote_sha" != "$commit_sha" ]]; then
     exit 1
 fi
 
+python3 .github/scripts/staged_validation.py gate
+python3 .github/scripts/staged_validation.py local "$commit_sha"
+python3 .github/scripts/require-full-preflight.py "$commit_sha" --pinned-canary
+
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 gh api --method POST "repos/$repository/statuses/$commit_sha" \
     -f state=success \

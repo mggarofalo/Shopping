@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "fixtures": {
+    "plan": "ShoppingFast",
+    "bundle": "ShoppingPersistenceTests",
+    "classes": ["FixtureReadinessTests", "HomeSharingStatusBootstrapTests"]
+  },
+  "environments": {
+    "local": {"xcode": "27.1", "runtime": "26.5"},
+    "pinned": {"xcode": "16.4", "runtime": "18.5"}
+  }
+}

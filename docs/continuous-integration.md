@@ -337,3 +337,119 @@ margin and 10-second cancellation grace.
 A timeout remains failure even if cleanup succeeds. These are containment bounds;
 no native operation deadline or UI assertion timeout changes. Reporting failure
 cannot replace the original test failure or turn a failed run into passing proof.
+
+## Staged validation receipts (SHOPPING-237)
+
+The authoritative exhaustive-candidate sequence is:
+
+```text
+clean committed candidate
+  → deterministic prerequisite contracts
+  → local fixture selection (25 existing methods) + local compatibility canary
+  → push unchanged SHA → normal exact-source manual Swift CI (both required checks)
+  → local ShoppingFull (also requires explicit pinned canary on this SHA)
+  → existing local/ShoppingFull attestation
+  → remote ShoppingFull, whose Ubuntu preflight repeats hosted checks
+```
+
+Run local prerequisites with `python3 .github/scripts/run-local-staged-validation.py
+--simulator <exclusively-owned-UDID> --artifacts <new-directory-outside-source>`.
+The existing `FixtureReadinessTests` and `HomeSharingStatusBootstrapTests` methods
+remain in ShoppingFast; explicit method filters select them without a new plan.
+The runner checks their built selection, then calls the existing four-method
+canary. It retains small receipts in the Git common directory under
+`shopping-staged-receipts/<SHA>/{fixtures,canary}/`. Raw artifacts stay at the
+requested location. This does not replace broader affected callers when a change
+has proof owners beyond these shared boundaries.
+
+Supported manual dispatch is `python3 .github/scripts/staged_validation.py dispatch
+--stage canary --fixtures <Fixtures-directory> --canary <Canary-directory>`.
+Use `--stage ci` for routine manual CI; a hosted canary is not required for that
+routine path. Candidates proceeding to Full additionally need `--stage canary`;
+the hosted canary and normal CI may finish in either order. Each entry point runs
+the cheap contracts, verifies both local receipts and the clean pushed SHA, and
+stops before `gh workflow run` on failure. The existing local Full and remote
+Full helpers require the retained local receipts, cheap contracts, pinned canary
+and exact-source required CI; remote Full still requires the local Full status.
+Do not dispatch ordinary CI, a PR, and a focused diagnostic for each experiment.
+Use focused diagnostics while investigating, then one normal manual CI run for
+the frozen candidate. Routine Fast and Acceptance continue sharing one build;
+the modern release/Siri toolchain remains a separate required native job.
+
+### Trust and bypass boundaries
+
+A receipt binds schema/gate implementation and selection digests, exact clean
+commit SHA, test plan, built xctestrun, executed identities/results, Xcode/runtime,
+ordered successful phases, source verification, and artifact hashes. Canary
+receipts also bind the driver log and independent restoration proof. Missing,
+changed, stale, dirty, skipped, failed or incomplete evidence is rejected.
+The runtime/toolchain pair is explicit in `.github/staged-validation.json`;
+changing it requires new evidence. Equal source trees or report copying never
+transfer proof to another SHA.
+
+Local hashes establish integrity, not authenticity. A developer-local report can
+only satisfy a local prerequisite; it never creates a hosted success status.
+Pinned evidence must come from GitHub's exact-source manual Swift CI run, the
+successful named canary job, and that run's unexpired artifact. The downloaded
+receipt must identify that run and the actual selected job attempt. A later normal
+run's skipped canary does not hide a prior canary; a newer relevant failed,
+cancelled, skipped or unfinished canary prevents reuse. A partial rerun may retain
+a successful canary from an earlier attempt of the same run, just as existing
+required-job preflight permits. Staged Full preflight selects the latest normal
+exact-source CI run, ignoring only the two explicitly named diagnostic run titles;
+a later normal failure/cancellation/in-progress run still blocks an older pass.
+Thus a canary after normal CI does not force duplicate broad CI. Existing local
+Full attestation trust is retained;
+it additionally needs independently verified hosted canary and required CI.
+
+Every Swift CI macOS job depends on cheap Ubuntu contracts, so bypassing the
+local dispatch helper cannot bypass the cheap hosted prerequisite. A local receipt
+cannot be authenticated on GitHub and is not represented as a hosted success.
+PR/main-push CI keeps its normal trigger and runs cheap contracts before its
+unchanged native coverage. Pinned canary evidence is additionally required only
+for Full; routine manual CI does not acquire a separate 14-minute hosted job.
+Exhaustive Ubuntu preflight independently repeats cheap, pinned-canary,
+exact-source CI and local-Full-status checks before its macOS job.
+
+The required checks remain `Build & Test` and `Release SDK Build`, now Ubuntu
+aggregate jobs depending on cheap validation and their respective native jobs.
+They use `always()` and fail on failed, cancelled or skipped prerequisites; this
+avoids GitHub treating skipped required checks as passing when a cheap gate fails.
+Diagnostic mode uses different aggregate names before skipping them, so it cannot
+manufacture either required check. The live ruleset is unchanged. Historical
+preflight interfaces retain their old job names; the new staged path additionally
+requires both native jobs. Cancellation never produces a passing aggregate.
+
+### Measured evidence and limits
+
+The prior SHOPPING-236 candidate `6e1bd27` provides this observed baseline, not
+validation of the new receipt implementation:
+
+| Environment/path | Serial test command | Build | Simulator | Whole hosted job |
+| --- | ---: | ---: | ---: | ---: |
+| Local Xcode 27.1/iOS 26.5, clean candidate | 122.103s | 44.832s empty DerivedData; 2.300s warm | 0.407s already booted | Not hosted |
+| Hosted Xcode 16.4/iOS 18.5, run 40722818410 | 264.618s | 367.872s cold; 13.352s warm | 76.164s | 849s (14m09s; 14.15 macOS runner-minutes) |
+
+Hosted phase sums exclude setup/simulator creation and an approximately 55-second
+post-boot/pre-build gap including the initial unphased content-size read. They
+must not be reported as whole-job duration. The local/hosted five-minute post-build
+samples establish feasibility only, not sustained tail latency.
+
+The controlled failing-dispatch contract injects failure at the cheap prerequisite
+and observes zero GitHub mutations and zero macOS allocations through fake process
+and API boundaries. Its measured latency is printed in the test evidence. This
+proves dispatch ordering; it is not a measured production runner-minute saving.
+The development cheap-gate run measured 1.189 seconds locally (all prerequisites
+passed; `/tmp/shopping-237-gate-phases.jsonl`). This was an uncommitted development
+measurement, not final-candidate evidence; record the reviewed candidate separately. No broad speedup, duplicate-run saving, or successful new native path
+is inferred from these deterministic checks. Failed historical Full runs are the
+motivation, not an equivalent-inventory before/after benchmark. Native and hosted
+confirmation remain separately coordinated, and Full is never dispatched to tune
+these gates.
+
+The rejected design would have required a standalone pinned canary before every
+routine manual CI run. The prior sample indicates an additional 849 seconds and
+14.15 macOS runner-minutes for that clean path, including another cold build.
+That requirement was not adopted. This is an avoided design cost, not a measured
+production saving. No baseline compiler, Fast coverage, acceptance or Full gate
+was removed. The additional pinned canary applies only when proceeding to Full.
