@@ -2,6 +2,7 @@
 """Exact-source staged evidence. Local integrity is not hosted authenticity."""
 import argparse
 from collections import Counter
+from datetime import datetime
 import hashlib
 import io
 import json
@@ -169,7 +170,7 @@ def require_local_receipts(sha):
 
 
 def gh_api(path, *, binary=False):
-    data = subprocess.check_output(['gh', 'api', path], timeout=60)
+    data = subprocess.check_output(['gh', 'api', path], cwd=ROOT, timeout=60)
     return data if binary else json.loads(data)
 
 
@@ -184,13 +185,20 @@ def pages(api, path, key):
         page += 1
 
 
+def execution_key(run):
+    """GitHub run_started_at resets on re-run; creation IDs do not."""
+    value = datetime.fromisoformat(run['run_started_at'].replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        raise ValueError('Execution timestamp must identify its timezone')
+    return value, run['id'], run.get('run_attempt', 1)
+
+
 def latest_canary(repository, sha, api=gh_api):
     runs = pages(api, f'repos/{repository}/actions/workflows/swift-ci.yml/runs?head_sha={sha}', 'workflow_runs')
-    for run in sorted(runs, key=lambda r: r['id'], reverse=True):
+    executions = []
+    for run in runs:
         if run.get('head_sha') != sha or run.get('event') != 'workflow_dispatch':
             continue
-        # A normal CI run has a skipped canary and must not hide the last
-        # relevant diagnostic attempt. A newer failed/running canary must.
         canaries = []
         for attempt in range(run['run_attempt'], 0, -1):
             jobs = pages(api, f"repos/{repository}/actions/runs/{run['id']}/attempts/{attempt}/jobs", 'jobs')
@@ -198,22 +206,40 @@ def latest_canary(repository, sha, api=gh_api):
             if matches:
                 canaries = matches
                 break
+            # A queued/incomplete rerun with no published canary job cannot
+            # borrow an earlier pass while its new selection is unresolved.
+            if attempt == run['run_attempt'] and run.get('status') != 'completed' and run.get('display_title') == 'Shopping compatibility canary':
+                break
         relevant = run.get('display_title') == 'Shopping compatibility canary' or any(
             job.get('conclusion') != 'skipped' for job in canaries)
         if not relevant:
             continue
-        if len(canaries) != 1 or canaries[0].get('status') != 'completed' or canaries[0].get('conclusion') != 'success':
+        execution = run
+        if attempt != run['run_attempt']:
+            execution = api(f"repos/{repository}/actions/runs/{run['id']}/attempts/{attempt}")
+            if (execution.get('head_sha'), execution.get('id'), execution.get('run_attempt')) != (sha, run['id'], attempt):
+                raise ValueError('Wrong retained canary execution')
+        executions.append((execution_key(execution), run, canaries, attempt))
+    if not executions:
+        raise ValueError('No exact-source pinned canary success')
+    latest = max(executions, key=lambda item: item[0])
+    # GitHub timestamps have second resolution. If two executions tie, an
+    # unresolved/failed one must not be hidden by a success with a larger ID.
+    for key, candidate, jobs, _ in executions:
+        if key[0] != latest[0][0]:
+            continue
+        if len(jobs) != 1 or jobs[0].get('status') != 'completed' or jobs[0].get('conclusion') != 'success':
             raise ValueError('Latest relevant pinned canary has not passed')
-        if run.get('status') != 'completed' or run.get('conclusion') != 'success':
+        if candidate.get('status') != 'completed' or candidate.get('conclusion') != 'success':
             raise ValueError('Pinned canary workflow did not complete successfully')
-        return run, dict(canaries[0], evidence_attempt=attempt)
-    raise ValueError('No exact-source pinned canary success')
+    _, run, canaries, attempt = latest
+    return run, dict(canaries[0], evidence_attempt=attempt)
 
 
 def require_pinned_canary(repository, sha, api=gh_api, download=None, root=ROOT):
     run, job = latest_canary(repository, sha, api)
     artifacts = pages(api, f"repos/{repository}/actions/runs/{run['id']}/artifacts", 'artifacts')
-    matches = [a for a in artifacts if a.get('name') == 'compatibility-' + sha and not a.get('expired')]
+    matches = [a for a in artifacts if a.get('name') == 'compatibility-' + sha and a.get('expired') is False]
     if len(matches) != 1:
         raise ValueError('Missing or ambiguous pinned artifact')
     artifact = matches[0]
@@ -242,6 +268,7 @@ def cheap_gate(run=subprocess.run):
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_exhaustive_contract.py'],
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_full_preflight.py'],
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_compatibility_canary.py'],
+                [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_staged_runner.py'],
                 ['bash', '.github/scripts/test-shopping-full-gate.sh'],
                 ['ruby', '.github/scripts/check-action-pins.rb']]
     for command in commands:
@@ -269,16 +296,27 @@ def dispatch(stage, fixtures, canary, *, run=subprocess.run, check=clean_source,
         raise ValueError('Push this exact candidate before dispatch')
     if check() != sha:
         raise ValueError('Source changed during staged preflight')
-    command = ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', branch]
+    command = ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', branch, '-f', 'expected_sha=' + sha]
     if stage == 'canary':
         command += ['-f', 'compatibility_canary=true']
-    run(command, check=True, timeout=60)
+    run(command, cwd=ROOT, check=True, timeout=60)
+
+
+def validate_expected_sha(actual, expected, required=False):
+    if not expected and not required:
+        return
+    if not re.fullmatch('[0-9a-f]{40}', expected) or actual != expected:
+        raise ValueError('Dispatched ref moved away from the validated candidate')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('gate')
+    p = sub.add_parser('expected-sha')
+    p.add_argument('actual')
+    p.add_argument('expected')
+    p.add_argument('--required', action='store_true')
     p = sub.add_parser('pinned')
     p.add_argument('sha')
     p = sub.add_parser('local')
@@ -294,8 +332,10 @@ def main():
     args = parser.parse_args()
     if args.command == 'gate':
         cheap_gate()
+    elif args.command == 'expected-sha':
+        validate_expected_sha(args.actual, args.expected, args.required)
     elif args.command == 'pinned':
-        repository = os.environ.get('GITHUB_REPOSITORY') or subprocess.check_output(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], text=True, timeout=60).strip()
+        repository = os.environ.get('GITHUB_REPOSITORY') or subprocess.check_output(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], cwd=ROOT, text=True, timeout=60).strip()
         require_pinned_canary(repository, args.sha)
     elif args.command == 'local':
         require_local_receipts(args.sha)

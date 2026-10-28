@@ -3,14 +3,16 @@
 import argparse
 import json
 import re
+from pathlib import Path
 import subprocess
 import sys
 from urllib.parse import urlencode
 
 sys.dont_write_bytecode = True
-from staged_validation import require_pinned_canary, NATIVE_JOBS
+from staged_validation import require_pinned_canary, NATIVE_JOBS, execution_key
 
 
+ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_JOBS = ('Build & Test', 'Release SDK Build')
 
 
@@ -25,8 +27,11 @@ def successful_candidate(runs, sha, ignore_diagnostics=False):
         candidates = [run for run in candidates if run.get('display_title') not in diagnostic_titles]
     if not candidates:
         raise ValueError('Run Swift CI on this exact branch commit before local Full')
-    latest = max(candidates, key=lambda run: run['id'])
-    if latest.get('status') != 'completed' or latest.get('conclusion') != 'success':
+    latest = max(candidates, key=execution_key)
+    newest_time = execution_key(latest)[0]
+    ambiguous_failure = any(execution_key(run)[0] == newest_time and
+                            (run.get('status') != 'completed' or run.get('conclusion') != 'success') for run in candidates)
+    if ambiguous_failure:
         raise ValueError('Latest exact-source Swift CI has not passed; wait or fix it before local Full')
     return latest
 
@@ -39,7 +44,7 @@ def require_jobs(jobs, names=REQUIRED_JOBS):
 
 
 def api(path):
-    return json.loads(subprocess.check_output(['gh', 'api', path], text=True))
+    return json.loads(subprocess.check_output(['gh', 'api', path], cwd=ROOT, text=True, timeout=60))
 
 
 def latest_required_jobs(last_attempt, fetch, names=REQUIRED_JOBS):
@@ -72,7 +77,7 @@ def main():
     sha = args.sha
     if not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise ValueError('Expected the captured candidate SHA')
-    repository = subprocess.check_output(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], text=True).strip()
+    repository = subprocess.check_output(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], cwd=ROOT, text=True, timeout=60).strip()
     query = urlencode({'head_sha': sha, 'per_page': 100})
     runs = []
     page = 1

@@ -10,7 +10,8 @@ spec.loader.exec_module(preflight)
 class FullPreflightTests(unittest.TestCase):
     def run_record(self, **overrides):
         return dict({'id': 1, 'head_sha': 'candidate', 'event': 'workflow_dispatch',
-                     'status': 'completed', 'conclusion': 'success'}, **overrides)
+                     'status': 'completed', 'conclusion': 'success',
+                     'run_started_at': f"2026-10-28T00:00:{overrides.get('id', 1):02d}Z"}, **overrides)
 
     def test_exact_manual_source_passes(self):
         run = self.run_record()
@@ -72,6 +73,13 @@ class FullPreflightTests(unittest.TestCase):
         unknown = self.run_record(id=4, conclusion='failure', display_title='Unrecognized diagnostic')
         with self.assertRaises(ValueError):
             preflight.successful_candidate([old, unknown], 'candidate', True)
+
+    def test_older_normal_run_rerun_failure_supersedes_newer_created_success(self):
+        old = self.run_record(id=1, run_started_at='2026-10-28T00:00:20Z')
+        new = self.run_record(id=2)
+        for status, conclusion in [('completed', 'failure'), ('queued', None), ('in_progress', None)]:
+            with self.assertRaises(ValueError):
+                preflight.successful_candidate([dict(old, status=status, conclusion=conclusion), new], 'candidate', True)
 
     def test_staged_preflight_requires_native_jobs_as_well_as_aggregates(self):
         names = preflight.REQUIRED_JOBS + preflight.NATIVE_JOBS

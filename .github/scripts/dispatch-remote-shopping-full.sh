@@ -40,6 +40,7 @@ gh api --method POST "repos/$repository/statuses/$commit_sha" \
 
 gh workflow run swift-exhaustive.yml \
     --ref "$branch" \
-    -f suite=full
+    -f suite=full \
+    -f expected_sha="$commit_sha"
 
 echo "Dispatched remote ShoppingFull for $commit_sha."

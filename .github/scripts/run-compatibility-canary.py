@@ -113,11 +113,11 @@ def source_identity():
     return sha
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--simulator', required=True)
     parser.add_argument('--artifacts', type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     os.chdir(ROOT)
     source = source_identity()
     artifacts = args.artifacts.resolve()

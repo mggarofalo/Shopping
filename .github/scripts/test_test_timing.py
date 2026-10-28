@@ -125,6 +125,7 @@ class LocalGateTests(unittest.TestCase):
         # their own adversarial suite; inject only that boundary here.
         (scripts / 'staged_validation.py').write_text("""import os, sys
 NATIVE_JOBS = ('Build & Test (native)', 'Release SDK Build (native)')
+def execution_key(run): return (run['run_started_at'], run['id'], run.get('run_attempt', 1))
 def require_pinned_canary(*args):
     if os.environ.get('PINNED_FAILURE') == '1':
         raise ValueError('pinned receipt failed')
@@ -157,7 +158,7 @@ else:
     if os.environ.get('CHANGE_PREFLIGHT_SOURCE') == '1':
         with open('source.txt', 'a') as stream:
             stream.write('changed')
-    print(json.dumps({'workflow_runs': [dict(id=1, head_sha=sha, event='workflow_dispatch', status='completed', conclusion=os.environ.get('CI_RESULT', 'success'), run_attempt=1, html_url='https://example.test/run')]}))
+    print(json.dumps({'workflow_runs': [dict(id=1, head_sha=sha, event='workflow_dispatch', status='completed', conclusion=os.environ.get('CI_RESULT', 'success'), run_attempt=1, run_started_at='2026-10-28T00:00:01Z', html_url='https://example.test/run')]}))
 """)
 
         self.environment = dict(os.environ, PATH=str(self.fakebin) + os.pathsep + os.environ["PATH"],

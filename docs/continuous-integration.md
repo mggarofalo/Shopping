@@ -387,6 +387,14 @@ The runtime/toolchain pair is explicit in `.github/staged-validation.json`;
 changing it requires new evidence. Equal source trees or report copying never
 transfer proof to another SHA.
 
+The local fixture runner invokes the existing canary in-process, so parent-only
+SIGINT/SIGTERM reaches its active phase supervisor and restoration path. Supported
+dispatch commands always use this repository as their working directory and pass
+`expected_sha`. Ubuntu compares it with the resolved workflow SHA before native
+allocation; a remote branch advance after local validation cannot run a different
+candidate with the old receipts. Full dispatch requires that input; ordinary raw
+manual CI may omit it but still runs hosted cheap prerequisites.
+
 Local hashes establish integrity, not authenticity. A developer-local report can
 only satisfy a local prerequisite; it never creates a hosted success status.
 Pinned evidence must come from GitHub's exact-source manual Swift CI run, the
@@ -398,7 +406,14 @@ a successful canary from an earlier attempt of the same run, just as existing
 required-job preflight permits. Staged Full preflight selects the latest normal
 exact-source CI run, ignoring only the two explicitly named diagnostic run titles;
 a later normal failure/cancellation/in-progress run still blocks an older pass.
-Thus a canary after normal CI does not force duplicate broad CI. Existing local
+Ordering uses `run_started_at`, which GitHub's [official OpenAPI schema](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json)
+defines as resetting on rerun. Retained canary jobs use their actual attempt's
+start time, so rerunning only Siri cannot refresh an old canary. A later failed,
+queued or in-progress attempt of an older run blocks prior proof; ambiguous tied
+failures fail closed. Read-only verification of historical run 37716058310 found
+attempt 1 at 02:04:21 UTC and attempt 2 at 02:19:56 UTC on October 8, while its
+creation timestamp stayed unchanged. Thus a canary after normal CI does not force
+duplicate broad CI. Existing local
 Full attestation trust is retained;
 it additionally needs independently verified hosted canary and required CI.
 

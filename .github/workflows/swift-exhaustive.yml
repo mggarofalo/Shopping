@@ -3,6 +3,10 @@ name: Swift exhaustive tests
 on:
   workflow_dispatch:
     inputs:
+      expected_sha:
+        description: Exact candidate required for Full dispatch
+        type: string
+        default: ''
       suite:
         description: Test suite to run
         required: true
@@ -28,6 +32,17 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Verify dispatched candidate
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          SUITE: ${{ inputs.suite }}
+        run: |
+          if [[ "$SUITE" == full ]]; then
+            python3 .github/scripts/staged_validation.py expected-sha "$GITHUB_SHA" "$EXPECTED_SHA" --required
+          else
+            python3 .github/scripts/staged_validation.py expected-sha "$GITHUB_SHA" "$EXPECTED_SHA"
+          fi
 
       - name: Validate deterministic prerequisites
         run: PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/staged_validation.py gate

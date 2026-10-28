@@ -114,7 +114,7 @@ class StagedValidationTests(unittest.TestCase):
     def run_record(self, run_id=10, **changes):
         return dict(id=run_id, head_sha=SHA, event='workflow_dispatch', run_attempt=1,
                     status='completed', conclusion='success', display_title='Shopping compatibility canary',
-                    html_url=f'https://github.com/owner/repo/actions/runs/{run_id}', **changes)
+                    html_url=f'https://github.com/owner/repo/actions/runs/{run_id}', run_started_at=f'2026-10-28T00:00:{run_id:02d}Z', **changes)
 
     def api(self, runs, jobs=None, artifact_changes=None):
         jobs = jobs or {10: [{'id': 100, 'name': stage.CANARY_JOB, 'status': 'completed', 'conclusion': 'success'}]}
@@ -122,6 +122,8 @@ class StagedValidationTests(unittest.TestCase):
             if '/workflows/' in path: return {'workflow_runs': runs}
             if '/jobs?' in path:
                 run_id = int(path.split('/runs/')[1].split('/')[0]); return {'jobs': jobs[run_id]}
+            if '/attempts/1' in path and '?' not in path:
+                return self.run_record()
             if '/artifacts?' in path:
                 return {'artifacts': [dict({'id': 1000, 'name': 'compatibility-' + SHA, 'expired': False,
                                            'workflow_run': {'head_sha': SHA}}, **(artifact_changes or {}))]}
@@ -169,6 +171,43 @@ class StagedValidationTests(unittest.TestCase):
         evidence = stage.require_pinned_canary('owner/repo', SHA, api, Mock(return_value=self.archive(self.files())))
         self.assertEqual(evidence['job_id'], 100)
 
+    def test_older_run_later_failed_or_queued_attempt_supersedes_new_run_success(self):
+        older = self.run_record(10)
+        newer = self.run_record(11)
+        older.update(run_attempt=2, run_started_at='2026-10-28T00:00:20Z')
+        jobs = {10: [dict(id=100, name=stage.CANARY_JOB, status='completed', conclusion='failure')],
+                11: [dict(id=101, name=stage.CANARY_JOB, status='completed', conclusion='success')]}
+        for status in ('completed', 'queued', 'in_progress'):
+            older['status'] = status
+            older['conclusion'] = 'failure' if status == 'completed' else None
+            jobs[10] = [] if status != 'completed' else [dict(id=100, name=stage.CANARY_JOB, status='completed', conclusion='failure')]
+            with self.assertRaises(ValueError):
+                stage.latest_canary('owner/repo', SHA, self.api([older, newer], jobs))
+
+    def test_unrelated_later_rerun_does_not_refresh_old_canary_timestamp(self):
+        older = self.run_record(10)
+        older.update(run_attempt=2, run_started_at='2026-10-28T00:00:30Z')
+        newer = self.run_record(11)
+        jobs = {10: [dict(id=100, name=stage.CANARY_JOB, status='completed', conclusion='success')],
+                11: [dict(id=101, name=stage.CANARY_JOB, status='completed', conclusion='failure')]}
+        base = self.api([older, newer], jobs)
+        def api(path):
+            if '/runs/10/attempts/2/jobs?' in path:
+                return {'jobs': [{'name': 'Siri launch diagnostic', 'status': 'completed', 'conclusion': 'success'}]}
+            return base(path)
+        with self.assertRaises(ValueError):
+            stage.latest_canary('owner/repo', SHA, api)
+
+    def test_remote_only_advance_is_rejected_by_host_before_native_allocation(self):
+        allocated = Mock()
+        for expected, actual, required in [(SHA, 'b' * 40, False), (SHA, 'b' * 40, True), ('', SHA, True)]:
+            with self.assertRaises(ValueError):
+                stage.validate_expected_sha(actual, expected, required)
+                allocated()
+        allocated.assert_not_called()
+        stage.validate_expected_sha(SHA, SHA, True)
+        stage.validate_expected_sha(SHA, '', False)
+
     def test_failing_cheap_gate_never_reaches_receipt_network_or_dispatch(self):
         native = Mock(); receipt = Mock()
         started = time.monotonic()
@@ -199,9 +238,10 @@ class StagedValidationTests(unittest.TestCase):
             stage.dispatch('ci', Path('fixtures'), Path('canary'), check=check,
                            gate=lambda: events.append('cheap'),
                            local=lambda path, sha, kind: events.append(kind),
-                           run=lambda cmd, **kwargs: events.append(('dispatch', cmd)))
+                           run=lambda cmd, **kwargs: events.append(('dispatch', cmd, kwargs)))
         self.assertEqual(events[:-1], ['source', 'cheap', 'fixtures', 'canary', 'source'])
-        self.assertEqual(events[-1][1], ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', 'test/candidate'])
+        self.assertEqual(events[-1][2]['cwd'], stage.ROOT)
+        self.assertEqual(events[-1][1], ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', 'test/candidate', '-f', 'expected_sha=' + SHA])
 
     def test_workflow_failure_graph_allocates_no_native_job_and_fails_required_names(self):
         workflow = json.loads(subprocess.check_output(['ruby', '-rjson', '-ryaml', '-e',
@@ -209,6 +249,9 @@ class StagedValidationTests(unittest.TestCase):
             str(stage.ROOT / '.github/workflows/swift-ci.yml')]))
         jobs = workflow['jobs']
         self.assertEqual(jobs['cheap-contracts']['runs-on'], 'ubuntu-latest')
+        steps = jobs['cheap-contracts']['steps']
+        self.assertIn('expected-sha', steps[1]['run'])
+        self.assertEqual(steps[1]['env']['EXPECTED_SHA'], '${{ inputs.expected_sha }}')
         self.assertFalse(any('staged_validation.py pinned' in step.get('run', '') for step in jobs['cheap-contracts']['steps']))
         for key in ('build', 'release-build', 'compatibility-canary', 'siri-launch-diagnostic'):
             self.assertEqual(jobs[key]['needs'], 'cheap-contracts')

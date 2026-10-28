@@ -8,7 +8,6 @@ import os
 import plistlib
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 
 sys.dont_write_bytecode = True
@@ -23,6 +22,12 @@ spec.loader.exec_module(canary)
 def verify_fixture_products(products):
     expected_skips = json.loads((ROOT / 'ShoppingFast.xctestplan').read_text())['testTargets'][0].get('skippedTests', [])
     verify_explicit_products(products, 'ShoppingFast', 'ShoppingPersistenceTests', fixture_selection(), expected_skips)
+
+
+def run_canary(simulator, output):
+    # Stay in this process so parent-only cancellation reaches the existing
+    # active phase supervisor and its native-driver restoration path.
+    return canary.main(['--simulator', simulator, '--artifacts', str(output)])
 
 
 def main():
@@ -71,8 +76,7 @@ def main():
     (fixtures / 'SourceVerified.json').write_text(json.dumps({'commit_sha': sha, 'clean_unchanged': True}) + '\n')
     make_receipt(fixtures, sha, 'fixtures', 'local')
     # Existing canary owns its unchanged four-method plan and timing framework.
-    subprocess.run([sys.executable, scripts / 'run-compatibility-canary.py', '--simulator', args.simulator,
-                    '--artifacts', output / 'Canary'], check=True, env=env)
+    run_canary(args.simulator, output / 'Canary')
     if clean_source() != sha:
         raise ValueError('Source changed during staged validation')
     for kind, directory in [('fixtures', fixtures), ('canary', output / 'Canary')]:
