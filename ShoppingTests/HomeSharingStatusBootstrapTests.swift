@@ -126,14 +126,22 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         let presentation = try await ready(bootstrap).presentation.id
         try await bootstrap.refreshHomes()
         try await FixtureReadiness.wait(changes: [bootstrap.objectWillChange.eraseToAnyPublisher()]) {
-            if case .failed(let error) = bootstrap.state { throw error }
-            guard try fixture.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
-            guard case .ready(let current) = bootstrap.state else { return ["ready presentation for \(graph)"] }
-            guard current.presentation.id == presentation else { throw UICommandAuthority.Failure.retired }
-            return [FixtureReadiness.mismatch("access for \(graph)",
-                actual: bootstrap.homeCoordinator.homes.first { $0.graph == graph }?.access,
-                expected: access)].compactMap { $0 }
+            try self.accessPrerequisites(fixture, graph: graph, access: access,
+                session: session, presentation: presentation)
         }
+    }
+
+    private func accessPrerequisites(_ fixture: Fixture, graph: HomeGraphIdentity,
+                                     access: HomeCandidate.Access, session: ShopperSession,
+                                     presentation: UUID) throws -> [String] {
+        let bootstrap = fixture.bootstrap
+        if case .failed(let error) = bootstrap.state { throw error }
+        guard try fixture.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
+        guard case .ready(let current) = bootstrap.state else { return ["ready presentation for \(graph)"] }
+        guard current.presentation.id == presentation else { throw UICommandAuthority.Failure.retired }
+        return [FixtureReadiness.mismatch("access for \(graph)",
+            actual: bootstrap.homeCoordinator.homes.first { $0.graph == graph }?.access,
+            expected: access)].compactMap { $0 }
     }
 
     private func drain(_ bootstrap: PersistenceBootstrap) async throws {
