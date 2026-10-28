@@ -133,7 +133,7 @@ xcodebuild test -project Shopping.xcodeproj -scheme Shopping -testPlan ShoppingD
 CI first rejects test categorization based on `#if targetEnvironment(simulator)`. The existing `Build & Test` job boots one iPhone 16 Pro/iOS 18.5 simulator, uses `build-for-testing -testPlan ShoppingAcceptance` once, and reuses that `DerivedData` for two `test-without-building` commands:
 
 1. `-testPlan ShoppingFast` writes `FastResults.xcresult`; only this bundle feeds the existing coverage gate.
-2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
+2. `-testPlan ShoppingAcceptance -only-testing:ShoppingTests -parallel-testing-enabled NO -collect-test-diagnostics never` writes `AcceptanceResults.xcresult`; the plan narrows that UI target to its explicit six methods.
 
 The built `.xctestrun` selection is checked before either run. After UI execution, the timing report must contain exactly the selected six passing methods, with no skipped, duplicate, or additional tests. These checks prevent a renamed selection silently disappearing or a target filter accidentally broadening to the exhaustive UI suite. Contract tests also protect plan membership, trigger ownership, shared build products, failure propagation, and the independent Fast coverage source:
 
@@ -539,3 +539,28 @@ The three-minute early upload allocation is therefore best-effort retention,
 not a guarantee after force cancellation, runner loss, or a large artifact that
 cannot finish within its bound. Small logs are attempted first so an incomplete
 bundle upload cannot be the only source of progress evidence.
+
+
+### Routine acceptance diagnostic collection (SHOPPING-145)
+
+Only the routine acceptance invocation disables Xcode's automatic diagnostic
+collector with `-collect-test-diagnostics never`. The [single-workflow
+comparison](shopping-full-runtime.md#routine-acceptance-diagnostic-tail-shopping-145)
+reproduced a 600-second collector timeout after a passing test, then retained
+the same runtime warning without that tail when collection was disabled.
+This is a collection-policy change, not a fix for the warning or collector.
+
+Test progress, runtime warnings, assertions, failure screenshots/attachments,
+coverage and xcresult writing retain their existing settings. Automatic
+simulator diagnostic archives are no longer collected for routine acceptance;
+that evidence tradeoff does not disable XCTest warning detection. The existing
+SHOPPING-251 one-minute raw-log and two-minute available-result uploads retain
+failure/cancellation evidence before readers, including incomplete bundles.
+They remain best effort. No extra post-test collector is introduced.
+
+The exact six workflows, serial execution, native assertion timeouts, 30-minute
+job ceiling, failure/cancellation propagation and no-retry policy are unchanged.
+Fast, Siri diagnostics, compatibility canaries and local/hosted Full retain their
+existing collection settings and validation gates. Pinned hosted acceptance
+must validate this policy on its own candidate; the local one-test comparison
+is not evidence of a whole-suite or hosted time saving.

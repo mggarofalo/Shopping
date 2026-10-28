@@ -70,7 +70,7 @@ The corrected appearance test passed in 126.358s under serial execution, but its
 
 A one-second sample of the waiting `simctl diagnose` process found a worker blocked in `NSConcreteTask waitUntilExit` and another in a dispatch-group wait. A process listing at the time showed no live direct child. Diagnostic files had stopped changing, and `diagnose.log` was empty. The sample is retained at `/tmp/shopping-108-evidence/simctl-diagnose-sample.txt`.
 
-This evidence locates the delay in post-test CoreSimulator diagnostic collection. It does not establish the underlying task-completion cause or an application defect. The same overhead affects serial and parallel commands, so compare test execution and command wall time separately. Keep failure diagnostics enabled; disabling them would remove useful evidence rather than fix the collector. The sample and result bundle provide a concrete basis for a separate tooling investigation or an Apple bug report.
+This evidence locates the delay in post-test CoreSimulator diagnostic collection. It does not establish the underlying task-completion cause or an application defect. The same overhead affects serial and parallel commands, so compare test execution and command wall time separately. The historical recommendation was to keep failure diagnostics enabled; the later [SHOPPING-145 routine acceptance policy](#routine-acceptance-diagnostic-tail-shopping-145) makes a measured, scoped collection tradeoff while preserving raw failure evidence. Full collection remains unchanged. The sample and result bundle provide a concrete basis for a separate tooling investigation or an Apple bug report.
 
 ## Reliability prerequisite
 
@@ -326,3 +326,62 @@ methods in ShoppingFull. Its step/job caps are 35/45 minutes to leave space for
 cold compilation and artifact collection; these temporary caps are not integrated
 into the permanent CI/Full workflows. The previous five logged UI passes cover
 unchanged scene checks, but do not replace final exact-source Full validation.
+
+
+## Routine acceptance diagnostic tail (SHOPPING-145)
+
+On October 28, 2026, clean `776bc54473a14637ff01944abcbd6828d05f0053`
+(tree `6093174a51fffaf8416ada70db4a84d5a6cf4a98`) reproduced the tail in
+`CatalogRefreshUITests/testSaveAndAddToListWorksForNewAndExistingCatalogItemsWithoutDuplicates`.
+Both commands passed exactly that one method, with zero skips, on Xcode 27.1
+(27A9275), macOS 27.0.1, iPhone 17 Pro / iOS 27.0 (24A434), serial execution.
+
+| Measurement | Default collection | `-collect-test-diagnostics never` |
+| --- | ---: | ---: |
+| Whole test command | 657.186s | 69.111s |
+| Test case | 28.779s | 33.873s |
+| Test-case end to command exit | 602.906s | 5.576s |
+| Exit status | 0 | 0 |
+
+Both reused one fresh Acceptance build (43.796s), with no intervening build or
+source edit. The comparator ran second on the same previously initialized,
+owned simulator, with a fresh test fixture. Initial boot state was not captured;
+this is warm-product reuse, not proof of a continuously booted simulator or a
+cold-runner comparison. The only xcodebuild behavior argument changed was
+`-collect-test-diagnostics never`; result paths differed to preserve both runs.
+This single fixed-order pair observed 588.075s less command time. It does not
+establish a six-workflow, Full, pinned-Xcode-16.4, or repeated-run saving.
+
+The baseline test passed at 22:10:16.978 UTC. `simctl diagnose -l -b
+--timeout=600` started at 22:10:17.330. At 22:20:17.447 Xcode reported its
+600-second diagnostics wait had timed out; the test command still exited zero
+at 22:20:19.882. The collector survived briefly under PID 1 (observed alive at
+22:20:22), then disappeared without intervention. A one-second sample at a
+10ms interval showed dispatch-group and `NSConcreteTask waitUntilExit` waits;
+no direct child was visible in the later process listing. This locates the
+delay but does not identify the blocked underlying task. The comparator's 57
+process observations, with approximately one-second waits, saw no owned
+`simctl diagnose`; they cannot exclude a shorter-lived process. Observation
+cost was not subtracted, and only the baseline received the one-second sample.
+
+Both xcresults retain the SwiftUI runtime warning “Invalid frame dimension
+(negative or non-finite).” Baseline app output logged it twice, at 22:10:00.361
+and 22:10:07.297. Its exported issue has no source filename or attachments and
+64 stack frames containing only zero addresses. Successful symbolication in the
+session log therefore does not provide an actionable source location. The
+warning may explain automatic collection, but that causal link and the layout
+source remain unproven; disabling collection does not solve the warning.
+
+Baseline evidence: `/tmp/shopping-244-current-776bc54/` contains
+`CatalogUI.xcresult`, `CatalogUITiming.json`, `Catalog-warningSummaries.json`,
+`DiagnosticProcessObservations.jsonl`, raw logs and the process sample.
+Comparator evidence: `/tmp/shopping-145-never-776bc54/` contains its separate
+xcresult, `Experiment.json`, `Comparison.json`, `Timing.json`, `TestDetails.json`,
+raw log and `OwnedCollectorObservations.jsonl`. Source remained clean; no retry,
+assertion/timeout change or warning suppression was used. The owned simulator
+was confirmed already shut down after the comparator.
+
+Routine acceptance adopts this scoped collection policy with the existing
+bounded raw-log/result retention described in [CI guidance](continuous-integration.md#routine-acceptance-diagnostic-collection-shopping-145).
+Other test invocations retain their collection settings. Required hosted CI
+still owns pinned-runtime validation of the final policy candidate.
