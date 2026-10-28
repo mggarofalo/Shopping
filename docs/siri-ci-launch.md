@@ -93,3 +93,47 @@ its parent exits, and added runner contracts to normal release CI before archive
 Those changes have dedicated local process tests; this earlier probe is not
 exact-source CI proof for them. The final integrated candidate still requires its
 own required checks. SHOPPING-249 remains open for the native launch cause.
+
+## Recurrence during phase integration
+
+[PR CI run 40748443094](https://github.com/mggarofalo/Shopping/actions/runs/40748443094)
+for milestone head `23f1176` again passed the 21 app-backed contracts and failed
+the native UI case at `XCUIApplication.launch()`. The test exit remained 65 and
+the exact-inventory check failed. The exported
+`Session-ShoppingSiriTests-2026-10-28_185814-h0DTyY.log` records:
+
+| UTC | Evidence |
+| --- | --- |
+| 19:00:07.952 | Runner creates the 60-second launch future (line 696). |
+| 19:00:12.796 | Xcode receives the launch request (line 698). |
+| 19:01:08.348 | Runner times out after 60.396 seconds (lines 1963–1966). |
+| 19:01:34.372 | Xcode invokes the token receipt, 26.024 seconds after timeout (line 713). |
+| 19:01:36.566 | Xcode submits the native application launch (line 2089). |
+| 19:01:37.551 | Runner observes PID 61647 running in the foreground (line 2148). |
+| 19:03:27.595 | Spindump collection finishes after 139.240 seconds (lines 2360–2363). |
+
+The failed case lasted 226.810 seconds. This repeats the launch acknowledgement
+failure, before intent execution; late app startup evidence does not explain
+the earlier delay. The post-test collector observed `Shutdown`, did not boot,
+and successfully deleted only its owned simulator. Its state inspection and
+cleanup commands totaled 2.607 seconds. Evidence is retained locally under
+`/tmp/shopping-phase-18-ci-40748443094/` and in that run's `siri-schema-results` artifact.
+
+Routine `Release SDK Build (native)` now enables the same bounded launch observer
+as the diagnostic job. The next actual routine stall can therefore retain
+pre-timeout evidence without requiring another diagnostic-only attempt. The
+existing artifact upload includes `LaunchObservation.json` and `LaunchSample`
+under `SiriRegistration`. Quick launches add log parsing and a small observation
+receipt, with no sampling subprocess or deliberate wait. A launch still pending
+after twenty seconds triggers two discovery commands and at most five one-second
+process samples on the background thread. Each command has a five-second timeout
+and up to five seconds to reap a killed process: 35 seconds of command timeouts,
+or a conservative 70 seconds including all timeout cleanup waits, excluding
+host scheduling and file I/O. Collection overlaps the native wait, but final
+thread cleanup can add the remaining collection time. Sampling can also perturb
+a slow host; this is an observation cost, not a measured speedup.
+
+Selection, launch ordering, native timeout and assertions are unchanged. Runner
+contracts cover routine observer wiring and preserve the native failure even
+when process discovery or sampling fails. The failed CI run stays failed, and
+the launch cause remains open pending evidence captured during the delay.

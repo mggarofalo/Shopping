@@ -77,7 +77,7 @@ jobs:
         run: python3 .github/scripts/validate-siri-metadata.py "$RUNNER_TEMP/Shopping.xcarchive/Products/Applications/Shopping.app"
 
       - name: Test current Siri schema contracts
-        run: python3 .github/scripts/siri-schema-ci.py test --output "$RUNNER_TEMP"
+        run: python3 .github/scripts/siri-schema-ci.py test --output "$RUNNER_TEMP" --sample-launch
 
       - name: Capture Siri registration diagnostics
         if: always()
