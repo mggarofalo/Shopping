@@ -63,7 +63,10 @@ def run_case(label, revision):
                 contents = log.read_text(errors='replace')
                 if marker_time is None and MARKER + "' started." in contents:
                     marker_time = time.monotonic()
-                if marker_time is not None and not sampled and time.monotonic() - marker_time >= 5:
+                target_finished = any(MARKER + "' " + outcome in contents
+                                      for outcome in ('passed', 'failed', 'skipped'))
+                if (marker_time is not None and not sampled and not target_finished
+                        and time.monotonic() - marker_time >= 5):
                     sampled = True
                     # A fresh, isolated simulator has exactly one Shopping host.
                     pids = subprocess.run(['pgrep', '-x', 'Shopping'], capture_output=True, text=True)
@@ -96,14 +99,25 @@ def run_case(label, revision):
                 evidence / 'system.log', timeout=60)
         return status
     finally:
-        (evidence / 'metadata.json').write_text(json.dumps(metadata, indent=2))
-        command(['xcrun', 'simctl', 'shutdown', simulator], evidence / 'shutdown.log', timeout=60)
-        command(['xcrun', 'simctl', 'delete', simulator], evidence / 'delete.log', timeout=60)
+        metadata['cleanup'] = {}
+        for operation in ('shutdown', 'delete'):
+            try:
+                metadata['cleanup'][operation] = command(
+                    ['xcrun', 'simctl', operation, simulator],
+                    evidence / (operation + '.log'), timeout=60)
+            except subprocess.TimeoutExpired:
+                metadata['cleanup'][operation] = 'timeout after 60 seconds'
+            except OSError as error:
+                metadata['cleanup'][operation] = str(error)
         # Retain test manifests, not hundreds of MB of simulator build products.
-        for manifest in products.glob('Build/Products/*.xctestrun'):
-            (evidence / manifest.name).write_bytes(manifest.read_bytes())
-        import shutil
-        shutil.rmtree(products, ignore_errors=True)
+        try:
+            for manifest in products.glob('Build/Products/*.xctestrun'):
+                (evidence / manifest.name).write_bytes(manifest.read_bytes())
+            import shutil
+            shutil.rmtree(products, ignore_errors=True)
+        except OSError as error:
+            metadata['cleanup']['products'] = str(error)
+        (evidence / 'metadata.json').write_text(json.dumps(metadata, indent=2))
 
 
 def main():
@@ -112,11 +126,15 @@ def main():
     outcomes = {}
     for label, revision in CASES:
         try:
-            outcomes[label] = run_case(label, revision)
+            status = run_case(label, revision)
+            metadata = json.loads((EVIDENCE / label / 'metadata.json').read_text())
+            outcomes[label] = {'test_exit_status': status, 'cleanup': metadata.get('cleanup', {})}
         except Exception as error:
             outcomes[label] = {'error': str(error)}
         (EVIDENCE / 'outcomes.json').write_text(json.dumps(outcomes, indent=2))
-    return 0 if all(value == 0 for value in outcomes.values()) else 1
+    return 0 if all(value.get('test_exit_status') == 0
+                    and all(status == 0 for status in value.get('cleanup', {}).values())
+                    for value in outcomes.values()) else 1
 
 
 if __name__ == '__main__':

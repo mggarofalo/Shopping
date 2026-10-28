@@ -341,7 +341,8 @@ jobs:
     name: Cart scheduling diagnosis (not required CI)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.cart_diagnostic }}
     runs-on: macos-15
-    timeout-minutes: 35
+    # Two independent cases: bounded boot, build, test, and retained evidence.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
