@@ -507,3 +507,35 @@ reproduced both expression-context errors in the rejected workflow. After
 `7ee53f2` moved cancellation handling to explicit step `if` conditions, actionlint
 passed both changed workflows. This negative/positive check validates workflow
 syntax, not hosted execution, and does not transfer native proof to a new SHA.
+
+### Acceptance cancellation evidence (SHOPPING-251)
+
+[Run 40748443094](https://github.com/mggarofalo/Shopping/actions/runs/40748443094)
+passed all 816 Fast tests with zero skips and passed coverage. Acceptance began
+at 19:03:14 UTC, announced its result path at 19:03:19, and was cancelled at
+19:18:49 after the native job reached its existing 30-minute limit. Quiet output
+and the absence of a readable result bundle left no evidence distinguishing a
+launch, execution, or finalization stall. The command, six-test selection, and
+job ceiling matched `95aa72a`; no phase-induced cause was established. This run
+remains failed, and it does not justify increasing the timeout.
+
+Acceptance now emits ordinary Xcode test progress through the existing streaming
+log recorder. The selection remains six methods, with unchanged assertions,
+serial execution, and job limit. Before the post-test summary and timing readers,
+failed or cancelled validation uploads small raw logs in a separate one-minute
+step, followed by available raw result bundles and built selections in a
+separate two-minute step. Incomplete bundles need no successful parsing to be
+retained. Result compression is disabled to avoid spending CPU on compression;
+artifacts retain the existing 14-day lifetime. Successful runs do not upload
+these large raw artifacts. A later reporting failure uploads them only if the
+early result upload was skipped, preserving the previous failure evidence path
+without uploading a bundle twice.
+
+The explicit `failure() || cancelled()` status expression includes cancellation
+without GitHub's implicit success requirement. It does not turn a failed or
+cancelled job into a pass. The [GitHub cancellation procedure](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation)
+re-evaluates conditions and may forcibly stop remaining work after five minutes.
+The three-minute early upload allocation is therefore best-effort retention,
+not a guarantee after force cancellation, runner loss, or a large artifact that
+cannot finish within its bound. Small logs are attempted first so an incomplete
+bundle upload cannot be the only source of progress evidence.
