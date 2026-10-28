@@ -2,6 +2,11 @@ name: Swift CI
 
 on:
   workflow_dispatch:
+    inputs:
+      siri_launch_diagnostic:
+        description: Observe the existing Siri launch boundary without producing required-check proof
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -19,6 +24,7 @@ concurrency:
 
 jobs:
   release-build:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
     name: Release SDK Build
     runs-on: xcode-27
     # Includes archive, a cold simulator boot and the separately compiled Siri suite.
@@ -59,9 +65,58 @@ jobs:
           path: |
             ${{ runner.temp }}/SiriSchema.xcresult
             ${{ runner.temp }}/SiriSchemaTests.json
+            ${{ runner.temp }}/SiriSchema.log
+            ${{ runner.temp }}/SiriRegistration
+
+  siri-launch-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.siri_launch_diagnostic }}
+    name: Siri launch diagnostic
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate diagnostic contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_siri_schema_ci.py
+
+      - name: Select upload Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_27.0.app
+
+      - name: Compile unsigned release archive
+        run: >-
+          xcodebuild archive
+          -project Shopping.xcodeproj
+          -scheme Shopping
+          -configuration Release
+          -destination 'generic/platform=iOS'
+          -archivePath "$RUNNER_TEMP/Shopping.xcarchive"
+          -derivedDataPath "$RUNNER_TEMP/ReleaseDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify exported Siri schema
+        run: python3 .github/scripts/validate-siri-metadata.py "$RUNNER_TEMP/Shopping.xcarchive/Products/Applications/Shopping.app"
+
+      - name: Observe current Siri launch boundary
+        run: python3 .github/scripts/siri-schema-ci.py test --output "$RUNNER_TEMP" --sample-launch
+
+      - name: Capture final Siri state without rebooting
+        if: always()
+        timeout-minutes: 3
+        run: python3 .github/scripts/siri-schema-ci.py capture --output "$RUNNER_TEMP"
+
+      - name: Retain Siri diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: siri-launch-diagnostic
+          path: |
+            ${{ runner.temp }}/SiriSchema.xcresult
+            ${{ runner.temp }}/SiriSchemaTests.json
+            ${{ runner.temp }}/SiriSchema.log
             ${{ runner.temp }}/SiriRegistration
 
   build:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
     name: Build & Test
     runs-on: macos-15
     timeout-minutes: 30
