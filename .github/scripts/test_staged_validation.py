@@ -57,7 +57,7 @@ class StagedValidationTests(unittest.TestCase):
         metadata = json.loads(files['Metadata.json'])
         report = json.loads(files['Timing.json'])
         receipt = dict(schema_version=1, sha=SHA, gate_version=stage.gate_version(), kind=kind,
-                       environment=environment, xcode=metadata['xcode'], devices=report['metadata']['devices'],
+                       environment=environment, local_attempt=None, xcode=metadata['xcode'], devices=report['metadata']['devices'],
                        tests=report['tests'], run_url=metadata.get('run_url'), run_attempt=metadata.get('run_attempt'),
                        artifacts={name: stage.digest(files[name]) for name in stage.artifact_names(kind)})
         files['StageReceipt.json'] = json.dumps(receipt).encode()
@@ -226,20 +226,30 @@ class StagedValidationTests(unittest.TestCase):
                            gate=Mock(), local=Mock(side_effect=ValueError('stale')))
         native.assert_not_called()
 
+    def test_latest_local_failure_blocks_even_valid_older_supplied_receipts(self):
+        invoked = Mock()
+        with patch.object(stage.subprocess, 'check_output', return_value='/tmp/fake-common-dir\n'):
+            with self.assertRaisesRegex(ValueError, 'known failure'):
+                stage.dispatch('canary', Path('older-fixtures'), Path('older-canary'), run=invoked,
+                               check=lambda: SHA, gate=Mock(), local=Mock(),
+                               latest=Mock(side_effect=ValueError('known failure')))
+        invoked.assert_not_called()
+
     def test_unchanged_passing_candidate_dispatches_only_after_ordered_prerequisites(self):
         events = []
         def check(): events.append('source'); return SHA
         def read(command, **kwargs):
             if command[1:3] == ['symbolic-ref', '--short']: return 'test/candidate\n'
+            if command[1] == 'rev-parse': return '/tmp/fake-common-dir\n'
             if command[1] == 'ls-remote': return SHA + '\trefs/heads/test/candidate\n'
             if command[0:3] == ['gh', 'repo', 'view']: return 'owner/repo\n'
             self.fail('Unexpected process: ' + repr(command))
         with patch.object(stage.subprocess, 'check_output', side_effect=read):
             stage.dispatch('ci', Path('fixtures'), Path('canary'), check=check,
                            gate=lambda: events.append('cheap'),
-                           local=lambda path, sha, kind: events.append(kind),
+                           local=lambda path, sha, kind: events.append(kind), latest=lambda *args: events.append('latest-local'),
                            run=lambda cmd, **kwargs: events.append(('dispatch', cmd, kwargs)))
-        self.assertEqual(events[:-1], ['source', 'cheap', 'fixtures', 'canary', 'source'])
+        self.assertEqual(events[:-1], ['source', 'cheap', 'fixtures', 'canary', 'latest-local', 'source'])
         self.assertEqual(events[-1][2]['cwd'], stage.ROOT)
         self.assertEqual(events[-1][1], ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', 'test/candidate', '-f', 'expected_sha=' + SHA])
 

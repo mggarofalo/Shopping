@@ -108,6 +108,37 @@ class FullPreflightTests(unittest.TestCase):
         preflight.require_current_job_evidence([first, second], second, 'candidate', names,
             lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
 
+    def test_other_success_cannot_rehabilitate_selected_runs_old_job(self):
+        names = preflight.REQUIRED_JOBS + preflight.NATIVE_JOBS + ('Deterministic validation prerequisites',)
+        def job(name, when, result='success'):
+            return dict(name=name, status='completed', conclusion=result, started_at=f'2026-10-28T00:00:{when:02d}Z')
+        a = self.run_record(id=1, run_attempt=2, run_started_at='2026-10-28T00:00:40Z')
+        b = self.run_record(id=2, run_attempt=2, run_started_at='2026-10-28T00:00:30Z')
+        c = self.run_record(id=3, run_attempt=1, run_started_at='2026-10-28T00:00:35Z', conclusion='failure')
+        records = {(1, 1): [job(n, 10) for n in names],
+                   (1, 2): [job(n, 40) for n in names if n != 'Build & Test (native)'],
+                   (2, 1): [job(n, 20, 'failure' if n == 'Build & Test (native)' else 'success') for n in names],
+                   (2, 2): [job('Build & Test (native)', 30)],
+                   (3, 1): [job(n, 35, 'failure' if n == 'Release SDK Build (native)' else 'success') for n in names]}
+        with self.assertRaisesRegex(ValueError, 'Build & Test'):
+            preflight.require_current_job_evidence([a, b, c], a, 'candidate', names,
+                lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
+        # Even without C, B's repaired later attempt cannot erase its adverse T2.
+        with self.assertRaisesRegex(ValueError, 'Build & Test'):
+            preflight.require_current_job_evidence([a, b], a, 'candidate', names,
+                lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
+
+    def test_queued_rerun_cannot_borrow_its_prior_completed_jobs(self):
+        names = preflight.REQUIRED_JOBS
+        a = self.run_record(id=1, run_attempt=2, run_started_at='2026-10-28T00:00:40Z')
+        b = self.run_record(id=2, run_attempt=2, run_started_at='2026-10-28T00:00:30Z', status='queued', conclusion=None)
+        def passed(name, when): return dict(name=name, status='completed', conclusion='success', started_at=f'2026-10-28T00:00:{when:02d}Z')
+        records = {(1, 1): [passed(n, 10) for n in names], (1, 2): [passed(names[0], 40)],
+                   (2, 1): [passed(n, 20) for n in names], (2, 2): []}
+        with self.assertRaises(ValueError):
+            preflight.require_current_job_evidence([a, b], a, 'candidate', names,
+                lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
+
     def test_queued_required_job_without_start_blocks_retained_pass(self):
         names = preflight.REQUIRED_JOBS
         own = self.run_record(id=1, run_attempt=1)

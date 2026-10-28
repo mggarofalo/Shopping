@@ -350,7 +350,15 @@ remain in ShoppingFast; explicit method filters select them without a new plan.
 The runner checks their built selection, then calls the existing four-method
 canary. It retains small receipts in the Git common directory under
 `shopping-staged-receipts/<SHA>/{fixtures,canary}/`. Raw artifacts stay at the
-requested location. This does not replace broader affected callers when a change
+requested location. Before gates or native work, the supported local runner writes
+a per-SHA running attempt marker and acquires an exclusive directory lock. Failed,
+cancelled or still-running attempts block dispatch, including explicit paths to
+older passing receipts. Success binds both receipt digests and their current
+attempt UUID. Each attempt's final record is retained; this does not discover
+arbitrary manual xcodebuild runs. A crash leaves the lock/marker fail-closed. After
+confirming that attempt's process has stopped, remove only its stale `attempt.lock`
+directory and rerun the supported local stage; removing a lock does not turn a
+running/failed marker into a pass. This does not replace broader affected callers when a change
 has proof owners beyond these shared boundaries.
 
 Supported manual dispatch is `python3 .github/scripts/staged_validation.py dispatch
@@ -404,8 +412,10 @@ queued or in-progress attempt of an older run blocks prior proof; ambiguous tied
 failures fail closed. Read-only verification of historical run 37716058310 found
 attempt 1 at 02:04:21 UTC and attempt 2 at 02:19:56 UTC on October 8, while its
 creation timestamp stayed unchanged. One successful normal run must supply all positive cheap/native/aggregate proofs.
-Their retained job `started_at` values are also compared with actual prerequisite
-executions in other normal runs. A later failed or unfinished native/cheap job
+Their retained job `started_at` values are compared with every adverse
+prerequisite event across relevant normal runs and attempts. A success in a
+different run cannot rehabilitate a selected run's stale prerequisite; only its
+own newer successful job can supersede the adverse event. A later failed or unfinished native/cheap job
 cannot be hidden by refreshing only an older run's aggregate or unrelated job;
 no positive proof is assembled across runs. Thus a canary after normal CI does not
 force duplicate broad CI. Existing local

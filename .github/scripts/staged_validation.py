@@ -13,16 +13,18 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import uuid
 
 sys.dont_write_bytecode = True
 from compatibility_evidence import verify as verify_restoration
+from local_validation_attempt import require_latest
 from selected_test_inventory import selected_tests, verify_selected_report, verify_products, verify_explicit_products
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = '.github/staged-validation.json'
 CANARY_JOB = 'Compatibility Canary (diagnostic)'
 NATIVE_JOBS = ('Build & Test (native)', 'Release SDK Build (native)')
-GATE_FILES = (CONFIG, '.github/scripts/staged_validation.py',
+GATE_FILES = (CONFIG, '.github/scripts/local_validation_attempt.py', '.github/scripts/staged_validation.py',
               '.github/scripts/run-local-staged-validation.py',
               '.github/scripts/require-full-preflight.py',
               '.github/scripts/run-compatibility-canary.py',
@@ -118,11 +120,11 @@ def artifact_names(kind):
                      if kind == 'canary' else ['Selection.json'])
 
 
-def make_receipt(directory, sha, kind, environment, root=ROOT):
+def make_receipt(directory, sha, kind, environment, root=ROOT, local_attempt=None):
     files = {name: (directory / name).read_bytes() for name in artifact_names(kind)}
     metadata, report = validate_native(files, sha, kind, environment, root)
     receipt = {'schema_version': 1, 'sha': sha, 'gate_version': gate_version(root),
-               'kind': kind, 'environment': environment, 'xcode': metadata['xcode'],
+               'kind': kind, 'environment': environment, 'local_attempt': local_attempt, 'xcode': metadata['xcode'],
                'devices': report['metadata']['devices'], 'tests': report['tests'],
                'run_url': metadata.get('run_url'), 'run_attempt': metadata.get('run_attempt'),
                'artifacts': {name: digest(data) for name, data in files.items()}}
@@ -136,6 +138,10 @@ def validate_receipt(files, sha, kind, environment, root=ROOT):
                        'kind': kind, 'environment': environment}.items():
         if receipt.get(key) != value:
             raise ValueError('Stale or incorrect receipt ' + key)
+    if 'local_attempt' not in receipt or (environment == 'pinned' and receipt['local_attempt'] is not None):
+        raise ValueError('Wrong local attempt identity for receipt environment')
+    if receipt['local_attempt'] is not None:
+        uuid.UUID(receipt['local_attempt'])
     expected = set(artifact_names(kind))
     if set(receipt.get('artifacts', {})) != expected:
         raise ValueError('Incomplete artifact receipt')
@@ -165,6 +171,7 @@ def local_receipt_root(sha):
 
 def require_local_receipts(sha):
     base = local_receipt_root(sha)
+    require_latest(base, sha, gate_version(), {kind: base / kind / 'StageReceipt.json' for kind in ('fixtures', 'canary')})
     for kind in ('fixtures', 'canary'):
         local_receipt(base / kind, sha, kind)
 
@@ -269,6 +276,7 @@ def cheap_gate(run=subprocess.run):
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_full_preflight.py'],
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_compatibility_canary.py'],
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_staged_runner.py'],
+                [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_local_validation_attempt.py'],
                 ['bash', '.github/scripts/test-shopping-full-gate.sh'],
                 ['ruby', '.github/scripts/check-action-pins.rb']]
     for command in commands:
@@ -283,13 +291,15 @@ def clean_source():
 
 
 def dispatch(stage, fixtures, canary, *, run=subprocess.run, check=clean_source, gate=cheap_gate,
-             local=local_receipt):
+             local=local_receipt, latest=None):
     if stage not in ('canary', 'ci'):
         raise ValueError('Unknown dispatch stage')
     sha = check()
     gate()
     local(fixtures, sha, 'fixtures')
     local(canary, sha, 'canary')
+    (latest or require_latest)(local_receipt_root(sha), sha, gate_version(),
+                               {'fixtures': fixtures / 'StageReceipt.json', 'canary': canary / 'StageReceipt.json'})
     branch = subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'], cwd=ROOT, text=True, timeout=60).strip()
     remote = subprocess.check_output(['git', 'ls-remote', '--heads', 'origin', 'refs/heads/' + branch], cwd=ROOT, text=True, timeout=60).split()
     if not remote or remote[0] != sha:

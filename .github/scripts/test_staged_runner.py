@@ -1,5 +1,6 @@
 """Parent-only cancellation must reach the in-process canary supervisor."""
 import os
+import json
 from pathlib import Path
 import signal
 import subprocess
@@ -38,9 +39,10 @@ sys.path.insert(0, str(scripts))
 spec = importlib.util.spec_from_file_location('staged_runner', scripts / 'run-local-staged-validation.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
-runner.canary.main = lambda argv: runner.canary.bounded_call(
+runner.canary.main = lambda argv, **kwargs: runner.canary.bounded_call(
     [sys.executable, root / 'phase.py', root], env=dict(os.environ), timeout=20)
-runner.run_canary('unused-simulator', root)
+with runner.LocalAttempt(root / 'records', 'a' * 40, 'test-version', root):
+    runner.run_canary('unused-simulator', root)
 """)
                 parent = subprocess.Popen([sys.executable, root / 'parent.py', SCRIPTS, root],
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
@@ -56,6 +58,8 @@ runner.run_canary('unused-simulator', root)
                     self.assertNotEqual(parent.returncode, 0, (stdout, stderr))
                     self.assertIn(f'Canary cancelled by signal {signum}'.encode(), stderr)
                     self.assertEqual((root / 'restored').read_text(), 'yes')
+                    self.assertEqual(json.loads((root / 'records/Latest.json').read_text())['status'], 'cancelled', stderr.decode())
+                    self.assertFalse((root / 'records/attempt.lock').exists())
                     with self.assertRaises(ProcessLookupError):
                         os.kill(int((root / 'native_pid').read_text()), 0)
                 finally:

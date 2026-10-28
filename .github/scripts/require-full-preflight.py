@@ -86,28 +86,39 @@ def job_time(job):
 
 
 def require_current_job_evidence(runs, candidate, sha, names, fetch_jobs, fetch_attempt):
-    """One run supplies positives; later adverse job evidence cannot be hidden."""
+    """One run supplies positives; every later adverse event remains relevant."""
     own = retained_job_evidence(candidate, names, fetch_jobs, fetch_attempt)
     require_jobs(own, names)
-    evidence = {name: [] for name in names}
+    owned_times = {job['name']: job_time(job) for job in own}
     for run in candidate_runs(runs, sha, True):
-        jobs = own if run['id'] == candidate['id'] else retained_job_evidence(run, names, fetch_jobs, fetch_attempt)
-        for name in names:
-            matches = [job for job in jobs if job['name'] == name]
-            if len(matches) > 1:
-                raise ValueError('Ambiguous required job execution: ' + name)
-            if matches:
-                evidence[name].extend(matches)
-            else:
-                # A queued or otherwise incomplete run must not disappear from
-                # the chronology because its jobs have not materialized yet.
-                evidence[name].append({'name': name, 'started_at': run['run_started_at'],
-                                       'status': run.get('status'), 'conclusion': None})
-    for name, events in evidence.items():
-        newest = max(job_time(job) for job in events)
-        if any(job_time(job) == newest and
-               (job.get('status') != 'completed' or job.get('conclusion') != 'success') for job in events):
-            raise ValueError('Latest execution of prerequisite has not passed: ' + name)
+        for attempt in range(1, run['run_attempt'] + 1):
+            jobs = [dict(job) for job in fetch_jobs(run['id'], attempt) if job.get('name') in names]
+            execution = None
+            def attempt_record():
+                nonlocal execution
+                if execution is None:
+                    execution = run if attempt == run['run_attempt'] else fetch_attempt(run['id'], attempt)
+                    if (execution.get('id'), execution.get('head_sha'), execution.get('run_attempt')) != (run['id'], sha, attempt):
+                        raise ValueError('Wrong required-job execution record')
+                return execution
+            # While a rerun has not published its job selection, old retained
+            # jobs cannot establish what this unfinished attempt will validate.
+            if attempt == run['run_attempt'] and run.get('status') != 'completed':
+                missing = set(names) - {job['name'] for job in jobs}
+                jobs.extend({'name': name, 'status': run.get('status'), 'conclusion': None,
+                             'started_at': run['run_started_at']} for name in missing)
+            elif not jobs:
+                metadata = attempt_record()
+                if metadata.get('conclusion') != 'success':
+                    jobs = [{'name': name, 'status': metadata.get('status'), 'conclusion': None,
+                             'started_at': metadata['run_started_at']} for name in names]
+            for job in jobs:
+                if job.get('status') == 'completed' and job.get('conclusion') == 'success':
+                    continue  # Another run's success cannot refresh owned proof.
+                if not job.get('started_at'):
+                    job['started_at'] = attempt_record()['run_started_at']
+                if job_time(job) >= owned_times[job['name']]:
+                    raise ValueError('Adverse execution is newer than candidate-owned proof: ' + job['name'])
     return own
 
 
