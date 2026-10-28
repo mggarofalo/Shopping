@@ -50,23 +50,36 @@ class Commands:
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=True)
 
-    def run(self, name, command, timeout=20):
+    def run(self, name, command, timeout=20, *, supervised=False):
         started = time.monotonic()
         record = {"command": command, "timeout_seconds": timeout,
                   "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-        with (self.output / f"{name}.log").open("wb") as log:
+        if supervised:
+            # Validation commands run on the main thread and share the test
+            # process-group supervisor. Sampling calls run on a worker thread,
+            # where signal handlers cannot be installed, and retain their bound.
             try:
-                process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
-                                           start_new_session=True)
-                try:
-                    code = process.wait(timeout=timeout)
-                    record["exit_code"] = code if code >= 0 else 128 - code
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
-                    record.update(exit_code=124, timed_out=True)
+                record["exit_code"] = execute_command(command, self.output / f"{name}.log", timeout=timeout)
+                if record["exit_code"] == 124:
+                    record["timed_out"] = True
+                elif record["exit_code"] in (130, 143):
+                    record["signal"] = record["exit_code"] - 128
             except (OSError, subprocess.SubprocessError) as error:
                 record.update(exit_code=1, error=str(error))
+        else:
+            with (self.output / f"{name}.log").open("wb") as log:
+                try:
+                    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
+                                               start_new_session=True)
+                    try:
+                        code = process.wait(timeout=timeout)
+                        record["exit_code"] = code if code >= 0 else 128 - code
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=5)
+                        record.update(exit_code=124, timed_out=True)
+                except (OSError, subprocess.SubprocessError) as error:
+                    record.update(exit_code=1, error=str(error))
         record["wall_seconds"] = round(time.monotonic() - started, 6)
         (self.output / f"{name}.json").write_text(json.dumps(record, indent=2) + "\n")
         return record["exit_code"]
@@ -133,14 +146,93 @@ class LaunchObserver:
             }, indent=2) + "\n")
 
 
-def test_command(device, output):
-    return ["xcodebuild", "test", "-project", "Shopping.xcodeproj", "-scheme", "ShoppingSiri",
+HOSTED_FILTERS = ["ShoppingPersistenceTests/SpokenGrocerySchemaTests",
+                  "ShoppingPersistenceTests/CatalogActionTests"]
+NATIVE_FILTERS = ["ShoppingSiriTests/" + UI_TEST.removesuffix("()")]
+
+
+def phase_command(device, output, phase):
+    """Build once; execute disjoint selections with a new IDE session each time."""
+    action = "build-for-testing" if phase == "Build" else "test-without-building"
+    filters = HOSTED_FILTERS + NATIVE_FILTERS if phase == "Build" else (
+        HOSTED_FILTERS if phase == "Hosted" else NATIVE_FILTERS)
+    return ["xcodebuild", action, "-project", "Shopping.xcodeproj", "-scheme", "ShoppingSiri",
             "-testPlan", "ShoppingSiri", "-collect-test-diagnostics", "never",
             "-destination", f"platform=iOS Simulator,id={device}", "-parallel-testing-enabled", "NO",
-            "-only-testing:ShoppingPersistenceTests/SpokenGrocerySchemaTests",
-            "-only-testing:ShoppingPersistenceTests/CatalogActionTests",
-            "-only-testing:ShoppingSiriTests/" + UI_TEST.removesuffix("()"),
-            "-resultBundlePath", str(output / "SiriSchema.xcresult")]
+            "-derivedDataPath", str(output / "SiriDerivedData"),
+            *["-only-testing:" + value for value in filters],
+            "-resultBundlePath", str(output / "SiriRegistration" / f"{phase}.xcresult")]
+
+
+def validate_phase(tree, phase):
+    selected = list(cases(tree))
+    identifiers = [test["nodeIdentifier"] for test in selected]
+    expected = ({"CatalogActionTests": 15, "SpokenGrocerySchemaTests": 6}
+                if phase == "Hosted" else {"ModernSiriActionTests": 1})
+    if (Counter(value.split("/")[0] for value in identifiers) != expected
+            or len(set(identifiers)) != len(identifiers)
+            or (phase == "Native" and identifiers != [UI_TEST])
+            or any(test.get("result") != "Passed" for test in selected)):
+        raise ValueError(f"{phase} Siri selection must contain exactly its unique passing cases: {expected}")
+
+
+def export_inventory(commands, bundle, name, validate):
+    try:
+        code = commands.run(name, ["xcrun", "xcresulttool", "get", "test-results", "tests",
+                                   "--path", str(bundle), "--format", "json"], supervised=True)
+        if code:
+            return code
+        validate(json.loads(commands.text(name)))
+    except (KeyError, ValueError, TypeError, OSError, subprocess.SubprocessError) as error:
+        (commands.output / f"{name}Failure.txt").write_text(str(error) + "\n")
+        return 1
+    return 0
+
+
+def run_phases(device, output, commands, sampled):
+    """Preserve the first failure and raw results even if export or merging fails."""
+    verdict = {"phases": [], "test_exit_code": 0, "manifest_exit_code": 0}
+    try:
+        for phase in ("Build", "Hosted", "Native"):
+            command = phase_command(device, output, phase)
+            log = output / "SiriSchema.log" if phase == "Native" else commands.output / f"{phase}.log"
+            sample = (lambda pid: sample_launch(commands.output, device, pid)) if sampled and phase == "Native" else None
+            started = time.monotonic()
+            record = {"phase": phase, "command": command,
+                      "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            verdict["phases"].append(record)
+            code = execute_test(command, log, sample)
+            record.update(exit_code=code, wall_seconds=round(time.monotonic() - started, 6))
+            verdict["test_exit_code"] = code
+            # Do not start another command after supervised cancellation.
+            if code in (130, 143):
+                return code
+            if phase != "Build":
+                verdict["manifest_exit_code"] = export_inventory(
+                    commands, commands.output / f"{phase}.xcresult", f"{phase}Inventory",
+                    lambda tree: validate_phase(tree, phase))
+            if code or verdict["manifest_exit_code"]:
+                return code or verdict["manifest_exit_code"]
+        merge_code = commands.run("MergeResults", ["xcrun", "xcresulttool", "merge", "--output-path",
+            str(output / "SiriSchema.xcresult"), str(commands.output / "Hosted.xcresult"),
+            str(commands.output / "Native.xcresult")], supervised=True)
+        verdict["merge_exit_code"] = merge_code
+        if merge_code:
+            return merge_code
+        def validate_merged(tree):
+            validate_selection(tree)
+            actual = Counter(test["nodeIdentifier"] for test in cases(tree))
+            expected = Counter(test["nodeIdentifier"] for phase in ("Hosted", "Native")
+                               for test in cases(json.loads(commands.text(f"{phase}Inventory"))))
+            if actual != expected:
+                raise ValueError("Merged Siri inventory differs from the two executed selections")
+        verdict["manifest_exit_code"] = export_inventory(
+            commands, output / "SiriSchema.xcresult", "TestInventory", validate_merged)
+        if (commands.output / "TestInventory.log").exists():
+            (output / "SiriSchemaTests.json").write_text(commands.text("TestInventory"))
+        return verdict["manifest_exit_code"]
+    finally:
+        (commands.output / "Verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
 
 
 def execute_command(command, log_path, *, timeout=None, observe=None):
@@ -304,23 +396,7 @@ def run_tests(output, sampled=False):
     device = str(uuid.UUID(commands.text("Create").strip())).upper()
     (output / "SiriSimulatorID").write_text(device + "\n")
     # Cache preparation is complete; Xcode still owns simulator boot and app launch.
-    command = test_command(device, output)
-    (commands.output / "TestCommand.json").write_text(json.dumps(command, indent=2) + "\n")
-    test_code = execute_test(command, output / "SiriSchema.log",
-                             (lambda pid: sample_launch(commands.output, device, pid)) if sampled else None)
-    export_code = commands.run("TestInventory", ["xcrun", "xcresulttool", "get", "test-results", "tests",
-                                                "--path", str(output / "SiriSchema.xcresult"), "--format", "json"])
-    manifest_code = export_code
-    if export_code == 0:
-        (output / "SiriSchemaTests.json").write_text(commands.text("TestInventory"))
-        try:
-            validate_selection(json.loads(commands.text("TestInventory")))
-        except (KeyError, ValueError) as error:
-            manifest_code = 1
-            (commands.output / "ManifestFailure.txt").write_text(str(error) + "\n")
-    (commands.output / "Verdict.json").write_text(json.dumps({"test_exit_code": test_code,
-        "manifest_exit_code": manifest_code}, indent=2) + "\n")
-    return test_code or manifest_code
+    return run_phases(device, output, commands, sampled)
 
 
 def capture(output):

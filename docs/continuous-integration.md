@@ -274,8 +274,8 @@ The combined archive-and-schema job has a 25-minute budget. The previous
 15-minute budget expired after an observed six-minute simulator startup, before
 the modern test ran (38316984917). This budget covers setup and artifact
 collection; no per-test timeout, assertion, selection or retry policy changes.
-The capture step has its own three-minute limit and restarts an already-created
-simulator when necessary to read retained logs.
+The capture step has its own three-minute limit. It observes the existing simulator
+state and skips live capture if it is shut down; diagnostics never boot it.
 
 ## Compatibility canary (SHOPPING-236)
 
@@ -564,3 +564,42 @@ Fast, Siri diagnostics, compatibility canaries and local/hosted Full retain thei
 existing collection settings and validation gates. Pinned hosted acceptance
 must validate this policy on its own candidate; the local one-test comparison
 is not evidence of a whole-suite or hosted time saving.
+
+
+### Isolate Siri hosted and UI sessions (SHOPPING-249)
+
+Run `40779521379` passed the 21 hosted contracts, but the subsequent UI launch
+requested a background assertion for retired host PID 50365 after Xcode launched
+new app PID 51058. The old host had already exited successfully; the assertion was
+rejected in 8 ms, before Siri action execution. Passing runs `40776593934` and
+`40774419389` either started with no app PID or cleared an intermediate PID before
+asserting the current process. These traces identify stale process selection,
+but do not establish where the delayed state originated.
+
+The controlled candidate builds the three explicit selections once, then runs the
+21 hosted contracts and one native UI test in separate `test-without-building`
+invocations. Both use the same owned simulator, serial execution, plan, and
+explicit DerivedData directory. This changes IDE session lifetime while holding
+simulator state and test inventory fixed. It adds no retry, sleep, or relaxed
+timeout. A successful experiment establishes compatibility, not a reliability
+cure. It does not address the separate hosted service-hub delay observed in
+`40780173582` or the earlier Accessibility bootstrap timeout.
+
+`SiriRegistration/Verdict.json` records each phase command, exit status and elapsed
+time. Build and hosted logs and all raw phase result bundles stay under
+`SiriRegistration`, which both workflow callers already retain. The native stream
+remains `SiriSchema.log`; launch observation applies only to that invocation.
+A failed phase stops subsequent execution and preserves its exit status even if
+inventory export fails. Inventory exports and result merging use the same process-
+group supervisor as test execution, with their existing 20-second command bound;
+SIGINT/SIGTERM cleans owned children and returns 130/143. Cancellation stops later
+phases. If a test already failed before export was cancelled, that original test
+failure remains authoritative. Worker-thread launch sampling keeps its existing
+bounded diagnostic path, which does not install main-thread signal handlers.
+Each test phase must contain exactly its passing selection, with no skips or
+duplicates. After both pass, `xcresulttool merge` produces `SiriSchema.xcresult`;
+its 22-case inventory must equal the union of the two executed manifests. Merge
+or inventory failure fails validation. Partial raw bundles remain available if
+no combined bundle can be produced. Independent review and a declared native
+diagnostic are required before adopting this candidate; no native result is yet
+claimed for the split.
