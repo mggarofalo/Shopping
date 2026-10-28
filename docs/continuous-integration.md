@@ -360,6 +360,15 @@ confirming that attempt's process has stopped, remove only its stale `attempt.lo
 directory and rerun the supported local stage; removing a lock does not turn a
 running/failed marker into a pass. This does not replace broader affected callers when a change
 has proof owners beyond these shared boundaries.
+Supported dispatch holds that same exclusive lock from receipt validation through
+GitHub dispatch. Both Full entrypoints reserve it before local receipt validation
+and retain it through hosted preflight and allocation; local Full holds it until
+execution finishes. An opaque owner token permits EXIT cleanup across the shell
+and Python boundary. A different token cannot release the reservation. Early
+errors preserve the previous validation record, while a crash leaves the lock
+closed until its owner is confirmed stopped. This prevents a concurrent supported
+local attempt from invalidating receipts between the check and allocation.
+
 
 Supported manual dispatch is `python3 .github/scripts/staged_validation.py dispatch
 --stage canary --fixtures <Fixtures-directory> --canary <Canary-directory>`.

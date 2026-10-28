@@ -19,6 +19,14 @@ SHA = 'a' * 40
 
 
 class StagedValidationTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.receipt_root = Path(temporary.name)
+        self.root_patch = patch.object(stage, 'local_receipt_root', return_value=self.receipt_root)
+        self.root_patch.start()
+        self.addCleanup(self.root_patch.stop)
+
     def files(self, kind='canary', environment='pinned'):
         platform = stage.config()['environments'][environment]
         metadata = dict(commit_sha=SHA, dirty=False, plan='ShoppingCompatibility' if kind == 'canary' else 'ShoppingFast', xcode='Xcode ' + platform['xcode'] + '\nBuild version test',
@@ -247,11 +255,32 @@ class StagedValidationTests(unittest.TestCase):
         with patch.object(stage.subprocess, 'check_output', side_effect=read):
             stage.dispatch('ci', Path('fixtures'), Path('canary'), check=check,
                            gate=lambda: events.append('cheap'),
-                           local=lambda path, sha, kind: events.append(kind), latest=lambda *args: events.append('latest-local'),
+                           local=lambda path, sha, kind: events.append(kind), latest=lambda *args, **kwargs: events.append('latest-local'),
                            run=lambda cmd, **kwargs: events.append(('dispatch', cmd, kwargs)))
         self.assertEqual(events[:-1], ['source', 'cheap', 'fixtures', 'canary', 'latest-local', 'source'])
         self.assertEqual(events[-1][2]['cwd'], stage.ROOT)
         self.assertEqual(events[-1][1], ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', 'test/candidate', '-f', 'expected_sha=' + SHA])
+
+    def test_dispatch_reserves_receipts_through_network_and_allocation(self):
+        from local_validation_attempt import LocalAttempt
+        points = []
+        def blocked(point):
+            with self.assertRaises(ValueError):
+                with LocalAttempt(self.receipt_root, SHA, 'v', Path('output')):
+                    self.fail('Concurrent validation acquired dispatch reservation')
+            points.append(point)
+        def read(command, **kwargs):
+            if command[1] == 'symbolic-ref': return 'test/candidate'
+            if command[1] == 'ls-remote':
+                blocked('remote')
+                return SHA + '\tref'
+            self.fail(repr(command))
+        with patch.object(stage.subprocess, 'check_output', side_effect=read):
+            stage.dispatch('ci', Path('fixtures'), Path('canary'), check=lambda: SHA,
+                           gate=Mock(), local=Mock(), latest=Mock(),
+                           run=lambda *args, **kwargs: blocked('dispatch'))
+        self.assertEqual(points, ['remote', 'dispatch'])
+        self.assertFalse((self.receipt_root / 'attempt.lock').exists())
 
     def test_workflow_failure_graph_allocates_no_native_job_and_fails_required_names(self):
         workflow = json.loads(subprocess.check_output(['ruby', '-rjson', '-ryaml', '-e',

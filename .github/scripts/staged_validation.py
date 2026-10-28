@@ -17,7 +17,7 @@ import uuid
 
 sys.dont_write_bytecode = True
 from compatibility_evidence import verify as verify_restoration
-from local_validation_attempt import require_latest
+from local_validation_attempt import ReceiptReservation, require_latest
 from selected_test_inventory import selected_tests, verify_selected_report, verify_products, verify_explicit_products
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,9 +169,9 @@ def local_receipt_root(sha):
     return common.resolve() / 'shopping-staged-receipts' / sha
 
 
-def require_local_receipts(sha):
+def require_local_receipts(sha, reservation=None):
     base = local_receipt_root(sha)
-    require_latest(base, sha, gate_version(), {kind: base / kind / 'StageReceipt.json' for kind in ('fixtures', 'canary')})
+    require_latest(base, sha, gate_version(), {kind: base / kind / 'StageReceipt.json' for kind in ('fixtures', 'canary')}, reservation=reservation)
     for kind in ('fixtures', 'canary'):
         local_receipt(base / kind, sha, kind)
 
@@ -296,20 +296,21 @@ def dispatch(stage, fixtures, canary, *, run=subprocess.run, check=clean_source,
         raise ValueError('Unknown dispatch stage')
     sha = check()
     gate()
-    local(fixtures, sha, 'fixtures')
-    local(canary, sha, 'canary')
-    (latest or require_latest)(local_receipt_root(sha), sha, gate_version(),
-                               {'fixtures': fixtures / 'StageReceipt.json', 'canary': canary / 'StageReceipt.json'})
-    branch = subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'], cwd=ROOT, text=True, timeout=60).strip()
-    remote = subprocess.check_output(['git', 'ls-remote', '--heads', 'origin', 'refs/heads/' + branch], cwd=ROOT, text=True, timeout=60).split()
-    if not remote or remote[0] != sha:
-        raise ValueError('Push this exact candidate before dispatch')
-    if check() != sha:
-        raise ValueError('Source changed during staged preflight')
-    command = ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', branch, '-f', 'expected_sha=' + sha]
-    if stage == 'canary':
-        command += ['-f', 'compatibility_canary=true']
-    run(command, cwd=ROOT, check=True, timeout=60)
+    with ReceiptReservation(local_receipt_root(sha)) as reservation:
+        local(fixtures, sha, 'fixtures')
+        local(canary, sha, 'canary')
+        (latest or require_latest)(local_receipt_root(sha), sha, gate_version(),
+                                   {'fixtures': fixtures / 'StageReceipt.json', 'canary': canary / 'StageReceipt.json'}, reservation=reservation)
+        branch = subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'], cwd=ROOT, text=True, timeout=60).strip()
+        remote = subprocess.check_output(['git', 'ls-remote', '--heads', 'origin', 'refs/heads/' + branch], cwd=ROOT, text=True, timeout=60).split()
+        if not remote or remote[0] != sha:
+            raise ValueError('Push this exact candidate before dispatch')
+        if check() != sha:
+            raise ValueError('Source changed during staged preflight')
+        command = ['gh', 'workflow', 'run', 'swift-ci.yml', '--ref', branch, '-f', 'expected_sha=' + sha]
+        if stage == 'canary':
+            command += ['-f', 'compatibility_canary=true']
+        run(command, cwd=ROOT, check=True, timeout=60)
 
 
 def validate_expected_sha(actual, expected, required=False):
@@ -331,6 +332,11 @@ def main():
     p.add_argument('sha')
     p = sub.add_parser('local')
     p.add_argument('sha')
+    p = sub.add_parser('reserve')
+    p.add_argument('sha')
+    p = sub.add_parser('release')
+    p.add_argument('sha')
+    p.add_argument('token')
     p = sub.add_parser('receipt')
     p.add_argument('--directory', type=Path, required=True)
     p.add_argument('--kind', choices=['fixtures', 'canary'], required=True)
@@ -349,6 +355,17 @@ def main():
         require_pinned_canary(repository, args.sha)
     elif args.command == 'local':
         require_local_receipts(args.sha)
+    elif args.command == 'reserve':
+        reservation = ReceiptReservation(local_receipt_root(args.sha))
+        reservation.__enter__()
+        try:
+            require_local_receipts(args.sha, reservation)
+        except BaseException:
+            reservation.__exit__(*sys.exc_info())
+            raise
+        print(reservation.token)
+    elif args.command == 'release':
+        ReceiptReservation(local_receipt_root(args.sha), args.token).release()
     elif args.command == 'receipt':
         make_receipt(args.directory, clean_source(), args.kind, args.environment)
     else:

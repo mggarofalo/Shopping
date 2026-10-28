@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from local_validation_attempt import LocalAttempt, require_latest
+from local_validation_attempt import LocalAttempt, ReceiptReservation, require_latest
 
 SHA = 'a' * 40
 VERSION = 'v1'
@@ -79,6 +79,46 @@ class LocalAttemptTests(unittest.TestCase):
         self.assertTrue((self.root / 'attempt.lock').exists())
         with self.assertRaises(ValueError):
             require_latest(self.root, SHA, VERSION, {})
+
+    def test_full_reservation_validates_under_owner_and_blocks_writers(self):
+        paths = self.passed_attempt()
+        before = (self.root / 'Latest.json').read_bytes()
+        lease = ReceiptReservation(self.root).__enter__()
+        # Shell entrypoints pass this opaque token between reserve and EXIT.
+        owner = ReceiptReservation(self.root, lease.token)
+        require_latest(self.root, SHA, VERSION, paths, reservation=owner)
+        with self.assertRaises(ValueError):
+            with LocalAttempt(self.root, SHA, VERSION, self.output): self.fail('Writer entered Full')
+        with self.assertRaises(ValueError): ReceiptReservation(self.root).release()
+        with self.assertRaises(ValueError): require_latest(self.root, SHA, VERSION, paths)
+        owner.release()
+        self.assertEqual((self.root / 'Latest.json').read_bytes(), before)
+        require_latest(self.root, SHA, VERSION, paths)
+
+    def test_reservation_error_preserves_marker_and_primary_error(self):
+        self.passed_attempt()
+        before = (self.root / 'Latest.json').read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'preflight failed'):
+            with ReceiptReservation(self.root): raise RuntimeError('preflight failed')
+        self.assertEqual((self.root / 'Latest.json').read_bytes(), before)
+        self.assertFalse((self.root / 'attempt.lock').exists())
+        with self.assertRaisesRegex(RuntimeError, 'primary'):
+            with ReceiptReservation(self.root) as lease:
+                with patch.object(lease, 'release', side_effect=OSError('release failed')):
+                    lease.__exit__(RuntimeError, RuntimeError('primary'), None)
+                raise RuntimeError('primary')
+
+    def test_full_helpers_hold_reservation_until_exit_including_early_errors(self):
+        scripts = Path(__file__).resolve().parent
+        for name in ('run-local-shopping-full.sh', 'dispatch-remote-shopping-full.sh'):
+            source = (scripts / name).read_text()
+            self.assertLess(source.index('staged_validation.py reserve'), source.index('require-full-preflight.py'))
+            self.assertLess(source.index('trap release_receipts EXIT'), source.index('require-full-preflight.py'))
+            self.assertIn('staged_validation.py release "$commit_sha" "$receipt_token"', source)
+            self.assertIn('if [[ "$exit_code" -eq 0 ]]; then exit_code="$release_code"; fi', source)
+        local = (scripts / 'run-local-shopping-full.sh').read_text()
+        finish = local[local.index('finish()'):local.index('trap finish EXIT')]
+        self.assertIn('staged_validation.py release', finish)
 
     def test_incomplete_pair_cannot_mark_attempt_passed(self):
         with self.assertRaises(ValueError):

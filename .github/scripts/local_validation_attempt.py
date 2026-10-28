@@ -17,10 +17,47 @@ def write_json(path, value):
     temporary.replace(path)
 
 
+class ReceiptReservation:
+    """Same directory lock as writers, with a token for cross-process release."""
+    def __init__(self, root, token=None):
+        self.root = root
+        self.lock = root / 'attempt.lock'
+        self.token = token or str(uuid.uuid4())
+
+    def __enter__(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lock.mkdir()
+        except FileExistsError as error:
+            raise ValueError('Local receipt owner is active or crashed') from error
+        # A crash before publishing the token deliberately leaves a closed lock.
+        (self.lock / 'owner').write_text(self.token)
+        return self
+
+    def verify_owner(self):
+        if (self.lock / 'owner').read_text() != self.token:
+            raise ValueError('Receipt reservation belongs to another owner')
+
+    def release(self):
+        self.verify_owner()
+        (self.lock / 'owner').unlink()
+        self.lock.rmdir()
+
+    def __exit__(self, kind, error, traceback):
+        try:
+            self.release()
+        except BaseException as cleanup_error:
+            if error is None:
+                raise
+            error.add_note(f'Receipt reservation cleanup failed: {cleanup_error}')
+        return False
+
+
 class LocalAttempt:
     def __init__(self, root, sha, version, artifacts):
         self.root = root
-        self.lock = root / 'attempt.lock'
+        self.reservation = ReceiptReservation(root)
+        self.lock = self.reservation.lock
         self.record = {'schema_version': 1, 'id': str(uuid.uuid4()), 'sha': sha,
                        'gate_version': version, 'status': 'running', 'pid': os.getpid(),
                        'started_at': datetime.now(timezone.utc).isoformat(), 'artifacts': str(artifacts)}
@@ -36,11 +73,7 @@ class LocalAttempt:
         write_json(self.root / 'Latest.json', self.record)
 
     def __enter__(self):
-        self.root.mkdir(parents=True, exist_ok=True)
-        try:
-            self.lock.mkdir()
-        except FileExistsError as error:
-            raise ValueError('Local staged attempt is active or crashed; inspect Latest.json and the lock before restarting') from error
+        self.reservation.__enter__()
         # A crash after locking remains fail-closed, even before this write.
         self.save()
         return self
@@ -67,14 +100,18 @@ class LocalAttempt:
                 if error is not None:
                     return False
                 raise
-        self.lock.rmdir()
+        self.reservation.__exit__(kind, error, traceback)
         if error is None and self.record['status'] != 'passed':
             raise ValueError('Local attempt ended without passing receipts')
         return False
 
 
-def require_latest(root, sha, version, receipts):
-    if (root / 'attempt.lock').exists():
+def require_latest(root, sha, version, receipts, reservation=None):
+    if reservation is not None:
+        if reservation.root != root:
+            raise ValueError('Wrong receipt reservation root')
+        reservation.verify_owner()
+    elif (root / 'attempt.lock').exists():
         raise ValueError('Latest supported local attempt is running or crashed')
     record = json.loads((root / 'Latest.json').read_text())
     if (record.get('schema_version'), record.get('sha'), record.get('gate_version'), record.get('status')) != (1, sha, version, 'passed'):
