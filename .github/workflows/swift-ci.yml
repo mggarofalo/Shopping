@@ -412,11 +412,14 @@ jobs:
     timeout-minutes: 1
     steps:
       - name: Require successful prerequisites and native validation
+        if: ${{ always() }}
         env:
           CHEAP_RESULT: ${{ needs.cheap-contracts.result }}
           NATIVE_RESULT: ${{ needs.build.result }}
-          CANCELLED: ${{ cancelled() }}
-        run: test "$CANCELLED" = false && test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+        run: test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+      - name: Reject cancelled workflow
+        if: ${{ cancelled() }}
+        run: exit 1
 
   release-required:
     name: ${{ github.event_name == 'workflow_dispatch' && (inputs.siri_launch_diagnostic || inputs.compatibility_canary) && 'Release gate not requested' || 'Release SDK Build' }}
@@ -426,8 +429,11 @@ jobs:
     timeout-minutes: 1
     steps:
       - name: Require successful prerequisites and native validation
+        if: ${{ always() }}
         env:
           CHEAP_RESULT: ${{ needs.cheap-contracts.result }}
           NATIVE_RESULT: ${{ needs.release-build.result }}
-          CANCELLED: ${{ cancelled() }}
-        run: test "$CANCELLED" = false && test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+        run: test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+      - name: Reject cancelled workflow
+        if: ${{ cancelled() }}
+        run: exit 1

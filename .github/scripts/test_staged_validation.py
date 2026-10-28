@@ -368,13 +368,21 @@ class StagedValidationTests(unittest.TestCase):
             self.assertIn("|| '" + name + "'", job['name'])
             self.assertIn('not requested', job['name'])
             self.assertEqual(job['runs-on'], 'ubuntu-latest')
-            command = job['steps'][0]['run']
-            for cheap, actual, cancelled in [('failure', 'skipped', 'false'), ('success', 'cancelled', 'false'),
-                                              ('success', 'success', 'true'), ('skipped', 'success', 'false')]:
+            validation, cancellation = job['steps']
+            self.assertEqual(validation['if'], '${{ always() }}')
+            self.assertEqual(cancellation['if'], '${{ cancelled() }}')
+            self.assertNotEqual(subprocess.run(['sh', '-c', cancellation['run']]).returncode, 0)
+            # Status functions are supported in step if, not env expressions.
+            for env in [job.get('env', {})] + [step.get('env', {}) for step in job['steps']]:
+                for value in env.values():
+                    self.assertFalse(any(function + '(' in str(value) for function in ('always', 'cancelled', 'failure', 'success')))
+            command = validation['run']
+            for cheap, actual in [('failure', 'skipped'), ('success', 'cancelled'),
+                                   ('cancelled', 'success'), ('skipped', 'success')]:
                 self.assertNotEqual(subprocess.run(['sh', '-c', command], env=dict(os.environ,
-                    CHEAP_RESULT=cheap, NATIVE_RESULT=actual, CANCELLED=cancelled)).returncode, 0)
+                    CHEAP_RESULT=cheap, NATIVE_RESULT=actual)).returncode, 0)
             self.assertEqual(subprocess.run(['sh', '-c', command], env=dict(os.environ,
-                    CHEAP_RESULT='success', NATIVE_RESULT='success', CANCELLED='false')).returncode, 0)
+                    CHEAP_RESULT='success', NATIVE_RESULT='success')).returncode, 0)
         exhaustive = (stage.ROOT / '.github/workflows/swift-exhaustive.yml').read_text()
         self.assertIn('needs: preflight', exhaustive)
         self.assertIn('require-full-preflight.py "$GITHUB_SHA" --pinned-canary', exhaustive)
