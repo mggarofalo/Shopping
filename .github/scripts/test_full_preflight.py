@@ -39,6 +39,19 @@ class FullPreflightTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 preflight.require_jobs(invalid)
 
+    def test_cart_diagnostic_cannot_substitute_for_required_jobs(self):
+        jobs = [dict(name=name, status='completed', conclusion='skipped')
+                for name in preflight.REQUIRED_JOBS]
+        jobs.append(dict(name='Cart scheduling diagnosis (not required CI)',
+                         status='completed', conclusion='success'))
+        with self.assertRaises(ValueError):
+            preflight.require_jobs(jobs)
+
+        workflow = Path(__file__).parents[1].joinpath('workflows/swift-ci.yml').read_text()
+        for job in ('build', 'release-build'):
+            self.assertIn('  ' + job + ':\n    if: ${{ !inputs.cart_diagnostic }}', workflow)
+        self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.cart_diagnostic }}", workflow)
+
     def test_partial_rerun_keeps_other_successful_job_from_same_run(self):
         build = dict(name='Build & Test', status='completed', conclusion='success')
         release = dict(name='Release SDK Build', status='completed', conclusion='success')
