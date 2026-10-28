@@ -24,7 +24,7 @@ def inventory():
 
 
 class SiriSchemaCITests(unittest.TestCase):
-    def test_diagnostic_mode_cannot_supply_required_checks(self):
+    def test_required_sampling_and_diagnostic_checks_remain_separate(self):
         workflow = json.loads(subprocess.check_output([
             "ruby", "-rjson", "-ryaml", "-e",
             "puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))",
@@ -40,6 +40,11 @@ class SiriSchemaCITests(unittest.TestCase):
         self.assertEqual(sum("--sample-launch" in command for command in commands), 1)
         self.assertFalse(any(step.get("continue-on-error") for step in diagnostic["steps"]))
         release_steps = jobs["release-build"]["steps"]
+        sampled = [step for step in release_steps if "--sample-launch" in step.get("run", "")]
+        self.assertEqual(len(sampled), 1)
+        self.assertIn("siri-schema-ci.py test", sampled[0]["run"])
+        self.assertFalse(sampled[0].get("continue-on-error"))
+        self.assertFalse(jobs["release-build"].get("continue-on-error"))
         validation = next(i for i, step in enumerate(release_steps)
                           if "test_siri_schema_ci.py" in step.get("run", ""))
         archive = next(i for i, step in enumerate(release_steps)
@@ -210,6 +215,28 @@ class SiriSchemaCITests(unittest.TestCase):
             with patch.object(siri, "Commands", fake), patch.object(fake, "text", text), patch.object(siri, "execute_test", return_value=0):
                 self.assertEqual(siri.run_tests(output), 1)
             self.assertTrue((output / "SiriRegistration/ManifestFailure.txt").exists())
+
+    def test_sampling_command_failure_preserves_native_failure(self):
+        class ImmediateObserver(siri.LaunchObserver):
+            def __init__(self, capture):
+                super().__init__(capture, delay=0)
+        for failed_command in ["Processes", "xcodebuild"]:
+            with self.subTest(failed_command=failed_command), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                (output / "SiriRegistration").mkdir()
+                commands = []
+                def run(instance, name, command, timeout=20):
+                    commands.append(name)
+                    return 124 if name == failed_command else 0
+                command = [sys.executable, "-c", "import sys; print('t = 1.00s Launch com.mggarofalo.shopping', flush=True); sys.exit(65)"]
+                with patch.object(siri, "LaunchObserver", ImmediateObserver), \
+                        patch.object(siri.Commands, "run", run), \
+                        patch.object(siri.Commands, "text", return_value="PID PPID COMM\n"):
+                    code = siri.execute_test(command, output / "SiriSchema.log",
+                                             sample=lambda pid: siri.sample_launch(output / "SiriRegistration", DEVICE, pid))
+                self.assertEqual(code, 65)
+                self.assertIn(failed_command, commands)
+                self.assertTrue(json.loads((output / "SiriRegistration/LaunchObservation.json").read_text())["sample_started"])
 
     def test_cancel_after_stdout_eof_kills_stubborn_child_and_restores_handlers(self):
         with tempfile.TemporaryDirectory() as directory:
