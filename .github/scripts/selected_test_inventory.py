@@ -16,7 +16,7 @@ def selected_tests(root=ROOT, plan_name="ShoppingAcceptance"):
     return Counter(normalized(test) for test in target["selectedTests"])
 
 
-def verify_products(products, root=ROOT, plan_name="ShoppingAcceptance"):
+def built_targets(products, plan_name):
     plans = []
     for path in products.glob("*.xctestrun"):
         data = plistlib.loads(path.read_bytes())
@@ -27,7 +27,11 @@ def verify_products(products, root=ROOT, plan_name="ShoppingAcceptance"):
     configurations = plans[0]["TestConfigurations"]
     if len(configurations) != 1 or not configurations[0].get("IsEnabled", True):
         raise ValueError("Selection must have one enabled test configuration")
-    targets = configurations[0]["TestTargets"]
+    return configurations[0]["TestTargets"]
+
+
+def verify_products(products, root=ROOT, plan_name="ShoppingAcceptance"):
+    targets = built_targets(products, plan_name)
     expected_targets = ["ShoppingTests", "ShoppingPersistenceTests"] if plan_name == "ShoppingAcceptance" else ["ShoppingTests"]
     if Counter(t["BlueprintName"] for t in targets) != Counter(expected_targets):
         raise ValueError("Built targets differ from the selected plan")
@@ -48,10 +52,14 @@ def verify_products(products, root=ROOT, plan_name="ShoppingAcceptance"):
 
 def verify_report(report, root=ROOT, plan_name="ShoppingAcceptance"):
     expected = selected_tests(root, plan_name)
+    verify_selected_report(report, expected, "ShoppingTests")
+
+
+def verify_selected_report(report, expected, bundle):
     tests = report["tests"]
     actual = Counter(normalized(t["identifier"]) for t in tests)
-    if actual != expected or any(t["bundle"] != "ShoppingTests" for t in tests):
-        raise ValueError(f"Executed UI identifiers differ from {plan_name}: expected {dict(expected)}, got {dict(actual)}")
+    if actual != expected or any(t["bundle"] != bundle for t in tests):
+        raise ValueError(f"Executed UI identifiers differ from selection: expected {dict(expected)}, got {dict(actual)}")
     if any(t["result"] != "Passed" for t in tests):
         raise ValueError("Every selected UI test must pass without skips")
     counts = report["counts"]
@@ -59,3 +67,12 @@ def verify_report(report, root=ROOT, plan_name="ShoppingAcceptance"):
         raise ValueError("Selection summary counts disagree with the complete passing selection")
 
 
+def verify_explicit_products(products, plan_name, bundle, expected, skipped=()):
+    targets = built_targets(products, plan_name)
+    if len(targets) != 1 or targets[0]['BlueprintName'] != bundle or targets[0].get('IsEnabled') is False:
+        raise ValueError('Expected exactly one enabled selected target')
+    target = targets[0]
+    if Counter(normalized(t) for t in target.get('OnlyTestIdentifiers', [])) != expected:
+        raise ValueError('Built identifiers differ from explicit selection')
+    if set(target.get('SkipTestIdentifiers', [])) != set(skipped):
+        raise ValueError('Built exclusions differ from the selected plan')
