@@ -197,9 +197,13 @@ The interrupted-replacement fixture requires the expected account/Home scope,
 replacement ID, target and stage, invitation account/imported Home and durable
 acknowledgement before explicit recovery. The sharing-status access fixture
 awaits fresh discovery after selection, then checks the captured account,
-presentation identity and exact graph's access. A changed presentation or account
-rejects the fixture action. Existing held-operation tests must always release
-and drain their workers, including when an intermediate prerequisite throws.
+selected scope and explicit-choice authority, plus the exact graph's access.
+Discovery may legitimately renew the presentation when the selected Home's access
+changes. Require the resulting active presentation to match the captured scope
+and current coordinator generation; do not require its pre-discovery ID. A new
+Home choice, renewed choice or account rejects the fixture action. Existing
+held-operation tests must always release and drain their workers, including when
+an intermediate prerequisite throws.
 
 Use explicit barriers to hold completion at service or journal boundaries. Show
 that the old proxy witness already passes while the new prerequisite does not;

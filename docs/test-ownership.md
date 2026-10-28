@@ -2681,6 +2681,24 @@ Changed-helper caller inventory:
   discovery is held, and discovery failure. The existing account-boundary,
   late-result, same-graph presentation-renewal and stale discovery tests remain.
 
+The October 28 follow-up preserves the selected scope and explicit-choice
+authority across discovery, while requiring the resulting active presentation
+to match the coordinator generation. `testAccessFixtureAcceptsFreshAccessThatRenewsTheSameHomePresentation`
+forces an owner-to-restricted result and verifies that discovery retires the old
+presentation without replacing the Home choice. The pre-fix helper fails this
+case with `retired`. `testAccessFixtureRejectsRenewedChoiceOfSameHomeDuringHeldDiscovery`
+and `testAccessFixtureRejectsAccountChangeDuringHeldDiscovery` retain rejection
+of changed authority even when the graph is unchanged. No production authority
+or access checks change.
+
+The same focused 25-case inventory (eight barrier cases, seventeen sharing-status
+bootstrap cases) produced 24 passes/one forced failure before the repair and
+25 passes/zero failures or skips after it on Xcode 27.1/iOS 26.5. Raw results,
+source diffs, timing metadata and exact manifests are retained at
+`/tmp/shopping-234-retired-fixture/`. Cold baseline versus incremental repaired
+build costs are not a speed comparison or pinned-runtime proof. The original
+hosted failure remains recorded in routine run 40691576008.
+
 Generic store-ready and replacement-offer helpers are not broadened into global
 quiescence checks: their callers include tests deliberately observing pending
 work. Other existing recovery/rejoin barriers retain their own proof. Every

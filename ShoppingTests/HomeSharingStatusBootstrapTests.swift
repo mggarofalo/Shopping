@@ -17,6 +17,10 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         func current() -> String { reads += 1; return name }
         func change() { name = "account-B" }
     }
+    private actor DiscoveryAccess {
+        var value: HomeCandidate.Access = .owner
+        func restrict() { value = .restricted }
+    }
     private actor Gate {
         var continuation: CheckedContinuation<Void, Never>?
         var opened = false
@@ -119,29 +123,37 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
     }
 
     private func awaitAccess(_ fixture: Fixture, graph: HomeGraphIdentity, access: HomeCandidate.Access) async throws {
-        // Selection invalidates startup discovery. Await a fresh operation and
-        // its exact account/presentation witness, not an arbitrary ready store.
+        // Discovery can renew presentation authority when access changes. Keep
+        // the explicit account/Home choice, then await its coherent new view.
         let session = try fixture.provider.currentSession()
         let bootstrap = fixture.bootstrap
-        let presentation = try await ready(bootstrap).presentation.id
+        let selectedScope = try XCTUnwrap(bootstrap.homeCoordinator.activeScope)
+        let choice = bootstrap.homeCoordinator.choiceAuthority
         try await bootstrap.refreshHomes()
         try await FixtureReadiness.wait(changes: [bootstrap.objectWillChange.eraseToAnyPublisher()]) {
             try self.accessPrerequisites(fixture, graph: graph, access: access,
-                session: session, presentation: presentation)
+                session: session, selectedScope: selectedScope, choice: choice)
         }
     }
 
     private func accessPrerequisites(_ fixture: Fixture, graph: HomeGraphIdentity,
                                      access: HomeCandidate.Access, session: ShopperSession,
-                                     presentation: UUID) throws -> [String] {
+                                     selectedScope: ActiveHomeScope, choice: UICommandAuthority) throws -> [String] {
         let bootstrap = fixture.bootstrap
         if case .failed(let error) = bootstrap.state { throw error }
         guard try fixture.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
+        try choice.validate()
+        guard bootstrap.homeCoordinator.activeScope == selectedScope else { throw UICommandAuthority.Failure.retired }
         guard case .ready(let current) = bootstrap.state else { return ["ready presentation for \(graph)"] }
-        guard current.presentation.id == presentation else { throw UICommandAuthority.Failure.retired }
-        return [FixtureReadiness.mismatch("access for \(graph)",
+        return [
+            FixtureReadiness.mismatch("selected Home presentation", actual: current.homeScope, expected: selectedScope),
+            FixtureReadiness.mismatch("current Home authority", actual: current.homeGeneration,
+                expected: bootstrap.homeCoordinator.generation),
+            FixtureReadiness.mismatch("active presentation", actual: current.presentation.isActive, expected: true),
+            FixtureReadiness.mismatch("access for \(graph)",
             actual: bootstrap.homeCoordinator.homes.first { $0.graph == graph }?.access,
-            expected: access)].compactMap { $0 }
+            expected: access)
+        ].compactMap { $0 }
     }
 
     private func drain(_ bootstrap: PersistenceBootstrap) async throws {
@@ -207,6 +219,73 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         await gate.open()
         do { try await barrier.value; XCTFail("A fresh Home cannot authorize the old fixture action") }
         catch { XCTAssertEqual(error as? UICommandAuthority.Failure, .retired) }
+    }
+
+    func testAccessFixtureAcceptsFreshAccessThatRenewsTheSameHomePresentation() async throws {
+        let access = DiscoveryAccess()
+        let fixture = try await open(discover: { service in
+            let snapshot = try await Task.detached { try service.discover() }.value
+            let value = await access.value
+            return HomeDiscovery(homes: snapshot.homes.map {
+                HomeCandidate(graph: $0.graph, name: $0.name, access: value)
+            }, hasIncompleteRoots: snapshot.hasIncompleteRoots)
+        })
+        let before = try await ready(fixture.bootstrap)
+        let scope = try XCTUnwrap(before.homeScope)
+        let choice = fixture.bootstrap.homeCoordinator.choiceAuthority
+        await access.restrict()
+        try await awaitAccess(fixture, graph: scope.graph, access: .restricted)
+        let after = try await ready(fixture.bootstrap)
+        XCTAssertEqual(after.homeScope, scope)
+        XCTAssertTrue(choice.isActive, "Discovery cannot replace the explicit Home choice")
+        XCTAssertFalse(before.presentation.isActive)
+        XCTAssertNotEqual(after.presentation.id, before.presentation.id)
+        XCTAssertEqual(after.homeGeneration, fixture.bootstrap.homeCoordinator.generation)
+        XCTAssertTrue(after.presentation.isActive)
+    }
+
+    func testAccessFixtureRejectsRenewedChoiceOfSameHomeDuringHeldDiscovery() async throws {
+        let gate = Gate(), started = expectation(description: "old choice discovery held")
+        let fixture = try await open(discover: { service in
+            let snapshot = try await Task.detached { try service.discover() }.value
+            if DiscoveryRequest.mode == .heldSuccess { started.fulfill(); await gate.wait() }
+            return snapshot
+        })
+        let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
+        let barrier = Task {
+            try await DiscoveryRequest.$mode.withValue(.heldSuccess) {
+                try await self.awaitAccess(fixture, graph: graph, access: .owner)
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        do {
+            try fixture.bootstrap.homeCoordinator.select(graph, renewingAuthority: true)
+            try await fixture.bootstrap.refreshHomes()
+        } catch { await gate.open(); _ = try? await barrier.value; throw error }
+        await gate.open()
+        do { try await barrier.value; XCTFail("A renewed choice cannot authorize the old fixture action") }
+        catch { XCTAssertEqual(error as? UICommandAuthority.Failure, .retired) }
+    }
+
+    func testAccessFixtureRejectsAccountChangeDuringHeldDiscovery() async throws {
+        let gate = Gate(), started = expectation(description: "old account discovery held")
+        let fixture = try await open(discover: { service in
+            let snapshot = try await Task.detached { try service.discover() }.value
+            if DiscoveryRequest.mode == .heldSuccess { started.fulfill(); await gate.wait() }
+            return snapshot
+        })
+        let graph = try XCTUnwrap(fixture.bootstrap.homeCoordinator.activeScope?.graph)
+        let barrier = Task {
+            try await DiscoveryRequest.$mode.withValue(.heldSuccess) {
+                try await self.awaitAccess(fixture, graph: graph, access: .owner)
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        await fixture.account.change()
+        await fixture.provider.refresh()
+        await gate.open()
+        do { try await barrier.value; XCTFail("Another account cannot authorize the old fixture action") }
+        catch { XCTAssertEqual(error as? PersonalCartError, .accountChanged) }
     }
 
     func testAccessFixturePropagatesDiscoveryFailure() async throws {
