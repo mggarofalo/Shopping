@@ -1,6 +1,7 @@
 """Validate serial cross-test restoration and isolated fixture receipts."""
 import json
 import uuid
+from pathlib import Path
 
 
 def records(log, prefix):
@@ -13,6 +14,8 @@ def verify(log, initial, expected_device=None):
     commands = records(log, 'Simulator text-size command: ')
     if len(fixtures) != 2 or len({f['store'] for f in fixtures}) != 2:
         raise ValueError('Expected two distinct isolated fixture stores')
+    for fixture in fixtures:
+        uuid.UUID(Path(fixture['store']).parent.name)
     for key in ('nonce', 'process'):
         values = [f[key] for f in fixtures]
         if len(set(values)) != 2:

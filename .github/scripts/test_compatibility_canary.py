@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import plistlib
 import tempfile
+import subprocess
 import unittest
 import uuid
 from unittest.mock import Mock
@@ -34,6 +35,38 @@ class CanaryContracts(unittest.TestCase):
             canary.gate_then_run(broken_transport, launch)
         self.assertTrue(case.driver.failed)
         launch.assert_not_called()
+
+    def test_workflow_diagnostic_modes_preserve_required_gates(self):
+        workflow = json.loads(subprocess.check_output([
+            'ruby', '-rjson', '-ryaml', '-e',
+            'puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))',
+            str(ROOT / '.github/workflows/swift-ci.yml')]))
+        jobs = workflow['jobs']
+        for name in ('build', 'release-build'):
+            self.assertEqual(jobs[name]['if'], "${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}")
+        diagnostic = jobs['compatibility-canary']
+        self.assertEqual(diagnostic['if'], "${{ github.event_name == 'workflow_dispatch' && inputs.compatibility_canary }}")
+        self.assertNotIn(diagnostic['name'], ('Build & Test', 'Release SDK Build'))
+        steps = {s.get('name'): s for s in jobs['build']['steps']}
+        self.assertIn('test_compatibility_canary.py', steps['Validate compatibility canary contracts']['run'])
+        self.assertTrue(any('Xcode_16.4.app' in step.get('run', '') for step in diagnostic['steps']))
+        self.assertTrue(any('SimRuntime.iOS-18-5' in step.get('run', '') for step in diagnostic['steps']))
+
+    def test_timeout_is_failure_even_after_successful_cleanup(self):
+        process = Mock()
+        process.wait.side_effect = [subprocess.TimeoutExpired(['command'], 1), 0]
+        with self.assertRaises(subprocess.TimeoutExpired):
+            canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
+        process.terminate.assert_called_once()
+        self.assertEqual(process.wait.call_args_list[1].kwargs['timeout'], canary.CLEANUP_SECONDS)
+
+    def test_failed_test_is_not_replaced_by_failed_report(self):
+        original = subprocess.CalledProcessError(65, ['test'])
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            canary.test_and_report(Mock(side_effect=original), Mock(side_effect=ValueError('bad report')))
+        self.assertIs(raised.exception, original)
+        with self.assertRaisesRegex(ValueError, 'bad report'):
+            canary.test_and_report(Mock(), Mock(side_effect=ValueError('bad report')))
 
     def test_exact_planned_built_executed_inventory(self):
         selected = selected_tests(plan_name=PLAN)

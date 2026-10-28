@@ -30,7 +30,7 @@ class SiriSchemaCITests(unittest.TestCase):
             "puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))",
             str(Path(__file__).resolve().parents[1] / "workflows/swift-ci.yml")]))
         jobs = workflow["jobs"]
-        expected = "${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}"
+        expected = "${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}"
         for name in ["build", "release-build"]:
             self.assertEqual(jobs[name]["if"], expected)
         diagnostic = jobs["siri-launch-diagnostic"]

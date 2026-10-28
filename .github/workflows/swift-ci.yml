@@ -148,6 +148,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_full_preflight.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_exhaustive_contract.py
 
+      - name: Validate compatibility canary contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_compatibility_canary.py
+
       - name: Validate system text-size driver
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_system_text_size*.py'
 
@@ -372,6 +375,7 @@ jobs:
             ${{ runner.temp }}/Compatibility/*.jsonl
             ${{ runner.temp }}/Compatibility/*.md
             ${{ runner.temp }}/Compatibility/*.txt
+            ${{ runner.temp }}/Compatibility/*.xctestrun
             ${{ runner.temp }}/Compatibility/*.log
             ${{ runner.temp }}/Compatibility/Results.xcresult
           retention-days: 14
