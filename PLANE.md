@@ -116,3 +116,9 @@ through the iOS 27 Reminders App Intent schema. Catalog matching happens only
 after invocation; App Shortcut registration never expands by catalog item.
 Shared catalog dialogue preserves Home, revision, authentication and duplicate
 guards. Actual Siri routing remains a separate release acceptance gate.
+
+## Phase 37: Grocery occurrence sync integrity
+
+Module `bf234c8a-1fec-4d61-ad93-c45aecadfbcf` tracks SHOPPING-244: the repaired
+device incident, [RCA and reproduction](docs/duplicate-need-incident.md), and
+conservative reconciliation of identical physical grocery occurrences after sync.

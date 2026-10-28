@@ -49,7 +49,7 @@ final class WatchPersistenceBootstrap {
     private var retirement: Task<Void, Error>?
     private var binding: String?
     private var observer: NSObjectProtocol?
-    private var remoteObserver: NSObjectProtocol?
+    private var remoteObserver: PersistentHistoryObserver?
     private var associationObserver: NSObjectProtocol?
     private var shareObserver: NSObjectProtocol?
     private var lastRefresh: Date?
@@ -85,7 +85,7 @@ final class WatchPersistenceBootstrap {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
+        remoteObserver = nil
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
         if let shareObserver { NotificationCenter.default.removeObserver(shareObserver) }
     }
@@ -179,6 +179,7 @@ final class WatchPersistenceBootstrap {
             object: persistence, queue: .main) { [weak self] _ in
                 Task { @MainActor in await self?.drainAssociations(runtime) }
             }
+        remoteObserver?.requestRefresh()
         refreshHomeAccess()
         return runtime
     }
@@ -207,7 +208,6 @@ final class WatchPersistenceBootstrap {
         if let previous {
             retirement = Self.retireStore(previous.persistence)
         }
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
         remoteObserver = nil
     }
 
@@ -223,9 +223,8 @@ final class WatchPersistenceBootstrap {
     }
 
     private func observeImports(_ runtime: Runtime) {
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
-        remoteObserver = NotificationCenter.default.addObserver(forName: .NSPersistentStoreRemoteChange,
-            object: runtime.persistence.container.persistentStoreCoordinator, queue: .main) { [weak self] _ in
+        remoteObserver = nil
+        remoteObserver = PersistentHistoryObserver(persistence: runtime.persistence, history: runtime.history) { [weak self] in
             Task { @MainActor in
                 guard let self, self.current?.persistence === runtime.persistence else { return }
                 do {

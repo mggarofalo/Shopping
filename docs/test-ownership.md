@@ -2716,3 +2716,16 @@ work. Other existing recovery/rejoin barriers retain their own proof. Every
 changed caller is covered by the complete Home adoption and sharing-status
 bootstrap suites, using isolated stores and teardown drainage. No UI workflow,
 negative assertion, real-system transition or recovery case is retired.
+
+## SHOPPING-244: imported occurrence identity
+
+`ImportedNeedReconciliationTests` owns exact physical Need duplication after a
+normal local insert, stable cloud-record selection in both physical orders,
+relaunch/idempotence, unchanged personal-cart membership, divergent fields and
+relationships, missing/cloud-zone identity, local-store exclusion, deferred
+permission denial with history progress, account changes, and split-transaction
+relationship imports. A concurrent import winning the optimistic deletion save
+is retained without failing history. It uses isolated SQLite stores and injected native identity
+and completed-sync evidence. It does not claim to simulate CloudKit transport or
+unseen offline edits racing cloud deletion. Existing `GroceryNeedTests` retains
+strict ambiguous-identity command and projection assertions.
