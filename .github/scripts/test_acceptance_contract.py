@@ -1,11 +1,13 @@
 """Protect the quick/full boundary and its independent Fast coverage gate."""
 
 from copy import deepcopy
+import fnmatch
 import importlib.util
 import json
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -64,6 +66,11 @@ class AcceptanceContractTests(unittest.TestCase):
         self.assertEqual(build["timeout-minutes"], 30)
         steps = {step.get("name"): step for step in build["steps"]}
         commands = [step.get("run", "") for step in build["steps"]]
+        driver_command = shlex.split(steps["Validate system text-size driver"]["run"])
+        driver_pattern = driver_command[driver_command.index("-p") + 1]
+        for filename in ("test_system_text_size.py", "test_system_text_size_protocol.py"):
+            self.assertTrue(fnmatch.fnmatchcase(filename, driver_pattern),
+                            f"CI must discover driver proof in {filename}")
         self.assertEqual(sum("xcodebuild build-for-testing" in command for command in commands), 1)
         self.assertIn("-testPlan ShoppingAcceptance", steps["Build acceptance test products"]["run"])
         fast = steps["Run fast deterministic tests"]["run"]

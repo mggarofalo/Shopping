@@ -18,7 +18,8 @@ A boundary test attempts xcrun/simctl, xcodebuild, shell and network operations 
 requires rejection before execution. Command-adapter tests supply fake runners.
 
 The four existing real Python-child lifecycle tests remain outside that zero-process
-gate. The complete 37-case inventory, including those smoke tests, runs with:
+gate. The complete 37-case inventory, including those smoke tests, runs in the existing
+Swift CI driver-validation step and locally with:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
@@ -29,8 +30,9 @@ Those four launch temporary Python fixtures and a fake xcrun in their private PA
 none launches Simulator. They retain success-with-abandonment, child failure,
 child signal exit and host cancellation proof. All original 17 tests remain.
 The original late-setter test now advances an injected clock instead of mocking
-global time. SHOPPING-237 owns enforcement in dispatch/CI; this issue introduces
-only the local entry point. Full, coverage and exact-source policy are unchanged.
+global time. CI discovery includes both driver test files; a workflow contract
+protects that inventory. SHOPPING-237 owns enforcement of cheap-first dispatch
+ordering. Full, coverage and exact-source policy are unchanged.
 
 ## Fault ownership
 
