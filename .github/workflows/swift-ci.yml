@@ -3,6 +3,10 @@ name: Swift CI
 on:
   workflow_dispatch:
     inputs:
+      compatibility_canary:
+        description: Run only the four pinned-runtime compatibility workflows (diagnostic)
+        type: boolean
+        default: false
       siri_launch_diagnostic:
         description: Observe the existing Siri launch boundary without producing required-check proof
         type: boolean
@@ -24,7 +28,7 @@ concurrency:
 
 jobs:
   release-build:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}
     name: Release SDK Build
     runs-on: xcode-27
     # Includes archive, a cold simulator boot and the separately compiled Siri suite.
@@ -119,7 +123,7 @@ jobs:
             ${{ runner.temp }}/SiriRegistration
 
   build:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}
     name: Build & Test
     runs-on: macos-15
     timeout-minutes: 30
@@ -143,6 +147,9 @@ jobs:
           .github/scripts/test-shopping-full-gate.sh
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_full_preflight.py
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_exhaustive_contract.py
+
+      - name: Validate compatibility canary contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_compatibility_canary.py
 
       - name: Validate system text-size driver
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_system_text_size*.py'
@@ -339,3 +346,37 @@ jobs:
             DerivedData/Build/Products/*.xctestrun
           if-no-files-found: warn
           retention-days: 14
+
+  compatibility-canary:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compatibility_canary }}
+    name: Compatibility Canary (diagnostic)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Select pinned compatibility Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Validate canary tooling before simulator allocation
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_compatibility_canary.py
+          PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/check-driver-contracts.py
+      - name: Run serial compatibility canary
+        timeout-minutes: 25
+        run: |
+          simulator_id="$(xcrun simctl create 'Shopping compatibility' com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro com.apple.CoreSimulator.SimRuntime.iOS-18-5)"
+          python3 .github/scripts/run-compatibility-canary.py --simulator "$simulator_id" --artifacts "$RUNNER_TEMP/Compatibility"
+      - name: Retain compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compatibility-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/Compatibility/*.json
+            ${{ runner.temp }}/Compatibility/*.jsonl
+            ${{ runner.temp }}/Compatibility/*.md
+            ${{ runner.temp }}/Compatibility/*.txt
+            ${{ runner.temp }}/Compatibility/*.xctestrun
+            ${{ runner.temp }}/Compatibility/*.log
+            ${{ runner.temp }}/Compatibility/Results.xcresult
+          retention-days: 14
+          compression-level: 0

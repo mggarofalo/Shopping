@@ -18,12 +18,13 @@ The 5 jobs ranged from 37m 16s to 50m 41s, with a median of 40m 9s and an observ
 
 ## Test plans
 
-The shared `Shopping` scheme exposes 6 plans:
+The shared `Shopping` scheme exposes these plans:
 
 | Plan | Owner | Contents | Normal trigger |
 | --- | --- | --- | --- |
 | `ShoppingFast` | Independent deterministic coverage gate | 218 deterministic unit, persistence, recovery, filtering, and service tests | Every pull request, push to `main`, or manual Swift CI dispatch |
 | `ShoppingAcceptance` | Quick product acceptance | All `ShoppingFast` tests plus 6 explicitly selected UI workflows | Same routine CI events; CI executes Fast and UI portions separately from one build |
+| `ShoppingCompatibility` | Pinned-runtime diagnostic | Four existing UI workflows, serial, with cross-test OS restoration receipts | Explicit manual canary mode |
 | `ShoppingCritical` | Semantic local check | 14 Swift Testing cases tagged `.critical` across unit and persistence suites | Local or manual use |
 | `ShoppingFull` | Exhaustive regression check | `ShoppingFast` plus UI, appearance, and simulator device tests | Manual remote dispatch only after the exact commit passes locally |
 | `ShoppingPerformance` | Performance investigation | The 3 service benchmarks and 2 loaded UI performance flows | Manual dispatch |
@@ -284,3 +285,55 @@ the modern test ran (38316984917). This budget covers setup and artifact
 collection; no per-test timeout, assertion, selection or retry policy changes.
 The capture step has its own three-minute limit and restarts an already-created
 simulator when necessary to read retained logs.
+
+## Compatibility canary (SHOPPING-236)
+
+`ShoppingCompatibility` selects four existing UI methods, serially on one
+simulator: PersonalCart store-picker Large/XXXL, HomeDetails restricted-membership
+Large/XXXL, HomeReplacement exact replacement/landing, and CategoryManagement
+anchored merge/delete destination menus. The plan is diagnostic; Fast, Acceptance,
+Full, coverage ownership and exact-SHA Full gates are unchanged. It samples native
+headings, full-frame membership viewport containment, outgoing invitation completion
+and real Menu destinations. It does not cover the separate quantity-sheet/background
+tab-bar geometry defect or replace the exhaustive workflow owners.
+
+Run `python3 .github/scripts/run-compatibility-canary.py --simulator <owned-UDID>
+--artifacts <new-absolute-directory>`. The existing timing framework records the
+no-process driver gate, simulator startup, cold/warm builds, serial execution and
+reporting separately. Build products are reused. Exact planned/built/executed
+identifiers reject omissions, broadening, duplication and skips. Driver receipts
+verify two distinct leases on the requested simulator, exact initial/restored
+category across both tests, distinct fixture stores/processes/nonces and real
+Large/XXXL round trips. Existing XCTest assertions retain same-process fresh
+lifecycle and UIKit restoration proof. `Restoration.json` records individual host
+command and host restoration costs; these do not include app activation time.
+
+The existing Swift CI workflow accepts `compatibility_canary=true` for the pinned
+Xcode 16.4/iOS 18.5 diagnostic job. Both required jobs are skipped in this mode,
+so it cannot supply required CI or exhaustive preflight evidence. Selecting both
+`compatibility_canary` and `siri_launch_diagnostic` runs the two independent
+diagnostic jobs on separate runners; required jobs remain skipped. Normal CI
+also runs the cheap canary tooling contracts. Hosted dispatch
+requires explicit task authorization. Do not use Full to tune this selection.
+The 30-minute job and 25-minute combined build/run ceilings are failure bounds,
+not measured budgets. The proposed five-minute post-build target remains an
+experiment until local and pinned measurements establish feasibility.
+
+Declare no more than three unchanged trials per environment/configuration and
+stop at the first unexplained failure. Preserve every failure and all raw evidence;
+a repetition is not a retry counted as success. Local Xcode 27.1/iOS 26.5 cannot
+establish pinned Xcode 16.4/iOS 18.5 compatibility. The runner retains reports under the Git
+common directory's `shopping-test-timings/<SHA>/<run-id>/` after each experiment;
+large result bundles and build products remain in the printed artifact directory.
+
+The runner refuses dirty source, verifies the same clean SHA after success, and
+retains the explicit plan and built xctestrun manifests. It bounds boot to five
+minutes, each build and UI execution to fifteen, and reporting to one minute.
+On cancellation it forwards TERM through the existing supervisors and allows
+265 seconds for an in-flight setter/readback pair plus the restoration
+setter/readback pair and supervision margin before a hard stop. The allowance
+is derived from the driver's four 60-second operation budgets, 15-second request
+margin and 10-second cancellation grace.
+A timeout remains failure even if cleanup succeeds. These are containment bounds;
+no native operation deadline or UI assertion timeout changes. Reporting failure
+cannot replace the original test failure or turn a failed run into passing proof.
