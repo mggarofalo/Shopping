@@ -1,10 +1,13 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -154,6 +157,61 @@ class SiriSchemaCITests(unittest.TestCase):
             with patch.object(siri, "Commands", fake), patch.object(fake, "text", text), patch.object(siri, "execute_test", return_value=0):
                 self.assertEqual(siri.run_tests(output), 1)
             self.assertTrue((output / "SiriRegistration/ManifestFailure.txt").exists())
+
+    def test_cancel_after_stdout_eof_kills_stubborn_child_and_restores_handlers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            ready = output / "child-ready"
+            child = output / "child.py"
+            child.write_text("import os, signal, time\nfrom pathlib import Path\n"
+                             "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                             "os.close(1); os.close(2)\n"
+                             f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                             "while True: time.sleep(1)\n")
+            wrapper = output / "wrapper.py"
+            wrapper.write_text("import importlib.util, json, signal, sys\nfrom pathlib import Path\n"
+                               f"spec=importlib.util.spec_from_file_location('runner', {str(Path(siri.__file__))!r})\n"
+                               "runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)\n"
+                               "def previous(signum, frame): pass\n"
+                               "signal.signal(signal.SIGTERM, previous)\n"
+                               f"code=runner.execute_test([sys.executable, {str(child)!r}], Path({str(output / 'test.log')!r}))\n"
+                               "print(json.dumps({'code': code, 'restored': signal.getsignal(signal.SIGTERM) is previous}), flush=True)\n"
+                               "sys.exit(code)\n")
+            process = subprocess.Popen([sys.executable, str(wrapper)], stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True, start_new_session=True)
+            try:
+                deadline = time.monotonic() + 10
+                while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "Child must close output and install its TERM handler before cancellation")
+                os.kill(process.pid, signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=8)
+                self.assertEqual(process.returncode, 143, stderr)
+                self.assertEqual(json.loads(stdout), {"code": 143, "restored": True})
+            finally:
+                # Retain bounded cleanup even when this regression is run against
+                # the old implementation that waits forever after pipe EOF.
+                for pid in ([int(ready.read_text())] if ready.exists() else []) + [process.pid]:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                process.communicate(timeout=5)
+
+    def test_cleanup_exit_race_does_not_replace_original_error(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(siri.subprocess, "Popen") as popen, \
+                patch("selectors.DefaultSelector") as selector, \
+                patch.object(siri.os, "killpg", side_effect=ProcessLookupError):
+            process = popen.return_value
+            process.poll.return_value = None
+            process.wait.return_value = -signal.SIGKILL
+            selector.return_value.get_map.return_value = {1: "open"}
+            selector.return_value.select.side_effect = RuntimeError("original stream failure")
+            previous = signal.getsignal(signal.SIGTERM)
+            with self.assertRaisesRegex(RuntimeError, "original stream failure"):
+                siri.execute_test(["fake-command"], Path(directory) / "test.log")
+            self.assertIs(signal.getsignal(signal.SIGTERM), previous)
 
     def test_postrun_capture_observes_without_booting_shutdown_device(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -153,7 +153,9 @@ def execute_test(command, log_path, sample=None):
     handlers = {sig: signal.signal(sig, cancel) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         with log_path.open("wb") as log:
-            while selector.get_map():
+            # Pipe EOF does not mean the command exited. Keep the cancellation
+            # deadline active when a stubborn child closes stdout before exit.
+            while selector.get_map() or process.poll() is None:
                 for key, _ in selector.select(timeout=0.1):
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
@@ -181,7 +183,10 @@ def execute_test(command, log_path, sample=None):
         selector.close()
         process.stdout.close()
         if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             process.wait(timeout=5)
         if observer and observer.thread:
             observer.thread.join()
