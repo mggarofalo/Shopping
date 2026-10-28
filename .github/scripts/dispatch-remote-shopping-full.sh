@@ -28,6 +28,19 @@ if [[ "$remote_sha" != "$commit_sha" ]]; then
     exit 1
 fi
 
+python3 .github/scripts/staged_validation.py gate
+receipt_token="$(python3 .github/scripts/staged_validation.py reserve "$commit_sha")"
+release_receipts() {
+    local exit_code="$?"
+    trap - EXIT
+    local release_code=0
+    (cd "$repository_root" && python3 .github/scripts/staged_validation.py release "$commit_sha" "$receipt_token") || release_code="$?"
+    if [[ "$exit_code" -eq 0 ]]; then exit_code="$release_code"; fi
+    exit "$exit_code"
+}
+trap release_receipts EXIT
+python3 .github/scripts/require-full-preflight.py "$commit_sha" --pinned-canary
+
 repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 gh api --method POST "repos/$repository/statuses/$commit_sha" \
     -f state=success \
@@ -36,6 +49,7 @@ gh api --method POST "repos/$repository/statuses/$commit_sha" \
 
 gh workflow run swift-exhaustive.yml \
     --ref "$branch" \
-    -f suite=full
+    -f suite=full \
+    -f expected_sha="$commit_sha"
 
 echo "Dispatched remote ShoppingFull for $commit_sha."

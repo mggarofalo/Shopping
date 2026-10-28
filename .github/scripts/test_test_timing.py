@@ -121,6 +121,17 @@ class LocalGateTests(unittest.TestCase):
         scripts.mkdir(parents=True)
         for name in ("test-timing.py", "run-local-shopping-full.sh", "summarize-xcresult.sh", "require-full-preflight.py", "with-system-text-size.py"):
             shutil.copy2(SCRIPT.with_name(name), scripts / name)
+        # This suite owns Full timing/attestation. Staged receipt semantics have
+        # their own adversarial suite; inject only that boundary here.
+        (scripts / 'staged_validation.py').write_text("""import os, sys
+NATIVE_JOBS = ('Build & Test (native)', 'Release SDK Build (native)')
+def execution_key(run): return (run['run_started_at'], run['id'], run.get('run_attempt', 1))
+def require_pinned_canary(*args):
+    if os.environ.get('PINNED_FAILURE') == '1':
+        raise ValueError('pinned receipt failed')
+if __name__ == '__main__':
+    sys.exit(int(os.environ.get('STAGED_GATE_EXIT', '0')))
+""")
         (self.root / "source.txt").write_text("original\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "fixture")):
             subprocess.run(["git", *args], cwd=self.root, check=True, capture_output=True)
@@ -141,13 +152,13 @@ import json, os, subprocess, sys
 if sys.argv[1] == 'repo':
     print('fixture/repository')
 elif '/jobs?' in sys.argv[2]:
-    print(json.dumps({'jobs': [dict(name=name, status='completed', conclusion='success') for name in ('Build & Test', 'Release SDK Build')]}))
+    print(json.dumps({'jobs': [dict(name=name, status='completed', conclusion='success', started_at='2026-10-28T00:00:01Z') for name in ('Build & Test', 'Release SDK Build', 'Build & Test (native)', 'Release SDK Build (native)', 'Deterministic validation prerequisites')]}))
 else:
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     if os.environ.get('CHANGE_PREFLIGHT_SOURCE') == '1':
         with open('source.txt', 'a') as stream:
             stream.write('changed')
-    print(json.dumps({'workflow_runs': [dict(id=1, head_sha=sha, event='workflow_dispatch', status='completed', conclusion=os.environ.get('CI_RESULT', 'success'), run_attempt=1, html_url='https://example.test/run')]}))
+    print(json.dumps({'workflow_runs': [dict(id=1, head_sha=sha, event='workflow_dispatch', status='completed', conclusion=os.environ.get('CI_RESULT', 'success'), run_attempt=1, run_started_at='2026-10-28T00:00:01Z', html_url='https://example.test/run')]}))
 """)
 
         self.environment = dict(os.environ, PATH=str(self.fakebin) + os.pathsep + os.environ["PATH"],
@@ -245,6 +256,13 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / ".git/shopping-test-timings").exists())
         self.assertFalse(self.attestation().exists())
+
+    def test_staged_or_pinned_failure_never_starts_full(self):
+        for environment in ({'STAGED_GATE_EXIT': '1'}, {'PINNED_FAILURE': '1'}):
+            result = self.run_local(**environment)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root / '.git/shopping-test-timings').exists())
+            self.assertFalse(self.attestation().exists())
 
     def test_source_change_during_preflight_never_starts_full(self):
         result = self.run_local(CHANGE_PREFLIGHT_SOURCE="1")

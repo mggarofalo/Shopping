@@ -178,3 +178,45 @@ metadata with every connected scene in the background; foreground observations
 require an active scene as well as exact category and freshness. This avoids
 relying on XCTest's asynchronously cached background state. Failure teardown
 still restores the host's captured original category.
+
+### Fixture completion contracts (SHOPPING-234)
+
+An open store or selected Home is not evidence that discovery or a durable
+invitation acknowledgement has completed. Keep `waitForReady` scoped to store
+availability; tests that intentionally inspect an in-flight operation still need
+that boundary. Await the additional witnesses required by the *next* action.
+
+`FixtureReadiness` is test-owned: it subscribes to observable changes, rechecks
+after registration, and evaluates exact prerequisites after pre-mutation
+notifications. It never changes app state. Its five-second deadline bounds
+observation, not the duration of a preceding service call. Cancellation and
+operation errors propagate; a timeout names expected and observed values.
+It uses no polling sleeps; the one timer is a failure deadline.
+
+The interrupted-replacement fixture requires the expected account/Home scope,
+replacement ID, target and stage, invitation account/imported Home and durable
+acknowledgement before explicit recovery. The sharing-status access fixture
+awaits fresh discovery after selection, then checks the captured account,
+selected scope and explicit-choice authority, plus the exact graph's access.
+Discovery may legitimately renew the presentation when the selected Home's access
+changes. Require the resulting active presentation to match the captured scope
+and current coordinator generation; do not require its pre-discovery ID. A new
+Home choice, renewed choice or account rejects the fixture action. Existing
+held-operation tests must always release and drain their workers, including when
+an intermediate prerequisite throws.
+
+Use explicit barriers to hold completion at service or journal boundaries. Show
+that the old proxy witness already passes while the new prerequisite does not;
+then release the actual operation and assert its persisted/public result. Do not
+seed the completion being tested or increase timeouts to conceal ordering bugs.
+Pure barrier tests do not prove Core Data or platform behavior: the affected
+bootstrap suites retain those owners. This change does not replace Full,
+coverage, pinned-platform or exact-source gates.
+
+## Deterministic text-size preflight
+
+Run `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/check-driver-contracts.py`
+for simulator-free lease, transport and process-supervision contracts before
+allocating simulator resources. The [SHOPPING-235 fault matrix](testing/shopping-235-driver-contracts.md)
+records proof ownership and separate native Python-child smoke tests.
+This entry point does not replace runtime compatibility or required CI.

@@ -2657,3 +2657,62 @@ acceptance workflows passed without failures/skips. Summaries are retained under
 separate capture step passed four stubbed failure-path checks and independent
 review. Capture timestamps distinguish post-test/reboot observations from the
 original test failure; a hard job cancellation can still truncate evidence.
+
+## Deterministic fixture readiness (SHOPPING-234)
+
+`FixtureReadinessTests` owns event registration, already-complete state, delayed
+acknowledgement/save, stale Home/account witnesses, missing-prerequisite
+diagnostics, cancellation and failure propagation before/after subscription.
+`HomeAdoptionBootstrapTests.testFixtureReadinessWaitsForDurableInvitationPublication`
+holds the real serial invitation worker, proves the next action cannot proceed,
+then verifies acknowledgement in the reopened journal after release.
+
+Changed-helper caller inventory:
+
+- `assertReplacementRecovery`: `testRelaunchRetainsExactPendingReplacementUntilExplicitRetry`,
+  `testResolvedInvitationRecoversInterruptedActivationOnExplicitRetry`, and
+  `testInterruptedReplacementCanKeepMountedStarterVisibleAndEditable` retain
+  their exact deletion/recovery and mounted-starter editing assertions. Their
+  readiness predicate now names account, graph, record, stage and invitation
+  acknowledgement rather than relying on selected graph plus record presence.
+- `awaitAccess`: `testInactiveDetailsShowTheirOwnAccessAndReadTheirOwnSavedWork`
+  retains independent inspected-Home access, saved-work and selected-Home checks.
+  Three new callers force held discovery after selection, a Home switch while
+  discovery is held, and discovery failure. The existing account-boundary,
+  late-result, same-graph presentation-renewal and stale discovery tests remain.
+
+The October 28 follow-up preserves the selected scope and explicit-choice
+authority across discovery, while requiring the resulting active presentation
+to match the coordinator generation. `testAccessFixtureAcceptsFreshAccessThatRenewsTheSameHomePresentation`
+holds its fixture-owned discovery after the helper captures authority, then
+releases an owner-to-restricted result and verifies that discovery retires the
+old presentation without replacing the Home choice. Task-local request identity
+keeps startup discovery from consuming or publishing this access change. The pre-fix helper fails this
+case with `retired`. `testAccessFixtureRejectsRenewedChoiceOfSameHomeDuringHeldDiscovery`
+and `testAccessFixtureRejectsAccountChangeDuringHeldDiscovery` retain rejection
+of changed authority even when the graph is unchanged. No production authority
+or access checks change.
+
+The same focused 25-case inventory (eight barrier cases, seventeen sharing-status
+bootstrap cases) produced 24 passes/one forced failure before the repair and
+25 passes/zero failures or skips after it on Xcode 27.1/iOS 26.5. Raw results,
+source diffs, timing metadata and exact manifests are retained at
+`/tmp/shopping-234-retired-fixture/`. Cold baseline versus incremental repaired
+build costs are not a speed comparison or pinned-runtime proof. The original
+hosted failure remains recorded in routine run 40691576008.
+
+Review found the first positive proof allowed startup discovery to publish the
+access change before the helper captured its witness. The task-local gate now
+orders those events explicitly. The first review validation also exposed startup
+discovery superseding the failure-propagation test's request; that test now
+observes startup discovery entry before issuing its deliberate failure. Both
+failed review runs are retained as `ReviewBaseline` and `ReviewFinal`; the
+subsequent corrected-order negative and repaired inventories are `Review2Baseline`
+and `Review2Final`. These are source changes between runs, not retries to green.
+
+Generic store-ready and replacement-offer helpers are not broadened into global
+quiescence checks: their callers include tests deliberately observing pending
+work. Other existing recovery/rejoin barriers retain their own proof. Every
+changed caller is covered by the complete Home adoption and sharing-status
+bootstrap suites, using isolated stores and teardown drainage. No UI workflow,
+negative assertion, real-system transition or recovery case is retired.

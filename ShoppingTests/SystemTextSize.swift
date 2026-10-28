@@ -59,6 +59,9 @@ final class SystemTextSize {
         }
         original = try Self.readMetadata(fileURL: metadataURL, nonce: nonce)
         let captured = try driver.request("acquire")
+        let fixtureReceipt = ["test": test.name, "store": storePath,
+                              "nonce": nonce, "process": original.process]
+        print("Compatibility fixture: " + String(decoding: try JSONEncoder().encode(fixtureReceipt), as: UTF8.self))
         attach("Original system text size", text: "host=\(captured.observed ?? "missing") UIKit=\(original.category)")
         // The host owns the original global category before the first mutation;
         // it also restores abandoned leases if teardown cannot complete.
