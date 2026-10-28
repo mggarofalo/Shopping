@@ -2,6 +2,11 @@ name: Swift CI
 
 on:
   workflow_dispatch:
+    inputs:
+      siri_launch_diagnostic:
+        description: Observe the existing Siri launch boundary without producing required-check proof
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -19,12 +24,63 @@ concurrency:
 
 jobs:
   release-build:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
     name: Release SDK Build
     runs-on: xcode-27
     # Includes archive, a cold simulator boot and the separately compiled Siri suite.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Select upload Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_27.0.app
+
+      - name: Validate Siri runner contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_siri_schema_ci.py
+
+      - name: Compile unsigned release archive
+        run: >-
+          xcodebuild archive
+          -project Shopping.xcodeproj
+          -scheme Shopping
+          -configuration Release
+          -destination 'generic/platform=iOS'
+          -archivePath "$RUNNER_TEMP/Shopping.xcarchive"
+          -derivedDataPath "$RUNNER_TEMP/ReleaseDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify exported Siri schema
+        run: python3 .github/scripts/validate-siri-metadata.py "$RUNNER_TEMP/Shopping.xcarchive/Products/Applications/Shopping.app"
+
+      - name: Test current Siri schema contracts
+        run: python3 .github/scripts/siri-schema-ci.py test --output "$RUNNER_TEMP"
+
+      - name: Capture Siri registration diagnostics
+        if: always()
+        timeout-minutes: 3
+        run: python3 .github/scripts/siri-schema-ci.py capture --output "$RUNNER_TEMP"
+
+      - name: Retain Siri schema test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: siri-schema-results
+          path: |
+            ${{ runner.temp }}/SiriSchema.xcresult
+            ${{ runner.temp }}/SiriSchemaTests.json
+            ${{ runner.temp }}/SiriSchema.log
+            ${{ runner.temp }}/SiriRegistration
+
+  siri-launch-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.siri_launch_diagnostic }}
+    name: Siri launch diagnostic
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate diagnostic contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_siri_schema_ci.py
 
       - name: Select upload Xcode version
         run: sudo xcode-select -s /Applications/Xcode_27.0.app
@@ -43,73 +99,27 @@ jobs:
       - name: Verify exported Siri schema
         run: python3 .github/scripts/validate-siri-metadata.py "$RUNNER_TEMP/Shopping.xcarchive/Products/Applications/Shopping.app"
 
-      - name: Test current Siri schema contracts
-        run: |
-          simulator_id="$(xcrun simctl create 'Shopping Siri schema' com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0)"
-          echo "$simulator_id" > "$RUNNER_TEMP/SiriSimulatorID"
-          # Preserve ordinary results plus targeted registration evidence; a verbose
-          # post-failure sysdiagnose previously exhausted the job and lost Info.plist.
-          xcodebuild test -project Shopping.xcodeproj -scheme ShoppingSiri -testPlan ShoppingSiri \
-            -collect-test-diagnostics never \
-            -destination "platform=iOS Simulator,id=$simulator_id" -parallel-testing-enabled NO \
-            -only-testing:ShoppingPersistenceTests/SpokenGrocerySchemaTests \
-            -only-testing:ShoppingPersistenceTests/CatalogActionTests \
-            -only-testing:ShoppingSiriTests/ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution \
-            -resultBundlePath "$RUNNER_TEMP/SiriSchema.xcresult"
-          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/SiriSchema.xcresult" --format json > "$RUNNER_TEMP/SiriSchemaTests.json"
-          jq -e '
-            [.. | objects | select(.nodeType? == "Test Case")] as $tests |
-            ($tests | length == 22) and all($tests[]; .result == "Passed") and
-            ([$tests[] | select(.nodeIdentifier | startswith("CatalogActionTests/"))] | length == 15) and
-            ([$tests[] | select(.nodeIdentifier | startswith("SpokenGrocerySchemaTests/"))] | length == 6) and
-            ([$tests[] | select(.nodeIdentifier == "ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()")] | length == 1)
-          ' "$RUNNER_TEMP/SiriSchemaTests.json"
+      - name: Observe current Siri launch boundary
+        run: python3 .github/scripts/siri-schema-ci.py test --output "$RUNNER_TEMP" --sample-launch
 
-      - name: Capture Siri registration diagnostics
+      - name: Capture final Siri state without rebooting
         if: always()
         timeout-minutes: 3
-        run: |
-          if [[ ! -f "$RUNNER_TEMP/SiriSimulatorID" ]]; then
-            echo "No Siri simulator was created."
-            exit 0
-          fi
-          simulator_id="$(cat "$RUNNER_TEMP/SiriSimulatorID")"
-          evidence="$RUNNER_TEMP/SiriRegistration"
-          mkdir -p "$evidence"
-          date -u > "$evidence/CaptureTime.txt"
-          # Best-effort diagnostics never change the preceding test/manifest verdict.
-          set +e
-          bounded() { python3 -c 'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=20).returncode)' "$@"; }
-          bounded xcrun simctl bootstatus "$simulator_id" -b > "$evidence/Boot.log" 2>&1
-          echo "boot=$?" >> "$evidence/ExitStatus.txt"
-          bounded xcrun simctl spawn "$simulator_id" log show --last 25m --style compact \
-            --predicate 'subsystem BEGINSWITH[c] "com.apple.appintents" OR process == "linkd"' \
-            > "$evidence/System.log" 2>&1
-          echo "log=$?" >> "$evidence/ExitStatus.txt"
-          app_path="$(bounded xcrun simctl get_app_container "$simulator_id" com.mggarofalo.shopping app 2> "$evidence/ContainerError.log")"
-          echo "container=$?" >> "$evidence/ExitStatus.txt"
-          if [[ -d "$app_path/Metadata.appintents" ]]; then
-            cp -R "$app_path/Metadata.appintents" "$evidence/Metadata.appintents"
-            echo "metadata_copy=$?" >> "$evidence/ExitStatus.txt"
-            plutil -convert json -o "$evidence/AppInfo.json" "$app_path/Info.plist"
-            echo "app_info=$?" >> "$evidence/ExitStatus.txt"
-          fi
-          bounded xcrun simctl shutdown "$simulator_id"
-          echo "shutdown=$?" >> "$evidence/ExitStatus.txt"
-          bounded xcrun simctl delete "$simulator_id"
-          echo "delete=$?" >> "$evidence/ExitStatus.txt"
+        run: python3 .github/scripts/siri-schema-ci.py capture --output "$RUNNER_TEMP"
 
-      - name: Retain Siri schema test evidence
+      - name: Retain Siri diagnostic evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: siri-schema-results
+          name: siri-launch-diagnostic
           path: |
             ${{ runner.temp }}/SiriSchema.xcresult
             ${{ runner.temp }}/SiriSchemaTests.json
+            ${{ runner.temp }}/SiriSchema.log
             ${{ runner.temp }}/SiriRegistration
 
   build:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.siri_launch_diagnostic }}
     name: Build & Test
     runs-on: macos-15
     timeout-minutes: 30
