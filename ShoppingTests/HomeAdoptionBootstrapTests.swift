@@ -1,4 +1,5 @@
 import CloudKit
+import Combine
 import CoreData
 import XCTest
 @testable import Shopping
@@ -1295,14 +1296,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             try LocalHomeDeletionJournal(storeURL: url).retain(command)
         }
         let bootstrap = try await openImportedFixture(fixture, autoJoinInvitations: true)
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        // Selection is published before durable invitation acknowledgement.
-        // This scenario retries an already-resolved invitation after both finish.
-        while bootstrap.homeCoordinator.activeScope?.graph != fixture.invited
-                || bootstrap.replacementRecord == nil
-                || bootstrap.invitations?.allEntries.first(where: { $0.id == fixture.entryID })?.activationResolved != true,
-              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(try XCTUnwrap(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+        try await FixtureReadiness.wait(changes: [
+            bootstrap.objectWillChange.eraseToAnyPublisher(),
+            try XCTUnwrap(bootstrap.invitations).objectWillChange.eraseToAnyPublisher()
+        ]) {
+            if case .failed(let error) = bootstrap.state { throw error }
+            guard try fixture.provider.currentSession() == session else { throw PersonalCartError.accountChanged }
+            return self.replacementRecoveryPrerequisites(bootstrap, fixture: fixture,
+                session: session, recordID: record.id, stage: stage)
+        }
         XCTAssertEqual(bootstrap.replacementRecord?.stage, stage)
         XCTAssertFalse(try LocalHomeDeletionJournal(storeURL: url).statuses().contains { $0.completed },
                        "Generic recovery must not execute replacement cleanup")
@@ -1326,6 +1328,23 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
             XCTAssertEqual(try LocalHomeDeletionJournal(storeURL: url).statuses().first?.command, command)
         }
         XCTAssertTrue(try LocalHomeDeletionJournal(storeURL: url).statuses().first?.completed == true)
+    }
+
+    private func replacementRecoveryPrerequisites(
+        _ bootstrap: PersistenceBootstrap, fixture: ImportedInvitationFixture,
+        session: ShopperSession, recordID: UUID, stage: HomeReplacementRecord.Stage
+    ) -> [String] {
+        let scope = ActiveHomeScope(session: session, graph: fixture.invited)
+        let entry = bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }
+        return [
+            FixtureReadiness.mismatch("selected account/Home", actual: bootstrap.homeCoordinator.activeScope, expected: scope),
+            FixtureReadiness.mismatch("replacement identity", actual: bootstrap.replacementRecord?.id, expected: recordID),
+            FixtureReadiness.mismatch("replacement target", actual: bootstrap.replacementRecord?.target, expected: scope),
+            FixtureReadiness.mismatch("replacement stage", actual: bootstrap.replacementRecord?.stage, expected: stage),
+            FixtureReadiness.mismatch("invitation account", actual: entry?.session, expected: session),
+            FixtureReadiness.mismatch("invitation imported Home", actual: entry?.state, expected: .ready(fixture.invited)),
+            FixtureReadiness.mismatch("invitation \(fixture.entryID) durable acknowledgement", actual: entry?.activationResolved, expected: true)
+        ].compactMap { $0 }
     }
 
     func testConfirmedStarterReplacementActivatesInvitedHomeBeforeRemovingOnlyLocalStarter() async throws {
@@ -1877,6 +1896,43 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         catch { }
         XCTAssertTrue(try access(cart, graph: fixture.invited).currentGrants.isEmpty)
         await bootstrap.runLoadingTransition()
+    }
+
+    func testFixtureReadinessWaitsForDurableInvitationPublication() async throws {
+        let fixture = try await importedInvitation()
+        var worker: HomeInvitationWorker?
+        let bootstrap = try await openImportedFixture(fixture, observeInvitationWorker: { worker = $0 })
+        let controller = try XCTUnwrap(bootstrap.invitations)
+        let journalHeld = expectation(description: "journal save deliberately held")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        try XCTUnwrap(worker).perform({ _ in
+            journalHeld.fulfill()
+            release.wait()
+        }, completion: { _ in })
+        await fulfillment(of: [journalHeld], timeout: 2)
+        let acknowledgement = Task { try await controller.resolveActivation(fixture.entryID) }
+        let evaluated = expectation(description: "fixture rejects missing durable acknowledgement")
+        var observed = false, nextActionRan = false
+        let barrier = Task {
+            try await FixtureReadiness.wait(changes: [controller.objectWillChange.eraseToAnyPublisher()]) {
+                if !observed { observed = true; evaluated.fulfill() }
+                return [FixtureReadiness.mismatch("invitation \(fixture.entryID) durable acknowledgement",
+                    actual: controller.allEntries.first { $0.id == fixture.entryID }?.activationResolved,
+                    expected: true)].compactMap { $0 }
+            }
+            nextActionRan = true
+        }
+        await fulfillment(of: [evaluated], timeout: 2)
+        XCTAssertFalse(nextActionRan)
+        XCTAssertFalse(try XCTUnwrap(controller.allEntries.first { $0.id == fixture.entryID }).activationResolved)
+        release.signal()
+        try await acknowledgement.value
+        try await barrier.value
+        XCTAssertTrue(nextActionRan)
+        let persisted = try HomeInvitationInbox(url: fixture.inboxURL,
+            containerIdentifier: "iCloud.test.imported-choice", environment: "Development")
+        XCTAssertTrue(try XCTUnwrap(persisted.entries.first { $0.id == fixture.entryID }).activationResolved)
     }
 
     func testInvitationIngressRetiresOpenBeforeBlockedJournalPublishesReplacement() async throws {

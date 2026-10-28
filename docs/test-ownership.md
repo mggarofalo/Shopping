@@ -2657,3 +2657,33 @@ acceptance workflows passed without failures/skips. Summaries are retained under
 separate capture step passed four stubbed failure-path checks and independent
 review. Capture timestamps distinguish post-test/reboot observations from the
 original test failure; a hard job cancellation can still truncate evidence.
+
+## Deterministic fixture readiness (SHOPPING-234)
+
+`FixtureReadinessTests` owns event registration, already-complete state, delayed
+acknowledgement/save, stale Home/account witnesses, missing-prerequisite
+diagnostics, cancellation and failure propagation before/after subscription.
+`HomeAdoptionBootstrapTests.testFixtureReadinessWaitsForDurableInvitationPublication`
+holds the real serial invitation worker, proves the next action cannot proceed,
+then verifies acknowledgement in the reopened journal after release.
+
+Changed-helper caller inventory:
+
+- `assertReplacementRecovery`: `testRelaunchRetainsExactPendingReplacementUntilExplicitRetry`,
+  `testResolvedInvitationRecoversInterruptedActivationOnExplicitRetry`, and
+  `testInterruptedReplacementCanKeepMountedStarterVisibleAndEditable` retain
+  their exact deletion/recovery and mounted-starter editing assertions. Their
+  readiness predicate now names account, graph, record, stage and invitation
+  acknowledgement rather than relying on selected graph plus record presence.
+- `awaitAccess`: `testInactiveDetailsShowTheirOwnAccessAndReadTheirOwnSavedWork`
+  retains independent inspected-Home access, saved-work and selected-Home checks.
+  Three new callers force held discovery after selection, a Home switch while
+  discovery is held, and discovery failure. The existing account-boundary,
+  late-result, same-graph presentation-renewal and stale discovery tests remain.
+
+Generic store-ready and replacement-offer helpers are not broadened into global
+quiescence checks: their callers include tests deliberately observing pending
+work. Other existing recovery/rejoin barriers retain their own proof. Every
+changed caller is covered by the complete Home adoption and sharing-status
+bootstrap suites, using isolated stores and teardown drainage. No UI workflow,
+negative assertion, real-system transition or recovery case is retired.
