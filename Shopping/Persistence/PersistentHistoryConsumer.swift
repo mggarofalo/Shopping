@@ -39,13 +39,20 @@ actor PersistentHistoryConsumer {
     }
     private let persistence: PersistenceController
     private let checkpoints: HistoryCheckpointStore
+    private let needReconciler: ImportedNeedReconciler
+    private var pendingNeedStores: Set<String> = []
+    var hasPendingNeedReconciliation: Bool { !pendingNeedStores.isEmpty }
     private var processing = false
     private var passRequested = false
     private var waiters: [CheckedContinuation<Summary, Error>] = []
 
-    init(persistence: PersistenceController, checkpoints: HistoryCheckpointStore) {
+    init(persistence: PersistenceController, checkpoints: HistoryCheckpointStore,
+         needRecordIdentity: ImportedNeedReconciler.RecordIdentity? = nil,
+         needSyncBoundary: ImportedNeedReconciler.SyncBoundary? = nil) {
         self.persistence = persistence
         self.checkpoints = checkpoints
+        needReconciler = ImportedNeedReconciler(persistence: persistence, recordIdentity: needRecordIdentity,
+                                              syncBoundary: needSyncBoundary)
     }
 
     @discardableResult
@@ -88,6 +95,12 @@ actor PersistentHistoryConsumer {
     }
 
     private func consume(role: PersistenceStoreRole, store: NSPersistentStore) async throws -> Summary {
+        // A completion arriving while the writer checks the candidates must not
+        // be lost before that check returns its deferred state.
+        pendingNeedStores.insert(store.identifier)
+        let pending = try await needReconciler.reconcile(in: store)
+        if pending { pendingNeedStores.insert(store.identifier) }
+        else { pendingNeedStores.remove(store.identifier) }
         guard let identifier = store.identifier ?? (store.metadata[NSStoreUUIDKey] as? String) else {
             throw PersistenceSetupError.missingPersistentStoreIdentifier
         }

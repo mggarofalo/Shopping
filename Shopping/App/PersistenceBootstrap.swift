@@ -226,7 +226,7 @@ final class PersistenceBootstrap: ObservableObject {
     private var associationCountKnown = false
     private let configuration: () throws -> PersistenceConfiguration
     private var preloadedPreviewEnvironment: ShoppingPreviewEnvironment?
-    private var remoteObserver: NSObjectProtocol?
+    private var remoteObserver: PersistentHistoryObserver?
     private var associationObserver: NSObjectProtocol?
     private var historyConsumer: PersistentHistoryConsumer?
     private var associationWorker: ManagedShareAssociationWorker?
@@ -982,7 +982,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     deinit {
         if let accountObserver { accountProvider?.removeSessionObserver(accountObserver) }
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
+        remoteObserver = nil
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
     }
 
@@ -2078,7 +2078,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     private func detachStores(_ previous: ReadyState?) async throws {
         generation += 1
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver); self.remoteObserver = nil }
+        remoteObserver = nil
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver); self.associationObserver = nil }
         historyConsumer = nil
         associationWorker = nil
@@ -2257,10 +2257,7 @@ final class PersistenceBootstrap: ObservableObject {
                 installRemoteObserver(for: persistence)
             } else {
                 historyConsumer = nil
-                if let remoteObserver {
-                    NotificationCenter.default.removeObserver(remoteObserver)
-                    self.remoteObserver = nil
-                }
+                remoteObserver = nil
             }
             cloudMonitor.attach(to: persistence.container)
             if let journal = persistence.shareAssociationJournal {
@@ -2323,12 +2320,9 @@ final class PersistenceBootstrap: ObservableObject {
     }
 
     private func installRemoteObserver(for persistence: PersistenceController) {
-        if let remoteObserver { NotificationCenter.default.removeObserver(remoteObserver) }
-        remoteObserver = NotificationCenter.default.addObserver(
-            forName: .NSPersistentStoreRemoteChange,
-            object: persistence.container.persistentStoreCoordinator,
-            queue: nil
-        ) { [weak self] _ in
+        remoteObserver = nil
+        guard let historyConsumer else { return }
+        remoteObserver = PersistentHistoryObserver(persistence: persistence, history: historyConsumer) { [weak self] in
             Task { @MainActor in self?.consumeHistory() }
         }
     }
