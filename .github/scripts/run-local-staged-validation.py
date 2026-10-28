@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Capture the maintained fixture selection, then the local compatibility canary."""
 import argparse
-from collections import Counter
 import importlib.util
 import json
 import os
@@ -13,7 +12,7 @@ import sys
 sys.dont_write_bytecode = True
 from selected_test_inventory import verify_explicit_products
 from local_validation_attempt import LocalAttempt
-from staged_validation import ROOT, cheap_gate, clean_source, config, fixture_selection, make_receipt, local_receipt_root, artifact_names, gate_version
+from staged_validation import ROOT, cheap_gate, clean_source, config, fixture_plan, fixture_selection, make_receipt, local_receipt_root, artifact_names, gate_version
 
 spec = importlib.util.spec_from_file_location('canary_runner', Path(__file__).with_name('run-compatibility-canary.py'))
 canary = importlib.util.module_from_spec(spec)
@@ -21,8 +20,8 @@ spec.loader.exec_module(canary)
 
 
 def verify_fixture_products(products):
-    expected_skips = json.loads((ROOT / 'ShoppingFast.xctestplan').read_text())['testTargets'][0].get('skippedTests', [])
-    verify_explicit_products(products, 'ShoppingFast', 'ShoppingPersistenceTests', fixture_selection(), expected_skips)
+    expected_skips = fixture_plan()['testTargets'][0].get('skippedTests', [])
+    verify_explicit_products(products, config()['fixtures']['plan'], 'ShoppingPersistenceTests', fixture_selection(), expected_skips)
 
 
 def run_canary(simulator, output, attempt_id=None):
@@ -54,23 +53,22 @@ def main():
         def phase(name, command, timeout):
             call(timing + ['run', '--phases', fixtures / 'Phases.jsonl', '--phase', name,
                           '--record-command', '--log', fixtures / (name + '.log'), '--'] + command, timeout)
-        call(timing + ['init', '--plan', 'ShoppingFast', '--json', fixtures / 'Metadata.json'])
+        call(timing + ['init', '--plan', config()['fixtures']['plan'], '--json', fixtures / 'Metadata.json'])
         selected = fixture_selection()
         (fixtures / 'Selection.json').write_text(json.dumps(sorted(selected)) + '\n')
-        base = ['xcodebuild', '-project', 'Shopping.xcodeproj', '-scheme', 'Shopping', '-testPlan', 'ShoppingFast',
+        base = ['xcodebuild', '-project', 'Shopping.xcodeproj', '-scheme', 'Shopping', '-testPlan', config()['fixtures']['plan'],
                 '-destination', 'platform=iOS Simulator,id=' + args.simulator,
                 '-derivedDataPath', fixtures / 'DerivedData', '-parallel-testing-enabled', 'NO']
-        base += ['-only-testing:ShoppingPersistenceTests/' + name for name in selected]
         phase('simulator', ['xcrun', 'simctl', 'bootstatus', args.simulator, '-b'], 300)
         phase('build', base + ['build-for-testing'], 900)
         verify_fixture_products(fixtures / 'DerivedData/Build/Products')
         for path in (fixtures / 'DerivedData/Build/Products').glob('*.xctestrun'):
             shutil.copyfile(path, fixtures / path.name)
-            if plistlib.loads(path.read_bytes()).get('TestPlan', {}).get('Name') == 'ShoppingFast':
+            if plistlib.loads(path.read_bytes()).get('TestPlan', {}).get('Name') == config()['fixtures']['plan']:
                 shutil.copyfile(path, fixtures / 'BuiltSelection.xctestrun')
         canary.test_and_report(
             lambda: phase('test', base + ['test-without-building', '-resultBundlePath', fixtures / 'Results.xcresult'], 300),
-            lambda: phase('report', timing + ['report', '--plan', 'ShoppingFast', '--metadata', fixtures / 'Metadata.json',
+            lambda: phase('report', timing + ['report', '--plan', config()['fixtures']['plan'], '--metadata', fixtures / 'Metadata.json',
                           '--phases', fixtures / 'Phases.jsonl', '--result', fixtures / 'Results.xcresult',
                           '--json', fixtures / 'Timing.json', '--markdown', fixtures / 'Timing.md'], 60))
         if clean_source() != sha:

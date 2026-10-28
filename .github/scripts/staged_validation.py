@@ -32,7 +32,8 @@ GATE_FILES = (CONFIG, '.github/scripts/local_validation_attempt.py', '.github/sc
               '.github/scripts/with-system-text-size.py',
               '.github/scripts/selected_test_inventory.py',
               '.github/scripts/compatibility_evidence.py',
-              'ShoppingCompatibility.xctestplan',
+              'ShoppingCompatibility.xctestplan', 'ShoppingFixtures.xctestplan', 'ShoppingFast.xctestplan',
+              'Shopping.xcodeproj/xcshareddata/xcschemes/Shopping.xcscheme',
               '.github/workflows/swift-ci.yml', '.github/workflows/swift-exhaustive.yml',
               '.github/scripts/run-local-shopping-full.sh',
               '.github/scripts/dispatch-remote-shopping-full.sh')
@@ -61,6 +62,22 @@ def fixture_selection(root=ROOT):
     return Counter(result)
 
 
+def fixture_plan(root=ROOT):
+    """Fixture selection preserves Fast's configuration and every exclusion."""
+    name = config(root)['fixtures']['plan']
+    plan = json.loads((root / (name + '.xctestplan')).read_text())
+    expected = json.loads((root / 'ShoppingFast.xctestplan').read_text())
+    expected['testTargets'][0]['selectedTests'] = [test + '()' for test in sorted(fixture_selection(root))]
+    if plan != expected:
+        raise ValueError('Fixture plan differs from source selection or Fast configuration')
+    import xml.etree.ElementTree as ET
+    refs = ET.parse(root / 'Shopping.xcodeproj/xcshareddata/xcschemes/Shopping.xcscheme').findall('.//TestPlanReference')
+    matches = [ref for ref in refs if ref.get('reference') == 'container:' + name + '.xctestplan']
+    if len(matches) != 1 or matches[0].get('default') != 'NO':
+        raise ValueError('Fixture plan must be registered once without changing the default')
+    return plan
+
+
 def validate_native(files, sha, kind, environment, root=ROOT):
     if kind not in ('fixtures', 'canary') or environment not in config(root)['environments']:
         raise ValueError('Unknown evidence stage or environment')
@@ -82,7 +99,7 @@ def validate_native(files, sha, kind, environment, root=ROOT):
     devices = report['metadata'].get('devices', [])
     if len(devices) != 1 or devices[0].get('osVersion') != platform['runtime'] or devices[0].get('platform') != 'iOS Simulator':
         raise ValueError('Wrong or incomplete runtime evidence')
-    expected_plan = 'ShoppingFast' if kind == 'fixtures' else 'ShoppingCompatibility'
+    expected_plan = config(root)['fixtures']['plan'] if kind == 'fixtures' else 'ShoppingCompatibility'
     if metadata.get('plan') != expected_plan or report['metadata'].get('plan') != expected_plan:
         raise ValueError('Wrong test plan provenance')
     expected = fixture_selection(root) if kind == 'fixtures' else selected_tests(root, 'ShoppingCompatibility')
@@ -100,8 +117,8 @@ def validate_native(files, sha, kind, environment, root=ROOT):
         if kind == 'canary':
             verify_products(products, root, 'ShoppingCompatibility')
         else:
-            skipped = json.loads((root / 'ShoppingFast.xctestplan').read_text())['testTargets'][0].get('skippedTests', [])
-            verify_explicit_products(products, 'ShoppingFast', bundle, expected, skipped)
+            skipped = fixture_plan(root)['testTargets'][0].get('skippedTests', [])
+            verify_explicit_products(products, expected_plan, bundle, expected, skipped)
     if kind == 'canary':
         if json.loads(files['PlannedSelection.json']) != json.loads((root / 'ShoppingCompatibility.xctestplan').read_text()):
             raise ValueError('Stale canary selection')
@@ -268,6 +285,7 @@ def require_pinned_canary(repository, sha, api=gh_api, download=None, root=ROOT)
 
 
 def cheap_gate(run=subprocess.run):
+    fixture_plan()
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
     commands = [[sys.executable, '.github/scripts/check-driver-contracts.py'],
                 [sys.executable, '-m', 'unittest', 'discover', '-s', '.github/scripts', '-p', 'test_staged_validation.py'],

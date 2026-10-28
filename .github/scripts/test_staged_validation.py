@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import tempfile
 import time
@@ -29,7 +30,7 @@ class StagedValidationTests(unittest.TestCase):
 
     def files(self, kind='canary', environment='pinned'):
         platform = stage.config()['environments'][environment]
-        metadata = dict(commit_sha=SHA, dirty=False, plan='ShoppingCompatibility' if kind == 'canary' else 'ShoppingFast', xcode='Xcode ' + platform['xcode'] + '\nBuild version test',
+        metadata = dict(commit_sha=SHA, dirty=False, plan='ShoppingCompatibility' if kind == 'canary' else stage.config()['fixtures']['plan'], xcode='Xcode ' + platform['xcode'] + '\nBuild version test',
                         run_url='https://github.com/owner/repo/actions/runs/10' if environment == 'pinned' else None,
                         run_attempt='1' if environment == 'pinned' else None)
         selected = stage.selected_tests(stage.ROOT, 'ShoppingCompatibility') if kind == 'canary' else stage.fixture_selection()
@@ -38,7 +39,7 @@ class StagedValidationTests(unittest.TestCase):
         tests = [{'identifier': x, 'bundle': bundle, 'result': 'Passed'} for x in selected]
         report = {'metadata': dict(metadata, devices=[device]), 'result': 'Passed', 'failures': [], 'tests': tests,
                   'counts': {'totalTestCount': len(tests), 'passedTests': len(tests), 'failedTests': 0, 'skippedTests': 0}}
-        plan = 'ShoppingCompatibility' if kind == 'canary' else 'ShoppingFast'
+        plan = 'ShoppingCompatibility' if kind == 'canary' else stage.config()['fixtures']['plan']
         target = {'BlueprintName': bundle, 'OnlyTestIdentifiers': list(selected)}
         if kind == 'fixtures':
             target['SkipTestIdentifiers'] = json.loads((stage.ROOT / 'ShoppingFast.xctestplan').read_text())['testTargets'][0]['skippedTests']
@@ -70,6 +71,41 @@ class StagedValidationTests(unittest.TestCase):
                        artifacts={name: stage.digest(files[name]) for name in stage.artifact_names(kind)})
         files['StageReceipt.json'] = json.dumps(receipt).encode()
         return files
+
+    def test_fixture_plan_matches_source_and_preserves_fast_configuration(self):
+        stage.fixture_plan()
+        root = self.receipt_root / 'source'
+        paths = [stage.CONFIG, 'ShoppingFast.xctestplan', 'ShoppingFixtures.xctestplan',
+                 'Shopping.xcodeproj/xcshareddata/xcschemes/Shopping.xcscheme']
+        paths += ['ShoppingTests/' + name + '.swift' for name in stage.config()['fixtures']['classes']]
+        for name in paths:
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(stage.ROOT / name, target)
+        fixture = root / 'ShoppingFixtures.xctestplan'
+        original = fixture.read_text()
+        for change in ('missing', 'extra', 'duplicate', 'coverage', 'exclusion'):
+            plan = json.loads(original)
+            target = plan['testTargets'][0]
+            if change == 'missing': target['selectedTests'].pop()
+            elif change == 'extra': target['selectedTests'].append('Other/testExtra()')
+            elif change == 'duplicate': target['selectedTests'].append(target['selectedTests'][0])
+            elif change == 'coverage': plan['defaultOptions']['codeCoverage'] = False
+            else: target['skippedTests'] = []
+            fixture.write_text(json.dumps(plan))
+            with self.subTest(change=change), self.assertRaises(ValueError): stage.fixture_plan(root)
+        fixture.write_text(original)
+        scheme = root / paths[3]
+        scheme.write_text(scheme.read_text().replace('container:ShoppingFixtures.xctestplan', 'container:Missing.xctestplan'))
+        with self.assertRaises(ValueError): stage.fixture_plan(root)
+
+    def test_cli_only_fixture_manifest_is_rejected(self):
+        files = self.files('fixtures', 'local')
+        built = plistlib.loads(files['BuiltSelection.xctestrun'])
+        del built['TestConfigurations'][0]['TestTargets'][0]['OnlyTestIdentifiers']
+        files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
+        with self.assertRaisesRegex(ValueError, 'Built identifiers'):
+            stage.validate_native(files, SHA, 'fixtures', 'local')
 
     def test_valid_fixture_and_canary_receipts(self):
         self.assertEqual(len(stage.fixture_selection()), 25)

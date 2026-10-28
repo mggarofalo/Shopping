@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "fixtures": {
-    "plan": "ShoppingFast",
+    "plan": "ShoppingFixtures",
     "bundle": "ShoppingPersistenceTests",
     "classes": ["FixtureReadinessTests", "HomeSharingStatusBootstrapTests"]
   },

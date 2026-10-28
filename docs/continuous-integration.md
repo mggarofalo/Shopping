@@ -346,7 +346,12 @@ clean committed candidate
 Run local prerequisites with `python3 .github/scripts/run-local-staged-validation.py
 --simulator <exclusively-owned-UDID> --artifacts <new-directory-outside-source>`.
 The existing `FixtureReadinessTests` and `HomeSharingStatusBootstrapTests` methods
-remain in ShoppingFast; explicit method filters select them without a new plan.
+remain in ShoppingFast; ShoppingFixtures selects those same 25 methods explicitly.
+Its configuration, coverage setting and exclusions match Fast, and the cheap gate
+checks the plan against the maintained fixture classes. The explicit plan is
+necessary because Xcode 27.1 did not serialize CLI-only selection into the built
+manifest: trial 4c15c01 stopped after a successful 72.913s build, before any test,
+and retained its failed attempt marker. No inventory proof was relaxed.
 The runner checks their built selection, then calls the existing four-method
 canary. It retains small receipts in the Git common directory under
 `shopping-staged-receipts/<SHA>/{fixtures,canary}/`. Raw artifacts stay at the
