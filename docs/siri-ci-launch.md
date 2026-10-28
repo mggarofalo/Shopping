@@ -137,3 +137,69 @@ Selection, launch ordering, native timeout and assertions are unchanged. Runner
 contracts cover routine observer wiring and preserve the native failure even
 when process discovery or sampling fails. The failed CI run stays failed, and
 the launch cause remains open pending evidence captured during the delay.
+
+## UI runner bootstrap and runtime-cache readiness experiment
+
+[Run 40757515880](https://github.com/mggarofalo/Shopping/actions/runs/40757515880)
+passed the 21 app-backed contracts, then failed before the native UI test began.
+The exported `Session-ShoppingSiriTests-2026-10-28_195721-ppCsXe.log` records the
+runner loading its test bundle at 19:57:43.166–43.242 UTC (lines 146–148), entering
+UI automation initialization (line 290), and starting the 70-second
+`loading Accessibility` wait at 19:57:43.262 (lines 301–302). The waiter watchdog
+triggered at 19:58:57.024 (line 304). Xcode observed SIGABRT at 19:59:14.964
+(line 307), then spent another 95.927 seconds synchronizing the crash report.
+
+The crash attachment `88FC33D3-4F9A-4B0C-BAB4-AFA9E961DB51.ips` shows the runner's
+main thread traversing dyld dependencies while `NSBundle` loads UIKit's
+accessibility bundle. Its call stack reaches `XCAXClient_iOS.loadAccessibility`
+and XCTest's pre-test initialization; the abort comes from XCTest's stalled-wait
+thread. No Shopping test body or application-startup code ran at this boundary.
+The snapshot does not prove how long dependency loading occupied the wait or why
+it was slow. Retained logs contain no explicit cache-creation error, missing
+runtime cache, lock wait, or host-pressure measurement. The crash's shared-cache
+field and individual runtime image paths do not establish cache readiness.
+
+The simulator was already Booted at 19:54:17.959, before the successful app-backed
+contracts. Thus a generic preboot is not the evidence-backed change. The existing
+observer correctly records no app-launch marker and no sample for this earlier
+failure. Raw evidence remains under `/tmp/shopping-phase-18-ci-40757515880/`; the
+original native exit 65 and failed selection remain failures.
+
+Apple's [Xcode 26.4 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_4-release-notes)
+identify runtime scanning/cache construction as a temporary performance cost and
+provide a command to wait for caching completion. An [Apple Developer Tools engineer](https://developer.apple.com/forums/thread/807025)
+likewise describes library-load delays during runtime scans and recommends cache
+readiness before another launch. These sources support a targeted experiment;
+they do not diagnose this Xcode 27 failure.
+
+Before creating its owned simulator, the runner now executes exactly:
+
+```sh
+xcrun simctl runtime dyld_shared_cache update com.apple.CoreSimulator.SimRuntime.iOS-27-0
+```
+
+This scopes preparation to the selected runtime. It neither forces recreation
+nor removes caches, and it does not boot a simulator or retry a test. The command
+must succeed within a separate 300-second setup bound before simulator creation
+or testing can proceed. That bound allows a finite setup experiment; it is not
+an observed readiness target or a change to the native test's timeout. The
+existing 25-minute job limit remains unchanged.
+
+`SiriRegistration/RuntimeReadiness.log` and `RuntimeReadiness.json` retain the
+command, start time, exit status, timeout/cancellation status, and wall time. The
+shared command supervisor streams output and owns its child process group. On
+SIGINT/SIGTERM it forwards the signal, allows five seconds, then attempts to kill
+remaining owned processes. Timeout likewise attempts to kill the group and
+returns 124. A separate five-second post-kill deadline bounds reaping/draining,
+including a leader that closed stdout but has not exited. Incomplete cleanup is
+reported without replacing an established timeout/cancellation. Real process
+contracts cover stubborn descendants and closed output pipes; a deterministic
+unreapable-process case verifies the final supervision bound. Cleanup cannot
+guarantee termination if the OS refuses the signal, and it does not cancel work
+already enqueued in CoreSimulator's system daemon.
+A timeout remains failed readiness even if that daemon later finishes its cache.
+
+The controlled hosted result must retain all 22 passing cases and measure the
+setup cost separately. A green run alone will not prove the cache was previously
+missing or that the intermittent cause is cured. No test selection, assertion,
+application behavior, native timeout, or retry policy changes in this experiment.

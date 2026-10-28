@@ -15,6 +15,9 @@ import threading
 import time
 import uuid
 
+RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
+RUNTIME_READINESS_TIMEOUT_SECONDS = 300
+
 UI_TEST = "ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()"
 LAUNCH_MARKER = re.compile(r"t =\s+[0-9.]+s\s+Launch com\.mggarofalo\.shopping\s*$")
 LAUNCH_COMPLETE = re.compile(r"t =\s+[0-9.]+s\s+(Setting up automation session|Wait for com\.mggarofalo\.shopping to idle|Tear Down)")
@@ -99,8 +102,9 @@ def sample_launch(output, device, xcode_pid):
 
 
 class LaunchObserver:
-    def __init__(self, capture, clock=time.monotonic, delay=20):
+    def __init__(self, capture, clock=time.monotonic, delay=20, output=None):
         self.capture, self.clock, self.delay = capture, clock, delay
+        self.output = output
         self.started = None
         self.observed_at = None
         self.finished = False
@@ -119,6 +123,15 @@ class LaunchObserver:
             self.thread = threading.Thread(target=self.capture, name="SiriLaunchEvidence")
             self.thread.start()
 
+    def close(self):
+        if self.thread:
+            self.thread.join()
+        if self.output:
+            self.output.write_text(json.dumps({
+                "launch_observed_at": self.observed_at, "sample_delay_seconds": self.delay,
+                "launch_finished_observed": self.finished, "sample_started": self.thread is not None,
+            }, indent=2) + "\n")
+
 
 def test_command(device, output):
     return ["xcodebuild", "test", "-project", "Shopping.xcodeproj", "-scheme", "ShoppingSiri",
@@ -130,38 +143,70 @@ def test_command(device, output):
             "-resultBundlePath", str(output / "SiriSchema.xcresult")]
 
 
-def execute_test(command, log_path, sample=None):
+def execute_command(command, log_path, *, timeout=None, observe=None):
+    """Stream one owned process group, preserving cancellation and bounded cleanup."""
     import selectors
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               start_new_session=True)
-    observer = LaunchObserver(lambda: sample(process.pid)) if sample else None
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
+    process, selector, observer = None, None, None
     pending = b""
     interrupted = None
     cancel_deadline = None
     drain_deadline = None
+    kill_deadline = None
+    timed_out = False
+    deadline = time.monotonic() + timeout if timeout is not None else None
+
+    def signal_group(signum):
+        if process is not None:
+            try:
+                os.killpg(process.pid, signum)
+            except ProcessLookupError:
+                pass
+            except OSError as error:
+                if interrupted is None and not timed_out:
+                    raise
+                print(f"Command cleanup signal failed: {error}", file=sys.stderr, flush=True)
+
+    def kill_remaining():
+        nonlocal kill_deadline
+        if kill_deadline is None:
+            kill_deadline = time.monotonic() + 5
+        signal_group(signal.SIGKILL)
+
+    def reap():
+        remaining = max(0, kill_deadline - time.monotonic()) if kill_deadline is not None else 5
+        return process.wait(timeout=remaining)
 
     def cancel(signum, _frame):
         nonlocal interrupted, cancel_deadline
-        interrupted = signum
-        cancel_deadline = time.monotonic() + 5
-        try:
-            os.killpg(process.pid, signum)
-        except ProcessLookupError:
-            pass
+        if interrupted is None:
+            interrupted = signum
+            cancel_deadline = time.monotonic() + 5
+            signal_group(signum)
 
+    # Install before spawning so a cancellation cannot abandon a new child.
     handlers = {sig: signal.signal(sig, cancel) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+        if interrupted is not None:
+            signal_group(interrupted)
+        observer = observe(process.pid) if observe else None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
         with log_path.open("wb") as log:
-            # Pipe EOF does not mean the command exited. Keep the cancellation
-            # deadline active when a stubborn child closes stdout before exit.
+            # Pipe EOF does not establish process exit; descendants can also
+            # retain the pipe after the leader exits. Both paths stay bounded.
             while selector.get_map() or process.poll() is None:
-                # Descendants can inherit the pipe after the direct command
-                # exits. Allow a bounded final drain without losing its status.
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    timed_out = True
+                    deadline = None
+                    kill_remaining()
+                if kill_deadline is not None and now >= kill_deadline:
+                    break
                 if process.poll() is not None and drain_deadline is None:
-                    drain_deadline = time.monotonic() + 5
-                if drain_deadline is not None and time.monotonic() >= drain_deadline:
+                    drain_deadline = now + 5
+                if drain_deadline is not None and now >= drain_deadline:
                     break
                 for key, _ in selector.select(timeout=0.1):
                     chunk = os.read(key.fd, 65536)
@@ -180,45 +225,85 @@ def execute_test(command, log_path, sample=None):
                 if observer:
                     observer.tick()
                 if cancel_deadline is not None and time.monotonic() >= cancel_deadline:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    kill_remaining()
                     cancel_deadline = None
-            code = process.wait()
+            code = reap()
+    except (OSError, subprocess.SubprocessError) as error:
+        if interrupted is None and not timed_out:
+            raise
+        print(f"Command did not finish cleanly: {error}", file=sys.stderr, flush=True)
+        code = 1  # The established timeout/cancellation below remains authoritative.
     finally:
-        selector.close()
-        process.stdout.close()
-        # The private group may outlive its leader, including after pipe EOF.
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        if process.poll() is None:
-            process.wait(timeout=5)
-        if observer and observer.thread:
-            observer.thread.join()
-        if observer:
-            (log_path.parent / "SiriRegistration" / "LaunchObservation.json").write_text(json.dumps({
-                "launch_observed_at": observer.observed_at, "sample_delay_seconds": observer.delay,
-                "launch_finished_observed": observer.finished, "sample_started": observer.thread is not None,
-            }, indent=2) + "\n")
-        for sig, handler in handlers.items():
-            signal.signal(sig, handler)
-    return 128 + interrupted if interrupted else code if code >= 0 else 128 - code
+            if process:
+                signal_group(signal.SIGKILL)
+                if process.poll() is None:
+                    reap()
+        except (OSError, subprocess.SubprocessError) as error:
+            if interrupted is None and not timed_out:
+                raise
+            print(f"Command cleanup incomplete: {error}", file=sys.stderr, flush=True)
+        finally:
+            try:
+                if selector:
+                    selector.close()
+                if process:
+                    process.stdout.close()
+                if observer:
+                    observer.close()
+            except (OSError, subprocess.SubprocessError) as error:
+                if interrupted is None and not timed_out:
+                    raise
+                print(f"Command evidence cleanup incomplete: {error}", file=sys.stderr, flush=True)
+            finally:
+                for sig, handler in handlers.items():
+                    signal.signal(sig, handler)
+    if interrupted is not None:
+        return 128 + interrupted
+    return 124 if timed_out else code if code >= 0 else 128 - code
+
+
+def execute_test(command, log_path, sample=None):
+    observe = (lambda pid: LaunchObserver(lambda: sample(pid),
+        output=log_path.parent / "SiriRegistration" / "LaunchObservation.json")) if sample else None
+    return execute_command(command, log_path, observe=observe)
+
+
+def prepare_runtime(output):
+    """Complete the scoped cache-readiness experiment before simulator ownership."""
+    command = ["xcrun", "simctl", "runtime", "dyld_shared_cache", "update", RUNTIME]
+    started = time.monotonic()
+    record = {"command": command, "timeout_seconds": RUNTIME_READINESS_TIMEOUT_SECONDS,
+              "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    try:
+        record["exit_code"] = execute_command(command, output / "RuntimeReadiness.log",
+                                              timeout=RUNTIME_READINESS_TIMEOUT_SECONDS)
+        if record["exit_code"] == 124:
+            record["timed_out"] = True
+        elif record["exit_code"] in (128 + signal.SIGINT, 128 + signal.SIGTERM):
+            record["signal"] = record["exit_code"] - 128
+    except (OSError, subprocess.SubprocessError) as error:
+        record.update(exit_code=1, error=str(error))
+    finally:
+        record["wall_seconds"] = round(time.monotonic() - started, 6)
+        (output / "RuntimeReadiness.json").write_text(json.dumps(record, indent=2) + "\n")
+    return record["exit_code"]
 
 
 def run_tests(output, sampled=False):
     output = Path(output)
     commands = Commands(output / "SiriRegistration")
+    code = prepare_runtime(commands.output)
+    if code:
+        return code
     code = commands.run("Create", ["xcrun", "simctl", "create", "Shopping Siri schema",
                                   "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
-                                  "com.apple.CoreSimulator.SimRuntime.iOS-27-0"])
+                                  RUNTIME])
     if code:
         return code
     device = str(uuid.UUID(commands.text("Create").strip())).upper()
     (output / "SiriSimulatorID").write_text(device + "\n")
-    # No boot/readiness change in this probe: preserve Xcode-owned launch ordering.
+    # Cache preparation is complete; Xcode still owns simulator boot and app launch.
     command = test_command(device, output)
     (commands.output / "TestCommand.json").write_text(json.dumps(command, indent=2) + "\n")
     test_code = execute_test(command, output / "SiriSchema.log",
