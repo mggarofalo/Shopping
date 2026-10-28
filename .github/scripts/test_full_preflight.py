@@ -89,6 +89,34 @@ class FullPreflightTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 preflight.require_jobs([job for job in jobs if job['name'] != native], names)
 
+    def test_wrapper_or_other_native_refresh_cannot_hide_later_job_failure(self):
+        names = preflight.REQUIRED_JOBS + preflight.NATIVE_JOBS + ('Deterministic validation prerequisites',)
+        first = self.run_record(id=1, run_attempt=2, run_started_at='2026-10-28T00:00:30Z')
+        second = self.run_record(id=2, run_attempt=1, run_started_at='2026-10-28T00:00:20Z', conclusion='failure')
+        def passed(name, second):
+            return dict(name=name, status='completed', conclusion='success', started_at=f'2026-10-28T00:00:{second:02d}Z')
+        original = [passed(name, 10) for name in names]
+        adverse = [dict(passed(name, 20), conclusion='failure' if name == 'Release SDK Build (native)' else 'success') for name in names]
+        for refreshed in [('Build & Test', 'Release SDK Build'), ('Build & Test (native)', 'Build & Test', 'Release SDK Build')]:
+            records = {(1, 1): original, (1, 2): [passed(name, 30) for name in refreshed], (2, 1): adverse}
+            with self.assertRaisesRegex(ValueError, 'Release SDK Build'):
+                preflight.require_current_job_evidence([first, second], first, 'candidate', names,
+                    lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
+        # A repaired same-run partial rerun retains its other own successful jobs.
+        second.update(run_attempt=2, run_started_at='2026-10-28T00:00:40Z', conclusion='success')
+        records[(2, 2)] = [passed('Release SDK Build (native)', 40), passed('Release SDK Build', 40)]
+        preflight.require_current_job_evidence([first, second], second, 'candidate', names,
+            lambda run_id, attempt: records[(run_id, attempt)], lambda *args: self.fail('Unexpected fallback'))
+
+    def test_queued_required_job_without_start_blocks_retained_pass(self):
+        names = preflight.REQUIRED_JOBS
+        own = self.run_record(id=1, run_attempt=1)
+        queued = self.run_record(id=2, run_attempt=1, status='queued', conclusion=None)
+        jobs = [dict(name=name, status='completed', conclusion='success', started_at=own['run_started_at']) for name in names]
+        with self.assertRaises(ValueError):
+            preflight.require_current_job_evidence([own, queued], own, 'candidate', names,
+                lambda run_id, attempt: jobs if run_id == 1 else [], lambda *args: self.fail('Unexpected fallback'))
+
     def test_preflight_precedes_expensive_operations(self):
         runner = Path(__file__).with_name('run-local-shopping-full.sh').read_text()
         self.assertLess(runner.index('require-full-preflight.py'), runner.index('mktemp'))

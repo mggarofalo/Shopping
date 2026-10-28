@@ -86,19 +86,10 @@ applicable. Quick acceptance alone cannot establish a changed workflow outside
 its six selected methods. Record the selection, result bundle, and source SHA in
 the issue; fix failures before committing the candidate.
 
-The candidate gate order is:
-
-```text
-changed-boundary tests → clean committed candidate → push exact branch
-  → manual Swift CI (Build & Test + Release SDK Build)
-  → local ShoppingFull → push unchanged SHA → hosted ShoppingFull
-  → integration → required main CI → signed release
-```
-
-Start the existing compatibility checks early with `gh workflow run swift-ci.yml
---ref <issue-or-milestone-branch>` after pushing the candidate. Wait for both jobs
-to pass. `run-local-shopping-full.sh` verifies the latest exact-source manual run
-(or main push) before allocating local Full artifacts or touching a simulator.
+Follow the [authoritative staged validation sequence](#staged-validation-receipts-shopping-237)
+and supported dispatch helper below after freezing the candidate. The local Full
+runner verifies required exact-source CI and the pinned canary before allocating
+artifacts or touching a simulator.
 It rejects missing, running, failed, skipped, or cancelled proof. For a partial
 rerun, it checks the most recent execution of each required job within that same
 exact-source run; an older success never overrides a newer failure or skip. Pull-request
@@ -412,8 +403,12 @@ start time, so rerunning only Siri cannot refresh an old canary. A later failed,
 queued or in-progress attempt of an older run blocks prior proof; ambiguous tied
 failures fail closed. Read-only verification of historical run 37716058310 found
 attempt 1 at 02:04:21 UTC and attempt 2 at 02:19:56 UTC on October 8, while its
-creation timestamp stayed unchanged. Thus a canary after normal CI does not force
-duplicate broad CI. Existing local
+creation timestamp stayed unchanged. One successful normal run must supply all positive cheap/native/aggregate proofs.
+Their retained job `started_at` values are also compared with actual prerequisite
+executions in other normal runs. A later failed or unfinished native/cheap job
+cannot be hidden by refreshing only an older run's aggregate or unrelated job;
+no positive proof is assembled across runs. Thus a canary after normal CI does not
+force duplicate broad CI. Existing local
 Full attestation trust is retained;
 it additionally needs independently verified hosted canary and required CI.
 

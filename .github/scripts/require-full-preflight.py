@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_JOBS = ('Build & Test', 'Release SDK Build')
 
 
-def successful_candidate(runs, sha, ignore_diagnostics=False):
+def candidate_runs(runs, sha, ignore_diagnostics=False):
     # PR runs test a synthetic merge commit. A manual run or main push tests
     # the stated head itself and can establish compiler compatibility here.
     candidates = [run for run in runs if run.get('head_sha') == sha
@@ -25,6 +25,11 @@ def successful_candidate(runs, sha, ignore_diagnostics=False):
     if ignore_diagnostics:
         diagnostic_titles = {'Shopping compatibility canary', 'Shopping Siri diagnostic'}
         candidates = [run for run in candidates if run.get('display_title') not in diagnostic_titles]
+    return candidates
+
+
+def successful_candidate(runs, sha, ignore_diagnostics=False):
+    candidates = candidate_runs(runs, sha, ignore_diagnostics)
     if not candidates:
         raise ValueError('Run Swift CI on this exact branch commit before local Full')
     latest = max(candidates, key=execution_key)
@@ -58,6 +63,54 @@ def latest_required_jobs(last_attempt, fetch, names=REQUIRED_JOBS):
     return jobs
 
 
+def retained_job_evidence(run, names, fetch_jobs, fetch_attempt):
+    jobs = []
+    for attempt in range(run['run_attempt'], 0, -1):
+        missing = set(names) - {job['name'] for job in jobs}
+        if not missing:
+            break
+        batch = [dict(job, evidence_attempt=attempt) for job in fetch_jobs(run['id'], attempt)
+                 if job.get('name') in missing]
+        for job in batch:
+            if not job.get('started_at'):
+                if job.get('conclusion') == 'success':
+                    raise ValueError('Successful job lacks execution chronology')
+                execution = run if attempt == run['run_attempt'] else fetch_attempt(run['id'], attempt)
+                job['started_at'] = execution['run_started_at']
+        jobs.extend(batch)
+    return jobs
+
+
+def job_time(job):
+    return execution_key({'id': job.get('id', 0), 'run_started_at': job['started_at']})[0]
+
+
+def require_current_job_evidence(runs, candidate, sha, names, fetch_jobs, fetch_attempt):
+    """One run supplies positives; later adverse job evidence cannot be hidden."""
+    own = retained_job_evidence(candidate, names, fetch_jobs, fetch_attempt)
+    require_jobs(own, names)
+    evidence = {name: [] for name in names}
+    for run in candidate_runs(runs, sha, True):
+        jobs = own if run['id'] == candidate['id'] else retained_job_evidence(run, names, fetch_jobs, fetch_attempt)
+        for name in names:
+            matches = [job for job in jobs if job['name'] == name]
+            if len(matches) > 1:
+                raise ValueError('Ambiguous required job execution: ' + name)
+            if matches:
+                evidence[name].extend(matches)
+            else:
+                # A queued or otherwise incomplete run must not disappear from
+                # the chronology because its jobs have not materialized yet.
+                evidence[name].append({'name': name, 'started_at': run['run_started_at'],
+                                       'status': run.get('status'), 'conclusion': None})
+    for name, events in evidence.items():
+        newest = max(job_time(job) for job in events)
+        if any(job_time(job) == newest and
+               (job.get('status') != 'completed' or job.get('conclusion') != 'success') for job in events):
+            raise ValueError('Latest execution of prerequisite has not passed: ' + name)
+    return own
+
+
 def jobs_for_attempt(repository, run_id, attempt):
     jobs = []
     page = 1
@@ -88,12 +141,21 @@ def main():
             break
         page += 1
     run = successful_candidate(runs, sha, ignore_diagnostics=args.pinned_canary)
-    names = REQUIRED_JOBS + NATIVE_JOBS if args.pinned_canary else REQUIRED_JOBS
-    jobs = latest_required_jobs(run['run_attempt'],
-                                lambda attempt: jobs_for_attempt(repository, run['id'], attempt), names)
-    require_jobs(jobs, names)
     if args.pinned_canary:
+        names = REQUIRED_JOBS + NATIVE_JOBS + ('Deterministic validation prerequisites',)
+        cache = {}
+        def fetch_jobs(run_id, attempt):
+            key = run_id, attempt
+            if key not in cache:
+                cache[key] = jobs_for_attempt(repository, run_id, attempt)
+            return cache[key]
+        require_current_job_evidence(runs, run, sha, names, fetch_jobs,
+            lambda run_id, attempt: api(f'repos/{repository}/actions/runs/{run_id}/attempts/{attempt}'))
         require_pinned_canary(repository, sha)
+    else:
+        jobs = latest_required_jobs(run['run_attempt'],
+                                    lambda attempt: jobs_for_attempt(repository, run['id'], attempt))
+        require_jobs(jobs)
     print(f"Exact-source Full preflight passed: {sha} {run['html_url']}")
 
 

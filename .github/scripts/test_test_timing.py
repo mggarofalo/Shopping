@@ -152,7 +152,7 @@ import json, os, subprocess, sys
 if sys.argv[1] == 'repo':
     print('fixture/repository')
 elif '/jobs?' in sys.argv[2]:
-    print(json.dumps({'jobs': [dict(name=name, status='completed', conclusion='success') for name in ('Build & Test', 'Release SDK Build', 'Build & Test (native)', 'Release SDK Build (native)')]}))
+    print(json.dumps({'jobs': [dict(name=name, status='completed', conclusion='success', started_at='2026-10-28T00:00:01Z') for name in ('Build & Test', 'Release SDK Build', 'Build & Test (native)', 'Release SDK Build (native)', 'Deterministic validation prerequisites')]}))
 else:
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     if os.environ.get('CHANGE_PREFLIGHT_SOURCE') == '1':
