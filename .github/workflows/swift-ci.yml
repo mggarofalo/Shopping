@@ -1,8 +1,13 @@
 name: Swift CI
+run-name: ${{ inputs.compatibility_canary && 'Shopping compatibility canary' || inputs.siri_launch_diagnostic && 'Shopping Siri diagnostic' || 'Shopping routine CI' }}
 
 on:
   workflow_dispatch:
     inputs:
+      expected_sha:
+        description: Exact candidate validated by the supported dispatcher
+        type: string
+        default: ''
       compatibility_canary:
         description: Run only the four pinned-runtime compatibility workflows (diagnostic)
         type: boolean
@@ -21,15 +26,30 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  cheap-contracts:
+    name: Deterministic validation prerequisites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Verify dispatched candidate
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 .github/scripts/staged_validation.py expected-sha "$GITHUB_SHA" "$EXPECTED_SHA"
+      - name: Validate fixture inventory, driver and workflow policy
+        run: PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/staged_validation.py gate
+
   release-build:
     if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}
-    name: Release SDK Build
+    needs: cheap-contracts
+    name: Release SDK Build (native)
     runs-on: xcode-27
     # Includes archive, a cold simulator boot and the separately compiled Siri suite.
     timeout-minutes: 25
@@ -77,6 +97,7 @@ jobs:
 
   siri-launch-diagnostic:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.siri_launch_diagnostic }}
+    needs: cheap-contracts
     name: Siri launch diagnostic
     runs-on: xcode-27
     timeout-minutes: 25
@@ -124,7 +145,8 @@ jobs:
 
   build:
     if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary) }}
-    name: Build & Test
+    needs: cheap-contracts
+    name: Build & Test (native)
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -349,6 +371,7 @@ jobs:
 
   compatibility-canary:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compatibility_canary }}
+    needs: cheap-contracts
     name: Compatibility Canary (diagnostic)
     runs-on: macos-15
     timeout-minutes: 30
@@ -380,3 +403,37 @@ jobs:
             ${{ runner.temp }}/Compatibility/Results.xcresult
           retention-days: 14
           compression-level: 0
+
+  build-required:
+    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.siri_launch_diagnostic || inputs.compatibility_canary) && 'Build gate not requested' || 'Build & Test' }}
+    needs: [cheap-contracts, build]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require successful prerequisites and native validation
+        if: ${{ always() }}
+        env:
+          CHEAP_RESULT: ${{ needs.cheap-contracts.result }}
+          NATIVE_RESULT: ${{ needs.build.result }}
+        run: test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+      - name: Reject cancelled workflow
+        if: ${{ cancelled() }}
+        run: exit 1
+
+  release-required:
+    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.siri_launch_diagnostic || inputs.compatibility_canary) && 'Release gate not requested' || 'Release SDK Build' }}
+    needs: [cheap-contracts, release-build]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || (!inputs.siri_launch_diagnostic && !inputs.compatibility_canary)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require successful prerequisites and native validation
+        if: ${{ always() }}
+        env:
+          CHEAP_RESULT: ${{ needs.cheap-contracts.result }}
+          NATIVE_RESULT: ${{ needs.release-build.result }}
+        run: test "$CHEAP_RESULT" = success && test "$NATIVE_RESULT" = success
+      - name: Reject cancelled workflow
+        if: ${{ cancelled() }}
+        run: exit 1

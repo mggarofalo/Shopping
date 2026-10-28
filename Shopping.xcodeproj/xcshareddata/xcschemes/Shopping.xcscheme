@@ -17,6 +17,7 @@
       <TestPlans>
          <TestPlanReference reference="container:ShoppingFast.xctestplan" default="YES"/>
          <TestPlanReference reference="container:ShoppingAcceptance.xctestplan" default="NO"/>
+         <TestPlanReference reference="container:ShoppingFixtures.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingCompatibility.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingCritical.xctestplan" default="NO"/>
          <TestPlanReference reference="container:ShoppingFull.xctestplan" default="NO"/>

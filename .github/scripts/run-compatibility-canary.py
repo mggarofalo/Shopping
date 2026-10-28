@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import sys
@@ -84,8 +85,13 @@ def bounded_call(command, *, env, timeout, popen=subprocess.Popen):
         # terminate its separate xcodebuild group and restore native state.
         for sig in old:
             signal.signal(sig, signal.SIG_IGN)
+        original_error = sys.exc_info()[1]
         try:
             cleanup_group(process)
+        except BaseException as cleanup_error:
+            if original_error is None:
+                raise
+            original_error.add_note(f'Process cleanup also failed: {cleanup_error}')
         finally:
             for sig, handler in old.items():
                 signal.signal(sig, handler)
@@ -112,11 +118,11 @@ def source_identity():
     return sha
 
 
-def main():
+def main(argv=None, local_attempt=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--simulator', required=True)
     parser.add_argument('--artifacts', type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     os.chdir(ROOT)
     source = source_identity()
     artifacts = args.artifacts.resolve()
@@ -145,6 +151,8 @@ def main():
         verify_products(artifacts / 'DerivedData/Build/Products', plan_name=PLAN)
         for path in (artifacts / 'DerivedData/Build/Products').glob('*.xctestrun'):
             shutil.copyfile(path, artifacts / path.name)
+            if plistlib.loads(path.read_bytes()).get('TestPlan', {}).get('Name') == PLAN:
+                shutil.copyfile(path, artifacts / 'BuiltSelection.xctestrun')
         def test():
             phase('test', [sys.executable, SCRIPTS / 'with-system-text-size.py', '--'] + base +
                   ['test-without-building', '-resultBundlePath', artifacts / 'Results.xcresult'])
@@ -164,6 +172,8 @@ def main():
         if source_identity() != source:
             raise ValueError('Source changed during canary')
         (artifacts / 'SourceVerified.json').write_text(json.dumps({'commit_sha': source, 'clean_unchanged': True}) + '\n')
+        from staged_validation import make_receipt
+        make_receipt(artifacts, source, 'canary', 'pinned' if os.environ.get('GITHUB_ACTIONS') == 'true' else 'local', local_attempt=local_attempt)
     except BaseException as error:
         (artifacts / 'Failure.json').write_text(json.dumps({'type': type(error).__name__, 'error': str(error)}) + '\n')
         raise

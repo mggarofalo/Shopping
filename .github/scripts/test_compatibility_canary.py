@@ -67,6 +67,19 @@ class CanaryContracts(unittest.TestCase):
                 canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
         cleanup.assert_called_once_with(process)
 
+    def test_cleanup_failure_preserves_original_failure_but_fails_success(self):
+        process = Mock()
+        process.wait.side_effect = InterruptedError('original cancellation')
+        with patch.object(canary, 'cleanup_group', side_effect=PermissionError('cleanup denied')):
+            with self.assertRaisesRegex(InterruptedError, 'original cancellation') as raised:
+                canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
+        self.assertIn('cleanup denied', raised.exception.__notes__[0])
+        process.wait.side_effect = None
+        process.wait.return_value = 0
+        with patch.object(canary, 'group_exists', return_value=False), patch.object(canary, 'cleanup_group', side_effect=PermissionError('cleanup denied')):
+            with self.assertRaisesRegex(PermissionError, 'cleanup denied'):
+                canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
+
     def test_dead_leader_still_allows_driver_restoration_and_preserves_exit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
