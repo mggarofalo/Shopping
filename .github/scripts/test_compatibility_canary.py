@@ -30,8 +30,9 @@ class CanaryContracts(unittest.TestCase):
         case.driver.command = lambda device, category=None, **kwargs: 'large'
         def broken_transport():
             case.test_exact_readback_and_original_restoration()
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(KeyError):
             canary.gate_then_run(broken_transport, launch)
+        self.assertTrue(case.driver.failed)
         launch.assert_not_called()
 
     def test_exact_planned_built_executed_inventory(self):
