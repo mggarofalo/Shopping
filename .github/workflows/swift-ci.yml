@@ -275,8 +275,41 @@ jobs:
             -parallel-testing-enabled NO \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -resultBundlePath AcceptanceResults.xcresult \
-            -quiet
+            -resultBundlePath AcceptanceResults.xcresult
+
+      # Retain raw evidence before a reader can stall on an incomplete result.
+      # Explicit status conditions also run when the native job is cancelled.
+      - name: Upload raw validation logs
+        if: failure() || cancelled()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: fast-failure-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            FastBuild.log
+            FastTest.log
+            AcceptanceTest.log
+            FastPhases.jsonl
+            AcceptancePhases.jsonl
+            FastTimingMetadata.json
+            AcceptanceTimingMetadata.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload raw validation results
+        id: raw-results
+        if: failure() || cancelled()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            FastResults.xcresult
+            AcceptanceResults.xcresult
+            DerivedData/Build/Products/*.xctestrun
+          compression-level: 0
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publish fast test summary
         if: always()
@@ -354,18 +387,22 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload fast failure results
-        if: failure()
+      # A reporting failure after passing tests still needs its raw bundle.
+      # The early upload owns interrupted tests; never upload that bundle twice.
+      - name: Upload results after reporting failure
+        if: (failure() || cancelled()) && steps.raw-results.outcome == 'skipped'
+        timeout-minutes: 2
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             FastResults.xcresult
+            AcceptanceResults.xcresult
+            DerivedData/Build/Products/*.xctestrun
             FastBuild.log
             FastTest.log
-            AcceptanceResults.xcresult
             AcceptanceTest.log
-            DerivedData/Build/Products/*.xctestrun
+          compression-level: 0
           if-no-files-found: warn
           retention-days: 14
 

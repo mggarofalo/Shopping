@@ -4,12 +4,16 @@ from copy import deepcopy
 import fnmatch
 import importlib.util
 import json
+import os
 from pathlib import Path
 import plistlib
 import re
 import shlex
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -114,6 +118,80 @@ class AcceptanceContractTests(unittest.TestCase):
                 path.write_bytes(plistlib.dumps(broken))
                 with self.assertRaises(ValueError):
                     acceptance.verify_products(products)
+
+    def test_interrupted_acceptance_retains_raw_evidence_before_readers(self):
+        build = self.workflow()["jobs"]["build"]
+        steps = build["steps"]
+        named = {step.get("name"): step for step in steps}
+        execution = named["Run acceptance UI workflows"]
+        self.assertNotIn("-quiet", shlex.split(execution["run"]))
+        self.assertIn("--log AcceptanceTest.log", execution["run"])
+        self.assertEqual(len(acceptance.selected_tests()), 6)
+        logs = named["Upload raw validation logs"]
+        results = named["Upload raw validation results"]
+        self.assertLess(steps.index(execution), steps.index(logs))
+        self.assertLess(steps.index(logs), steps.index(results))
+        for step, limit in [(logs, 1), (results, 2)]:
+            # An explicit cancellation status check avoids GitHub's implicit success().
+            self.assertEqual(step["if"], "failure() || cancelled()")
+            self.assertEqual(step["timeout-minutes"], limit)
+            self.assertEqual(step["with"]["retention-days"], 14)
+            self.assertEqual(step["with"]["if-no-files-found"], "warn")
+            self.assertNotIn("continue-on-error", step)
+        self.assertIn("AcceptanceTest.log", logs["with"]["path"])
+        self.assertNotIn("xcresult", logs["with"]["path"])
+        self.assertIn("AcceptanceResults.xcresult", results["with"]["path"])
+        self.assertEqual(results["with"]["compression-level"], 0)
+        for name in ["Publish fast test summary", "Publish fast timing report",
+                     "Publish acceptance test summary", "Publish acceptance timing report"]:
+            self.assertLess(steps.index(results), steps.index(named[name]))
+        fallback = named["Upload results after reporting failure"]
+        self.assertEqual(fallback["if"], "(failure() || cancelled()) && steps.raw-results.outcome == 'skipped'")
+        self.assertEqual(results["id"], "raw-results")
+        self.assertEqual(fallback["with"]["name"], results["with"]["name"])
+        self.assertEqual(fallback["timeout-minutes"], 2)
+        self.assertEqual(fallback["with"]["compression-level"], 0)
+
+    def test_cancelled_driver_command_keeps_progress_and_nonzero_verdict(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signum=signum):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    ready = root / "ready"
+                    command = [sys.executable, "-c",
+                               "import os,time; from pathlib import Path; "
+                               "print('acceptance workflow started', flush=True); "
+                               f"Path({str(ready)!r}).write_text(str(os.getpid())); time.sleep(60)"]
+                    process = subprocess.Popen([
+                        sys.executable, str(ROOT / ".github/scripts/test-timing.py"), "run",
+                        "--phase", "test", "--phases", str(root / "phases.jsonl"),
+                        "--log", str(root / "AcceptanceTest.log"), "--",
+                        sys.executable, str(ROOT / ".github/scripts/with-system-text-size.py"), "--", *command
+                    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                    try:
+                        deadline = time.monotonic() + 5
+                        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                        self.assertTrue(ready.exists(), "Command must start before cancellation")
+                        os.kill(process.pid, signum)
+                        stdout, stderr = process.communicate(timeout=5)
+                        self.assertEqual(process.returncode, 128 + signum, stderr)
+                        self.assertIn(b"acceptance workflow started", stdout)
+                        self.assertIn("acceptance workflow started", (root / "AcceptanceTest.log").read_text())
+                        phase = json.loads((root / "phases.jsonl").read_text())
+                        self.assertEqual(phase["exit_code"], 128 + signum)
+                        self.assertEqual(phase["signal"], signum)
+                    finally:
+                        if ready.exists():
+                            try:
+                                os.killpg(int(ready.read_text()), signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.communicate(timeout=5)
 
     def test_actual_results_reject_skips_missing_extra_and_duplicate_tests(self):
         tests = [{"identifier": name + "()", "bundle": "ShoppingTests", "result": "Passed"} for name in acceptance.selected_tests()]
