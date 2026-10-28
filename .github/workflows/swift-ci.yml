@@ -135,7 +135,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_exhaustive_contract.py
 
       - name: Validate system text-size driver
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_system_text_size.py
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_system_text_size*.py'
 
       - name: Validate TestFlight workflow
         run: .github/scripts/test-testflight-workflow.sh

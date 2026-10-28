@@ -18,13 +18,27 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def time(self):
+        return self.now
+
+    monotonic = time
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
 class DriverTests(unittest.TestCase):
     def setUp(self):
         self.device = str(uuid.uuid4())
         self.lease = str(uuid.uuid4())
         self.sizes = {self.device: "large"}
         self.writes = []
-        self.driver = module.Driver("test-token", self.command)
+        self.clock = FakeClock()
+        self.driver = module.Driver("test-token", self.command, clock=self.clock)
 
     def command(self, device, category=None, *, device_set):
         if category is not None:
@@ -35,7 +49,7 @@ class DriverTests(unittest.TestCase):
     def request(self, operation, **changes):
         request = dict(id=str(uuid.uuid4()), token="test-token", device=self.device,
                        lease=self.lease, operation=operation, category=None, deviceSet="/simulators",
-                       expires=time.time() + 15)
+                       expires=self.clock.time() + 15)
         request.update(changes)
         return request
 
@@ -65,7 +79,7 @@ class DriverTests(unittest.TestCase):
 
     def test_expired_request_never_mutates(self):
         self.acquire()
-        result = self.driver.handle(self.request("set", category="small", expires=time.time() - 1))
+        result = self.driver.handle(self.request("set", category="small", expires=self.clock.time() - 1))
         self.assertIn("error", result)
         self.assertEqual(self.writes, [])
 
@@ -101,8 +115,14 @@ class DriverTests(unittest.TestCase):
     def test_timed_out_setter_finishes_before_restoration(self):
         self.acquire()
         request = self.request("set", category="small")
-        with patch.object(module.time, "time", side_effect=[request["expires"] - 1, request["expires"] - 1, request["expires"] + 1]):
-            self.assertIn("error", self.driver.handle(request))
+        def delayed(device, category=None, *, device_set):
+            value = self.command(device, category, device_set=device_set)
+            if category is not None:
+                self.clock.sleep(16)
+            return value
+        self.driver.command = delayed
+        self.assertIn("error", self.driver.handle(request))
+        self.driver.command = self.command
         self.assertEqual(self.sizes[self.device], "small")
         self.driver.handle(self.request("restore"))
         self.assertEqual(self.writes, [(self.device, "small"), (self.device, "large")])
