@@ -45,8 +45,9 @@ Raw evidence is retained locally under `/tmp/shopping-249-current-release/`,
 
 `.github/scripts/siri-schema-ci.py` owns the existing simulator creation, unchanged
 22-test command and result manifest. It preserves the original test exit even
-when exporting the inventory succeeds. Missing, duplicated, failed, skipped or
-unexpected cases cannot produce a passing manifest. The selected tests remain
+when exporting the inventory succeeds. Wrong class counts, duplicate identifiers,
+failed or skipped cases, unexpected test classes, and a different native UI method
+cannot produce a passing manifest. The selected tests remain
 15 catalog contracts, six spoken-schema contracts and the one native UI method.
 
 The manual `siri_launch_diagnostic` workflow input runs a separately named
@@ -73,3 +74,22 @@ probe should retain the baseline launch ordering so it changes one factor.
 Explicit owned boot/readiness, host configuration or application changes require
 the next evidence-backed decision. Do not infer that a green probe establishes
 the original intermittent failure's cause.
+
+## October 28 probe result
+
+[Diagnostic run 40714864040](https://github.com/mggarofalo/Shopping/actions/runs/40714864040)
+on `e8ecf35` passed all 22 selected cases and the manifest check. Automation setup
+completed before the twenty-second sampling threshold, so no stack sample was
+triggered. Final state was `Shutdown`; capture observed it without booting and
+completed in approximately three seconds by GitHub step timestamps. Raw evidence
+is retained at `/tmp/shopping-249-launch-probe/`.
+
+This confirms that the post-test collector need not restart a simulator that
+Xcode has shut down. It does not reproduce or explain the intermittent launch
+timeout, and it is not a controlled whole-job speed comparison.
+
+Subsequent review fixed bounded draining when a descendant retains stdout after
+its parent exits, and added runner contracts to normal release CI before archive.
+Those changes have dedicated local process tests; this earlier probe is not
+exact-source CI proof for them. The final integrated candidate still requires its
+own required checks. SHOPPING-249 remains open for the native launch cause.
