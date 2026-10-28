@@ -8,6 +8,7 @@ import subprocess
 import sys
 import signal
 import shutil
+import time
 
 sys.dont_write_bytecode = True
 
@@ -30,6 +31,36 @@ def gate_then_run(gate, run):
     return run()
 
 
+def group_exists(process):
+    try:
+        os.killpg(process.pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def cleanup_group(process):
+    """A dead timing leader can still have a live driver owning native children."""
+    if not group_exists(process):
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + CLEANUP_SECONDS
+    while group_exists(process):
+        # Reap the leader too: a terminated zombie otherwise keeps its PGID alive.
+        process.poll()
+        if time.monotonic() >= deadline:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+            return
+        time.sleep(0.05)
+
+
 def bounded_call(command, *, env, timeout, popen=subprocess.Popen):
     """Forward cancellation through the existing timing/driver supervisors."""
     process = popen([str(v) for v in command], env=env, start_new_session=True)
@@ -37,25 +68,22 @@ def bounded_call(command, *, env, timeout, popen=subprocess.Popen):
         raise InterruptedError(f'Canary cancelled by signal {signum}')
     old = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
-        try:
-            code = process.wait(timeout=timeout)
-        except (subprocess.TimeoutExpired, InterruptedError, KeyboardInterrupt):
-            # Timing forwards TERM to the text-size supervisor, which owns its
-            # xcodebuild group and restores the actual simulator before exit.
-            for sig in old:
-                signal.signal(sig, signal.SIG_IGN)
-            process.terminate()
-            try:
-                process.wait(timeout=CLEANUP_SECONDS)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise
+        code = process.wait(timeout=timeout)
         if code:
             raise subprocess.CalledProcessError(code, command)
+        if group_exists(process):
+            raise RuntimeError('Command exited with live descendants')
     finally:
-        for sig, handler in old.items():
-            signal.signal(sig, handler)
+        # The timing process may exit on a log-write failure before its driver.
+        # Signal its owned group even after the leader exits, so the driver can
+        # terminate its separate xcodebuild group and restore native state.
+        for sig in old:
+            signal.signal(sig, signal.SIG_IGN)
+        try:
+            cleanup_group(process)
+        finally:
+            for sig, handler in old.items():
+                signal.signal(sig, handler)
 
 
 def test_and_report(test, report):

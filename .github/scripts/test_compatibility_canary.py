@@ -6,9 +6,11 @@ from pathlib import Path
 import plistlib
 import tempfile
 import subprocess
+import os
+import sys
 import unittest
 import uuid
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from compatibility_evidence import verify
 from selected_test_inventory import selected_tests, verify_products, verify_report
@@ -54,11 +56,45 @@ class CanaryContracts(unittest.TestCase):
 
     def test_timeout_is_failure_even_after_successful_cleanup(self):
         process = Mock()
-        process.wait.side_effect = [subprocess.TimeoutExpired(['command'], 1), 0]
-        with self.assertRaises(subprocess.TimeoutExpired):
-            canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
-        process.terminate.assert_called_once()
-        self.assertEqual(process.wait.call_args_list[1].kwargs['timeout'], canary.CLEANUP_SECONDS)
+        process.wait.side_effect = subprocess.TimeoutExpired(['command'], 1)
+        with patch.object(canary, 'cleanup_group') as cleanup:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                canary.bounded_call(['command'], env={}, timeout=1, popen=Mock(return_value=process))
+        cleanup.assert_called_once_with(process)
+
+    def test_dead_leader_still_allows_driver_restoration_and_preserves_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = root / 'driver.py'
+            child.write_text("""import os, signal, subprocess, sys, time
+from pathlib import Path
+root = Path(sys.argv[1])
+native = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
+def stop(signum, frame):
+    (root / 'term').write_text('received')
+    os.killpg(native.pid, signal.SIGTERM)
+    native.wait(timeout=5)
+    (root / 'restored').write_text('yes')
+    sys.exit(0)
+signal.signal(signal.SIGTERM, stop)
+(root / 'ready').write_text(str(native.pid))
+while True: time.sleep(0.05)
+""")
+            leader = root / 'leader.py'
+            leader.write_text("""import subprocess, sys, time
+from pathlib import Path
+root = Path(sys.argv[1])
+subprocess.Popen([sys.executable, str(root / 'driver.py'), str(root)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not (root / 'ready').exists(): time.sleep(0.01)
+sys.exit(65)
+""")
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                canary.bounded_call([sys.executable, leader, root], env=dict(os.environ), timeout=10)
+            self.assertEqual(raised.exception.returncode, 65)
+            self.assertEqual((root / 'term').read_text(), 'received')
+            self.assertEqual((root / 'restored').read_text(), 'yes')
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int((root / 'ready').read_text()), 0)
 
     def test_failed_test_is_not_replaced_by_failed_report(self):
         original = subprocess.CalledProcessError(65, ['test'])
