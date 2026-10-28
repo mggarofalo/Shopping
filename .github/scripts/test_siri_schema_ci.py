@@ -185,10 +185,136 @@ class SiriSchemaCITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             fake, calls = self.fake_commands(output)
-            with patch.object(siri, "Commands", fake), patch.object(siri, "execute_test", return_value=65):
+            with patch.object(siri, "Commands", fake), patch.object(siri, "execute_test", return_value=65), patch.object(siri, "prepare_runtime", return_value=0):
                 self.assertEqual(siri.run_tests(output), 65)
             self.assertEqual([name for name, _ in calls], ["Create", "TestInventory"])
             self.assertEqual(json.loads((output / "SiriRegistration/Verdict.json").read_text())["test_exit_code"], 65)
+
+    def test_runtime_readiness_is_scoped_and_precedes_simulator_ownership(self):
+        for code in [0, 1, 124, 130, 143]:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                fake, calls = self.fake_commands(output)
+                def ready(command, path, *, timeout):
+                    self.assertEqual(calls, [], "Readiness must precede simulator creation")
+                    self.assertEqual(command, ["xcrun", "simctl", "runtime", "dyld_shared_cache",
+                                               "update", "com.apple.CoreSimulator.SimRuntime.iOS-27-0"])
+                    self.assertEqual(timeout, 300)
+                    self.assertEqual(path, output / "SiriRegistration/RuntimeReadiness.log")
+                    return code
+                with patch.object(siri, "Commands", fake), \
+                        patch.object(siri, "execute_command", side_effect=ready), \
+                        patch.object(siri, "execute_test", return_value=0) as test:
+                    self.assertEqual(siri.run_tests(output), code)
+                record = json.loads((output / "SiriRegistration/RuntimeReadiness.json").read_text())
+                self.assertEqual(record["exit_code"], code)
+                self.assertEqual(record["timeout_seconds"], 300)
+                if code:
+                    test.assert_not_called()
+                    self.assertEqual(calls, [])
+                    self.assertFalse((output / "SiriSimulatorID").exists())
+                else:
+                    test.assert_called_once()
+                    self.assertEqual([name for name, _ in calls], ["Create", "TestInventory"])
+
+    def test_runtime_timeout_and_cancellation_clean_stubborn_process_group(self):
+        for signum in [None, signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                ready, descendant_ready = output / "ready", output / "descendant"
+                descendant = ("import os,signal,time\nfrom pathlib import Path\n"
+                    "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    f"Path({str(descendant_ready)!r}).write_text(str(os.getpid()))\n"
+                    "os.close(1); os.close(2)\nwhile True: time.sleep(1)\n")
+                child = output / "child.py"
+                child.write_text("import os,signal,subprocess,sys,time\nfrom pathlib import Path\n"
+                    "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    f"subprocess.Popen([sys.executable, '-c', {descendant!r}])\n"
+                    f"while not Path({str(descendant_ready)!r}).exists(): time.sleep(0.01)\n"
+                    "print('runtime preparation started', flush=True)\n"
+                    f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                    "os.close(1); os.close(2)\nwhile True: time.sleep(1)\n")
+                wrapper = output / "wrapper.py"
+                wrapper.write_text("import importlib.util,signal,sys\nfrom pathlib import Path\n"
+                    f"spec=importlib.util.spec_from_file_location('runner', {str(Path(siri.__file__))!r})\n"
+                    "runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)\n"
+                    "previous={sig:signal.getsignal(sig) for sig in (signal.SIGINT,signal.SIGTERM)}\n"
+                    "execute=runner.execute_command\n"
+                    f"runner.RUNTIME_READINESS_TIMEOUT_SECONDS={1.5 if signum is None else 300}\n"
+                    f"runner.execute_command=lambda command,path,timeout: execute([sys.executable,{str(child)!r}],path,timeout=timeout)\n"
+                    f"code=runner.prepare_runtime(Path({str(output)!r}))\n"
+                    "assert all(signal.getsignal(sig)==handler for sig,handler in previous.items())\n"
+                    "sys.exit(code)\n")
+                process = subprocess.Popen([sys.executable, str(wrapper)], stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, start_new_session=True)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(ready.exists(), "Both children must be ready before cancellation")
+                    if signum is not None:
+                        os.kill(process.pid, signum)
+                    stdout, stderr = process.communicate(timeout=8)
+                    expected = 124 if signum is None else 128 + signum
+                    self.assertEqual(process.returncode, expected, stderr)
+                    self.assertIn(b"runtime preparation started", stdout)
+                    record = json.loads((output / "RuntimeReadiness.json").read_text())
+                    self.assertEqual(record["exit_code"], expected)
+                    self.assertGreater(record["wall_seconds"], 0)
+                    if signum is None:
+                        self.assertTrue(record["timed_out"])
+                    else:
+                        self.assertEqual(record["signal"], signum)
+                    for path in [ready, descendant_ready]:
+                        deadline = time.monotonic() + 2
+                        while True:
+                            state = subprocess.run(["ps", "-o", "stat=", "-p", path.read_text()],
+                                                   capture_output=True, text=True).stdout.strip()
+                            if not state or state.startswith("Z"):
+                                break
+                            self.assertLess(time.monotonic(), deadline, "Owned child remains alive")
+                            time.sleep(0.01)
+                finally:
+                    for pid in ([int(ready.read_text())] if ready.exists() else []) + [process.pid]:
+                        try:
+                            os.killpg(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    process.communicate(timeout=5)
+
+    def test_unreapable_process_cannot_outlive_supervisor_deadline(self):
+        for signum in [None, signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(siri.subprocess, "Popen") as popen, \
+                    patch("selectors.DefaultSelector") as selector, \
+                    patch.object(siri.os, "killpg", side_effect=PermissionError("signal denied")), \
+                    patch.object(siri.time, "monotonic") as clock:
+                now = [0]
+                def tick():
+                    now[0] += 1
+                    self.assertLess(now[0], 40, "Supervisor failed to enforce its post-kill bound")
+                    return now[0]
+                clock.side_effect = tick
+                process = popen.return_value
+                process.poll.return_value = None
+                process.wait.side_effect = subprocess.TimeoutExpired("unreapable", 0)
+                selector.return_value.get_map.return_value = {}
+                delivered = False
+                def select(timeout):
+                    nonlocal delivered
+                    if signum is not None and not delivered:
+                        delivered = True
+                        signal.getsignal(signum)(signum, None)
+                    return []
+                selector.return_value.select.side_effect = select
+                previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+                code = siri.execute_command(["fake"], Path(directory) / "command.log",
+                                             timeout=1 if signum is None else 300)
+                self.assertEqual(code, 124 if signum is None else 128 + signum)
+                self.assertTrue(all(0 <= call.kwargs["timeout"] <= 5 for call in process.wait.call_args_list))
+                self.assertEqual({sig: signal.getsignal(sig) for sig in previous}, previous)
 
     def test_streaming_observation_retains_output_and_nonzero_exit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -196,8 +322,8 @@ class SiriSchemaCITests(unittest.TestCase):
             (output / "SiriRegistration").mkdir()
             captured = []
             class ImmediateObserver(siri.LaunchObserver):
-                def __init__(self, capture):
-                    super().__init__(capture, delay=0)
+                def __init__(self, capture, **kwargs):
+                    super().__init__(capture, delay=0, **kwargs)
             command = [sys.executable, "-c", "import sys; print('t = 1.00s Launch com.mggarofalo.shopping', flush=True); sys.exit(65)"]
             with patch.object(siri, "LaunchObserver", ImmediateObserver):
                 self.assertEqual(siri.execute_test(command, output / "SiriSchema.log", sample=captured.append), 65)
@@ -212,14 +338,14 @@ class SiriSchemaCITests(unittest.TestCase):
             original = fake.text
             def text(instance, name):
                 return "{}" if name == "TestInventory" else original(instance, name)
-            with patch.object(siri, "Commands", fake), patch.object(fake, "text", text), patch.object(siri, "execute_test", return_value=0):
+            with patch.object(siri, "Commands", fake), patch.object(fake, "text", text), patch.object(siri, "execute_test", return_value=0), patch.object(siri, "prepare_runtime", return_value=0):
                 self.assertEqual(siri.run_tests(output), 1)
             self.assertTrue((output / "SiriRegistration/ManifestFailure.txt").exists())
 
     def test_sampling_command_failure_preserves_native_failure(self):
         class ImmediateObserver(siri.LaunchObserver):
-            def __init__(self, capture):
-                super().__init__(capture, delay=0)
+            def __init__(self, capture, **kwargs):
+                super().__init__(capture, delay=0, **kwargs)
         for failed_command in ["Processes", "xcodebuild"]:
             with self.subTest(failed_command=failed_command), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory)
