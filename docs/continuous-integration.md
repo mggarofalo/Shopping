@@ -491,3 +491,19 @@ routine manual CI run. The prior sample indicates an additional 849 seconds and
 That requirement was not adopted. This is an avoided design cost, not a measured
 production saving. No baseline compiler, Fast coverage, acceptance or Full gate
 was removed. The additional pinned canary applies only when proceeding to Full.
+
+Semantic workflow validation is required before native confirmation after workflow
+edits. Run `actionlint -shellcheck="" .github/workflows/swift-ci.yml
+.github/workflows/swift-exhaustive.yml`, adjusting the file list to changed
+workflows. `.github/actionlint.yaml` recognizes the existing `xcode-27` label.
+This check complements YAML parsing and deterministic shell/selection contracts;
+it is not downloaded or required on every staged gate invocation.
+
+The supported dispatch for `a239532` was rejected with GitHub HTTP 422 before a
+workflow run existed or a runner was allocated: `cancelled()` had been used in
+step environment expressions. Its local 25-fixture/four-canary pass remains
+historical evidence for that SHA. Checksum-verified official actionlint 1.7.12
+reproduced both expression-context errors in the rejected workflow. After
+`7ee53f2` moved cancellation handling to explicit step `if` conditions, actionlint
+passed both changed workflows. This negative/positive check validates workflow
+syntax, not hosted execution, and does not transfer native proof to a new SHA.

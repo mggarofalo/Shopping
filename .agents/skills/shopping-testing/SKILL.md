@@ -54,3 +54,11 @@ across SHAs or treat fake protocol checks as native compatibility evidence. Use 
 focused diagnostic while testing a hypothesis, then one normal exact-source manual
 CI run for the unchanged candidate; do not also open a PR merely to trigger the
 same broad CI. Preserve the existing manual CI → local Full → remote Full order.
+
+When changing workflows, run semantic validation with `actionlint -shellcheck=""
+.github/workflows/swift-ci.yml .github/workflows/swift-exhaustive.yml` (adjust the
+file list to the changed workflows) before native confirmation. The maintained
+`.github/actionlint.yaml` declares the existing `xcode-27` runner label. YAML
+parsing and text contracts do not validate expression-context restrictions;
+keep shell contracts separate when shellcheck is disabled. This is a workflow-edit
+check, not an additional dependency for every staged gate.
