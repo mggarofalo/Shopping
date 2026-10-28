@@ -54,6 +54,7 @@ class Driver:
         self.device_sets = {}
         self.seen = set()
         self.poisoned = set()
+        self.unrecovered = {}
         self.failed = False
 
     def size(self, device, category=None):
@@ -63,6 +64,8 @@ class Driver:
         response = {key: request.get(key) for key in ("id", "token", "lease", "device", "deviceSet", "operation", "category")}
         try:
             for key in ("id", "lease", "device"):
+                if not isinstance(request[key], str):
+                    raise ValueError(f"Invalid {key} identity")
                 uuid.UUID(request[key])
             if request["token"] != self.token:
                 raise ValueError("Wrong run token")
@@ -76,6 +79,8 @@ class Driver:
             device_set = request["deviceSet"]
             if not isinstance(device_set, str) or not Path(device_set).is_absolute():
                 raise ValueError("Invalid simulator device set")
+            if device in self.unrecovered:
+                raise ValueError("Simulator restoration failed; this run cannot reuse it")
             if operation == "acquire":
                 if device in self.leases:
                     raise ValueError("Simulator already has an active text-size lease")
@@ -110,8 +115,9 @@ class Driver:
                 raise ValueError("System operation exceeded request deadline")
         except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as error:
             self.failed = True
-            if request.get("device") in self.leases:
-                self.poisoned.add(request["device"])
+            device = request.get("device")
+            if isinstance(device, str) and device in self.leases:
+                self.poisoned.add(device)
             response["error"] = str(error)
         print("System text size: " + json.dumps(response), flush=True)
         return response
@@ -128,6 +134,7 @@ class Driver:
                     raise ValueError("Emergency restoration readback differs")
                 print(f"Restored abandoned text-size lease for {device} to {original}", flush=True)
             except (ValueError, OSError, subprocess.SubprocessError) as error:
+                self.unrecovered[device] = self.leases[device]
                 print(f"Text-size cleanup failed for {device}: {error}", file=sys.stderr, flush=True)
             del self.leases[device]
 
@@ -140,7 +147,7 @@ def process_requests(root, driver, should_stop=lambda: False):
             break
         try:
             request = json.loads(path.read_text())
-            if path.name != request.get("id", "") + ".request.json":
+            if not isinstance(request, dict) or not isinstance(request.get("id"), str) or path.name != request["id"] + ".request.json":
                 raise ValueError("Request filename does not match identity")
             response = driver.handle(request)
             destination = root / (path.name.removesuffix(".request.json") + ".response.json")
@@ -175,6 +182,9 @@ def supervise(process, root, driver, cancellation, *, clock=time, killpg=os.kill
             process_requests(root, driver, lambda: cancellation()[0] is not None)
         clock.sleep(0.05)
     code = process.wait()
+    # The command may exit while grandchildren still own its private group.
+    # They must not outlive the run or race emergency simulator restoration.
+    signal_child(process, signal.SIGKILL, killpg)
     driver.cleanup()
     signum, _ = cancellation()
     if signum is not None:
@@ -192,6 +202,7 @@ def main(command):
     token = str(uuid.uuid4())
     driver = Driver(token)
     process = None
+    group_finished = False
     cancelled = None
     cancel_started = None
 
@@ -210,7 +221,9 @@ def main(command):
                        TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TOKEN=token,
                        TEST_RUNNER_SHOPPING_SYSTEM_TEXT_SIZE_TIMEOUT=str(REQUEST_TIMEOUT_SECONDS))
             process = subprocess.Popen(command, env=env, start_new_session=True)
-            return supervise(process, root, driver, lambda: (cancelled, cancel_started))
+            result = supervise(process, root, driver, lambda: (cancelled, cancel_started))
+            group_finished = True
+            return result
     finally:
         if process is not None and process.poll() is None:
             signal_child(process, signal.SIGTERM)
@@ -219,6 +232,8 @@ def main(command):
             except subprocess.TimeoutExpired:
                 signal_child(process, signal.SIGKILL)
                 process.wait()
+        if process is not None and not group_finished:
+            signal_child(process, signal.SIGKILL)
         driver.cleanup()
         for sig, handler in old.items():
             signal.signal(sig, handler)

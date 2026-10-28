@@ -208,3 +208,11 @@ seed the completion being tested or increase timeouts to conceal ordering bugs.
 Pure barrier tests do not prove Core Data or platform behavior: the affected
 bootstrap suites retain those owners. This change does not replace Full,
 coverage, pinned-platform or exact-source gates.
+
+## Deterministic text-size preflight
+
+Run `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/check-driver-contracts.py`
+for simulator-free lease, transport and process-supervision contracts before
+allocating simulator resources. The [SHOPPING-235 fault matrix](testing/shopping-235-driver-contracts.md)
+records proof ownership and separate native Python-child smoke tests.
+This entry point does not replace runtime compatibility or required CI.
