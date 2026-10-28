@@ -35,6 +35,9 @@ jobs:
       - name: Select upload Xcode version
         run: sudo xcode-select -s /Applications/Xcode_27.0.app
 
+      - name: Validate Siri runner contracts
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_siri_schema_ci.py
+
       - name: Compile unsigned release archive
         run: >-
           xcodebuild archive

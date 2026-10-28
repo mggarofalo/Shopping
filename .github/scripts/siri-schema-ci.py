@@ -140,6 +140,7 @@ def execute_test(command, log_path, sample=None):
     pending = b""
     interrupted = None
     cancel_deadline = None
+    drain_deadline = None
 
     def cancel(signum, _frame):
         nonlocal interrupted, cancel_deadline
@@ -156,6 +157,12 @@ def execute_test(command, log_path, sample=None):
             # Pipe EOF does not mean the command exited. Keep the cancellation
             # deadline active when a stubborn child closes stdout before exit.
             while selector.get_map() or process.poll() is None:
+                # Descendants can inherit the pipe after the direct command
+                # exits. Allow a bounded final drain without losing its status.
+                if process.poll() is not None and drain_deadline is None:
+                    drain_deadline = time.monotonic() + 5
+                if drain_deadline is not None and time.monotonic() >= drain_deadline:
+                    break
                 for key, _ in selector.select(timeout=0.1):
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
@@ -182,11 +189,12 @@ def execute_test(command, log_path, sample=None):
     finally:
         selector.close()
         process.stdout.close()
+        # The private group may outlive its leader, including after pipe EOF.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             process.wait(timeout=5)
         if observer and observer.thread:
             observer.thread.join()

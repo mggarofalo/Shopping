@@ -39,6 +39,59 @@ class SiriSchemaCITests(unittest.TestCase):
         commands = [step.get("run", "") for step in diagnostic["steps"]]
         self.assertEqual(sum("--sample-launch" in command for command in commands), 1)
         self.assertFalse(any(step.get("continue-on-error") for step in diagnostic["steps"]))
+        release_steps = jobs["release-build"]["steps"]
+        validation = next(i for i, step in enumerate(release_steps)
+                          if "test_siri_schema_ci.py" in step.get("run", ""))
+        archive = next(i for i, step in enumerate(release_steps)
+                       if "xcodebuild archive" in step.get("run", ""))
+        self.assertLess(validation, archive)
+
+    def test_parent_exit_bounds_inherited_pipe_drain_and_cleans_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            ready = output / "descendant-ready"
+            descendant = ("import os, signal, time\nfrom pathlib import Path\n"
+                          "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                          f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                          "print('descendant output', flush=True)\n"
+                          "while True: time.sleep(1)\n")
+            parent = output / "parent.py"
+            parent.write_text("import os, subprocess, sys, time\nfrom pathlib import Path\n"
+                              f"Path({str(output / 'group')!r}).write_text(str(os.getpid()))\n"
+                              f"subprocess.Popen([sys.executable, '-c', {descendant!r}])\n"
+                              f"while not Path({str(ready)!r}).exists(): time.sleep(0.01)\n"
+                              "sys.exit(65)\n")
+            wrapper = output / "wrapper.py"
+            wrapper.write_text("import importlib.util, sys\nfrom pathlib import Path\n"
+                               f"spec=importlib.util.spec_from_file_location('runner', {str(Path(siri.__file__))!r})\n"
+                               "runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)\n"
+                               f"sys.exit(runner.execute_test([sys.executable, {str(parent)!r}], Path({str(output / 'test.log')!r})))\n")
+            process = subprocess.Popen([sys.executable, str(wrapper)], stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True, start_new_session=True)
+            try:
+                stdout, stderr = process.communicate(timeout=8)
+                self.assertEqual(process.returncode, 65, stderr)
+                self.assertIn("descendant output", stdout)
+                self.assertIn("descendant output", (output / "test.log").read_text())
+                pid = int(ready.read_text())
+                deadline = time.monotonic() + 2
+                while True:
+                    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                                           capture_output=True, text=True).stdout.strip()
+                    if not state or state.startswith("Z"):
+                        break
+                    self.assertLess(time.monotonic(), deadline, "Inherited-pipe descendant remains alive")
+                    time.sleep(0.01)
+            finally:
+                groups = [process.pid]
+                if (output / "group").exists():
+                    groups.append(int((output / "group").read_text()))
+                for pid in groups:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                process.communicate(timeout=5)
 
     def test_exact_passing_inventory_is_required(self):
         siri.validate_selection(inventory())
