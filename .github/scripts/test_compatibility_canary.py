@@ -54,6 +54,11 @@ class CanaryContracts(unittest.TestCase):
         self.assertTrue(any('Xcode_16.4.app' in step.get('run', '') for step in diagnostic['steps']))
         self.assertTrue(any('SimRuntime.iOS-18-5' in step.get('run', '') for step in diagnostic['steps']))
 
+    def test_cleanup_budget_covers_inflight_pair_and_restoration_pair(self):
+        self.assertGreater(canary.CLEANUP_SECONDS, 4 * canary.driver.COMMAND_TIMEOUT_SECONDS)
+        self.assertGreaterEqual(canary.CLEANUP_SECONDS,
+                                canary.driver.REQUEST_TIMEOUT_SECONDS + canary.driver.CANCEL_GRACE_SECONDS)
+
     def test_timeout_is_failure_even_after_successful_cleanup(self):
         process = Mock()
         process.wait.side_effect = subprocess.TimeoutExpired(['command'], 1)

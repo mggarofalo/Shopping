@@ -330,7 +330,10 @@ The runner refuses dirty source, verifies the same clean SHA after success, and
 retains the explicit plan and built xctestrun manifests. It bounds boot to five
 minutes, each build and UI execution to fifteen, and reporting to one minute.
 On cancellation it forwards TERM through the existing supervisors and allows
-210 seconds for an in-flight host command plus restoration before a hard stop.
+265 seconds for an in-flight setter/readback pair plus the restoration
+setter/readback pair and supervision margin before a hard stop. The allowance
+is derived from the driver's four 60-second operation budgets, 15-second request
+margin and 10-second cancellation grace.
 A timeout remains failure even if cleanup succeeds. These are containment bounds;
 no native operation deadline or UI assertion timeout changes. Reporting failure
 cannot replace the original test failure or turn a failed run into passing proof.

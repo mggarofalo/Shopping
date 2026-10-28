@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build once and run the four compatibility workflows serially; never retries."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -18,9 +19,13 @@ from selected_test_inventory import verify_products, verify_report
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / '.github/scripts'
 PLAN = 'ShoppingCompatibility'
-# Let the existing driver finish an in-flight 60s command and two 60s restore
-# commands after cancellation; do not change its operation deadlines.
-CLEANUP_SECONDS = 210
+# Cancellation can arrive during set: its setter + readback finish before
+# cleanup's setter + readback. Derive four command budgets and supervision
+# margin from the existing driver, without changing native operation deadlines.
+driver_spec = importlib.util.spec_from_file_location('canary_text_size_driver', SCRIPTS / 'with-system-text-size.py')
+driver = importlib.util.module_from_spec(driver_spec)
+driver_spec.loader.exec_module(driver)
+CLEANUP_SECONDS = driver.REQUEST_TIMEOUT_SECONDS + driver.CANCEL_GRACE_SECONDS
 PHASE_LIMITS = {'driver-contracts': 60, 'simulator': 300, 'build-cold': 900,
                 'build-warm': 900, 'test': 900, 'report': 60}
 
