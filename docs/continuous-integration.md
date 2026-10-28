@@ -351,7 +351,11 @@ Its configuration, coverage setting and exclusions match Fast, and the cheap gat
 checks the plan against the maintained fixture classes. The explicit plan is
 necessary because Xcode 27.1 did not serialize CLI-only selection into the built
 manifest: trial 4c15c01 stopped after a successful 72.913s build, before any test,
-and retained its failed attempt marker. No inventory proof was relaxed.
+and retained its failed attempt marker. Trial 1198fa6 then built the exact 25
+identifiers in 58.498s but stopped before tests because Xcode omitted the two
+unselected exclusions from that manifest. The verifier permits only omissions
+disjoint from the exact selected identifiers; unexpected exclusions or omissions
+that affect a selected test still fail. Both failed attempts remain recorded.
 The runner checks their built selection, then calls the existing four-method
 canary. It retains small receipts in the Git common directory under
 `shopping-staged-receipts/<SHA>/{fixtures,canary}/`. Raw artifacts stay at the

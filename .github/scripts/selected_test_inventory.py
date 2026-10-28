@@ -74,5 +74,13 @@ def verify_explicit_products(products, plan_name, bundle, expected, skipped=()):
     target = targets[0]
     if Counter(normalized(t) for t in target.get('OnlyTestIdentifiers', [])) != expected:
         raise ValueError('Built identifiers differ from explicit selection')
-    if set(target.get('SkipTestIdentifiers', [])) != set(skipped):
+    planned_skips = {normalized(test) for test in skipped}
+    built_skips = {normalized(test) for test in target.get('SkipTestIdentifiers', [])}
+    omitted = planned_skips - built_skips
+    # Xcode can omit exclusions outside an explicit OnlyTestIdentifiers list.
+    # Such omissions cannot widen the already-verified exact selection.
+    if built_skips - planned_skips or any(
+        test == exclusion or test.startswith(exclusion + '/')
+        for exclusion in omitted for test in expected
+    ):
         raise ValueError('Built exclusions differ from the selected plan')

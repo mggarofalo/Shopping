@@ -107,6 +107,26 @@ class StagedValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Built identifiers'):
             stage.validate_native(files, SHA, 'fixtures', 'local')
 
+    def test_built_fixture_manifest_may_omit_only_disjoint_exclusions(self):
+        files = self.files('fixtures', 'local')
+        built = plistlib.loads(files['BuiltSelection.xctestrun'])
+        target = built['TestConfigurations'][0]['TestTargets'][0]
+        del target['SkipTestIdentifiers']
+        files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
+        stage.validate_native(files, SHA, 'fixtures', 'local')
+        target['SkipTestIdentifiers'] = ['UnexpectedClass']
+        files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
+        with self.assertRaisesRegex(ValueError, 'Built exclusions'):
+            stage.validate_native(files, SHA, 'fixtures', 'local')
+        target.pop('SkipTestIdentifiers')
+        with tempfile.TemporaryDirectory() as directory:
+            products = Path(directory)
+            (products / 'manifest.xctestrun').write_bytes(plistlib.dumps(built))
+            for exclusion in ('FixtureReadinessTests', next(iter(stage.fixture_selection()))):
+                with self.subTest(exclusion=exclusion), self.assertRaisesRegex(ValueError, 'Built exclusions'):
+                    stage.verify_explicit_products(products, stage.config()['fixtures']['plan'],
+                        'ShoppingPersistenceTests', stage.fixture_selection(), [exclusion])
+
     def test_valid_fixture_and_canary_receipts(self):
         self.assertEqual(len(stage.fixture_selection()), 25)
         for kind in ('fixtures', 'canary'):
