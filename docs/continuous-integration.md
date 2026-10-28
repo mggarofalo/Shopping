@@ -603,3 +603,11 @@ or inventory failure fails validation. Partial raw bundles remain available if
 no combined bundle can be produced. Independent review and a declared native
 diagnostic are required before adopting this candidate; no native result is yet
 claimed for the split.
+
+The first split-session hosted diagnostic, run `40783837065` on clean
+`fff80fb111c417fd93af91a3485abe4f999b0a7e`, passed all 21 hosted and one native
+case with zero skips. Per-phase and merged-inventory guards passed. Build took
+96.360 seconds, hosted execution 306.465 seconds, and native execution 242.730
+seconds. This validates native invocation and merge compatibility on that SHA;
+it does not establish a speedup or cure the intermittent stale-process failure.
+The final integrated candidate still requires ordinary CI.

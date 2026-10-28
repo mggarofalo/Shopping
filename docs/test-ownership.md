@@ -2729,3 +2729,42 @@ is retained without failing history. It uses isolated SQLite stores and injected
 and completed-sync evidence. It does not claim to simulate CloudKit transport or
 unseen offline edits racing cloud deletion. Existing `GroceryNeedTests` retains
 strict ambiguous-identity command and projection assertions.
+
+## Clear-interruption setup pilot (SHOPPING-252)
+
+`ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement`
+continues to own actual Checkout confirmation, committed clear followed by forced
+process exit before UI acknowledgement, relaunch of the same store without
+reseeding, the Recently cleared restore interaction, and recovery of the same
+rendered occurrence ID with `Keep cold` notes and one-time lifecycle. It still
+checks that Catalog has no remembered items. Ordinary termination remains a
+separate owner in `ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering`.
+
+| Replaced prerequisite | Retained proof owner |
+| --- | --- |
+| First-home button and arrival at Groceries | `GroceryEditingUITests/testRememberedDraftCancelAndAtomicSaveSurviveRelaunch` still calls `createFirstHomeForWorkflow`, which asserts the first-home button is present and hittable and the resulting Groceries destination appears. `HomeCreationTests/testFirstLocalHomeReplaysCommittedGraphAfterRelaunchWithoutClaimingAccount` retains durable local-creation semantics. |
+| Add to Groceries, one-time editor, title, Remember choice, Any store and Save | `GroceryEditingUITests/testOneTimeIndividualRemovalAndUndoDoNotCreateCatalogKnowledge` retains the complete one-time creation path and saved row, relaunch and Catalog isolation. |
+| Purchase-note entry | `OneTimePromotionUITests/testPromotionCancelAndExplicitCreatePreserveOccurrenceAfterRelaunch` retains entering and saving one-time notes and verifying them after relaunch. The interruption test still asserts the recovered notes itself. |
+| Swipe to In cart and its feedback toast | `ChecklistUITests/testOneTimeClearRecoverySurvivesRelaunchWithoutRemembering` still carts a newly created one-time need through the UI and waits for its feedback before Checkout. The interruption test starts already carted; it no longer generates or waits for that unrelated toast. |
+
+The `clearInterruption` fixture uses the existing local preview graph and seeds
+one active, carted one-time `Fresh ice` need with `Keep cold` notes, unset quantity,
+normal urgency and Any store. No catalog, clear operation, checkout result or
+recovery state is seeded. The UI captures the actual row identifier in In cart
+before Checkout, then locates that same identifier after restore. The original
+scenario had no explicit quantity assertion; the fixture contract verifies the
+unchanged unset quantity. This is local legacy-cart proof, not personal-cart or
+live CloudKit proof. Preview Home naming and omission of the first-create journal
+are setup differences, not assertions owned by this recovery scenario.
+
+`PreviewFixtureTests/testClearInterruptionFixturePersistsOnlyIsolatedPreCheckoutState`
+checks two independent SQLite stores, distinct Home/occurrence identities,
+reciprocal selected Home/list relationships, local authority, complete saved
+fields after reopening, no catalog/suggestions and no clear operation. Reusing
+an existing fixture path fails instead of overwriting it. Each UI execution uses
+a new UUID store path; the deliberate post-exit launch removes the fixture key
+and keeps the same path. The maintained UI selection and all recovery assertions
+remain unchanged. The matched local pair passed both exact one-case inventories;
+[runtime evidence](shopping-full-runtime.md#clear-interruption-setup-comparison-shopping-252)
+records the measured saving and its fixed-order/cache limits. Final evidence
+review and phase CI remain separate integration gates.

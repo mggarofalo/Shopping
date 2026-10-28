@@ -8,26 +8,13 @@ final class ClearInterruptionUITests: XCTestCase {
         app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] =
             FileManager.default.temporaryDirectory
             .appendingPathComponent("ShoppingClearInterruption-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "clearInterruption"
         app.launchEnvironment["SHOPPING_UI_TEST_EXIT_AFTER_CLEAR"] = "1"
         app.launch()
-        app.createFirstHomeForWorkflow()
-        XCTAssertTrue(app.buttons["shopping.addGrocery"].existsOrAppears(timeout: 5))
-        app.buttons["shopping.addGrocery"].tap()
-        XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))
-        app.buttons["shopping.grocery.addOneTime"].tap()
-        let name = app.textFields["shopping.grocery.name"]
-        XCTAssertTrue(name.existsOrAppears(timeout: 2))
-        name.tap()
-        name.typeText("Fresh ice")
-        setSwitch(app.switches["shopping.grocery.remembered"], on: false, app: app)
-        let notes = app.textFields["shopping.grocery.purchaseNotes"]
-        reveal(notes, app: app)
-        notes.tap()
-        notes.typeText("Keep cold")
-        let anyStore = app.buttons["shopping.purchase.anyStore"]
-        reveal(anyStore, app: app)
-        if anyStore.value as? String != "Selected" { anyStore.tap() }
-        app.buttons["shopping.grocery.save"].tap()
+        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
+        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
+        carted.tap()
+        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
         let row = app.buttons.matching(
             NSPredicate(
                 format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "shopping.grocery.row.", "Fresh ice"
@@ -35,14 +22,6 @@ final class ClearInterruptionUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(row.existsOrAppears(timeout: 3))
         let originalID = row.identifier
-        row.swipeLeft()
-        app.buttons["In cart"].tap()
-        let carted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "In cart (1)")).firstMatch
-        XCTAssertTrue(carted.existsOrAppears(timeout: 3))
-        carted.tap()
-        XCTAssertTrue(app.navigationBars["In cart"].existsOrAppears(timeout: 2))
-        // The cart toast can obscure Checkout even when XCTest reports it as hittable.
-        XCTAssertTrue(app.staticTexts["Fresh ice moved to In cart."].waitForNonExistence(timeout: 5))
         let checkout = app.buttons["shopping.checkout.start"]
         reveal(checkout, app: app)
         checkout.tap()
@@ -50,6 +29,7 @@ final class ClearInterruptionUITests: XCTestCase {
         app.buttons["shopping.checkout.confirm"].tap()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
 
+        app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_FIXTURE")
         app.launchEnvironment.removeValue(forKey: "SHOPPING_UI_TEST_EXIT_AFTER_CLEAR")
         app.launch()
         let recentlyCleared = app.buttons["Recently cleared"]
@@ -74,15 +54,6 @@ final class ClearInterruptionUITests: XCTestCase {
         app.navigationBars["In cart"].buttons.firstMatch.tap()
         app.tabBars.buttons["Catalog"].tap()
         XCTAssertTrue(app.staticTexts["No remembered items"].existsOrAppears(timeout: 3))
-    }
-
-    private func setSwitch(_ toggle: XCUIElement, on: Bool, app: XCUIApplication) {
-        reveal(toggle, app: app)
-        if (toggle.value as? String == "1") != on {
-            let inner = toggle.switches.firstMatch
-            (inner.exists ? inner : toggle).tap()
-        }
-        XCTAssertEqual(toggle.value as? String, on ? "1" : "0")
     }
 
     private func reveal(_ element: XCUIElement, app: XCUIApplication) {

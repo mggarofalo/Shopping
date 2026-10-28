@@ -385,3 +385,66 @@ Routine acceptance adopts this scoped collection policy with the existing
 bounded raw-log/result retention described in [CI guidance](continuous-integration.md#routine-acceptance-diagnostic-collection-shopping-145).
 Other test invocations retain their collection settings. Required hosted CI
 still owns pinned-runtime validation of the final policy candidate.
+
+## Clear-interruption setup comparison (SHOPPING-252)
+
+The passing PR92 acceptance run `40780173582` recorded 58.363 seconds for the
+clear-interruption workflow. That hosted observation identified a candidate;
+it is not the matched local baseline. The unchanged local baseline on clean
+`9f552e1f1616093d39d412ac94cfa0740d49b04e` ran exactly
+`ShoppingTests/ClearInterruptionUITests/testCommittedOneTimeClearRecoversAfterExitBeforeUIAcknowledgement`
+through `ShoppingAcceptance`, serially, on Xcode 27.1 (27A9275), iOS 27.0,
+iPhone 17 Pro simulator `A544F546-FC88-416E-AD88-0043429D3A9C`.
+
+The simulator was recorded as Shutdown before the fresh build. Separate
+`build-for-testing` and `test-without-building` commands used explicit
+`/tmp/shopping-252-derived-data`. Both baseline and planned comparator use
+`-collect-test-diagnostics never`; this differs from routine CI at that baseline
+and excludes the separately investigated automatic diagnostic tail. No test
+assertion, selection or timeout changed for the baseline.
+
+| Phase | Baseline `9f552e1` | Candidate `41dbf22` |
+| --- | ---: | ---: |
+| Build command | 47.612 s (fresh) | 2.254 s (incremental) |
+| Test command | 98.268 s | 59.633 s |
+| Result-bundle interval | 94.930 s | 54.642 s |
+| Single test body | 66.994 s | 29.708 s |
+| Checkout-start tap, relative to test start | 47.63 s | 11.90 s |
+
+Both exact one-case inventories passed with zero skips, one trial each. Candidate
+`41dbf22645f4cacb51f5efe83e6edfb69d70db1b` was clean before and after execution;
+its new fixture contract separately passed one focused persistence case in
+0.060 seconds (47.661-second build-and-test command). Two independent code
+reviews cleared that candidate before the UI comparison. The complete test
+body decreased by 37.286 seconds (55.7%); the test command decreased by 38.635
+seconds (39.3%). The earlier Checkout-start tap corroborates removal of
+incidental setup while the actual checkout, forced exit, relaunch and restoration
+still execute. These are observations from one local pair, not suite-wide or
+hosted savings.
+
+The candidate used the same simulator, toolchain/runtime, serial worker,
+selection, explicit DerivedData and diagnostic setting. Execution order was
+fixed: baseline, fixture-contract validation, then candidate. The baseline
+started with fresh build products; the intervening fixture validation rebuilt
+changed products before the candidate's incremental build. The build-time
+difference is not an optimization result. Baseline simulator state was captured
+as Shutdown before the build, but not immediately before its test command.
+Candidate state was captured as Shutdown before both build and test. No erase,
+cache reset, or simulator-state equivalence beyond those observations is claimed.
+The comparison retains launch/setup/teardown costs within each test command.
+
+The new `clearInterruption` fixture replaces only prerequisite Home/one-time/cart
+setup. [Proof ownership](test-ownership.md#clear-interruption-setup-pilot-shopping-252)
+records the retained UI and persistence owners. The fixture does not seed
+checkout or recovery. The UI captures the rendered row ID before checkout and
+requires that same row after restoring, with unchanged notes, one-time status and
+empty Catalog assertions. Post-test source edits only document the measurement;
+the measured Swift/test code remains byte-identical to `41dbf22`.
+
+Raw artifacts, metadata, exact commands, phase records, result bundles and final
+clean source checks remain at `/tmp/shopping-252-baseline-9f552e1`,
+`/tmp/shopping-252-contract-41dbf22`, and `/tmp/shopping-252-candidate-41dbf22`.
+Copies excluding build products are retained in the Git common directory at
+`shopping-test-timings/41dbf22645f4cacb51f5efe83e6edfb69d70db1b/20261028-clear-interruption/`.
+Independent evidence review cleared the comparison; required exact-source phase CI remains outstanding;
+this focused comparison is not Full, live CloudKit, or physical-device proof.
