@@ -112,8 +112,15 @@ class StagedValidationTests(unittest.TestCase):
         built = plistlib.loads(files['BuiltSelection.xctestrun'])
         target = built['TestConfigurations'][0]['TestTargets'][0]
         del target['SkipTestIdentifiers']
+        # Observed Xcode27.1 shape: 25 method IDs with (), no Skip key.
+        target['OnlyTestIdentifiers'] = [test + '()' for test in sorted(target['OnlyTestIdentifiers'])]
         files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
         stage.validate_native(files, SHA, 'fixtures', 'local')
+        target['OnlyTestIdentifiers'].append(target['OnlyTestIdentifiers'][0])
+        files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
+        with self.assertRaisesRegex(ValueError, 'Built identifiers'):
+            stage.validate_native(files, SHA, 'fixtures', 'local')
+        target['OnlyTestIdentifiers'].pop()
         target['SkipTestIdentifiers'] = ['UnexpectedClass']
         files['BuiltSelection.xctestrun'] = plistlib.dumps(built)
         with self.assertRaisesRegex(ValueError, 'Built exclusions'):
@@ -122,6 +129,10 @@ class StagedValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             products = Path(directory)
             (products / 'manifest.xctestrun').write_bytes(plistlib.dumps(built))
+            # Prefix collisions are disjoint: class/method boundaries matter.
+            for exclusion in ('FixtureReadinessTest', next(iter(stage.fixture_selection()))[:-1]):
+                stage.verify_explicit_products(products, stage.config()['fixtures']['plan'],
+                    'ShoppingPersistenceTests', stage.fixture_selection(), [exclusion])
             for exclusion in ('FixtureReadinessTests', next(iter(stage.fixture_selection()))):
                 with self.subTest(exclusion=exclusion), self.assertRaisesRegex(ValueError, 'Built exclusions'):
                     stage.verify_explicit_products(products, stage.config()['fixtures']['plan'],
