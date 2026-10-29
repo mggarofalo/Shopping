@@ -73,6 +73,47 @@ struct ShoppingActionTests {
         #expect(ready.presentation.isActive)
     }
 
+    @Test func readinessFailsVisiblyWhileTheStoreIsStillOpening() async {
+        let opening = DispatchSemaphore(value: 0)
+        defer { opening.signal() }
+        let runtime = ShoppingApplicationRuntime(bootstrap: PersistenceBootstrap(configuration: {
+            opening.wait()
+            throw ShoppingActionError.homeUnavailable
+        }))
+        let started = ContinuousClock.now
+        await #expect(throws: ShoppingActionError.loading) { try await runtime.ready(timeout: .milliseconds(300)) }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func deadlineAbandonsUninterruptibleWorkAndReportsTheTimeout() async {
+        let stuck = DispatchSemaphore(value: 0)
+        defer { stuck.signal() }
+        let started = ContinuousClock.now
+        await #expect(throws: ShoppingActionError.timedOut) {
+            try await ShoppingActionDeadline.run(within: .milliseconds(200), onTimeout: .timedOut) {
+                await Task.detached { stuck.wait(); return 1 }.value
+            }
+        }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func deadlineReturnsFinishedWorkAndHonorsCallerCancellation() async throws {
+        #expect(try await ShoppingActionDeadline.run(within: .seconds(5), onTimeout: .timedOut) { 7 } == 7)
+        await #expect(throws: NeedServiceError.invalidName) {
+            try await ShoppingActionDeadline.run(within: .seconds(5), onTimeout: .timedOut) { () throws -> Int in
+                throw NeedServiceError.invalidName
+            }
+        }
+        let stuck = DispatchSemaphore(value: 0)
+        defer { stuck.signal() }
+        let caller = Task {
+            try await ShoppingActionDeadline.run(within: .seconds(60), onTimeout: .timedOut) {
+                await Task.detached { stuck.wait(); return 1 }.value
+            }
+        }
+        caller.cancel()
+        await #expect(throws: CancellationError.self) { try await caller.value }
+    }
 
     @Test func groceryActionsReturnFromCartAndHistoryToListRoot() {
         let navigation = GroceryNavigationState(defaults: UserDefaults(suiteName: UUID().uuidString)!)

@@ -21,6 +21,7 @@ class SiriMetadataTests(unittest.TestCase):
         self.action = {
             'assistantDefinedSchemas': [{'domain': 'reminders', 'name': 'CreateReminderIntent'}],
             'authenticationPolicy': 2,
+            'supportedModes': 9,
             'parameters': [{'name': 'title', 'valueType': {'primitive': {'wrapper': {'typeIdentifier': 0}}}}],
         }
         self.metadata = {'actions': {'AddSpokenGroceryIntent': self.action}, 'autoShortcuts': [
@@ -50,6 +51,11 @@ class SiriMetadataTests(unittest.TestCase):
     def test_unauthenticated_action_fails(self):
         self.action['authenticationPolicy'] = 0
         with self.assertRaisesRegex(ValueError, 'authentication'):
+            self.validate()
+
+    def test_foreground_only_action_fails(self):
+        self.action['supportedModes'] = 8
+        with self.assertRaisesRegex(ValueError, 'background'):
             self.validate()
 
     def test_catalog_phrase_fails(self):

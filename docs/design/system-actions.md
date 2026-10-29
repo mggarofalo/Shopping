@@ -65,7 +65,8 @@ execution checks current Home-qualified identity and captured revisions.
 The iOS 27 adapter adopts `.reminders.createReminder` with a free-form title and
 returns the durable saved occurrence as a reminder entity. Only the selected
 Home’s grocery list is exposed. List lookup recognizes “shopping list”, “my shopping list”,
-“the shopping list”, “grocery list”, “groceries” and “shopping”. This only resolves
+“the shopping list”, “grocery list”, “groceries”, “shopping” and the app’s own
+name (“Milk and Bananas”, “Milk & Bananas”), since the app has one list per Home. This only resolves
 the list after Siri selects the app; it does not reserve unqualified requests or
 set a system default reminder app. Purchased or superseded occurrences are excluded
 by the existing outstanding-demand projection. Unsupported dates, recurrence,
@@ -74,8 +75,31 @@ The schema requires these parameters to exist even when the app cannot support
 their semantics. Required unsupported entity types return no query candidates.
 
 Both adapters use `CatalogAddDialogue` for lookup, captured choices, add and scoped
-creation handoff. The modern unknown-name path throws the framework’s foreground
-continuation error; it does not return an entity for an unsaved item.
+creation handoff. The modern action declares `supportedModes` of background plus
+dynamic foreground instead of the deprecated `ForegroundContinuableIntent`. Siri
+runs it in the background; only an unknown name calls `continueInForeground`
+(skipped when the app is already in front), then queues the prefilled editor and
+returns no entity, because nothing is saved until the user chooses Save and Add.
+A request that arrives while the user has a sheet open waits behind it (the app
+never dismisses the user's work), and a further unknown name then fails with the
+spoken “finish or cancel the pending action” message rather than a generic error.
+
+Every wait inside a system action is bounded. Readiness, including the loading
+transition, fails after 15 seconds with “still opening”. Each store read or write
+fails after 10 seconds with a spoken “didn’t respond in time” message; the
+abandoned store work may still finish, and duplicate-add rules keep a retry safe.
+Persistence errors that have no spoken text (for example duplicate remembered
+needs) become a user-facing failure instead of Siri’s generic problem message.
+
+SHOPPING-258 exercised the 1.6.3 action through AppIntentsTesting system
+execution on the iOS 27 simulator (`supportedModes` was foreground-only, 8). From a
+backgrounded app, the old unknown-name continuation came forward to the editor in
+about one second; it did not reproduce the physical device's multi-minute spin.
+With the app already in front, it returned no value to the schema
+(`castingFailed NSNull`). A second unknown name queued behind the open editor
+sheet and a third failed as busy. “Milk and Bananas” resolved no list. The current
+modes follow Apple's replacement for the deprecated protocol; the device spin
+still needs a physical re-test to confirm it is gone.
 
 Apple now describes [SiriKit Lists and Notes](https://developer.apple.com/documentation/sirikit/lists-and-notes)
 as legacy and unsupported by Apple Intelligence/Siri AI. The exploratory legacy

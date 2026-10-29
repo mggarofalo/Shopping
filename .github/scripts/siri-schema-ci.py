@@ -18,7 +18,8 @@ import uuid
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
 RUNTIME_READINESS_TIMEOUT_SECONDS = 300
 
-UI_TEST = "ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()"
+UI_TESTS = ["ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()",
+            "ModernSiriActionTests/testUnknownSpokenNameHandsOffToEditorWithoutBlockingLaterRequests()"]
 LAUNCH_MARKER = re.compile(r"t =\s+[0-9.]+s\s+Launch com\.mggarofalo\.shopping\s*$")
 LAUNCH_COMPLETE = re.compile(r"t =\s+[0-9.]+s\s+(Setting up automation session|Wait for com\.mggarofalo\.shopping to idle|Tear Down)")
 
@@ -39,10 +40,10 @@ def validate_selection(tree):
     selected = list(cases(tree))
     identifiers = [test["nodeIdentifier"] for test in selected]
     counts = Counter(identifier.split("/")[0] for identifier in identifiers)
-    if (len(selected) != 22 or len(set(identifiers)) != 22
-            or counts != {"CatalogActionTests": 15, "SpokenGrocerySchemaTests": 6, "ModernSiriActionTests": 1}
-            or UI_TEST not in identifiers or any(test.get("result") != "Passed" for test in selected)):
-        raise ValueError("Siri schema selection must contain exactly 22 unique passing cases (15 catalog, 6 schema, 1 native UI)")
+    if (len(selected) != 25 or len(set(identifiers)) != 25
+            or counts != {"CatalogActionTests": 17, "SpokenGrocerySchemaTests": 6, "ModernSiriActionTests": 2}
+            or not set(UI_TESTS) <= set(identifiers) or any(test.get("result") != "Passed" for test in selected)):
+        raise ValueError("Siri schema selection must contain exactly 25 unique passing cases (17 catalog, 6 schema, 2 native UI)")
 
 
 class Commands:
@@ -148,7 +149,7 @@ class LaunchObserver:
 
 HOSTED_FILTERS = ["ShoppingPersistenceTests/SpokenGrocerySchemaTests",
                   "ShoppingPersistenceTests/CatalogActionTests"]
-NATIVE_FILTERS = ["ShoppingSiriTests/" + UI_TEST.removesuffix("()")]
+NATIVE_FILTERS = ["ShoppingSiriTests/ModernSiriActionTests"]
 
 
 def phase_command(device, output, phase):
@@ -167,11 +168,11 @@ def phase_command(device, output, phase):
 def validate_phase(tree, phase):
     selected = list(cases(tree))
     identifiers = [test["nodeIdentifier"] for test in selected]
-    expected = ({"CatalogActionTests": 15, "SpokenGrocerySchemaTests": 6}
-                if phase == "Hosted" else {"ModernSiriActionTests": 1})
+    expected = ({"CatalogActionTests": 17, "SpokenGrocerySchemaTests": 6}
+                if phase == "Hosted" else {"ModernSiriActionTests": 2})
     if (Counter(value.split("/")[0] for value in identifiers) != expected
             or len(set(identifiers)) != len(identifiers)
-            or (phase == "Native" and identifiers != [UI_TEST])
+            or (phase == "Native" and sorted(identifiers) != sorted(UI_TESTS))
             or any(test.get("result") != "Passed" for test in selected)):
         raise ValueError(f"{phase} Siri selection must contain exactly its unique passing cases: {expected}")
 

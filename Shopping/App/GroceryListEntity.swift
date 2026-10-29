@@ -22,9 +22,12 @@ struct GroceryListEntity {
             return identifiers.contains(current.id) ? [current] : []
         }
         @MainActor func entities(matching string: String) async throws -> [GroceryListEntity] {
-            guard ["grocery list", "shopping list", "my shopping list", "the shopping list", "groceries", "shopping"].contains(CatalogProjection.normalizedName(string)) else { return [] }
+            guard Self.aliases.contains(CatalogProjection.normalizedName(string)) else { return [] }
             return [try await current()]
         }
+        /// The app has one list per Home, so its spoken name ("add bread to Milk and Bananas") names that list.
+        static let aliases: Set<String> = ["grocery list", "shopping list", "my shopping list", "the shopping list",
+                                           "groceries", "shopping", "milk and bananas", "milk & bananas"]
         @MainActor func suggestedEntities() async throws -> [GroceryListEntity] { [try await current()] }
         @MainActor private func current() async throws -> GroceryListEntity {
             let runtime = ShoppingApplicationRuntime.shared

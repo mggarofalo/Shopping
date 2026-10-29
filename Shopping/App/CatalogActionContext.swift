@@ -9,8 +9,12 @@ struct CatalogActionContext {
     let householdID: UUID
     let listID: UUID
     let namespace: String
+    /// Siri gives up on a request it cannot answer, so a store busy with sync or
+    /// another command fails visibly instead of holding the dialogue open.
+    let storeTimeout: Duration
 
-    init(runtime: ShoppingApplicationRuntime, ready: PersistenceBootstrap.ReadyState) throws {
+    init(runtime: ShoppingApplicationRuntime, ready: PersistenceBootstrap.ReadyState,
+         storeTimeout: Duration = .seconds(10)) throws {
         guard let householdID = ready.householdID, let listID = ready.listID else {
             throw ShoppingActionError.homeUnavailable
         }
@@ -18,6 +22,7 @@ struct CatalogActionContext {
         self.ready = ready
         self.householdID = householdID
         self.listID = listID
+        self.storeTimeout = storeTimeout
         let scope = ready.homeScope?.preferenceNamespace ?? "local:\(householdID):\(listID)"
         namespace = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -38,13 +43,8 @@ struct CatalogActionContext {
     }
 
     func items() async throws -> [CatalogActionItem] {
-        try validate()
-        let service = ready.service, householdID = householdID, listID = listID
-        let items = try await Task.detached(priority: .userInitiated) {
-            try service.catalogActionItems(householdID: householdID, listID: listID)
-        }.value
-        try validate()
-        return items
+        let householdID = householdID, listID = listID
+        return try await onStore { try $0.catalogActionItems(householdID: householdID, listID: listID) }
     }
 
     /// Saved shortcuts retain identity across renames, but never across Homes.
@@ -61,13 +61,10 @@ struct CatalogActionContext {
     }
 
     func capture(_ items: [CatalogActionItem]) async throws -> CatalogAddToken {
-        try validate()
-        let service = ready.service, householdID = householdID, listID = listID
-        let preview = try await Task.detached(priority: .userInitiated) {
-            try service.captureCatalogAdd(itemIDs: Set(items.map(\.id)), householdID: householdID,
-                                          listID: listID, selectedStoreID: nil)
-        }.value
-        try validate()
+        let householdID = householdID, listID = listID, itemIDs = Set(items.map(\.id))
+        let preview = try await onStore {
+            try $0.captureCatalogAdd(itemIDs: itemIDs, householdID: householdID, listID: listID, selectedStoreID: nil)
+        }
         guard preview.token.entries.count == items.count,
               items.allSatisfy({ item in preview.token.entries.contains {
                   $0.itemID == item.id && $0.itemRevision == item.revision
@@ -88,11 +85,7 @@ struct CatalogActionContext {
         }
         let selected = CatalogAddToken(id: token.id, householdID: householdID, listID: listID,
                                        selectedStoreID: nil, entries: [entry])
-        let service = ready.service
-        let result = try await Task.detached(priority: .userInitiated) {
-            try service.applyCatalogAdd(selected, renewCarted: false)
-        }.value
-        try validate()
+        let result = try await onStore { try $0.applyCatalogAdd(selected, renewCarted: false) }
         guard result.changedCount == 0, result.missingCount == 0,
               result.archivedCount == 0, result.ineligibleCount == 0 else {
             throw ShoppingActionError.scopeChanged
@@ -103,13 +96,26 @@ struct CatalogActionContext {
     }
 
     func groceryNeeds(ids: Set<UUID>) async throws -> [GroceryActionNeed] {
+        let householdID = householdID, listID = listID
+        return try await onStore { try $0.groceryActionNeeds(ids: ids, householdID: householdID, listID: listID) }
+    }
+
+    /// Persistence errors have no spoken text; report them as a user-facing failure.
+    private func onStore<Value: Sendable>(
+        _ work: @escaping @Sendable (NeedService) throws -> Value
+    ) async throws -> Value {
         try validate()
-        let service = ready.service, householdID = householdID, listID = listID
-        let needs = try await Task.detached(priority: .userInitiated) {
-            try service.groceryActionNeeds(ids: ids, householdID: householdID, listID: listID)
-        }.value
+        let service = ready.service
+        let value: Value
+        do {
+            value = try await ShoppingActionDeadline.run(within: storeTimeout, onTimeout: .timedOut) {
+                try await Task.detached(priority: .userInitiated) { try work(service) }.value
+            }
+        } catch let error as NeedServiceError {
+            throw error == .scopeChanged ? ShoppingActionError.scopeChanged : ShoppingActionError.unavailable
+        }
         try validate()
-        return needs
+        return value
     }
 
     func entityID(for itemID: UUID) -> String { namespace + ":" + itemID.uuidString.lowercased() }

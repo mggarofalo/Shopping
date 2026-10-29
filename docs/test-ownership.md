@@ -2638,6 +2638,18 @@ read its returned entity and verify duplicate identity. It runs in the current
 SDK job alongside the focused persistence suites. This is action execution proof,
 not Siri speech or app-selection proof.
 
+## Spoken grocery execution (SHOPPING-258)
+
+`ModernSiriActionTests/testUnknownSpokenNameHandsOffToEditorWithoutBlockingLaterRequests`
+owns the system-executed unknown-name path from a backgrounded app: the app comes
+forward to the prefilled editor within the response bound, no reminder entity is
+returned, Cancel saves nothing, and a later known and unknown request both still
+complete. It also resolves the spoken app name as the list. `ShoppingActionTests`
+owns the readiness bound and the deadline helper (timeout, passthrough, caller
+cancellation, uninterruptible work). `CatalogActionTests` owns the store-busy bound
+and the spoken failure for duplicate remembered needs. The metadata guard rejects a
+foreground-only spoken action. None of these is Siri speech or app-selection proof.
+
 The modern system test lives in the iOS 27-only `ShoppingSiriTests` target and
 `ShoppingSiri` scheme/plan. Its fixture and assertions are unchanged by this
 separation. It is required by the current-SDK CI job, independently of Full.

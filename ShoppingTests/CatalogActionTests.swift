@@ -155,6 +155,50 @@ struct CatalogActionTests {
         #expect(try await context.items().map(\.id) == [itemID])
     }
 
+    @Test func busyStoreFailsTheSystemActionWithinItsBound() async throws {
+        let environment = try ShoppingPreviewFixtures.make(.empty)
+        _ = try create("Rice", in: environment)
+        let runtime = ShoppingApplicationRuntime(bootstrap: PersistenceBootstrap(preloadedPreviewEnvironment: environment))
+        let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready(), storeTimeout: .milliseconds(300))
+        let busy = DispatchSemaphore(value: 0), entered = DispatchSemaphore(value: 0)
+        let writer = environment.persistence.writer
+        DispatchQueue.global().async { writer.performAndWait { entered.signal(); busy.wait() } }
+        entered.wait()
+        let started = ContinuousClock.now
+        await #expect(throws: ShoppingActionError.timedOut) { try await context.items() }
+        #expect(ContinuousClock.now - started < .seconds(5))
+        busy.signal()
+        #expect(try await context.items().map(\.name) == ["Rice"])
+    }
+
+    @Test func duplicateNeedsGiveASpokenFailureInsteadOfAPersistenceError() async throws {
+        let (environment, context) = try await fixture()
+        let itemID = try create("Shaving cream", in: environment)
+        let needID = try environment.service.addRememberedNeed(itemID: itemID, listID: context.listID)
+        let replica = environment.persistence.simulationContext()
+        try replica.performAndWait {
+            let request = Need.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", needID as CVarArg)
+            let original = try #require(try replica.fetch(request).first)
+            let duplicate = try #require(NSEntityDescription.insertNewObject(forEntityName: "Need", into: replica) as? Need)
+            duplicate.id = UUID()
+            duplicate.kind = NeedKind.remembered.rawValue
+            duplicate.title = original.title
+            duplicate.notes = "Replica edit"
+            duplicate.quantity = original.quantity
+            duplicate.urgency = original.urgency
+            duplicate.revision = original.revision
+            duplicate.archived = false
+            duplicate.oneTimeAnyStore = original.oneTimeAnyStore
+            duplicate.list = original.list
+            duplicate.item = original.item
+            try replica.save()
+        }
+        let items = try await context.items()
+        await #expect(throws: ShoppingActionError.unavailable) { try await context.capture(items) }
+        #expect(ShoppingActionError.unavailable.errorDescription?.isEmpty == false)
+    }
+
     @Test func savedEntityUsesCurrentNameAndRejectsArchivedOrForeignIdentity() async throws {
         let (environment, context) = try await fixture()
         let id = try create("Milk", in: environment)
