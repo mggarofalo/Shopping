@@ -228,7 +228,7 @@ jobs:
             -testPlan ShoppingAcceptance \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath DerivedData \
-            -quiet
+            -showBuildTimingSummary
 
       - name: Verify built acceptance selection
         run: python3 .github/scripts/check-acceptance-selection.py --products DerivedData/Build/Products
@@ -370,6 +370,7 @@ jobs:
         with:
           name: fast-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            FastBuild.log
             FastSummary.md
             FastSummary.json
             FastTiming.json
