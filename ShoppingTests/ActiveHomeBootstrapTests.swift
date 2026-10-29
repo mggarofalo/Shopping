@@ -88,12 +88,12 @@ final class ActiveHomeBootstrapTests: XCTestCase {
 
     private func waitForReady(_ bootstrap: PersistenceBootstrap) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < deadline {
+        while true {
             if case .ready = bootstrap.state { return }
             if case .failed(let error) = bootstrap.state { throw error }
+            guard ContinuousClock.now < deadline else { return XCTFail("Bootstrap did not reach ready state") }
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTFail("Bootstrap did not reach ready state")
     }
 
     private func ready(_ bootstrap: PersistenceBootstrap) throws -> PersistenceBootstrap.ReadyState {
@@ -184,7 +184,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
 
     private func waitForFirstHomeDecision(_ bootstrap: PersistenceBootstrap) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < deadline {
+        while true {
             // start() already owns the initial load. Drive only the account
             // transition that first-home resolution requested, so a second
             // initial load cannot publish a stale local Create state.
@@ -193,9 +193,9 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             }
             if bootstrap.homeEntry.root == .noHomes, !bootstrap.isResolvingFirstAccount { return }
             if case .failed(let error) = bootstrap.state { throw error }
+            guard ContinuousClock.now < deadline else { return XCTFail("First-home account decision did not finish") }
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTFail("First-home account decision did not finish")
     }
 
     func testFreshAvailableAccountDiscoversBeforeOfferingAccountHomeCreation() async throws {
@@ -494,7 +494,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         // A burst invalidates authority synchronously, but schedules one reopen.
         for _ in 0..<3 { center.post(name: .CKAccountChanged, object: nil) }
         XCTAssertThrowsError(try provider.currentSession())
-        await waitForRetirement(original)
+        try await waitForRetirement(original, in: bootstrap)
         XCTAssertThrowsError(try cart.checkout(checkout))
         await bootstrap.runLoadingTransition()
         XCTAssertFalse(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty,
@@ -534,7 +534,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         let originalURL = original.persistence.primaryStore?.url
         await account.setName("account-B")
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(original)
+        try await waitForRetirement(original, in: bootstrap)
         await bootstrap.runLoadingTransition()
         try await waitForReady(bootstrap)
         let other = try ready(bootstrap)
@@ -546,7 +546,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
 
         await account.setName("account-A")
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(other)
+        try await waitForRetirement(other, in: bootstrap)
         await bootstrap.runLoadingTransition()
         try await waitForReady(bootstrap)
         let returned = try ready(bootstrap)
@@ -581,7 +581,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         await account.holdNextRecord { held.fulfill() }
         addTeardownBlock { await account.releaseRecord() }
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(original)
+        try await waitForRetirement(original, in: bootstrap)
         await bootstrap.runLoadingTransition()
         await fulfillment(of: [held], timeout: 5)
         XCTAssertFalse(controller.allEntries.first { $0.id == entry.id }?.openRequested == true,
@@ -620,7 +620,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         await account.setName("account-A")
         let beforeReturn = try ready(relaunched)
         relaunchCenter.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(beforeReturn)
+        try await waitForRetirement(beforeReturn, in: relaunched)
         await relaunched.runLoadingTransition()
         try await waitForReady(relaunched)
         XCTAssertEqual(try ready(relaunched).homeScope, originalScope)
@@ -680,20 +680,20 @@ final class ActiveHomeBootstrapTests: XCTestCase {
 
         await account.setStatus(.available, networkUnavailable: false)
         bootstrap.applicationDidEnterForeground()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("verified account B to retire its old intent") {
             if case .ready(let session) = provider.state {
                 return session == cachedB
                     && controller.allEntries.first { $0.id == old.id }?.openRequested == false
             }
             return false
-        }, object: nil)], timeout: 5)
+        }
         XCTAssertFalse(try HomeInvitationInbox(url: inboxURL, containerIdentifier: namespace,
             environment: "Development").entries.first { $0.id == old.id }?.openRequested == true)
 
         await account.setName("account-A")
         let previous = try ready(bootstrap)
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(previous)
+        try await waitForRetirement(previous, in: bootstrap)
         await bootstrap.runLoadingTransition()
         _ = try await waitForReady(bootstrap)
         XCTAssertFalse(controller.allEntries.first { $0.id == old.id }?.openRequested == true)
@@ -720,16 +720,16 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         await account.holdNextRecord { requested.fulfill() }
         addTeardownBlock { await account.releaseRecord() }
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(original)
+        try await waitForRetirement(original, in: bootstrap)
         await bootstrap.runLoadingTransition()
         await fulfillment(of: [requested], timeout: 5)
         center.post(name: .CKAccountChanged, object: nil)
         XCTAssertThrowsError(try provider.currentSession())
         await account.releaseRecord()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("bootstrap failure") {
             if case .failed = bootstrap.state { return true }
             return false
-        }, object: nil)], timeout: 5)
+        }
         guard case .failed(let error) = bootstrap.state else { return XCTFail("Late identity must stay blocked") }
         XCTAssertEqual(error as? ShopperSessionError, .accountChanged)
         XCTAssertEqual(provider.state, .accountChanged)
@@ -752,12 +752,12 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         let originalURL = try XCTUnwrap(original.persistence.primaryStore?.url)
         await account.setStatus(status, networkUnavailable: networkUnavailable)
         center.post(name: .CKAccountChanged, object: nil)
-        await waitForRetirement(original)
+        try await waitForRetirement(original, in: bootstrap)
         await bootstrap.runLoadingTransition()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("bootstrap failure") {
             if case .failed = bootstrap.state { return true }
             return false
-        }, object: nil)], timeout: 5)
+        }
         guard case .failed(let error) = bootstrap.state else { return XCTFail("Must stay blocked") }
         XCTAssertEqual(error as? ShopperSessionError, expected)
         XCTAssertThrowsError(try XCTUnwrap(provider).currentSession())
@@ -766,11 +766,14 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
     }
 
-    private func waitForRetirement(_ ready: PersistenceBootstrap.ReadyState) async {
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            !ready.presentation.isActive
-        }, object: nil)], timeout: 5)
-        XCTAssertFalse(ready.presentation.isActive)
+    private func waitForRetirement(_ ready: PersistenceBootstrap.ReadyState, in bootstrap: PersistenceBootstrap,
+                                   file: StaticString = #filePath, line: UInt = #line) async throws {
+        // Discovery can also retire a presentation. Wait for the account
+        // transition itself, which runLoadingTransition then consumes.
+        try await waitForState("presentation retirement by a pending transition", file: file, line: line) {
+            guard !ready.presentation.isActive, case .loading = bootstrap.state else { return false }
+            return true
+        }
     }
 
     func testExplicitCreationWorksFromEmptyImportWithoutReplacingAnotherHome() async throws {
