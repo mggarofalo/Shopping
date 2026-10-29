@@ -75,7 +75,7 @@ struct WatchItemCard: View {
             } else if let item = addableItem {
                 HStack {
                     Button {
-                        if session.submit(.add(token: item.commandToken, quantity: draftQuantity)) { dismiss() }
+                        if session.add(item, quantity: draftQuantity) { dismiss() }
                     } label: {
                         Text("Add to cart").font(.caption2)
                     }

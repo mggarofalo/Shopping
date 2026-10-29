@@ -101,6 +101,19 @@ dependent intents rather than retargeting them. Failed or uncertain saves affect
 that occurrence; independent items can continue. An authoritative read resolves
 uncertainty without resubmitting the mutation.
 
+SHOPPING-257: every read mints new opaque tokens for unchanged rows, and a full
+read follows each drained queue. A tap handled after that read replaced the
+snapshot, but before SwiftUI re-rendered, carried the superseded token. The
+session accepted it without an optimistic row, so the card dismissed and the
+item stayed in groceries until a later read, which looks like an ignored tap; a
+second tap could then queue another Add for the same item. Add is therefore keyed
+by the tapped occurrence: `WatchShoppingSession.add(_:quantity:)` submits the
+current row's token, and a row already in your cart, pending or saved, makes the
+repeat a no-op. Quantity and Remove tokens carry membership causality and keep
+the rules above. Queue depth is unbounded: session tests cover 1, 2, 3 and 8
+queued Adds and a failure mid-queue; SQLite tests cover four Adds behind a held
+writer and a tap from a row rendered before a read replaced its token.
+
 Private cart commands save promptly using the existing causal records and
 removal evidence. A fixed two-second window publishes the latest advisory
 presence for changed needs only; continuous tapping does not reset the window.

@@ -380,6 +380,25 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertFalse(granola.exists)
     }
 
+    func testThreeConsecutiveCardAddsQueueBehindHeldFirstSave() {
+        // Only the first Add is held; every later tap must still be accepted at once.
+        let app = launchFixture("rapidCartEdits")
+        let cart = app.buttons["watch.cart.open"]
+        for (index, id) in ["bananas", "strawberries", "granola"].enumerated() {
+            let row = app.buttons["watch.item.\(id)"]
+            reveal(row, in: app)
+            row.tap()
+            let add = app.buttons["watch.item.add"]
+            XCTAssertTrue(add.waitForExistence(timeout: 3), "Add \(index + 1) offered")
+            XCTAssertTrue(add.isEnabled, "Add \(index + 1) enabled")
+            add.tap()
+            assertReturnedToGroceries(app)
+            XCTAssertFalse(row.exists, "Add \(index + 1) accepted")
+            XCTAssertTrue(cart.label.contains("\(index + 2) items"), cart.label)
+        }
+        screenshot("Watch accepted three consecutive card Adds", app: app)
+    }
+
     func testSlowSwipeAddMovesToCartBeforeSaveReturns() {
         let app = launchFixture("slowAdd")
         let bananas = app.buttons["watch.item.bananas"]

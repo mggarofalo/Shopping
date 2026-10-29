@@ -588,6 +588,82 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertEqual(try f.cart.entries(householdID: f.householdID, listID: f.listID).count, 1)
     }
 
+    func testRapidAddsWhileWriterIsHeldAreAcceptedAndEachSavedOnce() async throws {
+        let f = try fixture()
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let list = try XCTUnwrap(household.groceryList)
+            for name in ["Bread", "Eggs", "Rice"] {
+                let item = Item(context: context); item.id = UUID(); item.name = name; item.notes = ""; item.anyStore = true
+                item.household = household
+                let need = Need(context: context); need.id = UUID(); need.title = name; need.notes = ""
+                need.kind = NeedKind.remembered.rawValue; need.urgency = NeedUrgency.normal.rawValue; need.item = item; need.list = list
+            }
+            try f.persistence.prepareForSave(context); try context.save()
+        }
+        let service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        let rows = initial.grocerySections.flatMap(\.items)
+        XCTAssertEqual(rows.count, 4)
+        let session = WatchShoppingSession(service: service, initialSnapshot: initial)
+        let entered = expectation(description: "Writer held")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait { entered.fulfill(); release.wait() }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        for row in rows { XCTAssertTrue(session.add(row, quantity: nil), "\(row.name) accepted") }
+        XCTAssertEqual(session.snapshot.cartCount, 4)
+        XCTAssertTrue(session.snapshot.grocerySections.isEmpty)
+        XCTAssertTrue(session.snapshot.cartSections.flatMap(\.items).allSatisfy(\.isPendingAdd), "No receipt while the writer is held")
+        release.signal()
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(5)
+        while session.snapshot.cartSections.flatMap(\.items).contains(where: \.isPendingAdd), clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(session.snapshot.cartSections.flatMap(\.items).contains(where: \.isPendingAdd))
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertEqual(Set(entries.map(\.needID.uuidString)), Set(rows.map(\.occurrenceID)))
+        XCTAssertEqual(entries.count, 4, "Each Add is saved once")
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testAddFromRowRenderedBeforeRefreshReadIsShownAndSavedOnce() async throws {
+        let f = try fixture()
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let list = try XCTUnwrap(household.groceryList)
+            let item = Item(context: context); item.id = UUID(); item.name = "Bread"; item.notes = ""; item.anyStore = true
+            item.household = household
+            let need = Need(context: context); need.id = UUID(); need.title = "Bread"; need.notes = ""
+            need.kind = NeedKind.remembered.rawValue; need.urgency = NeedUrgency.normal.rawValue; need.item = item; need.list = list
+            try f.persistence.prepareForSave(context); try context.save()
+        }
+        let service = adapter(f)
+        let session = WatchShoppingSession(service: service)
+        await session.reload(storeID: f.storeID)
+        let rendered = try XCTUnwrap(session.snapshot.grocerySections.flatMap(\.items).first { $0.name == "Bread" })
+        // The read after a drained queue replaces every token before the next render.
+        await session.reload()
+        let current = try XCTUnwrap(session.snapshot.item(id: rendered.occurrenceID))
+        XCTAssertNotEqual(current.commandToken, rendered.commandToken, "Each read mints a new token")
+        XCTAssertTrue(session.add(rendered, quantity: 2))
+        XCTAssertTrue(session.snapshot.item(id: rendered.occurrenceID)?.isPendingAdd ?? false, "The tap is shown at once")
+        XCTAssertFalse(session.add(rendered, quantity: 2), "A repeat tap from the same row is idempotent")
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(5)
+        while session.snapshot.item(id: rendered.occurrenceID)?.isPendingAdd ?? false, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let saved = try XCTUnwrap(session.snapshot.item(id: rendered.occurrenceID))
+        XCTAssertTrue(saved.isInOwnCart && !saved.isPendingAdd)
+        XCTAssertEqual(saved.quantity, 2)
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertEqual(entries.map(\.needID.uuidString), [rendered.occurrenceID], "Saved once")
+        XCTAssertNil(session.errorMessage)
+    }
+
     func testStoreCountsUseAllPendingOccurrencesAndCanonicalPurchaseRules() async throws {
         let f = try fixture(), service = adapter(f)
         let context = f.persistence.container.viewContext

@@ -28,7 +28,7 @@ struct WatchItemSections: View {
                             .disabled(session.isBusy)
                         } else if !item.isInOwnCart && item.canAdd {
                             Button("Add", systemImage: "cart.badge.plus") {
-                                session.submit(.add(token: item.commandToken, quantity: item.quantity))
+                                session.add(item, quantity: item.quantity)
                             }
                             .tint(.green)
                             .disabled(session.isBusy)
@@ -41,7 +41,7 @@ struct WatchItemSections: View {
                             }
                         } else if !item.isInOwnCart && item.canAdd {
                             Button("Add to your cart") {
-                                session.submit(.add(token: item.commandToken, quantity: item.quantity))
+                                session.add(item, quantity: item.quantity)
                             }
                         }
                     }
