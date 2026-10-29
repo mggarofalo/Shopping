@@ -149,12 +149,12 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
 
     private func waitForReady(_ bootstrap: PersistenceBootstrap) async throws -> PersistenceBootstrap.ReadyState {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < deadline {
+        while true {
             if case .ready(let ready) = bootstrap.state { return ready }
             if case .failed(let error) = bootstrap.state { throw error }
+            guard ContinuousClock.now < deadline else { throw CocoaError(.fileReadUnknown) }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw CocoaError(.fileReadUnknown)
     }
 
     func testFailedAccountVerificationLeavesMountedOriginalUsable() async throws {
@@ -709,10 +709,10 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await identity.change()
         center.post(name: .CKAccountChanged, object: nil)
         await bootstrap.runLoadingTransition()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("bootstrap failure") {
             if case .failed = bootstrap.state { return true }
             return false
-        }, object: nil)], timeout: 5)
+        }
         bootstrap.retry()
         await bootstrap.runLoadingTransition()
         let otherAccount = try await waitForReady(bootstrap)
@@ -722,9 +722,10 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await identity.set("account-A")
         let beforeReturn = otherAccount
         center.post(name: .CKAccountChanged, object: nil)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            !beforeReturn.presentation.isActive
-        }, object: nil)], timeout: 5)
+        try await waitForState("presentation retirement by a pending transition") {
+            guard !beforeReturn.presentation.isActive, case .loading = bootstrap.state else { return false }
+            return true
+        }
         await bootstrap.runLoadingTransition()
         _ = try await waitForReady(bootstrap)
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
@@ -1594,17 +1595,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         let beforeChange = try await waitForReady(bootstrap)
         await account.change()
         center.post(name: .CKAccountChanged, object: nil)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            !beforeChange.presentation.isActive
-        }, object: nil)], timeout: 5)
+        try await waitForState("presentation retirement by a pending transition") {
+            guard !beforeChange.presentation.isActive, case .loading = bootstrap.state else { return false }
+            return true
+        }
         await bootstrap.runLoadingTransition()
         await held.release()
         let otherAccount = try await waitForReady(bootstrap)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            bootstrap.autoOpeningInvitationID == nil
-        }, object: nil)], timeout: 5)
-        XCTAssertNil(bootstrap.autoOpeningInvitationID,
-            "The retired native verification must settle before the cold bootstrap reopens its journal")
+        // The retired native verification must settle before the cold bootstrap reopens its journal.
+        try await waitForState("retired automatic open to settle") { bootstrap.autoOpeningInvitationID == nil }
         XCTAssertNil(otherAccount.homeScope)
         XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
 
@@ -1621,21 +1620,20 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         await account.set("account-A")
         let beforeReturn = try await waitForReady(relaunched)
         relaunchCenter.post(name: .CKAccountChanged, object: nil)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            !beforeReturn.presentation.isActive
-        }, object: nil)], timeout: 5)
+        try await waitForState("presentation retirement by a pending transition") {
+            guard !beforeReturn.presentation.isActive, case .loading = relaunched.state else { return false }
+            return true
+        }
         await relaunched.runLoadingTransition()
         _ = try await waitForReady(relaunched)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("relaunched invitation and complete discovery") {
             relaunched.invitations?.entries.contains { $0.id == fixture.entryID } == true
                 && relaunched.homeCoordinator.discoveryState == .complete
-        }, object: nil)], timeout: 5)
+        }
         XCTAssertEqual(relaunched.homeCoordinator.activeScope?.graph, original)
         XCTAssertFalse(relaunched.invitations?.allEntries.first { $0.id == fixture.entryID }?.openRequested == true)
         try await relaunched.joinInvitation(fixture.entryID)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            relaunched.homeCoordinator.activeScope?.graph == fixture.invited
-        }, object: nil)], timeout: 5)
+        try await waitForState("invited home to open") { relaunched.homeCoordinator.activeScope?.graph == fixture.invited }
         XCTAssertEqual(relaunched.homeCoordinator.activeScope?.graph, fixture.invited,
             "The accepted home remains available through an explicit Open")
     }
@@ -1664,9 +1662,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertFalse(persisted.entries.first { $0.id == fixture.entryID }?.openRequested == true)
         XCTAssertFalse(bootstrap.invitations?.allEntries.first { $0.id == fixture.entryID }?.activationResolved == true)
         try await bootstrap.joinInvitation(fixture.entryID)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            bootstrap.homeCoordinator.activeScope?.graph == fixture.invited
-        }, object: nil)], timeout: 5)
+        try await waitForState("invited home to open") { bootstrap.homeCoordinator.activeScope?.graph == fixture.invited }
         XCTAssertEqual(bootstrap.homeCoordinator.activeScope?.graph, fixture.invited)
     }
 

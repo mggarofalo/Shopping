@@ -185,12 +185,12 @@ final class HomeLeaveBootstrapTests: XCTestCase {
 
     private func ready(_ bootstrap: PersistenceBootstrap) async throws -> PersistenceBootstrap.ReadyState {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < deadline {
+        while true {
             if case .ready(let value) = bootstrap.state { return value }
             if case .failed(let error) = bootstrap.state { throw error }
+            guard ContinuousClock.now < deadline else { throw Failure.timeout }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw Failure.timeout
     }
 
     private func retire(_ bootstrap: PersistenceBootstrap) async throws {
