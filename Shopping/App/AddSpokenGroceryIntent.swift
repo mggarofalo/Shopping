@@ -1,13 +1,16 @@
 #if compiler(>=6.4)
 import AppIntents
 import Foundation
+import os
 import UniformTypeIdentifiers
 
 @available(iOS 27.0, *)
 @AppIntent(schema: .reminders.createReminder)
-struct AddSpokenGroceryIntent: ForegroundContinuableIntent {
+struct AddSpokenGroceryIntent: AppIntent {
     static var title: LocalizedStringResource = "Add grocery by voice"
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
+    /// Siri runs the app in the background; only an unknown name moves to the app's editor.
+    static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
     @Parameter(title: "Item name") var title: String
     @Parameter(title: "List") var list: GroceryListEntity?
     @Parameter(title: "Note") var note: AttributedString?
@@ -21,35 +24,54 @@ struct AddSpokenGroceryIntent: ForegroundContinuableIntent {
     @Parameter(title: "Section") var section: GroceryReminderSectionEntity?
     @Parameter(title: "Catalog choice") var catalogChoice: CatalogItemEntity?
 
+    /// No reminder exists for an unknown name until the user saves it in the app.
     @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<GroceryReminderEntity> & ProvidesDialog {
-        let runtime = ShoppingApplicationRuntime.shared
-        let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
-        let dialogue = try await prepare(context: context)
-        if dialogue.candidates.isEmpty {
-            throw needsToContinueInForegroundError("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?") {
-                try dialogue.createInApp()
+    func perform() async throws -> some IntentResult & ReturnsValue<GroceryReminderEntity?> & ProvidesDialog {
+        do {
+            let runtime = ShoppingApplicationRuntime.shared
+            let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
+            let dialogue = try await prepare(context: context)
+            if dialogue.candidates.isEmpty {
+                try await handOff(dialogue)
+                Self.log.info("Spoken add handed off to the editor")
+                return .result(value: nil, dialog: "Review \(dialogue.name) in Milk & Bananas, then save and add it.")
             }
-        }
-        let selectedID: String
-        if dialogue.candidates.count == 1 {
-            selectedID = context.entityID(for: dialogue.candidates[0].id)
-        } else {
-            let choices = dialogue.candidates.enumerated().map {
-                CatalogItemEntity(item: $0.element, context: context, choiceNumber: $0.offset + 1)
+            let selectedID: String
+            if dialogue.candidates.count == 1 {
+                selectedID = context.entityID(for: dialogue.candidates[0].id)
+            } else {
+                let choices = dialogue.candidates.enumerated().map {
+                    CatalogItemEntity(item: $0.element, context: context, choiceNumber: $0.offset + 1)
+                }
+                selectedID = try await $catalogChoice.requestDisambiguation(
+                    among: choices, dialog: "Which catalog item do you mean?").id
             }
-            selectedID = try await $catalogChoice.requestDisambiguation(
-                among: choices, dialog: "Which catalog item do you mean?").id
+            let (item, needID, added) = try await dialogue.add(entityID: selectedID)
+            guard let need = try await context.groceryNeeds(ids: [needID]).first else {
+                throw ShoppingActionError.scopeChanged
+            }
+            Self.log.info("Spoken add finished; added: \(added, privacy: .public)")
+            let dialog: IntentDialog = added
+                ? "Added \(item.name) to your grocery list."
+                : "\(item.name) is already on your grocery list."
+            return .result(value: GroceryReminderEntity(snapshot: need, context: context), dialog: dialog)
+        } catch {
+            Self.log.error("Spoken add failed: \(String(describing: type(of: error)), privacy: .public)")
+            throw error
         }
-        let (item, needID, added) = try await dialogue.add(entityID: selectedID)
-        guard let need = try await context.groceryNeeds(ids: [needID]).first else {
-            throw ShoppingActionError.scopeChanged
-        }
-        let dialog: IntentDialog = added
-            ? "Added \(item.name) to your grocery list."
-            : "\(item.name) is already on your grocery list."
-        return .result(value: GroceryReminderEntity(snapshot: need, context: context), dialog: dialog)
     }
+
+    /// The editor request is queued only once the app is in front; a declined
+    /// handoff queues nothing. When already in front, continuing stalled the action
+    /// in system execution (SHOPPING-258), so the request is queued directly.
+    @MainActor
+    func handOff(_ dialogue: CatalogAddDialogue) async throws {
+        if systemContext.currentMode != .foreground {
+            try await continueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?")
+        }
+        try dialogue.createInApp()
+    }
+
     @MainActor
     func prepare(context: CatalogActionContext) async throws -> CatalogAddDialogue {
         guard note == nil, isFlagged != true, images.isEmpty, tags.isEmpty, urls.isEmpty,
@@ -62,6 +84,7 @@ struct AddSpokenGroceryIntent: ForegroundContinuableIntent {
         return try await CatalogAddDialogue(context: context, name: title, entityID: catalogChoice?.id)
     }
 
+    private static let log = Logger(subsystem: "com.mggarofalo.shopping", category: "Siri")
 }
 
 enum SpokenGroceryError: LocalizedError {

@@ -2096,12 +2096,13 @@ final class PersistenceBootstrap: ObservableObject {
         if let ready = previous {
             ready.persistence.container.viewContext.reset()
             let retiring = RetiringStore(persistence: ready.persistence)
-            try await Task.detached(priority: .utility) {
+            // The readiness deadline bounds this transition, and sync may hold the writer.
+            try await BlockingStoreWork.run(qos: .utility) {
                 let writer = retiring.persistence.writer
                 writer.performAndWait { writer.reset() }
                 let coordinator = retiring.persistence.container.persistentStoreCoordinator
                 for store in coordinator.persistentStores { try coordinator.remove(store) }
-            }.value
+            }
         }
         activeAccountBinding = nil
     }
@@ -2127,7 +2128,8 @@ final class PersistenceBootstrap: ObservableObject {
                     }.value
                     guard generation == requestedGeneration else { return }
                 }
-                let prepared = try await Task.detached(priority: .userInitiated) {
+                // The system-action readiness deadline bounds this open.
+                let prepared = try await BlockingStoreWork.run {
                     let resolved = try personalConfiguration ?? configuration()
                     let persistence = try PersistenceController(configuration: resolved)
                     let service = NeedService(persistence: persistence)
@@ -2152,7 +2154,7 @@ final class PersistenceBootstrap: ObservableObject {
                     return PreparedStore(configuration: resolved, persistence: persistence,
                         service: service, selection: selection, personalCartService: cartService,
                         resumeError: resumeError, homeDiscovery: discovery)
-                }.value
+                }
                 guard generation == requestedGeneration else { return }
                 if personalMode, try accountProvider?.currentSession() != session {
                     throw ShopperSessionError.accountChanged

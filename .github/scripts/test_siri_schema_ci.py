@@ -18,8 +18,8 @@ DEVICE = "C173A9C4-C7AD-42FE-9B90-932ACB424D13"
 
 
 def inventory():
-    names = ([f"CatalogActionTests/case{n}()" for n in range(15)]
-             + [f"SpokenGrocerySchemaTests/case{n}()" for n in range(6)] + [siri.UI_TEST])
+    names = ([f"CatalogActionTests/case{n}()" for n in range(17)]
+             + [f"SpokenGrocerySchemaTests/case{n}()" for n in range(6)] + siri.UI_TESTS)
     return {"testNodes": [{"nodeType": "Test Case", "nodeIdentifier": name, "result": "Passed"} for name in names]}
 
 
@@ -130,7 +130,7 @@ class SiriSchemaCITests(unittest.TestCase):
 
     def test_stage_inventories_reject_cross_stage_cases_and_skips(self):
         all_cases = inventory()["testNodes"]
-        for phase, nodes in [("Hosted", all_cases[:-1]), ("Native", all_cases[-1:])]:
+        for phase, nodes in [("Hosted", all_cases[:-2]), ("Native", all_cases[-2:])]:
             siri.validate_phase({"testNodes": nodes}, phase)
             for altered in [nodes[:-1], nodes + [nodes[0]], all_cases,
                             [dict(node, result="Skipped") for node in nodes]]:
@@ -194,8 +194,8 @@ class SiriSchemaCITests(unittest.TestCase):
                 if name == "Create": return DEVICE
                 if name in ("TestInventory", "HostedInventory", "NativeInventory"):
                     tree = inventory()
-                    if name == "HostedInventory": tree["testNodes"] = tree["testNodes"][:-1]
-                    if name == "NativeInventory": tree["testNodes"] = tree["testNodes"][-1:]
+                    if name == "HostedInventory": tree["testNodes"] = tree["testNodes"][:-2]
+                    if name == "NativeInventory": tree["testNodes"] = tree["testNodes"][-2:]
                     return json.dumps(tree)
                 if name == "FinalDeviceState": return json.dumps({"devices": {"runtime": [{"udid": DEVICE, "state": state}]}})
                 if name == "Container": return str(output / "absent-app")

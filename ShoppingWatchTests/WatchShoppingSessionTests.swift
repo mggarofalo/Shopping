@@ -79,6 +79,106 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(model.snapshot.item(id: "bananas")?.isInOwnCart ?? true)
     }
 
+    func testAddQueuesOfAnyLengthAreAcceptedAtOnceAndCommitInTapOrder() async throws {
+        for count in [1, 2, 3, 8] {
+            let names = (1...count).map { "item-\($0)" }
+            let service = SpyService()
+            service.value = groceries(names)
+            let session = WatchShoppingSession(service: service)
+            await session.reload()
+            let started = expectation(description: "First of \(count) held")
+            let drained = expectation(description: "Read after \(count) commits")
+            var first: CheckedContinuation<WatchShoppingCommit, Error>?
+            service.commitHandler = { command in
+                guard case .add(let token, let quantity) = command else { throw NSError(domain: "Unexpected command", code: 1) }
+                if first == nil, token == names[0] {
+                    return try await withCheckedThrowingContinuation { first = $0; started.fulfill() }
+                }
+                return .item(occurrenceID: token, item: self.localItem(token, token: token + "-saved", quantity: quantity))
+            }
+            for name in names {
+                let row = try XCTUnwrap(session.snapshot.item(id: name))
+                XCTAssertTrue(session.add(row, quantity: 1), "\(name) of \(count) accepted")
+                XCTAssertTrue(session.snapshot.item(id: name)?.isPendingAdd ?? false, "\(name) of \(count) shown")
+            }
+            await fulfillment(of: [started], timeout: 2)
+            XCTAssertEqual(session.snapshot.cartCount, count + 1)
+            XCTAssertTrue(session.snapshot.grocerySections.isEmpty)
+            XCTAssertNil(session.errorMessage)
+            XCTAssertEqual(service.commands.count, 1, "Later Adds queue behind the held write")
+            service.value = saved(names, in: service.value)
+            service.onLoad = { if service.commands.count == count { drained.fulfill() } }
+            first?.resume(returning: .item(occurrenceID: names[0],
+                item: localItem(names[0], token: names[0] + "-saved", quantity: 1)))
+            await fulfillment(of: [drained], timeout: 2)
+            XCTAssertEqual(service.commands, names.map { .add(token: $0, quantity: 1) }, "Each Add once, in tap order")
+            XCTAssertEqual(session.snapshot.cartCount, count + 1)
+            XCTAssertTrue(session.snapshot.cartSections.flatMap(\.items).allSatisfy { !$0.isPendingAdd })
+            XCTAssertNil(session.errorMessage)
+        }
+    }
+
+    func testFailedAddMidQueueKeepsLaterAddsAndOffersRetry() async throws {
+        let names = ["item-1", "item-2", "item-3"]
+        let service = SpyService()
+        service.value = groceries(names)
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "First held")
+        let reconciled = expectation(description: "Failure reconciliation read")
+        var first: CheckedContinuation<WatchShoppingCommit, Error>?
+        service.commitHandler = { command in
+            guard case .add(let token, let quantity) = command else { throw NSError(domain: "Unexpected command", code: 1) }
+            if token == "item-1", first == nil {
+                return try await withCheckedThrowingContinuation { first = $0; started.fulfill() }
+            }
+            if token == "item-2" { throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Save failed"]) }
+            return .item(occurrenceID: token, item: self.localItem(token, token: token + "-saved", quantity: quantity))
+        }
+        for name in names { XCTAssertTrue(session.add(try XCTUnwrap(session.snapshot.item(id: name)), quantity: nil)) }
+        await fulfillment(of: [started], timeout: 2)
+        // The durable store holds the first and third Add; the second never saved.
+        service.value = saved(["item-1", "item-3"], in: service.value)
+        service.onLoad = { if service.commands.count == 3 { reconciled.fulfill() } }
+        first?.resume(returning: .item(occurrenceID: "item-1", item: localItem("item-1", token: "item-1-saved", quantity: nil)))
+        await fulfillment(of: [reconciled], timeout: 2)
+        XCTAssertEqual(service.commands, names.map { .add(token: $0, quantity: nil) }, "A failure does not cancel other items")
+        XCTAssertEqual(session.errorMessage, "Save failed")
+        XCTAssertFalse(session.hasUnconfirmedAdd)
+        XCTAssertTrue(session.snapshot.item(id: "item-1")?.isInOwnCart ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "item-3")?.isInOwnCart ?? false)
+        let failed = try XCTUnwrap(session.snapshot.item(id: "item-2"))
+        XCTAssertFalse(failed.isInOwnCart)
+        XCTAssertTrue(failed.canAdd)
+        session.acknowledgeError()
+        XCTAssertTrue(session.add(failed, quantity: nil), "The failed item can be added again")
+        XCTAssertTrue(session.snapshot.item(id: "item-2")?.isPendingAdd ?? false)
+    }
+
+    func testAddFromRowRenderedBeforeTokenRefreshIsShownOnceWithCurrentToken() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        // Production reads mint a new opaque token for every unchanged row. The
+        // tap below was delivered before SwiftUI re-rendered from this read.
+        service.value.grocerySections[0].items[0].commandToken = "bananas-reread"
+        await session.reload()
+        let started = expectation(description: "Save held")
+        var held: CheckedContinuation<WatchShoppingCommit, Error>?
+        service.commitHandler = { _ in try await withCheckedThrowingContinuation { held = $0; started.fulfill() } }
+        XCTAssertTrue(session.add(rendered, quantity: 3))
+        let row = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        XCTAssertTrue(row.isInOwnCart && row.isPendingAdd, "The tap is shown immediately")
+        XCTAssertEqual(row.quantity, 3)
+        XCTAssertFalse(session.snapshot.grocerySections.flatMap(\.items).contains { $0.occurrenceID == "bananas" })
+        XCTAssertFalse(session.add(rendered, quantity: 3), "A repeat tap from the same stale row is idempotent")
+        XCTAssertFalse(session.add(row, quantity: 3), "A repeat tap on the pending row is idempotent")
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(service.commands, [.add(token: "bananas-reread", quantity: 3)])
+        held?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "bananas-saved", quantity: 3)))
+    }
+
     func testFailedOptimisticAddUsesLatestSnapshotAndCanRetryNilQuantity() async throws {
         let service = SpyService(), started = expectation(description: "Save held")
         let session = WatchShoppingSession(service: service)
@@ -663,6 +763,24 @@ final class WatchShoppingSessionTests: XCTestCase {
         WatchShoppingItem(id: "membership-" + occurrence, commandToken: token, name: occurrence.capitalized,
             quantity: quantity, rule: .canBuyHere, isInOwnCart: true, needID: occurrence,
             canRemove: true, canChangeQuantity: true)
+    }
+
+    private func groceries(_ names: [String]) -> WatchShoppingSnapshot {
+        var value = WatchPreviewService.sample
+        value.grocerySections = [WatchItemSection(id: "Pantry", title: "Pantry", items: names.map {
+            WatchShoppingItem(id: $0, commandToken: $0, name: $0.capitalized, quantity: nil, rule: .canBuyHere,
+                isInOwnCart: false, canAdd: true)
+        }, categoryOrder: 2)]
+        return value
+    }
+
+    private func saved(_ names: [String], in source: WatchShoppingSnapshot) -> WatchShoppingSnapshot {
+        var value = source
+        for index in value.grocerySections.indices { value.grocerySections[index].items.removeAll { names.contains($0.id) } }
+        value.grocerySections.removeAll { $0.items.isEmpty }
+        value.cartSections.append(WatchItemSection(id: "Pantry", title: "Pantry",
+            items: names.map { localItem($0, token: $0 + "-saved", quantity: nil) }, categoryOrder: 2))
+        return value
     }
 
     private func savedBananas(_ source: WatchShoppingSnapshot, quantity: Int?) -> WatchShoppingSnapshot {

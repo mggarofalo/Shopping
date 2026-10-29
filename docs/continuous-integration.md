@@ -249,10 +249,11 @@ budget change does not convert the canceled run into passing evidence.
 
 `Release SDK Build` uses the standard `xcode-27` runner and Xcode 27.0 to archive
 the iPhone/Watch pair and check the generated Siri metadata. It also runs
-`CatalogActionTests`, `SpokenGrocerySchemaTests`, and the single modern
-out-of-process action test from `ModernSiriActionTests` on iOS 27. The dedicated
+`CatalogActionTests`, `SpokenGrocerySchemaTests`, and the two modern
+out-of-process action tests in `ModernSiriActionTests` on iOS 27. The dedicated
 `ShoppingSiri` scheme/plan with the three explicit `-only-testing` selections
-requires all 22 cases to pass. Running the plan without those filters additionally
+requires all 25 cases to pass (17 catalog, 6 schema, 2 native; SHOPPING-258 added
+two catalog bound/failure contracts and the unknown-name handoff case). Running the plan without those filters additionally
 runs the broader persistence suite. Its `ShoppingSiriTests`
 UI target requires iOS 27 and exclusively links AppIntentsTesting, whose SDK
 framework cannot load on the pinned iOS 26.5 Full runtime. Existing Full and
@@ -267,7 +268,7 @@ The schema job retains installed Debug intent metadata and focused system
 registration logs with 20-second command bounds on simulator operations. Capture runs in a separate `always` step, leaving the preceding test/manifest
 verdict untouched. Each capture command status is retained, including errors. Verbose post-failure sysdiagnose
 is disabled for this focused job; ordinary xcresult evidence and the exact
-22-case assertion remain required. This addresses diagnostic loss, not a test
+25-case assertion remain required. This addresses diagnostic loss, not a test
 failure or a proof of metadata readiness.
 
 The combined archive-and-schema job has a 25-minute budget. The previous

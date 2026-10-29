@@ -31,6 +31,16 @@ struct ShoppingItemColumns: Layout {
         }
     }
 
+    /// Exposes the shared baseline so a trailing control, such as quantity, aligns with the name.
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout ()) -> CGFloat? {
+        guard guide == .firstTextBaseline else { return nil }
+        let baseline = zip(subviews, columnWidths(bounds.width)).map { view, width in
+            view.dimensions(in: ProposedViewSize(width: width, height: nil))[.firstTextBaseline]
+        }.max() ?? 0
+        return bounds.minY + baseline
+    }
+
     private func columnWidths(_ width: CGFloat) -> [CGFloat] {
         let available = max(0, width - spacing)
         return [available * 2 / 3, available / 3]

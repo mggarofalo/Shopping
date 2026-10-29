@@ -5,25 +5,31 @@ struct ShoppingItemStoreSummary: View {
     let storeLabels: [String]
     let hasSavedStores: Bool
     var hasResolvedIdentity = true
-    var alignment: HorizontalAlignment = .trailing
+    /// A selected-store purchase-rule symbol; the row value announces its meaning.
+    var symbol: String?
 
     var body: some View {
         Group {
             if storeLabels.isEmpty {
-                Text(fullSummary).fixedSize(horizontal: false, vertical: true)
+                text(fullSummary).fixedSize(horizontal: false, vertical: true)
             } else {
                 ViewThatFits(in: .horizontal) {
                     ForEach((0...storeLabels.count).reversed(), id: \.self) { count in
-                        Text(summary(showing: count)).fixedSize(horizontal: true, vertical: true)
+                        text(summary(showing: count)).fixedSize(horizontal: true, vertical: true)
                     }
-                    Text(summary(showing: 0)).fixedSize(horizontal: false, vertical: true)
+                    text(summary(showing: 0)).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
         .font(.caption)
         .foregroundStyle(Color.grocerySecondary)
-        .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+        .multilineTextAlignment(.trailing)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func text(_ summary: String) -> Text {
+        guard let symbol else { return Text(summary) }
+        return Text("\(Image(systemName: symbol)) \(summary)")
     }
 
     private var fullSummary: String {

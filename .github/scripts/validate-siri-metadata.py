@@ -18,6 +18,10 @@ def validate(app):
         raise ValueError('Siri item title must be a free-form String.')
     if action.get('authenticationPolicy') != 2:
         raise ValueError('Siri add must require local device authentication.')
+    # Observed Xcode 27 encoding: background 1, dynamic foreground 8 (openAppWhenRun is 2).
+    # The deprecated ForegroundContinuableIntent declared foreground-only (8) (SHOPPING-258).
+    if action.get('supportedModes', 0) & 9 != 9:
+        raise ValueError('Siri add must run in the background and continue in the foreground only when needed.')
     shortcuts = metadata.get('autoShortcuts', [])
     if {s.get('actionIdentifier') for s in shortcuts} != {'AddGroceryIntent', 'SearchCatalogIntent'} or len(shortcuts) != 2:
         raise ValueError('Expected only static Add and Search App Shortcuts.')

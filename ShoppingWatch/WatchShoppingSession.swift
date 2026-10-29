@@ -155,6 +155,15 @@ final class WatchShoppingSession {
         return false
     }
 
+    // Reads mint new tokens for unchanged rows, so a tap rendered before one is stale.
+    // Within the current scope an Add token names no membership; use the current row.
+    @discardableResult
+    func add(_ row: WatchShoppingItem, quantity: Int?) -> Bool {
+        // A row already in this cart, pending or saved, makes a repeat tap a no-op.
+        guard let current = snapshot.item(id: row.occurrenceID), !current.isInOwnCart, current.canAdd else { return false }
+        return submit(.add(token: current.commandToken, quantity: quantity))
+    }
+
     @discardableResult
     func perform(_ command: WatchShoppingCommand) async -> Bool {
         if case .buyAnyway = command {
