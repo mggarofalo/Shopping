@@ -203,3 +203,48 @@ The controlled hosted result must retain all 22 passing cases and measure the
 setup cost separately. A green run alone will not prove the cache was previously
 missing or that the intermittent cause is cured. No test selection, assertion,
 application behavior, native timeout, or retry policy changes in this experiment.
+
+## App Intents registration after install (SHOPPING-262)
+
+Release SDK runs [40958113407](https://github.com/mggarofalo/Shopping/actions/runs/40958113407)
+(attempt 1) and [40962628144](https://github.com/mggarofalo/Shopping/actions/runs/40962628144)
+failed the first native case at its first `IntentDefinitions` lookup with
+`AppIntentsServicesMetadataErrorDomain Code=400 "com.mggarofalo.shopping is not present"`.
+Launch had already succeeded; this is neither the SHOPPING-249 launch-token stall
+nor a stale PID. The first run predates SHOPPING-258, with one native case, so
+the second native case is not the cause. In 40962628144 that second case passed
+in the same runner process about 21 seconds after install.
+
+Xcode installs Shopping.app during the native session's first `XCUIApplication.launch()`,
+after the launch request. The exported session logs give the time from that install
+to the first lookup:
+
+| Run | Shopping.app installed (UTC) | First lookup | Gap | Result |
+| --- | --- | --- | --- | --- |
+| 40958113407 #1 | 21:43:17.557 | 21:43:26.443 | 8.9 s | failed |
+| 40962628144 | 22:15:11.238 | 22:15:20.711 | 9.5 s | failed |
+| 40957779036 | 21:36:25.744 | 21:36:38.139 | 12.4 s | passed |
+| 40939541147 | 19:42:30.415 | 19:42:45.020 | 14.6 s | passed |
+| 40958113407 #2 | 22:10:55.592 | 22:11:10.526 | 14.9 s | passed |
+| 40949930887 | 20:54:07.510 | 20:54:26.716 | 19.2 s | passed |
+
+Every failure looked up sooner after install than every pass. Six runs show a
+correlation, not a threshold, but they are consistent with a fast launch beating
+the system's asynchronous registration of the new bundle's metadata. The local
+experiments below support the cause directly.
+
+Local experiments on Xcode 27.1 and an owned iOS 27.0 simulator reproduced the
+same error by querying with Shopping uninstalled. `AppEntityDefinition.isInstance`
+succeeds either way, so it cannot detect registration. In-process polling sees the
+state change: lookups returned 400 until about 0.5–1 seconds after
+`simctl install` finished locally, then resolved. The runner caches no negative result.
+
+Both native cases now call `registeredDefinitions()` after `launch()`. It polls
+the read-only `GroceryListEntity` suggested-entities query every 250 ms while,
+and only while, the lookup fails with that exact domain and code. Any other
+result or error returns or propagates unchanged. If the bundle is still absent
+after 30 seconds of that state, the test fails with "App Intents metadata was not
+registered". The bound covers the not-present wait. A single lookup that never
+returns stays unbounded, as the existing lookups already were.
+When a wait occurred, the native log records its duration. Selection, assertions,
+action bounds and launch timeouts are unchanged, and nothing is retried.

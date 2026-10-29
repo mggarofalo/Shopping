@@ -263,6 +263,10 @@ The older Xcode 16.4
 `Build & Test` job retains compatibility and coverage ownership; compiler-gated
 iOS 27 code is not validated by that older job. Neither job proves Siri routing
 or Apple Intelligence availability. Those require a real system invocation.
+Each native case waits for the system to register the reinstalled app's App
+Intents metadata before its first lookup. It waits at most 30 seconds in the
+"not present" state and fails clearly if the metadata never appears (SHOPPING-262; see
+[the Siri launch investigation](siri-ci-launch.md#app-intents-registration-after-install-shopping-262)).
 
 The schema job retains installed Debug intent metadata and focused system
 registration logs with 20-second command bounds on simulator operations. Capture runs in a separate `always` step, leaving the preceding test/manifest
