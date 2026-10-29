@@ -110,12 +110,12 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
                        matching predicate: (PersistenceBootstrap.ReadyState) -> Bool = { _ in true }) async throws
         -> PersistenceBootstrap.ReadyState {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < deadline {
+        while true {
             if case .ready(let value) = bootstrap.state, predicate(value) { return value }
             if case .failed(let error) = bootstrap.state { throw error }
+            guard ContinuousClock.now < deadline else { throw Failure.timeout }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw Failure.timeout
     }
 
     private func awaitAccess(_ fixture: Fixture, graph: HomeGraphIdentity, access: HomeCandidate.Access) async throws {
@@ -478,13 +478,13 @@ final class HomeSharingStatusBootstrapTests: XCTestCase {
         XCTAssertFalse(try savedWork(f.bootstrap).contains("444"))
         // Settle the queued account transition before fixture teardown detaches it.
         let end = ContinuousClock.now.advanced(by: .seconds(5))
-        while ContinuousClock.now < end {
+        while true {
             if case .loading = f.bootstrap.state { await f.bootstrap.runLoadingTransition() }
             if case .ready(let current) = f.bootstrap.state,
                current.persistence.personalCartInitialBinding == (try f.provider.currentSession()).accountBinding { return }
+            guard ContinuousClock.now < end else { return XCTFail("Account transition did not settle") }
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTFail("Account transition did not settle")
     }
 
     func testSynchronousAccountBoundaryHidesOldObservationsBeforeQueuedUITransition() async throws {

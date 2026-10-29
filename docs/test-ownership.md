@@ -2817,3 +2817,36 @@ remain unchanged. The matched local pair passed both exact one-case inventories;
 [runtime evidence](shopping-full-runtime.md#clear-interruption-setup-comparison-shopping-252)
 records the measured saving and its fixed-order/cache limits. Final evidence
 review and phase CI remain separate integration gates.
+
+
+### SHOPPING-259 stall-safe hosted state waits
+
+Routine main CI `40942712753` on `0029d14` failed Fast at the `.failed` wait in
+`ActiveHomeBootstrapTests.assertAccountNotificationFails`, during
+`testAccountStatusNotificationSignOutCannotReopenCachedAccount`. The identical PR
+tree passed twice. The in-process XCTest session log records the failing
+predicate (`0x600000c77ba0`) as satisfied at 19:54:51.211, about 1s into the
+wait. Its completion was never delivered. The waiter reported a timeout at 55.227
+and returned TimedOut after 15.729s. The simulator system log is almost silent
+from 19:54:51 to 19:55:05, so the host stalled. Every later assertion passed. The
+product reached `.failed` on time, and this was the test's first failure in Swift
+CI history.
+
+SHOPPING-191 corrected what bootstrap readiness tests await. This issue corrects
+how they wait. `XCTNSPredicateExpectation` polls about once per second and reports
+through XCTest's waiter, so its timeout can win after the state already holds.
+Hosted bootstrap tests now use `waitForState(_:until:)`
+(`ShoppingTests/MainActorStateWaiting.swift`). It polls main-actor state every
+10ms and checks again after every sleep, including one that outlasts the
+5-second bound, before it records a failure. The `waitForReady`, `ready`,
+first-home and invitation deadline loops likewise check the state before
+failing. Retirement waits that precede `runLoadingTransition` now also require
+the pending `.loading` transition, because discovery can retire a presentation
+without one. No bound, retry, assertion or proof owner changed. Faster waits
+remove the previous fixed ~1s idle from each predicate wait.
+
+Deterministic local probes, not committed: a main-thread stall injected
+immediately after the predicate held, and a stall spanning the deadline, both
+produced the correct verdict with the new loop. Starving XCTest's private
+delivery queue cannot be forced locally; the CI session log above is the
+direct evidence of that race.

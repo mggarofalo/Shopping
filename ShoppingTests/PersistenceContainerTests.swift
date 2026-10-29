@@ -681,9 +681,7 @@ extension PersistenceContainerTests {
         window.rootViewController = UIHostingController(rootView: PersistenceRootView(bootstrap: bootstrap))
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previousWindow?.makeKeyAndVisible() }
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            bootstrap.isPresentationMounted(ready.presentation.id)
-        }, object: nil)], timeout: 5)
+        try await waitForState("presentation mount") { bootstrap.isPresentationMounted(ready.presentation.id) }
         let context = ready.persistence.container.viewContext
         let stores = try context.fetch(Store.fetchRequest())
         XCTAssertFalse(stores.isEmpty)
@@ -702,10 +700,10 @@ extension PersistenceContainerTests {
         await fulfillment(of: [accountRequested], timeout: 5)
         // The injected provider fulfills before throwing. Wait for the bootstrap
         // to consume that failure, rather than treating provider entry as completion.
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        try await waitForState("bootstrap failure") {
             if case .failed = bootstrap.state { return true }
             return false
-        }, object: nil)], timeout: 5)
+        }
         XCTAssertFalse(bootstrap.isPresentationMounted(ready.presentation.id))
         XCTAssertTrue(ready.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         guard case .failed = bootstrap.state else { return XCTFail("Expected isolated provider failure") }

@@ -37,11 +37,11 @@ final class HomeInvitationControllerTests: XCTestCase {
 
     private func waitUntilAccepting(_ transport: InvitationFakeTransport) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while ContinuousClock.now < deadline {
+        while true {
             if await !transport.accepted.isEmpty { return }
+            guard ContinuousClock.now < deadline else { throw NSError(domain: "InvitationTestAcceptanceDidNotStart", code: 1) }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw NSError(domain: "InvitationTestAcceptanceDidNotStart", code: 1)
     }
 
     func testOutstandingIngressKeepsHoldWhileEarlierEmptySnapshotPublishes() async throws {
