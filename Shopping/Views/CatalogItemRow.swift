@@ -5,7 +5,7 @@ struct CatalogItemRow: View {
     let validStores: [Store]
 
     var body: some View {
-        ShoppingItemColumns {
+        ShoppingItemRowContent(storeSummary: storeSummary) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .foregroundStyle(.primary)
@@ -21,12 +21,6 @@ struct CatalogItemRow: View {
                         .font(.caption).foregroundStyle(Color.grocerySecondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            storeSummary
-                .font(.caption)
-                .foregroundStyle(Color.grocerySecondary)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .shoppingItemRow()
         .accessibilityElement(children: .ignore)
@@ -34,7 +28,7 @@ struct CatalogItemRow: View {
             .filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
-    private var storeSummary: some View {
+    private var storeSummary: ShoppingItemStoreSummary {
         ShoppingItemStoreSummary(anyStore: item.anyStore, storeLabels: storeLabels,
             hasSavedStores: !(item.stores ?? []).isEmpty)
     }

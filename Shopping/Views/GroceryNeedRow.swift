@@ -35,13 +35,17 @@ struct GroceryNeedRow: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 2) {
                     detailsControl
-                    HStack(alignment: .top, spacing: 8) {
-                        supportingDetailsControl
-                        quantityControl
+                    if hasSupportingDetails || need.quantity != nil {
+                        HStack(alignment: .top, spacing: 8) {
+                            supportingDetailsControl
+                            quantityControl
+                        }
+                        .padding(.bottom, ShoppingListMetrics.itemTextVerticalPadding)
                     }
                 }
             } else {
-                HStack(alignment: .top, spacing: 8) {
+                // The quantity aligns with the name's first line, however tall the row grows.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     detailsControl
                     quantityControl
                 }
@@ -158,20 +162,11 @@ struct GroceryNeedRow: View {
         }
     }
 
-    private var storeMetadata: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            if let storeIndicator {
-                Image(systemName: storeIndicator.symbol)
-                    .imageScale(.small)
-                    .foregroundStyle(Color.grocerySecondary)
-                    .accessibilityHidden(true)
-            }
-            ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
-                hasSavedStores: !assignedStores.isEmpty,
-                hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil,
-                alignment: .leading)
-                .accessibilityHidden(true)
-        }
+    private var storeMetadata: ShoppingItemStoreSummary {
+        ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
+            hasSavedStores: !assignedStores.isEmpty,
+            hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil,
+            symbol: storeIndicator?.symbol)
     }
 
     private var cartActionTitle: String {
@@ -212,11 +207,13 @@ struct GroceryNeedRow: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            titleDetails
-            if !dynamicTypeSize.isAccessibilitySize { supportingDetails }
+        ShoppingItemRowContent(storeSummary: storeMetadata) {
+            VStack(alignment: .leading, spacing: 2) {
+                titleDetails
+                if !dynamicTypeSize.isAccessibilitySize && hasSupportingDetails { supportingDetails }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -224,7 +221,6 @@ struct GroceryNeedRow: View {
 
     private var supportingDetails: some View {
         VStack(alignment: .leading, spacing: 2) {
-            storeMetadata
             if need.kind == NeedKind.oneTime.rawValue {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
@@ -263,6 +259,10 @@ struct GroceryNeedRow: View {
     }
 
     private var title: String { need.item?.name ?? need.title }
+
+    private var hasSupportingDetails: Bool {
+        need.kind == NeedKind.oneTime.rawValue || !need.notes.isEmpty || !presenceNames.isEmpty
+    }
 
     private var assignedStores: Set<Store> {
         need.item?.stores ?? (need.kind == NeedKind.oneTime.rawValue ? need.oneTimeStores : nil) ?? []

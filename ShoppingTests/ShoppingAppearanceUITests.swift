@@ -263,8 +263,13 @@ final class ShoppingAppearanceUITests: XCTestCase {
             let cell = app.collectionViews.cells.containing(.button, identifier: row.identifier).firstMatch
             XCTAssertGreaterThanOrEqual(title.frame.minY, cell.frame.minY)
             XCTAssertLessThanOrEqual(notes.frame.maxY, cell.frame.maxY)
-            XCTAssertLessThanOrEqual(title.frame.width, row.frame.width * 0.7)
-            XCTAssertLessThanOrEqual(notes.frame.width, row.frame.width * 0.7)
+            if size.contains("Accessibility") {
+                // Accessibility sizes stack the right-aligned stores below the full-width text.
+                XCTAssertGreaterThan(title.frame.width, row.frame.width * 0.7)
+            } else {
+                XCTAssertLessThanOrEqual(title.frame.width, row.frame.width * 0.7)
+                XCTAssertLessThanOrEqual(notes.frame.width, row.frame.width * 0.7)
+            }
             attach("Catalog2to1 \(appearance) \(size)", app)
             if size.contains("Accessibility") {
                 for _ in 0..<8 where notes.frame.maxY > app.frame.maxY - 100 { app.swipeUp() }
@@ -276,6 +281,67 @@ final class ShoppingAppearanceUITests: XCTestCase {
             row.tap()
             XCTAssertTrue(app.navigationBars["Edit catalog item"].existsOrAppears(timeout: 3))
             XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, name)
+            app.terminate()
+        }
+    }
+
+    func testGroceryStoreNamesTrailLikeCatalogAndRowsSizeToContent() {
+        for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TrailingStores-\(UUID().uuidString).sqlite").path
+            app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+            let granola = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+                "shopping.grocery.row.", "Edit Granola")).firstMatch
+            for _ in 0..<6 where !granola.isHittable { app.swipeUp() }
+            XCTAssertTrue(granola.existsOrAppears(timeout: 3))
+            let cell = app.collectionViews.cells.containing(.button, identifier: granola.identifier).firstMatch
+            let title = granola.staticTexts["Granola"]
+            let store = granola.staticTexts["Costco"]
+            XCTAssertTrue(title.exists)
+            XCTAssertTrue(store.exists)
+            XCTAssertEqual(cell.frame.maxX - store.frame.maxX, title.frame.minX - cell.frame.minX, accuracy: 1,
+                           "Store names are right-aligned at the row's trailing inset")
+            if size == "UICTContentSizeCategoryL" {
+                XCTAssertGreaterThanOrEqual(store.frame.minX, title.frame.maxX, "Store names trail the name")
+                XCTAssertLessThan(store.frame.minY, title.frame.maxY, "Store names share the name's first line")
+            } else {
+                XCTAssertGreaterThanOrEqual(store.frame.minY, title.frame.maxY - 1,
+                                            "Accessibility sizes give the name the full width")
+            }
+            XCTAssertGreaterThanOrEqual(title.frame.minY - cell.frame.minY, 12,
+                                        "Text must stay clear of the rounded row corners")
+            attach("Trailing grocery stores \(size)", app)
+            guard size == "UICTContentSizeCategoryL" else {
+                app.terminate()
+                continue
+            }
+            let notes = granola.staticTexts["Low sugar"]
+            XCTAssertTrue(notes.exists)
+            XCTAssertGreaterThanOrEqual(notes.frame.minY, title.frame.maxY - 1, "Notes stay under the name")
+            XCTAssertLessThan(notes.frame.maxX, store.frame.minX)
+            XCTAssertGreaterThanOrEqual(cell.frame.maxY - notes.frame.maxY, 12)
+            let chipotles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+                "shopping.grocery.row.", "Edit Chipotles in adobo")).firstMatch
+            XCTAssertTrue(chipotles.existsOrAppears(timeout: 3))
+            let chipotlesCell = app.collectionViews.cells.containing(.button, identifier: chipotles.identifier).firstMatch
+            XCTAssertGreaterThan(cell.frame.height, chipotlesCell.frame.height,
+                                 "A row with notes grows instead of sharing the single-line height")
+            let groceryPublix = chipotles.staticTexts["Publix"]
+            XCTAssertTrue(groceryPublix.exists)
+            let groceryPublixMaxX = groceryPublix.frame.maxX
+            app.tabBars.buttons["Catalog"].tap()
+            let catalog = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+                "shopping.catalog.item.", "Chipotles in adobo")).firstMatch
+            for _ in 0..<6 where !catalog.isHittable { app.swipeUp() }
+            XCTAssertTrue(catalog.existsOrAppears(timeout: 3))
+            let catalogPublix = catalog.staticTexts["Publix"]
+            XCTAssertTrue(catalogPublix.exists)
+            XCTAssertEqual(groceryPublixMaxX, catalogPublix.frame.maxX, accuracy: 1,
+                           "Grocery and Catalog store names share the trailing column")
             app.terminate()
         }
     }

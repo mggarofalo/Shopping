@@ -7,6 +7,9 @@ enum ShoppingListMetrics {
     static let minimumRowHeight: CGFloat = 44
     static let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
     static let contentVerticalPadding: CGFloat = 4
+    /// Item text keeps this space inside the 44-point minimum, so multiline rows grow
+    /// with their content while text stays clear of the rounded section corners.
+    static let itemTextVerticalPadding: CGFloat = 8
     /// Native forms use the same floor as a padded item row, while growing for content.
     static let minimumListRowHeight = minimumRowHeight + 2 * contentVerticalPadding
         + rowInsets.top + rowInsets.bottom
