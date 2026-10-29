@@ -91,7 +91,7 @@ struct ShoppingActionTests {
         let started = ContinuousClock.now
         await #expect(throws: ShoppingActionError.timedOut) {
             try await ShoppingActionDeadline.run(within: .milliseconds(200), onTimeout: .timedOut) {
-                await Task.detached { stuck.wait(); return 1 }.value
+                try await BlockingStoreWork.run { stuck.wait(); return 1 }
             }
         }
         #expect(ContinuousClock.now - started < .seconds(5))
@@ -108,7 +108,7 @@ struct ShoppingActionTests {
         defer { stuck.signal() }
         let caller = Task {
             try await ShoppingActionDeadline.run(within: .seconds(60), onTimeout: .timedOut) {
-                await Task.detached { stuck.wait(); return 1 }.value
+                try await BlockingStoreWork.run { stuck.wait(); return 1 }
             }
         }
         caller.cancel()

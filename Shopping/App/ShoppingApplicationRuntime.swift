@@ -59,8 +59,24 @@ enum ShoppingActionError: LocalizedError, Equatable {
     }
 }
 
+/// Runs blocking store work on a dispatch thread instead of a cooperative-pool thread.
+/// `Task.sleep` wakes through that pool, so work parked on a busy or opening store must
+/// not occupy it, or it can starve the deadline that bounds it.
+enum BlockingStoreWork {
+    static func run<Value: Sendable>(
+        qos: DispatchQoS.QoSClass = .userInitiated, _ work: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: qos).async {
+                continuation.resume(with: Result(catching: work))
+            }
+        }
+    }
+}
+
 /// Bounds a system-action wait without waiting for the abandoned work to finish.
 /// Store work cannot be interrupted, so a late completion must remain harmless.
+/// Run blocking work through `BlockingStoreWork` so the deadline can always fire.
 @MainActor
 enum ShoppingActionDeadline {
     static func run<Value>(

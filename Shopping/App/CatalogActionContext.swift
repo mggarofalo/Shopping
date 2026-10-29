@@ -109,7 +109,7 @@ struct CatalogActionContext {
         let value: Value
         do {
             value = try await ShoppingActionDeadline.run(within: storeTimeout, onTimeout: .timedOut) {
-                try await Task.detached(priority: .userInitiated) { try work(service) }.value
+                try await BlockingStoreWork.run { try work(service) }
             }
         } catch let error as NeedServiceError {
             throw error == .scopeChanged ? ShoppingActionError.scopeChanged : ShoppingActionError.unavailable
