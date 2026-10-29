@@ -448,3 +448,61 @@ Copies excluding build products are retained in the Git common directory at
 `shopping-test-timings/41dbf22645f4cacb51f5efe83e6edfb69d70db1b/20261028-clear-interruption/`.
 Independent evidence review cleared the comparison; required exact-source phase CI remains outstanding;
 this focused comparison is not Full, live CloudKit, or physical-device proof.
+
+
+## Remembered-draft setup pilot: no adoption (SHOPPING-254)
+
+The existing first-Home setup is retained. Replacing it with the existing empty
+fixture did not demonstrate a complete-workflow saving, so the candidate UI
+change and its new fixture contract were removed. No retries or additional
+unchanged trials were run. Production code, test inventory and assertions remain
+unchanged from the baseline.
+
+On October 29, 2026, baseline `bbfddc6ebc858ad3c5cdffedd6d86efe6a7a18f7`
+and candidate `4a6225173adb2d9d6396899adb4690613e7514ba` each passed exactly
+`GroceryEditingUITests/testRememberedDraftCancelAndAtomicSaveSurviveRelaunch`,
+with zero failures or skips and clean recorded source. Both used Xcode 27.1
+(27A9275), iOS 27.0, exclusively owned simulator
+`A544F546-FC88-416E-AD88-0043429D3A9C`, serial execution, `ShoppingAcceptance`,
+one explicit method selection, `/tmp/shopping-254-derived-data`, and
+`-collect-test-diagnostics never`. Both captured Shutdown state immediately
+before build and immediately before the test command. The baseline followed a
+fresh build; the candidate used incremental products after a focused fixture
+contract run. Fixed order, intervening compilation and warm caches remain
+confounds despite the matched simulator states.
+
+| Measurement | Baseline | Candidate |
+| --- | ---: | ---: |
+| Build command | 47.745 s | 3.787 s |
+| Test command | 116.986 s | 113.213 s |
+| Result bundle | 112.113 s | 108.397 s |
+| Single test body | 77.763 s | 80.229 s |
+| First Add Grocery action, relative to test start | 8.62 s | 7.29 s |
+| Second Add Grocery action, relative to test start | 41.76 s | 39.62 s |
+
+The fixture removed the first-Home tap at 7.16 seconds, reaching the first
+Add Grocery action only 1.33 seconds sooner. The unchanged interval between the
+two Add Grocery actions varied by 0.81 seconds (33.14 versus 32.33 seconds), and
+later unchanged work reversed the early advantage: total test-body time rose
+2.466 seconds. The 3.773-second lower command time therefore does not establish
+a workflow improvement; startup/finalization outside the body moved in the
+opposite direction. The incremental build difference is not attributed to the
+fixture. This one local pair provides no hosted or suite-wide saving claim.
+
+The candidate changed only the initial fixture argument and removed the fixture
+key before the existing relaunch. Both independent code reviews found the
+cancel/save/catalog/relaunch assertions preserved. Its additional
+`PreviewFixtureTests/testEmptyFixturePersistsOnlyAnIsolatedLocalHomeAfterReopen`
+passed once (0.053-second body, 38.710-second command), checking independent
+SQLite Home/list identities and no preseeded need, catalog or recovery result.
+That new contract is also removed because this pilot is not being adopted;
+existing fixture and creation coverage remains intact.
+
+Raw evidence is retained at `/tmp/shopping-254-baseline-bbfddc6`,
+`/tmp/shopping-254-candidate-4a62251` and
+`/tmp/shopping-254-contract-4a62251`, including logs, result bundles, commands,
+metadata, state captures and clean-source checks. Copies excluding DerivedData
+are retained in the Git common directory at
+`shopping-test-timings/4a6225173adb2d9d6396899adb4690613e7514ba/20261029-remembered-draft/`.
+The measured candidate remains in branch ancestry for auditability. This is a
+completed no-change experiment, not Full, live CloudKit or physical-device proof.
