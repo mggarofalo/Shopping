@@ -2189,6 +2189,43 @@ exact-value proof, unique fallback filenames and stable relaunch paths. Hosted
 pinned iOS18.5 acceptance remains required on the exact integration successor.
 
 
+### Committed catalog name readback (SHOPPING-255)
+
+Routine main CI `40881531986` on `81a22e5` failed Acceptance at the SHOPPING-194
+post-Done name wait; PR CI `40878602154` had passed the same source. The retained
+hierarchy, captured about 8.6s after the name check began, shows
+`shopping.catalog.name` with value `Oat milk` and no keyboard. Video frames from
+about t=21s until teardown show the settled form with the full name and enabled
+Save actions. The app had committed the name.
+
+Automation queries, not the value, consumed the wait. Steps before Done ran as fast
+as, or faster than, the passing run. After Done the app reported idle in 0.41s,
+but the keyboard-absence check then stayed in one existence query for up to about
+18s (t=23.95–42.24). XCTest's first predicate poll starts about 1s into a wait,
+so the 3-second name wait left about 2s for one lookup. That lookup, begun at
+t=42.24, took 2.25s and evaluated false; XCTest's debug-description capture for a
+false element predicate records only the query chain, so it does not show which
+value or resolution result it saw. The capture's own snapshot then took 6.3s. Done only clears focus and starts no app work, so an app
+stall is unlikely, though the evidence cannot exclude one. The SHOPPING-194
+failure, a value wait before keyboard dismissal, also had a single lookup. Recent
+CI history has no other failure at this step.
+
+The name binding updates on every keystroke. Keyboard disappearance is the only
+interaction boundary, and the test still waits for it. The test now reads the
+field once through ordinary element resolution, as the shared `replaceText`
+helper does. It keeps the hierarchy attachment on mismatch and asserts the exact
+name. The later grocery editor assertion still proves the saved name end to end.
+No timeout, retry or selection changed. App source is unchanged.
+
+A first local 25-iteration trial on a newly created, unseeded iOS 26.5 simulator
+passed 24. Its first iteration failed the keyboard-absence assertion because
+Apple's one-time `UIContinuousPathIntroductionView` covered the accessory Done.
+Hosted simulators already set `DidShowContinuousPathIntroduction` (see the
+QuickPath entry above), so local validation seeds the same preference; the test
+is unchanged for this environment-only onboarding. With that seed, test source
+`78ec6e4` passed **45/45** iterations across three erased iOS 26.5 iPhone 17 Pro
+simulators (25, 10 and 10), with no skips.
+
 ## Home picker placement in Settings
 
 The picker now belongs to Settings; this supersedes the Groceries-only placement
