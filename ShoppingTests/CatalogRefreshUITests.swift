@@ -51,18 +51,16 @@ final class CatalogRefreshUITests: XCTestCase {
         name.typeText("Oat milk")
         app.buttons["shopping.catalog.keyboardDone"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
-        let typedName = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Oat milk"), object: name
-        )
-        let nameReady = XCTWaiter.wait(for: [typedName], timeout: 3)
-        if nameReady != .completed {
+        // The binding commits each keystroke, so the value is already committed
+        // once the keyboard is gone; read it once (SHOPPING-255).
+        let committedName = app.textFields["shopping.catalog.name"].value as? String
+        if committedName != "Oat milk" {
             let diagnostic = XCTAttachment(string: app.debugDescription)
             diagnostic.name = "Committed catalog name readiness"
             diagnostic.lifetime = .keepAlways
             add(diagnostic)
         }
-        XCTAssertEqual(nameReady, .completed)
-        XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, "Oat milk")
+        XCTAssertEqual(committedName, "Oat milk")
         let saveAndAdd = app.buttons["shopping.catalog.saveAndAddToList"]
         XCTAssertTrue(saveAndAdd.isEnabled)
         saveAndAdd.tap()
