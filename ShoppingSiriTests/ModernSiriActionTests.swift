@@ -6,7 +6,7 @@ final class ModernSiriActionTests: XCTestCase {
     func testModernSiriActionReturnsSavedEntityThroughSystemExecution() async throws {
         continueAfterFailure = false
         _ = launch()
-        let definitions = IntentDefinitions(bundleIdentifier: "com.mggarofalo.shopping")
+        let definitions = try await registeredDefinitions()
         let lists = try await definitions.entities["GroceryListEntity"].entities(matching: "my shopping list")
         XCTAssertEqual(lists.count, 1)
         let list = try XCTUnwrap(lists.first)
@@ -29,7 +29,7 @@ final class ModernSiriActionTests: XCTestCase {
     func testUnknownSpokenNameHandsOffToEditorWithoutBlockingLaterRequests() async throws {
         continueAfterFailure = false
         let app = launch()
-        let definitions = IntentDefinitions(bundleIdentifier: "com.mggarofalo.shopping")
+        let definitions = try await registeredDefinitions()
         let lists = try await definitions.entities["GroceryListEntity"].entities(matching: "my shopping list")
         let list = try XCTUnwrap(lists.first)
         for appName in ["Milk and Bananas", "Milk & Bananas"] {
@@ -79,6 +79,32 @@ final class ModernSiriActionTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 10))
         return app
+    }
+
+    /// SHOPPING-262: Xcode installs Shopping during the session's first `launch()`, and the system
+    /// registers the new bundle's App Intents metadata asynchronously. Until it does, every lookup
+    /// fails with "not present". Wait, boundedly, only while that state persists; any other outcome stands.
+    private func registeredDefinitions(within seconds: Double = 30) async throws -> IntentDefinitions {
+        let definitions = IntentDefinitions(bundleIdentifier: "com.mggarofalo.shopping")
+        let started = ContinuousClock.now
+        var unregistered = 0
+        while true {
+            do {
+                _ = try await definitions.entities["GroceryListEntity"].suggestedEntities()
+                if unregistered > 0 {
+                    print("App Intents metadata registered after \(ContinuousClock.now - started) (\(unregistered) not-present lookups)")
+                }
+                return definitions
+            } catch let error as NSError
+                where error.domain == "AppIntentsServicesMetadataErrorDomain" && error.code == 400 {
+                unregistered += 1
+                guard ContinuousClock.now - started < .seconds(seconds) else {
+                    XCTFail("App Intents metadata was not registered within \(seconds) seconds of launch")
+                    throw error
+                }
+                try await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 
     /// The system connection abandons a stuck action after about 35 seconds; anything
