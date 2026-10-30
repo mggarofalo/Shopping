@@ -129,6 +129,83 @@ whose end is spent or uncertain is retired so its operation ID cannot replay.
 One narrower case remains: a row rendered before a read, tapped after another
 edit of the same item through the refreshed row, still reports a change.
 
+### Local-first shopping (SHOPPING-269)
+
+On 1.6.5 a shopper quickly added three items on the Watch, then removed them.
+The cart emptied at once, but the items did not return to groceries until
+CloudKit sync finished. The Watch store was already local. The session was not:
+
+- A Remove's optimistic projection and its receipt both dropped the row. Only a
+  later full projection read put it back in groceries.
+- Each drained queue schedules that full read. A commit queued while a read was
+  in flight waited for the whole read before it started.
+- Every full read is several writer transactions over the private command
+  history, on the same store coordinator that CloudKit mirroring uses for its
+  import and export. On a Watch during sync, the read finishes when the sync
+  work does. A Remove could therefore wait for two reads in turn. No device
+  trace was captured; the SQLite tests reproduce the dependency on the read.
+
+The target design: every result the shopper sees comes from the Watch's own
+durable receipt, and a full read only converges what arrived from elsewhere.
+
+- `PersistentWatchShoppingService` builds grocery and cart rows through one
+  `RowContext`, used by full reads and local receipts alike. A removal receipt
+  reads the occurrence in the same writer transaction as the receipt. If it is
+  still outstanding and eligible at the selected store, the receipt returns its
+  grocery row with a fresh Add token.
+- `WatchShoppingSnapshot.replaceItem(occurrenceID:with:section:)` places a row
+  in cart or groceries with the service's ordering. The session's pending
+  projection and the adapter's receipt patch share it.
+- Commits never wait for a read. A read that overlaps an applied receipt is
+  discarded in the session and not adopted by the adapter, because it may
+  predate that receipt, and a new read is requested. A removal's grocery row is
+  never recorded as a successor token.
+- Checkout, restore and store choice remain barriers until local edits settle.
+- One read still waits: after a commit throws, the session waits for any
+  in-flight read, then reads once to learn whether the failed write committed.
+  Later edits queue behind that check.
+
+| Watch interaction | Shown from | Needs network, phone or sync |
+| --- | --- | --- |
+| Add, Remove, Quantity | the local receipt (pending row until it lands) | no |
+| Groceries after Remove | the removal receipt | no (was: a full read) |
+| Checkout capture and result | local capture, private intent, local read | no; household receipt publishes later |
+| Restore | private restore intent, local read | no; retraction publishes later |
+| Relaunch | the account's cached session and SQLite replica | no |
+| Another device's changes | the next read after a history import | yes, by definition |
+
+Offline: an already provisioned Watch uses its cached session, so launch and
+every command above work in airplane mode with the phone away. Presence,
+purchase receipts and retractions stay in the durable outbox and publish when
+CloudKit exports them.
+
+Convergence: cart records are immutable causal envelopes (ADR 0002). An import
+from the phone or another shopper changes nothing already shown until a read
+adopts it. Concurrent Adds of one occurrence resolve to one membership on every
+replica; a concurrent Remove wins; another shopper's purchase leaves your entry
+with a purchase notice. Imports only request a read, and that read can't undo a
+newer local receipt.
+
+Relaunch: commands are durable before their receipts return, so a relaunch,
+offline or not, reads the same cart, quantities and groceries from SQLite.
+Native share verification runs in the background and never gates that read.
+
+Tests with no refresh read and no network: rapid Add then Remove returning
+every item to groceries; rapid quantity edits and removal surviving a relaunch
+while native verification never answers; and an import of the same shopper's
+phone edits plus a new household item, converging with each item once.
+
+Remaining decision, not changed here: for an invited participant,
+`PersonalDemandProjection` counts the shopper's own checkout as fulfilled only
+while native publication is verified, and a cached (offline) session never is.
+After an offline checkout the cart empties, but the purchased items show in that
+shopper's groceries again until verification succeeds online. Owners are not
+affected. The rule is shared with the iPhone and with household replacement
+lineage, so changing it is a sharing-policy decision. See SHOPPING-269 on Plane.
+
+The engine stays `NSPersistentCloudKitContainer` mirroring. Nothing above
+needed a different sync engine; Apple still controls export and import timing.
+
 Private cart commands save promptly using the existing causal records and
 removal evidence. A fixed two-second window publishes the latest advisory
 presence for changed needs only; continuous tapping does not reset the window.

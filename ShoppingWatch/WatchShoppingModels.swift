@@ -90,6 +90,49 @@ struct WatchShoppingSnapshot: Equatable {
     func item(id: String) -> WatchShoppingItem? {
         (cartSections + grocerySections).lazy.flatMap(\.items).first { $0.id == id || $0.needID == id }
     }
+
+    /// Moves one occurrence into the list its row belongs to, or removes it. Local
+    /// receipts and pending intents use this, so neither needs a full read to show.
+    mutating func replaceItem(occurrenceID: String, with item: WatchShoppingItem?, section: WatchItemSection?) {
+        grocerySections = Self.removing(occurrenceID, from: grocerySections)
+        cartSections = Self.removing(occurrenceID, from: cartSections)
+        guard let item, let section else { return }
+        if item.isInOwnCart {
+            cartSections = Self.inserting(item, in: section, into: cartSections)
+        } else {
+            grocerySections = Self.inserting(item, in: section, into: grocerySections)
+        }
+    }
+
+    private static func removing(_ occurrenceID: String, from sections: [WatchItemSection]) -> [WatchItemSection] {
+        sections.compactMap { section in
+            var section = section
+            section.items.removeAll { $0.occurrenceID == occurrenceID }
+            return section.items.isEmpty ? nil : section
+        }
+    }
+
+    // The service's category rank, Settings order and name order.
+    private static func inserting(_ item: WatchShoppingItem, in section: WatchItemSection,
+                                  into sections: [WatchItemSection]) -> [WatchItemSection] {
+        var sections = sections
+        if let index = sections.firstIndex(where: { $0.id == section.id }) {
+            sections[index].items.append(item)
+            sections[index].items.sort {
+                let comparison = $0.name.localizedStandardCompare($1.name)
+                return comparison == .orderedSame ? $0.occurrenceID < $1.occurrenceID : comparison == .orderedAscending
+            }
+        } else {
+            var group = section
+            group.items = [item]
+            sections.append(group)
+        }
+        return sections.sorted {
+            if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
+            if $0.categoryOrder != $1.categoryOrder { return $0.categoryOrder < $1.categoryOrder }
+            return $0.id < $1.id
+        }
+    }
 }
 
 enum WatchShoppingCommand: Equatable {

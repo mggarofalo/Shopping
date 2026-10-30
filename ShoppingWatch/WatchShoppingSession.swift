@@ -56,6 +56,8 @@ final class WatchShoppingSession {
     private var refreshTask: Task<Void, Never>?
     private let incomingRefreshInterval: Duration
     private var lastSnapshotRead = ContinuousClock().now
+    // Counts applied local receipts. A read that overlaps one may predate it.
+    private var receiptRevision = 0
 
     init(service: any WatchShoppingService, initialSnapshot: WatchShoppingSnapshot = WatchShoppingSnapshot(),
          incomingRefreshInterval: Duration = .seconds(2)) {
@@ -130,9 +132,14 @@ final class WatchShoppingSession {
         isRefreshing = true
         reloadRequested = false
         let generation = authorityGeneration
+        let revision = receiptRevision
         do {
             let value = try await service.load(storeID: savedSnapshot.selectedStoreID)
-            if generation == authorityGeneration {
+            if generation == authorityGeneration, revision != receiptRevision {
+                // Local edits never wait for a read. One that finished meanwhile is
+                // already shown from its receipt; read again rather than undo it.
+                reloadRequested = true
+            } else if generation == authorityGeneration {
                 let hadUncertainty = !uncertain.isEmpty
                 uncertain.removeAll()
                 applySnapshot(value)
@@ -226,13 +233,13 @@ final class WatchShoppingSession {
         return intent.id
     }
 
+    // Commits never wait for a read: each receipt is shown from the Watch's own store.
     private func drain() async {
-        if isRefreshing { await withCheckedContinuation { refreshWaiter = $0 } }
         var failed: [(WatchCartIntent, String)] = []
         while !pending.isEmpty {
             // A continuous stream of local edits must not starve incoming state.
             // This is a local read checkpoint, not a CloudKit fetch or write delay.
-            if reloadRequested, lastSnapshotRead.duration(to: ContinuousClock().now) >= incomingRefreshInterval {
+            if reloadRequested, !isRefreshing, lastSnapshotRead.duration(to: ContinuousClock().now) >= incomingRefreshInterval {
                 await readSnapshot()
             }
             guard let intent = pending.first else { break }
@@ -250,6 +257,7 @@ final class WatchShoppingSession {
                       pending.first?.id == intent.id else { continue }
                 pending.removeFirst()
                 failedAddDrafts.removeValue(forKey: intent.occurrenceID)
+                receiptRevision += 1
                 switch receipt {
                 case .snapshot(let value):
                     applySnapshot(value)
@@ -257,8 +265,9 @@ final class WatchShoppingSession {
                     // Keep captured descendant tokens for service revalidation.
                 case .item(let occurrenceID, let item, let mayRebase):
                     if occurrenceID == intent.occurrenceID {
-                        savedSnapshot.replaceCartItem(occurrenceID: occurrenceID, item: item, section: intent.section)
-                        if mayRebase, let item, item.commandToken != intent.command.token {
+                        savedSnapshot.replaceItem(occurrenceID: occurrenceID, with: item, section: intent.section)
+                        // A grocery row after removal names no membership to chain onto.
+                        if mayRebase, let item, item.isInOwnCart, item.commandToken != intent.command.token {
                             acknowledgedSuccessors[intent.command.token] = item.commandToken
                             rebaseFollowing(intent, item: item)
                         } else {
@@ -291,6 +300,7 @@ final class WatchShoppingSession {
         // Independent local commits precede reconciliation of uncertain writes.
         // The read can establish whether the failed call nevertheless committed.
         if !failed.isEmpty {
+            if isRefreshing { await withCheckedContinuation { refreshWaiter = $0 } }
             await readSnapshot()
             for (intent, message) in failed where intent.generation == authorityGeneration {
                 let unresolved = uncertain.contains { $0.id == intent.id }
@@ -480,7 +490,7 @@ private struct WatchCartIntent {
             row.isInOwnCart = true
         case .setQuantity(_, let quantity): row.quantity = quantity
         case .remove:
-            value.replaceCartItem(occurrenceID: occurrenceID, item: nil, section: section)
+            value.replaceItem(occurrenceID: occurrenceID, with: nil, section: section)
             return value
         case .buyAnyway: return saved
         }
@@ -491,7 +501,7 @@ private struct WatchCartIntent {
         row.canRemove = !uncertain
         row.canChangeQuantity = !uncertain
         row.canBuyAnyway = false
-        value.replaceCartItem(occurrenceID: occurrenceID, item: row, section: section)
+        value.replaceItem(occurrenceID: occurrenceID, with: row, section: section)
         return value
     }
 
@@ -503,38 +513,6 @@ private struct WatchCartIntent {
         case .remove: return row == nil
         case .setQuantity(_, let quantity): return row != nil && row?.quantity == quantity
         case .buyAnyway: return false
-        }
-    }
-}
-
-private extension WatchShoppingSnapshot {
-    mutating func replaceCartItem(occurrenceID: String, item: WatchShoppingItem?, section: WatchItemSection?) {
-        grocerySections = grocerySections.compactMap { group in
-            var group = group
-            group.items.removeAll { $0.occurrenceID == occurrenceID }
-            return group.items.isEmpty ? nil : group
-        }
-        for index in cartSections.indices { cartSections[index].items.removeAll { $0.occurrenceID == occurrenceID } }
-        if let item, let section {
-            if let index = cartSections.firstIndex(where: { $0.id == section.id }) {
-                cartSections[index].items.append(item)
-            } else {
-                var group = section
-                group.items = [item]
-                cartSections.append(group)
-            }
-        }
-        cartSections.removeAll { $0.items.isEmpty }
-        for index in cartSections.indices {
-            cartSections[index].items.sort {
-                let comparison = $0.name.localizedStandardCompare($1.name)
-                return comparison == .orderedSame ? $0.occurrenceID < $1.occurrenceID : comparison == .orderedAscending
-            }
-        }
-        cartSections.sort {
-            if $0.categoryRank != $1.categoryRank { return $0.categoryRank < $1.categoryRank }
-            if $0.categoryOrder != $1.categoryOrder { return $0.categoryOrder < $1.categoryOrder }
-            return $0.id < $1.id
         }
     }
 }
