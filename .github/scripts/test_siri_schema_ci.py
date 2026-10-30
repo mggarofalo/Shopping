@@ -19,8 +19,8 @@ DEVICE = "C173A9C4-C7AD-42FE-9B90-932ACB424D13"
 
 
 def inventory():
-    names = ([f"CatalogActionTests/case{n}()" for n in range(17)]
-             + [f"SpokenGrocerySchemaTests/case{n}()" for n in range(6)] + siri.UI_TESTS)
+    names = ([f"CatalogActionTests/case{n}()" for n in range(20)]
+             + [f"SpokenGrocerySchemaTests/case{n}()" for n in range(7)] + siri.UI_TESTS)
     return {"testNodes": [{"nodeType": "Test Case", "nodeIdentifier": name, "result": "Passed"} for name in names]}
 
 

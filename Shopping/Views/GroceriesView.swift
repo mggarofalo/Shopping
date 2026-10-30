@@ -12,6 +12,15 @@ struct GroceriesView: View {
         let revision: Int
     }
 
+    private struct VisibleNeedRows: Equatable {
+        let householdID: UUID?
+        let listID: UUID?
+        let presentationID: UUID?
+        let objectIDs: Set<NSManagedObjectID>
+    }
+
+    private enum ContentState { case loading, failed, empty, rows }
+
     @Environment(\.persistencePresentation) private var presentation
     @Environment(\.needService) private var service
     @Environment(\.personalCart) private var personalCart
@@ -26,8 +35,8 @@ struct GroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
     @ObservedObject var navigation: GroceryNavigationState
-    @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
-    @State private var projectionTask: Task<Void, Never>?
+    @State private var visibleRows: ProjectionLoad<VisibleNeedRows> = .loading
+    @State private var projectionRefresh = CoalescedRefresh()
     @State private var projectionRevision = 0
     @State private var storeCountSnapshot: StoreCountSnapshot?
     @State private var pendingCartActionNeedIDs: Set<UUID> = []
@@ -62,12 +71,29 @@ struct GroceriesView: View {
         return GroceryRowScope.canonicalList(Array(lists), households: Array(households), selection: selection)
     }
 
+    /// Rows read for the current scope; `nil` until that read completes.
+    private var visibleNeedObjectIDs: Set<NSManagedObjectID>? {
+        guard case .loaded(let rows) = visibleRows,
+              rows.householdID == selection.householdID, rows.listID == selection.listID,
+              rows.presentationID == presentation?.id else { return nil }
+        return rows.objectIDs
+    }
+
     private var visibleNeeds: [Need] {
-        guard presentation?.isActive != false else { return [] }
+        guard presentation?.isActive != false, let visibleNeedObjectIDs else { return [] }
         return needs.filter {
             visibleNeedObjectIDs.contains($0.objectID) && GroceryRowScope.matches($0, canonicalList: canonicalList) &&
                 isOutstanding($0) && !isInMyCart($0)
         }
+    }
+
+    private var contentState: ContentState {
+        if case .failed = visibleRows { return .failed }
+        if let personalCart, !personalCart.hasLoadedSnapshot {
+            return personalCart.error == nil ? .loading : .failed
+        }
+        guard visibleNeedObjectIDs != nil else { return .loading }
+        return visibleNeeds.isEmpty ? .empty : .rows
     }
 
     private var grocerySections: [ItemCollectionSection<GroceryCollectionSectionID, Need>] {
@@ -189,14 +215,15 @@ struct GroceriesView: View {
                 configureAndRefresh()
             }
             .onChange(of: stores.map { "\($0.id)-\($0.isArchived)" }) { _, _ in configureAndRefresh() }
-            .onChange(of: navigation.selectedStoreID) { _, _ in refreshProjection() }
-            .onChange(of: navigation.includedStoreIDs) { _, _ in refreshProjection() }
-            .onChange(of: navigation.excludedStoreIDs) { _, _ in refreshProjection() }
-            .onChange(of: navigation.urgentOnly) { _, _ in refreshProjection() }
-            .onChange(of: navigation.categoryID) { _, _ in refreshProjection() }
+            .onChange(of: navigation.selectedStoreID) { _, _ in requestProjection() }
+            .onChange(of: navigation.includedStoreIDs) { _, _ in requestProjection() }
+            .onChange(of: navigation.excludedStoreIDs) { _, _ in requestProjection() }
+            .onChange(of: navigation.urgentOnly) { _, _ in requestProjection() }
+            .onChange(of: navigation.categoryID) { _, _ in requestProjection() }
             .onChange(of: needs.count) { _, _ in refreshProjection() }
-            .onChange(of: personalCart?.cartedNeedIDs) { _, _ in refreshProjection() }
-            .onChange(of: personalCart?.outstandingNeedIDs) { _, _ in refreshProjection() }
+            .onChange(of: canonicalList?.id) { _, _ in requestProjection() }
+            .onChange(of: personalCart?.cartedNeedIDs) { _, _ in requestProjection() }
+            .onChange(of: personalCart?.outstandingNeedIDs) { _, _ in requestProjection() }
             .onChange(of: navigation.systemAddRequestID) { _, _ in presentSystemAdd() }
             .onChange(of: navigation.pendingNeedFocusID) { _, _ in focusRequestedNeed() }
             .onReceive(NotificationCenter.default.publisher(
@@ -218,9 +245,11 @@ struct GroceriesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .searchable(text: $navigation.searchText, prompt: "Search groceries")
-        .onSubmit(of: .search, refreshProjection)
-        .onChange(of: navigation.searchText) { _, _ in refreshProjection() }
+        // A list laid out during launch otherwise hides the automatic drawer on the next push.
+        .searchable(text: $navigation.searchText, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Search groceries")
+        .onSubmit(of: .search, requestProjection)
+        .onChange(of: navigation.searchText) { _, _ in requestProjection() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink(value: GroceryDestination.recentlyCleared) {
@@ -290,42 +319,65 @@ struct GroceriesView: View {
         }
     }
 
+    /// One List in every state, so the search bar keeps its scroll view when rows arrive.
     private var groceryContent: some View {
-        Group {
-            if visibleNeeds.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        homeControls.padding(.horizontal, 16)
-                        scopeControls
-                        emptyState.frame(maxWidth: .infinity)
-                    }
-                }
-            } else {
-                List {
-                    Section {
-                        homeControls
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                        scopeControls
-                            .buttonStyle(.borderless)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                    CompactGrocerySections(
-                        sections: grocerySections,
-                        itemID: \.objectID
-                    ) { _, need in
-                        shoppingRow(need)
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .listSectionSpacing(.custom(8))
-                .contentMargins(.top, 0, for: .scrollContent)
-                .contentMargins(
-                    .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
-                )
+        List {
+            Section {
+                homeControls
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                scopeControls
+                    .buttonStyle(.borderless)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+            switch contentState {
+            case .loading:
+                statusSection {
+                    ProgressView("Loading groceries…")
+                        .padding()
+                        .accessibilityIdentifier("shopping.groceries.loading")
+                        .onAppear { ShoppingPerformanceTrace.launchEvent("Grocery loading shown") }
+                }
+            case .failed:
+                statusSection {
+                    ContentUnavailableView {
+                        Label("Couldn’t load groceries", systemImage: "exclamationmark.triangle")
+                    } actions: {
+                        Button("Try Again", action: configureAndRefresh)
+                    }
+                    .accessibilityIdentifier("shopping.groceries.loadFailed")
+                }
+            case .empty:
+                statusSection {
+                    emptyState
+                        .onAppear { ShoppingPerformanceTrace.launchEvent("Grocery empty state shown", emptyTitle) }
+                }
+            case .rows:
+                CompactGrocerySections(
+                    sections: grocerySections,
+                    itemID: \.objectID
+                ) { _, need in
+                    shoppingRow(need)
+                }
+                .onAppear { ShoppingPerformanceTrace.launchEvent("Grocery rows shown", "\(visibleNeeds.count)") }
+            }
+        }
+        .shoppingItemList()
+        .scrollContentBackground(contentState == .rows ? .automatic : .hidden)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .contentMargins(
+            .bottom, dynamicTypeSize.isAccessibilitySize ? 96 : nil, for: .scrollContent
+        )
+    }
+
+    private func statusSection(@ViewBuilder _ status: () -> some View) -> some View {
+        Section {
+            status()
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -418,7 +470,7 @@ struct GroceriesView: View {
             return personalCart.visibleEntries(filter: currentNeedFilter, activeStoreIDs: Set(activeStores.map(\.id))).count
         }
         return GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
-            .filter { !$0.archived && $0.carted && visibleNeedObjectIDs.contains($0.objectID) }.count
+            .filter { !$0.archived && $0.carted && visibleNeedObjectIDs?.contains($0.objectID) == true }.count
     }
 
     private var emptyTitle: String {
@@ -536,7 +588,8 @@ struct GroceriesView: View {
         guard !pending.wasEditing || categoryID(for: need) == pending.savedCategoryID else { return }
         pendingSavedNeed = nil
         refreshProjection()
-        let savedWhileFiltered = !isInMyCart(need) && hasViewNarrowing && !visibleNeedObjectIDs.contains(need.objectID)
+        let savedWhileFiltered = !isInMyCart(need) && hasViewNarrowing &&
+            visibleNeedObjectIDs?.contains(need.objectID) != true
         let name = need.item?.name ?? need.title
         if pending.wasEditing, pending.originalCategoryID != pending.savedCategoryID {
             let message = "\(name) moved to \(categoryName(for: need))."
@@ -674,22 +727,34 @@ struct GroceriesView: View {
         refreshProjection()
     }
 
+    /// Rereads the personal cart and the rows after the store may have changed.
     private func refreshProjection() {
         guard presentation?.isActive != false else { return }
         personalCart?.refresh()
-        projectionTask?.cancel()
+        requestProjection()
+    }
+
+    /// Rereads the rows only; filter and cart changes do not change the cart snapshot.
+    private func requestProjection() {
+        guard presentation?.isActive != false else { return }
         projectionRevision += 1
         let revision = projectionRevision
         guard let householdID = selection.householdID, let listID = canonicalList?.id, let service else {
-            visibleNeedObjectIDs = []
+            // Without a selected list there are no groceries. A selected list this context
+            // cannot resolve is a failure, not an empty list; resolving it requests a new read.
+            visibleRows = selection.listID == nil ? .loaded(VisibleNeedRows(householdID: selection.householdID,
+                listID: nil, presentationID: presentation?.id, objectIDs: [])) : .failed
             storeCountSnapshot = nil
             return }
         let filter = currentNeedFilter
         let cartedNeedIDs = personalCart?.cartedNeedIDs ?? []
         let presentationID = presentation?.id
-        projectionTask = Task {
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
+        projectionRefresh.request {
+            let isCurrent = {
+                selection.householdID == householdID && selection.listID == listID &&
+                    presentation?.id == presentationID && presentation?.isActive != false &&
+                    currentNeedFilter == filter
+            }
             do {
                 let projected = try await Task.detached(priority: .userInitiated) {
                     let projection = try service.groceryNeedProjection(
@@ -701,26 +766,25 @@ struct GroceriesView: View {
                         shareIDs: projection.shareableNeedIDs(for: filter.purchase.selectedStoreID, excluding: cartedNeedIDs)
                     )
                 }.value
-                guard !Task.isCancelled, projectionRevision == revision,
-                      selection.householdID == householdID, selection.listID == listID,
-                      presentation?.id == presentationID,
-                      presentation?.isActive != false else { return }
+                guard isCurrent() else { return }
+                ShoppingPerformanceTrace.launchEvent("Grocery projection published", "matches=\(projected.ids.count)")
                 storeCountSnapshot = StoreCountSnapshot(
                     scope: PersonalCartScopeSnapshot(householdID: householdID, listID: listID),
                     presentationID: presentationID, values: projected.counts,
                     selectedStoreID: filter.purchase.selectedStoreID, shareableNeedIDs: projected.shareIDs, revision: revision
                 )
                 let matchingIDs = projected.ids
-                visibleNeedObjectIDs = Set(GroceryRowScope.validNeeds(
-                    Array(needs), canonicalList: canonicalList
-                ).filter { matchingIDs.contains($0.id) }.map(\.objectID))
+                let rows = ProjectionLoad.loaded(VisibleNeedRows(
+                    householdID: householdID, listID: listID, presentationID: presentationID,
+                    objectIDs: Set(GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList)
+                        .filter { matchingIDs.contains($0.id) }.map(\.objectID))
+                ))
+                // Republishing identical rows would still invalidate the list mid-navigation.
+                if visibleRows != rows { visibleRows = rows }
             } catch {
-                guard !Task.isCancelled, projectionRevision == revision,
-                      selection.householdID == householdID, selection.listID == listID,
-                      presentation?.id == presentationID,
-                      presentation?.isActive != false else { return }
+                guard isCurrent() else { return }
                 self.error = error
-                visibleNeedObjectIDs = []
+                visibleRows = .failed
                 storeCountSnapshot = nil
             }
         }

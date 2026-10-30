@@ -544,6 +544,42 @@ final class WatchShoppingUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).count, 1)
     }
 
+    func testDurableRapidAddsThenRapidRemovesReportNoProblem() {
+        let app = launchDurableFixture("rapid")
+        selectMarketIfNeeded(app)
+        let names = ["Bread", "Eggs", "Milk"]
+        func row(_ name: String) -> XCUIElement { app.buttons.matching(NSPredicate(format: "label == %@", name)).element }
+        for name in names {
+            reveal(row(name), in: app)
+            row(name).swipeLeft()
+            app.buttons["Add"].tap()
+        }
+        let cart = app.buttons["watch.cart.open"]
+        XCTAssertTrue(cart.label.contains("3 items"), cart.label)
+        cart.tap()
+        XCTAssertTrue(app.navigationBars["In cart"].waitForExistence(timeout: 3))
+        // No wait for any save: each Remove follows its Add as fast as the UI allows.
+        for name in names {
+            reveal(row(name), in: app)
+            row(name).swipeLeft()
+            app.buttons["Remove"].tap()
+            XCTAssertTrue(row(name).waitForNonExistence(timeout: 3), "\(name) removed at once")
+        }
+        XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["OK"].waitForExistence(timeout: 3), "No problem is reported")
+        screenshot("Watch rapid adds then removes leave an empty cart", app: app)
+        app.navigationBars.buttons.firstMatch.tap()
+        for name in names {
+            reveal(row(name), in: app)
+            XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", name)).count, 1, "\(name) back once")
+        }
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        XCTAssertTrue(cart.waitForExistence(timeout: 5))
+        XCTAssertTrue(cart.label.contains("0 items"), cart.label)
+    }
+
     func testDurableCardAddDismissesAndQuantitySurvivesRelaunch() {
         let app = launchDurableFixture("ready")
         selectMarketIfNeeded(app)

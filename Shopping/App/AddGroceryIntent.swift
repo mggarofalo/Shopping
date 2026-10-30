@@ -22,17 +22,33 @@ struct AddGroceryIntent: ForegroundContinuableIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        SiriActionLog.started("Prompted add")
+        do {
+            return try await .result(dialog: add())
+        } catch {
+            SiriActionLog.failed("Prompted add", error)
+            throw error
+        }
+    }
+
+    @MainActor
+    private func add() async throws -> IntentDialog {
         let runtime = ShoppingApplicationRuntime.shared
         let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
         let spoken: String?
         if catalogItem != nil || name != nil { spoken = name }
         else { spoken = try await $name.requestValue("What would you like to add?") }
         let dialogue = try await CatalogAddDialogue(context: context, name: spoken, entityID: catalogItem?.id)
+        if let need = dialogue.existingOneTime {
+            SiriActionLog.finished("Prompted add", "existing one-time need")
+            return "\(need.title) is already on your grocery list."
+        }
         if dialogue.candidates.isEmpty {
             try await requestToContinueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?") {
                 try dialogue.createInApp()
             }
-            return .result(dialog: "Review \(dialogue.name) in the app, then save and add it.")
+            SiriActionLog.finished("Prompted add", "handed off to the editor")
+            return "Review \(dialogue.name) in the app, then save and add it."
         }
         let selectedID: String
         if dialogue.candidates.count == 1 {
@@ -45,10 +61,10 @@ struct AddGroceryIntent: ForegroundContinuableIntent {
                 among: choices, dialog: "Which catalog item do you mean?").id
         }
         let (item, _, added) = try await dialogue.add(entityID: selectedID)
-        let dialog: IntentDialog = added
+        SiriActionLog.finished("Prompted add", added ? "added" : "existing catalog need")
+        return added
             ? "Added \(item.name) to your grocery list."
             : "\(item.name) is already on your grocery list."
-        return .result(dialog: dialog)
     }
 }
 

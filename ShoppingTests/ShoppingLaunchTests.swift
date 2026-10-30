@@ -28,6 +28,34 @@ final class ShoppingLaunchTests: XCTestCase {
         ), "Version accessibility label: \(version.label)")
     }
 
+    func testSlowedLoadShowsLoadingInsteadOfEmptyStates() {
+        let app = XCUIApplication()
+        app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShoppingUITest-\(UUID().uuidString).sqlite").path
+        app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+        app.launchEnvironment["SHOPPING_UI_TEST_PROJECTION_DELAY_MS"] = "2000"
+        app.launch()
+        let groceryEmptyCopy = ["shopping.emptyState", "Your grocery list", "No matching groceries"]
+        let groceryLoading = app.descendants(matching: .any)["shopping.groceries.loading"]
+        XCTAssertTrue(groceryLoading.existsOrAppears(timeout: 5))
+        for copy in groceryEmptyCopy { XCTAssertFalse(app.descendants(matching: .any)[copy].exists, copy) }
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.grocery.row.")).firstMatch
+        XCTAssertTrue(row.existsOrAppears(timeout: 10))
+        XCTAssertFalse(groceryLoading.exists)
+        for copy in groceryEmptyCopy { XCTAssertFalse(app.descendants(matching: .any)[copy].exists, copy) }
+
+        app.tabBars.buttons["Catalog"].tap()
+        let catalogLoading = app.descendants(matching: .any)["shopping.catalog.loading"]
+        XCTAssertTrue(catalogLoading.existsOrAppears(timeout: 3))
+        XCTAssertFalse(app.staticTexts["No remembered items"].exists)
+        let item = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "shopping.catalog.item.")).firstMatch
+        XCTAssertTrue(item.existsOrAppears(timeout: 10))
+        XCTAssertFalse(catalogLoading.exists)
+        XCTAssertFalse(app.staticTexts["No remembered items"].exists)
+    }
+
     func testCategorySuggestionIsVisibleInCatalogAndGroceryEditors() {
         let app = launchApp()
 

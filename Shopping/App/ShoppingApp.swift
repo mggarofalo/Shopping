@@ -49,6 +49,7 @@ struct ShoppingApp: App {
     @AppStorage("shopping.appearance") private var appearance = AppearancePreference.system.rawValue
 
     init() {
+        ShoppingPerformanceTrace.launchEvent("App init")
         let bootstrap = ShoppingApplicationRuntime.shared.bootstrap
         _bootstrap = StateObject(wrappedValue: bootstrap)
         shortcutsRegistration = ShoppingShortcutsRegistration()

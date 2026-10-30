@@ -38,7 +38,8 @@ struct GroceryNeedRow: View {
                     if hasSupportingDetails || need.quantity != nil {
                         HStack(alignment: .top, spacing: 8) {
                             supportingDetailsControl
-                            quantityControl
+                            // This row already has its own line, so the hit region stays inside it.
+                            quantityControl.frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         }
                         .padding(.bottom, ShoppingListMetrics.itemTextVerticalPadding)
                     }
@@ -131,21 +132,24 @@ struct GroceryNeedRow: View {
     private var quantityControl: some View {
         if let quantity = need.quantity {
             if let onQuantityChange {
-                Button {
-                    quantityPresentation = QuantityPresentation(quantity: need.quantity, revision: need.revision)
-                } label: {
-                    Text("\(quantity)×")
-                        .font(.subheadline.weight(.medium))
-                        .monospacedDigit()
-                    .fixedSize()
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+                // The 44-point hit region reaches into the row padding instead of growing the row.
+                ShoppingRowAccessoryLayout {
+                    Button {
+                        quantityPresentation = QuantityPresentation(quantity: need.quantity, revision: need.revision)
+                    } label: {
+                        Text("\(quantity)×")
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+                            .fixedSize()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!quantityActionAvailable)
+                    .accessibilityLabel("Edit quantity for \(title)")
+                    .accessibilityValue("\(quantity)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.edit.\(need.id.uuidString)")
                 }
-                .buttonStyle(.borderless)
-                .disabled(!quantityActionAvailable)
-                .accessibilityLabel("Edit quantity for \(title)")
-                .accessibilityValue("\(quantity)")
-                .accessibilityIdentifier("shopping.checklist.quantity.edit.\(need.id.uuidString)")
                 .sheet(item: $quantityPresentation) { presentation in
                     ShoppingQuantityEditor(itemName: title, quantity: presentation.quantity,
                                            actionAvailable: quantityActionAvailable,

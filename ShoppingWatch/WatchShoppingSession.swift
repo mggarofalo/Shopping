@@ -7,6 +7,8 @@ final class WatchShoppingSession {
     private var savedSnapshot = WatchShoppingSnapshot()
     private var pending: [WatchCartIntent] = []
     private var uncertain: [WatchCartIntent] = []
+    // Tokens this session's own receipts superseded, keyed by the token each command carried.
+    private var acknowledgedSuccessors: [String: String] = [:]
     private struct QuantityDraft { let quantity: Int? }
     private var failedAddDrafts: [String: QuantityDraft] = [:]
     private struct CanceledEditNotice {
@@ -164,6 +166,22 @@ final class WatchShoppingSession {
         return submit(.add(token: current.commandToken, quantity: quantity))
     }
 
+    // A row rendered before its add's receipt carries the add token, which names no
+    // membership. Keyed by occurrence, membership edits resolve it through this session's
+    // own receipts only; the service still rejects a membership another device changed.
+    @discardableResult
+    func remove(_ row: WatchShoppingItem) -> Bool {
+        // A row already removed, pending or saved, makes a repeat tap a no-op.
+        guard let current = snapshot.item(id: row.occurrenceID), current.isInOwnCart, current.canRemove else { return false }
+        return enqueue(.remove(token: row.commandToken), row: current) != nil
+    }
+
+    @discardableResult
+    func setQuantity(_ row: WatchShoppingItem, quantity: Int?) -> Bool {
+        guard let current = snapshot.item(id: row.occurrenceID), current.isInOwnCart, current.canChangeQuantity else { return false }
+        return enqueue(.setQuantity(token: row.commandToken, quantity: quantity), row: current) != nil
+    }
+
     @discardableResult
     func perform(_ command: WatchShoppingCommand) async -> Bool {
         if case .buyAnyway = command {
@@ -175,12 +193,14 @@ final class WatchShoppingSession {
         return await withCheckedContinuation { completions[id] = $0 }
     }
 
-    private func enqueue(_ command: WatchShoppingCommand) -> UUID? {
+    private func enqueue(_ command: WatchShoppingCommand, row: WatchShoppingItem? = nil) -> UUID? {
         guard !isBusy else {
             errorMessage = "Another cart action is still finishing. Try again when it completes."
             return nil
         }
-        let intent = WatchCartIntent(command: command, snapshot: snapshot, generation: authorityGeneration)
+        // An Add token names no membership, so only membership edits follow receipts.
+        let command = command.isAdd ? command : command.replacingToken(acknowledgedToken(command.token))
+        let intent = WatchCartIntent(command: command, snapshot: snapshot, generation: authorityGeneration, row: row)
         let duplicate: Bool
         if case .setQuantity = command {
             // A reversal (2 → 3 → 2) is a new intent even while the first 2 is
@@ -238,9 +258,11 @@ final class WatchShoppingSession {
                 case .item(let occurrenceID, let item, let mayRebase):
                     if occurrenceID == intent.occurrenceID {
                         savedSnapshot.replaceCartItem(occurrenceID: occurrenceID, item: item, section: intent.section)
-                        if mayRebase, item != nil {
+                        if mayRebase, let item, item.commandToken != intent.command.token {
+                            acknowledgedSuccessors[intent.command.token] = item.commandToken
                             rebaseFollowing(intent, item: item)
                         } else {
+                            retireAcknowledgedChain(endingAt: intent.command.token)
                             cancelDescendants(of: intent)
                         }
                     }
@@ -252,6 +274,7 @@ final class WatchShoppingSession {
                 guard intent.generation == authorityGeneration,
                       pending.first?.id == intent.id else { continue }
                 pending.removeFirst()
+                retireAcknowledgedChain(endingAt: intent.command.token)
                 // Do not dispatch descendants through an uncertain causal token.
                 let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
                 pending.removeAll { $0.occurrenceID == intent.occurrenceID }
@@ -297,6 +320,17 @@ final class WatchShoppingSession {
         }
     }
 
+    private func acknowledgedToken(_ token: String) -> String {
+        var token = token
+        while let next = acknowledgedSuccessors[token] { token = next }
+        return token
+    }
+
+    // A spent or uncertain token must not be reused: its operation ID would replay.
+    private func retireAcknowledgedChain(endingAt token: String) {
+        acknowledgedSuccessors = acknowledgedSuccessors.filter { acknowledgedToken($0.value) != token }
+    }
+
     private func cancelDescendants(of intent: WatchCartIntent) {
         let descendants = pending.filter { $0.occurrenceID == intent.occurrenceID }
         pending.removeAll { $0.occurrenceID == intent.occurrenceID }
@@ -318,6 +352,7 @@ final class WatchShoppingSession {
         pending.removeAll()
         uncertain.removeAll()
         failedAddDrafts.removeAll()
+        acknowledgedSuccessors.removeAll()
         canceledEditNotice = nil
         let waiting = completions.values
         completions.removeAll()
@@ -398,6 +433,7 @@ final class WatchShoppingSession {
                 errorMessage = nil
             }
             canceledEditNotice = nil
+            acknowledgedSuccessors.removeAll()
         }
         if value.availability != .ready || value.authorityID != savedSnapshot.authorityID {
             sheet = nil
@@ -420,13 +456,16 @@ private struct WatchCartIntent {
     let section: WatchItemSection?
     var item: WatchShoppingItem?
 
-    init(command: WatchShoppingCommand, snapshot: WatchShoppingSnapshot, generation: Int) {
+    init(command: WatchShoppingCommand, snapshot: WatchShoppingSnapshot, generation: Int, row: WatchShoppingItem? = nil) {
         self.command = command
         self.generation = generation
         authorityID = snapshot.authorityID
         storeID = snapshot.selectedStoreID
-        section = (snapshot.cartSections + snapshot.grocerySections).first { $0.items.contains { $0.commandToken == command.token } }
-        item = section?.items.first { $0.commandToken == command.token }
+        let rowMatches: (WatchShoppingItem) -> Bool = { candidate in
+            row.map { candidate.occurrenceID == $0.occurrenceID } ?? (candidate.commandToken == command.token)
+        }
+        section = (snapshot.cartSections + snapshot.grocerySections).first { $0.items.contains(where: rowMatches) }
+        item = section?.items.first(where: rowMatches)
         occurrenceID = item?.occurrenceID ?? command.token
     }
 
@@ -501,6 +540,10 @@ private extension WatchShoppingSnapshot {
 }
 
 private extension WatchShoppingCommand {
+    var isAdd: Bool {
+        guard case .add = self else { return false }
+        return true
+    }
     var token: String {
         switch self {
         case .add(let token, _), .remove(let token), .setQuantity(let token, _), .buyAnyway(let token): token

@@ -60,6 +60,19 @@ struct SpokenGrocerySchemaTests {
         #expect(try await context.items().isEmpty)
     }
 
+    @Test func spokenOneTimeNameAlreadyOnListResolvesToThatNeed() async throws {
+        guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
+        let (environment, context) = try await fixture()
+        let needID = try environment.service.addOneTimeNeed(title: "Shaving cream", listID: context.listID)
+        let intent = AddSpokenGroceryIntent(); intent.title = "shaving cream"
+        let dialogue = try await intent.prepare(context: context)
+        let need = try #require(dialogue.existingOneTime)
+        let entity = GroceryReminderEntity(snapshot: need, context: context)
+        #expect(entity.id == context.entityID(for: needID))
+        #expect(entity.title == "Shaving cream")
+        #expect(context.runtime.actions.pending == nil)
+    }
+
     @Test func explicitlySelectedOtherListIsRejectedWithoutCatalogMutation() async throws {
         guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
         let (environment, context) = try await fixture()

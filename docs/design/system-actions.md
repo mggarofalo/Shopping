@@ -22,6 +22,10 @@ The Add operation accepts a free-text item prompt so unknown names can reach an 
 creation handoff. Required catalog entity resolution must not swallow that path.
 Exact normalized matches outrank substring matches. Ambiguous results need a
 choice; no result offers a prefilled editor after native foreground continuation.
+A one-time need already on the list whose name matches exactly (after the same
+folding) is reported as “already on your grocery list” instead of offering a new
+catalog item, unless a catalog item has that exact name. Substring matches never
+select a one-time need, and the lookup never makes one-time needs suggestions.
 Only an explicit save creates catalog data. If a subsequent list add fails, the
 saved catalog item is retained and the partial result is explained. Existing
 needs, including carted ones, are reported without silently renewing or editing
@@ -38,7 +42,7 @@ and [ForegroundContinuableIntent](https://developer.apple.com/documentation/appi
 Existing actions retain iOS 17 compatibility. The modern Siri schema requires iOS 27 and Xcode 27; older compilers exclude that adapter. Release metadata checks fail if it is omitted.
 
 The two App Shortcuts use static app-qualified phrases, such as “Add an item in
-Milk and Bananas”. There are no catalog-item phrase templates or catalog
+Milk and Bananas” and “Add to my shopping list in Milk and Bananas”. There are no catalog-item phrase templates or catalog
 suggestions exported during registration. App Shortcut phrases cannot interpolate
 an unrestricted String parameter. The older Add action prompts for a name;
 saved shortcuts can still supply text or a remembered catalog entity. Matching folds case, diacritics,
@@ -119,6 +123,37 @@ The app's spoken name is
 Milk and Bananas. These make invocation discoverable but are not evidence that
 Siri recognized a physical user's voice. Apple documents entity phrase parameters
 and refresh requirements in [Dive into App Shortcuts](https://developer.apple.com/videos/play/wwdc2023/10102/).
+
+## Choosing between Reminders and this app (SHOPPING-266)
+
+Any app that adopts the Reminders schema can receive an unqualified request such
+as “Add milk to my shopping list”. Apple documents that the same phrases work in
+every adopting app and that the system identifies the app, but not how it chooses,
+whether it remembers a choice, or when it asks. That choice, speech recognition,
+and whether Apple Intelligence or legacy SiriKit handles the request belong to iOS.
+Developer-forum reports describe the chooser appearing even when the app is named,
+and schema routing only on devices with Apple Intelligence enabled.
+
+The app controls three things:
+
+- App Shortcut phrases always name the app, so they route here without a chooser.
+  The Add shortcut covers both “grocery list” and “shopping list” wording; the
+  metadata guard rejects a phrase without the app name and a missing wording.
+  Phrases cannot carry a free-form item name (WWDC23 “Dive into App Shortcuts”),
+  so these phrases ask for the name.
+- The list query accepts the app name, so “Add bread to Milk and Bananas” resolves
+  the list once Siri has chosen this app.
+- Donating `createReminder` after in-app adds is Apple's only documented cue for
+  learning the preferred app (WWDC26 session 343). It would put grocery names in
+  the system's on-device donation store and reverses the “no persistent donation”
+  choice above, so it is not adopted without a product decision.
+
+`CFBundleSpokenName`, parameter summaries, `supportedModes` and entity synonyms
+have no documented effect on app choice.
+
+Both Add actions log start, outcome and error type, without grocery text, in the
+`com.mggarofalo.shopping` subsystem's `Siri` category at notice level, which
+sysdiagnose archives keep. A request with no “started” line never reached the app.
 
 ## Validation evidence
 

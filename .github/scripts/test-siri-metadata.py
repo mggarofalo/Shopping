@@ -25,8 +25,11 @@ class SiriMetadataTests(unittest.TestCase):
             'parameters': [{'name': 'title', 'valueType': {'primitive': {'wrapper': {'typeIdentifier': 0}}}}],
         }
         self.metadata = {'actions': {'AddSpokenGroceryIntent': self.action}, 'autoShortcuts': [
-            {'actionIdentifier': name, 'phraseTemplates': [{'key': 'Add in ${applicationName}'}]}
-            for name in ('AddGroceryIntent', 'SearchCatalogIntent')
+            {'actionIdentifier': 'AddGroceryIntent', 'phraseTemplates': [
+                {'key': 'Add to my grocery list in ${applicationName}'},
+                {'key': 'Add to my shopping list in ${applicationName}'},
+            ]},
+            {'actionIdentifier': 'SearchCatalogIntent', 'phraseTemplates': [{'key': 'Search in ${applicationName}'}]},
         ]}
         self.info = {'INAlternativeAppNames': [{'INAlternativeAppName': 'Milk and Bananas'}]}
 
@@ -61,6 +64,16 @@ class SiriMetadataTests(unittest.TestCase):
     def test_catalog_phrase_fails(self):
         self.metadata['autoShortcuts'][0]['phraseTemplates'][0]['key'] = 'Add ${catalogItem} in ${applicationName}'
         with self.assertRaisesRegex(ValueError, 'enumerate catalog'):
+            self.validate()
+
+    def test_phrase_without_app_name_fails(self):
+        self.metadata['autoShortcuts'][1]['phraseTemplates'][0]['key'] = 'Search my catalog'
+        with self.assertRaisesRegex(ValueError, 'name the app'):
+            self.validate()
+
+    def test_missing_shopping_list_phrase_fails(self):
+        self.metadata['autoShortcuts'][0]['phraseTemplates'].pop()
+        with self.assertRaisesRegex(ValueError, 'shopping list'):
             self.validate()
 
     def test_extra_shortcut_fails(self):

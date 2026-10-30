@@ -96,8 +96,7 @@ struct CartedGroceriesView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(.custom(8))
+        .shoppingItemList()
                 .contentMargins(.top, 0, for: .scrollContent)
         .navigationTitle("In cart")
         .navigationBarTitleDisplayMode(.inline)

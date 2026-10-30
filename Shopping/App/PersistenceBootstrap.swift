@@ -1040,6 +1040,7 @@ final class PersistenceBootstrap: ObservableObject {
 
     func start() {
         guard case .loading = state, transition == nil, !restoringLocalRoute else { return }
+        ShoppingPerformanceTrace.launchEvent("Bootstrap start")
         if !personalMode, defaults.bool(forKey: Self.retainedLocalKey), deviceLocalHome == nil {
             restoringLocalRoute = true
             let requestedGeneration = generation
@@ -2130,6 +2131,7 @@ final class PersistenceBootstrap: ObservableObject {
                 }
                 // The system-action readiness deadline bounds this open.
                 let prepared = try await BlockingStoreWork.run {
+                    ShoppingPerformanceTrace.launchEvent("Store open begin")
                     let resolved = try personalConfiguration ?? configuration()
                     let persistence = try PersistenceController(configuration: resolved)
                     let service = NeedService(persistence: persistence)
@@ -2155,6 +2157,7 @@ final class PersistenceBootstrap: ObservableObject {
                         service: service, selection: selection, personalCartService: cartService,
                         resumeError: resumeError, homeDiscovery: discovery)
                 }
+                ShoppingPerformanceTrace.launchEvent("Store open end")
                 guard generation == requestedGeneration else { return }
                 if personalMode, try accountProvider?.currentSession() != session {
                     throw ShopperSessionError.accountChanged
@@ -2270,6 +2273,7 @@ final class PersistenceBootstrap: ObservableObject {
                 && selection == nil && localDiscoveryComplete && prepared != nil
                 && persistence.primaryStore?.type == NSSQLiteStoreType
             isResolvingFirstAccount = resolveFirstAccount
+            ShoppingPerformanceTrace.launchEvent("Bootstrap ready", "personal=\(personalService != nil)")
             state = .ready(ReadyState(
                 persistence: persistence,
                 service: service,
@@ -2350,6 +2354,7 @@ final class PersistenceBootstrap: ObservableObject {
         Task {
             do {
                 let imported = try await historyConsumer.consumeSummary()
+                ShoppingPerformanceTrace.launchEvent("History consumed")
                 guard generation == requestedGeneration else { return }
                 if case .ready(let ready) = state {
                     ready.persistence.homeNativeAccess.applyImportedHistory(imported)

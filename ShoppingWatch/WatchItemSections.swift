@@ -22,7 +22,7 @@ struct WatchItemSections: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if item.isInOwnCart && item.canRemove {
                             Button("Remove", systemImage: "cart.badge.minus") {
-                                session.submit(.remove(token: item.commandToken))
+                                session.remove(item)
                             }
                             .tint(.orange)
                             .disabled(session.isBusy)
@@ -37,7 +37,7 @@ struct WatchItemSections: View {
                     .accessibilityActions {
                         if item.isInOwnCart && item.canRemove {
                             Button("Remove from your cart") {
-                                session.submit(.remove(token: item.commandToken))
+                                session.remove(item)
                             }
                         } else if !item.isInOwnCart && item.canAdd {
                             Button("Add to your cart") {

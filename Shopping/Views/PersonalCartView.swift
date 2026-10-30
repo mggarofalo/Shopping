@@ -95,8 +95,7 @@ struct PersonalCartView: View {
                 .accessibilityAction(named: "Remove from cart") { remove(entry) }
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(.custom(8))
+        .shoppingItemList()
         .navigationTitle("My cart")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {

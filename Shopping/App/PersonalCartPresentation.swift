@@ -27,6 +27,8 @@ final class PersonalCartPresentation {
     private(set) var recovery: PersonalCartRecoverySnapshot?
     var pendingLegacyReview: [LegacyCartReviewSnapshot] { recovery?.pendingLegacyReview ?? [] }
     private(set) var error: String?
+    /// False until a complete snapshot is read. Until then, empty sets mean "unknown", not "empty".
+    private(set) var hasLoadedSnapshot = false
     private var pendingCartState: [UUID: Bool] = [:]
     private var pendingQuantityIDs: Set<UUID> = []
     private var inFlightNeedIDs: Set<UUID> = []
@@ -63,12 +65,14 @@ final class PersonalCartPresentation {
                 }
                 switch result {
                 case .success(let snapshot):
+                    ShoppingPerformanceTrace.launchEvent("Cart snapshot published", "outstanding=\(snapshot.outstandingNeedIDs.count)")
                     entries = snapshot.entries
                     history = snapshot.history
                     recovery = snapshot.recovery
                     outstandingNeedIDs = snapshot.outstandingNeedIDs
                     presence = snapshot.presence
                     error = snapshot.householdError
+                    if snapshot.householdError == nil { hasLoadedSnapshot = true }
                     pendingCartState = pendingCartState.filter { inFlightNeedIDs.contains($0.key) }
                     pendingQuantityIDs.formIntersection(inFlightQuantityIDs)
                 case .failure(let failure):

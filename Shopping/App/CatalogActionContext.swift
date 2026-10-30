@@ -100,6 +100,11 @@ struct CatalogActionContext {
         return try await onStore { try $0.groceryActionNeeds(ids: ids, householdID: householdID, listID: listID) }
     }
 
+    func oneTimeNeeds() async throws -> [GroceryActionNeed] {
+        let householdID = householdID, listID = listID
+        return try await onStore { try $0.oneTimeGroceryActionNeeds(householdID: householdID, listID: listID) }
+    }
+
     /// Persistence errors have no spoken text; report them as a user-facing failure.
     private func onStore<Value: Sendable>(
         _ work: @escaping @Sendable (NeedService) throws -> Value
