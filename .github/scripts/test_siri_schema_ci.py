@@ -14,6 +14,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location("siri_ci", Path(__file__).with_name("siri-schema-ci.py"))
 siri = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(siri)
+REAL_PREPARE = siri.prepare_device
 DEVICE = "C173A9C4-C7AD-42FE-9B90-932ACB424D13"
 
 
@@ -23,7 +24,172 @@ def inventory():
     return {"testNodes": [{"nodeType": "Test Case", "nodeIdentifier": name, "result": "Passed"} for name in names]}
 
 
+def ps_listing(cpu, device=DEVICE):
+    """Two devices' launchd_sim trees plus an unrelated host process, with the owned tree's CPU split."""
+    return "\n".join([
+        f"  100     1   {cpu / 2 // 60:.0f}:{cpu / 2 % 60:05.2f} /sbin/launchd_sim /Devices/{device}/data/var/run/launchd_bootstrap.plist",
+        f"  101   100   0:{cpu / 2:05.2f} /System/Library/CoreServices/SpringBoard.app/SpringBoard",
+        "  102   101   1:00:00.00 /usr/libexec/nested child with spaces",
+        "  200     1   9:00.00 /sbin/launchd_sim /Devices/OTHER-DEVICE/data/var/run/launchd_bootstrap.plist",
+        "  201   200   9:00.00 /usr/libexec/other-device-daemon",
+        "  300     1   99:00.00 /Applications/Xcode.app/Contents/MacOS/xcodebuild",
+    ]) + "\n"
+
+
 class SiriSchemaCITests(unittest.TestCase):
+    def setUp(self):
+        # Phase sequencing tests stub device readiness; its own contracts call the real function.
+        patcher = patch.object(siri, "prepare_device", return_value=0)
+        self.prepare_device = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def settle_with(self, cpu_by_sample, budget=siri.READINESS_BUDGET_SECONDS, signals=()):
+        """Run the real settle loop over scripted ps samples taken five seconds apart."""
+        clock = [0.0]
+        texts = iter(cpu_by_sample)
+        class Listing:
+            def __init__(self, output):
+                self.output = output
+            def run(self, name, command, timeout=20, *, supervised=False):
+                self.current = next(texts)
+                if len(signals) > self.samples and signals[self.samples]:
+                    os.kill(os.getpid(), signals[self.samples])
+                self.samples += 1
+                return 1 if self.current is None else 0
+            def text(self, name):
+                return self.current
+        Listing.samples = 0
+        def wait(seconds):
+            clock[0] += seconds
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        output = Path(directory.name)
+        handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        code = siri.settle_device(Listing(output), DEVICE, "Native", budget, clock=lambda: clock[0], wait=wait)
+        self.assertEqual({sig: signal.getsignal(sig) for sig in handlers}, handlers)
+        return code, json.loads((output / "NativeSettle.json").read_text())
+
+    def test_device_cpu_counts_only_the_owned_launchd_sim_tree(self):
+        seconds = siri.device_cpu_seconds(ps_listing(130.0), DEVICE)
+        self.assertEqual(set(seconds), {100, 101, 102})
+        self.assertEqual(seconds[100], 65.0)
+        self.assertEqual(seconds[102], 3600.0)
+        self.assertEqual(siri.device_cpu_seconds(ps_listing(1.0), "ABSENT"), {})
+
+    def test_settle_requires_consecutive_quiet_intervals_after_post_boot_work(self):
+        # Busy (8 cores), quiet, busy again, quiet at the threshold, just over it, then three quiet intervals.
+        cumulative = [0, 40, 41, 81, 86, 91.5, 92.5, 93.5, 94.5]
+        code, record = self.settle_with([ps_listing(cpu) for cpu in cumulative])
+        self.assertEqual(code, 0)
+        self.assertEqual([sample["cores"] for sample in record["samples"]], [8.0, 0.2, 8.0, 1.0, 1.1, 0.2, 0.2, 0.2])
+        self.assertEqual(record["exit_code"], 0)
+        self.assertEqual(record["quiet_cores"], 1.0)
+
+    def test_settle_failed_listing_resets_quiet_run_and_bound_fails_closed(self):
+        code, record = self.settle_with([ps_listing(0), ps_listing(0.1), None, ps_listing(0.2),
+                                         ps_listing(0.3), ps_listing(0.4), ps_listing(0.5)])
+        self.assertEqual(code, 0)
+        self.assertEqual(record["samples"][1], {"elapsed": 10.0, "ps_exit_code": 1})
+        # Without the reset the third quiet interval would end the wait at 25 s.
+        self.assertEqual(len(record["samples"]), 5)
+        self.assertEqual(record["samples"][-1]["elapsed"], 30.0)
+        busy = [ps_listing(8.0 * n) for n in range(30)]
+        code, record = self.settle_with(busy, budget=100)
+        self.assertEqual(code, 124)
+        self.assertTrue(record["timed_out"])
+        self.assertEqual(record["wall_seconds"], 100)
+        self.assertEqual(record["budget_remaining_seconds"], 100)
+
+    def test_settle_counts_a_reused_pid_as_a_new_process(self):
+        reused = ps_listing(100.0).replace("  101   100   0:50.00", "  101   100   0:40.00")
+        self.assertNotEqual(reused, ps_listing(100.0))
+        code, record = self.settle_with([ps_listing(100.0)] + [reused] * 4)
+        self.assertEqual(code, 0)
+        self.assertEqual([sample["cores"] for sample in record["samples"]], [8.0, 0.0, 0.0, 0.0])
+
+    def test_settle_cancellation_returns_signal_status_and_keeps_evidence(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signum=signum):
+                code, record = self.settle_with([ps_listing(0), ps_listing(40)], signals=(0, signum))
+                self.assertEqual(code, 128 + signum)
+                self.assertEqual(record["signal"], signum)
+
+    def test_unparsable_cpu_time_is_skipped_not_fatal(self):
+        text = ps_listing(10.0) + "  400   100   ??:?? /usr/libexec/odd\n"
+        self.assertNotIn(400, siri.device_cpu_seconds(text, DEVICE))
+
+    def test_settle_rejects_a_missing_device_tree(self):
+        code, record = self.settle_with([ps_listing(0, device="OTHER")])
+        self.assertEqual(code, 1)
+        self.assertIn("launchd_sim", record["error"])
+
+    def test_prepare_device_boots_if_needed_before_settling(self):
+        calls = []
+        class Recorder:
+            def run(self, name, command, timeout=20, *, supervised=False):
+                calls.append((name, command, timeout, supervised))
+                return self.code
+        for code in (0, 1, 124, 130, 143):
+            calls.clear()
+            recorder = Recorder()
+            recorder.code = code
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            recorder.output = Path(directory.name)
+            with self.subTest(code=code), patch.object(siri, "settle_device", return_value=0) as settle:
+                deadline = time.monotonic() + 1000
+                self.assertEqual(REAL_PREPARE(recorder, DEVICE, "Hosted", deadline), code)
+                self.assertEqual(calls, [("HostedBootStatus", ["xcrun", "simctl", "bootstatus", DEVICE, "-b"], 300, True)])
+                self.assertEqual(settle.call_count, 0 if code else 1)
+        # bootstatus never outlasts the shared budget, and a spent budget starts nothing.
+        calls.clear()
+        recorder.code = 0
+        with patch.object(siri, "settle_device", return_value=0):
+            REAL_PREPARE(recorder, DEVICE, "Native", time.monotonic() + 30)
+            self.assertLessEqual(calls[0][2], 30)
+            calls.clear()
+            self.assertEqual(REAL_PREPARE(recorder, DEVICE, "Native", time.monotonic() - 1), 124)
+            self.assertEqual(calls, [])
+            self.assertIn("budget", json.loads((recorder.output / "NativeSettle.json").read_text())["error"])
+
+    def test_each_test_phase_waits_for_a_ready_device_and_failure_stops_before_testing(self):
+        for failing, code in [(None, 0), ("Hosted", 124), ("Native", 1), ("Native", 143)]:
+            with self.subTest(failing=failing, code=code), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                fake, calls = self.fake_commands(output)
+                order = []
+                budgets = []
+                clock = [1000.0]
+                def ready(commands, device, phase, deadline):
+                    self.assertEqual(device, DEVICE)
+                    budgets.append(deadline - clock[0])
+                    clock[0] += 100  # readiness wait
+                    self.assertEqual([name for name, _ in calls], ["Create"] + (["HostedInventory"] if phase == "Native" else []))
+                    order.append(f"ready:{phase}")
+                    return code if phase == failing else 0
+                def test(command, log, sample=None):
+                    order.append(f"test:{command[1]}")
+                    clock[0] += 300  # build or test time is not readiness time
+                    return 0
+                self.prepare_device.side_effect = ready
+                with patch.object(siri, "Commands", fake), patch.object(siri, "execute_test", side_effect=test), \
+                        patch.object(siri, "prepare_runtime", return_value=0), \
+                        patch.object(siri.time, "monotonic", lambda: clock[0]):
+                    self.assertEqual(siri.run_tests(output), code)
+                expected = ["test:build-for-testing", "ready:Hosted", "test:test-without-building",
+                            "ready:Native", "test:test-without-building"]
+                stop = {None: 5, "Hosted": 2, "Native": 4}[failing]
+                self.assertEqual(order, expected[:stop])
+                verdict = json.loads((output / "SiriRegistration/Verdict.json").read_text())
+                # Only readiness waits spend the shared budget; the 300 s hosted test does not.
+                budget = siri.READINESS_BUDGET_SECONDS
+                self.assertEqual(budgets, [budget, budget - 100][:len(budgets)])
+                self.assertEqual(verdict.get("device_ready_exit_code"), code or None)
+                readiness = [phase.get("device_ready_exit_code") for phase in verdict["phases"]]
+                self.assertEqual(readiness, {None: [None, 0, 0], "Hosted": [None, 124], "Native": [None, 0, code]}[failing])
+                # A device that never became ready never starts that phase's test command.
+                self.assertNotIn("started_at", verdict["phases"][-1] if failing else {})
+
     def test_required_sampling_and_diagnostic_checks_remain_separate(self):
         workflow = json.loads(subprocess.check_output([
             "ruby", "-rjson", "-ryaml", "-e",
@@ -50,6 +216,41 @@ class SiriSchemaCITests(unittest.TestCase):
         archive = next(i for i, step in enumerate(release_steps)
                        if "xcodebuild archive" in step.get("run", ""))
         self.assertLess(validation, archive)
+
+    def test_readiness_budget_covers_the_slowest_measured_phases_inside_the_job(self):
+        # The slowest measured boot (98.6 s, 40989182159), hosted settle and native
+        # settle must together fit the shared budget. 40989182159's device ran at
+        # about 2 cores until its 660 s budget ended at 562 s, at the end of the
+        # launch sequence that settled faster runners after 1/1.35 of the CPU time,
+        # so its work ends near 1.35 x 428 s. After the hosted tests on 40992872404,
+        # the device ran at 1.2-2.1 cores, mostly apsd and diagnosticd, for 131 s.
+        boot, budget = 98.6, siri.READINESS_BUDGET_SECONDS
+        def trace(busy_until, busy_cores):
+            cpu, samples = 0.0, [ps_listing(0.0)]
+            for elapsed in range(5, busy_until + 30, 5):
+                cpu += 5 * (busy_cores if elapsed <= busy_until else 0.5)
+                samples.append(ps_listing(cpu))
+            return samples
+        code, hosted = self.settle_with(trace(round(1.35 * 428), 2.0), budget=budget - boot)
+        self.assertEqual(code, 0, hosted["samples"][-4:])
+        self.assertGreater(hosted["wall_seconds"], 660 - boot)
+        code, native = self.settle_with(trace(131, 1.3), budget=budget - boot - hosted["wall_seconds"])
+        self.assertEqual(code, 0, native["samples"][-4:])
+        # A healthy runner already needed 790 s, so keep a quarter in reserve.
+        self.assertGreaterEqual(budget, 1.25 * (boot + hosted["wall_seconds"] + native["wall_seconds"]))
+        # The worst measured time before and after readiness must leave the whole
+        # budget inside each job that runs the suite: 520 s of contracts, archive
+        # and Siri build (40992872404), and 275 s of tests, capture and upload
+        # (1.4 x 40984757588).
+        workflow = json.loads(subprocess.check_output([
+            "ruby", "-rjson", "-ryaml", "-e",
+            "puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))",
+            str(Path(__file__).resolve().parents[1] / "workflows/swift-ci.yml")]))
+        suites = {name: job for name, job in workflow["jobs"].items()
+                  if any("siri-schema-ci.py test" in step.get("run", "") for step in job.get("steps", []))}
+        self.assertEqual(set(suites), {"release-build", "siri-launch-diagnostic"})
+        for name, job in suites.items():
+            self.assertGreaterEqual(job["timeout-minutes"] * 60, 520 + siri.READINESS_BUDGET_SECONDS + 275, name)
 
     def test_parent_exit_bounds_inherited_pipe_drain_and_cleans_group(self):
         with tempfile.TemporaryDirectory() as directory:

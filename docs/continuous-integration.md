@@ -268,6 +268,13 @@ Each native case waits for the system to register the reinstalled app's App
 Intents metadata before its first lookup. It waits at most 30 seconds in the
 "not present" state and fails clearly if the metadata never appears (SHOPPING-262; see
 [the Siri launch investigation](siri-ci-launch.md#app-intents-registration-after-install-shopping-262)).
+Before each hosted and native session the runner boots its owned simulator if
+needed and waits for the device's post-boot work to settle (three 5-second
+intervals at or below 1.0 core), so no XCTest launch budget overlaps that work.
+Readiness has one 1080-second budget and its own evidence, and fails closed. The
+release and Siri diagnostic jobs allow 35 minutes so that budget fits (SHOPPING-249; see
+[owned boot and settled device](siri-ci-launch.md#owned-boot-and-settled-device) and
+[the budget calibration](siri-ci-launch.md#readiness-budget-calibration-october-30)).
 
 The schema job retains installed Debug intent metadata and focused system
 registration logs with 20-second command bounds on simulator operations. Capture runs in a separate `always` step, leaving the preceding test/manifest
@@ -276,7 +283,7 @@ is disabled for this focused job; ordinary xcresult evidence and the exact
 25-case assertion remain required. This addresses diagnostic loss, not a test
 failure or a proof of metadata readiness.
 
-The combined archive-and-schema job has a 25-minute budget. The previous
+The combined archive-and-schema job has a 35-minute budget (25 minutes until SHOPPING-249 sized the readiness budget). The previous
 15-minute budget expired after an observed six-minute simulator startup, before
 the modern test ran (38316984917). This budget covers setup and artifact
 collection; no per-test timeout, assertion, selection or retry policy changes.

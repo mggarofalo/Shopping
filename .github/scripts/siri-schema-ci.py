@@ -17,6 +17,22 @@ import uuid
 
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
 RUNTIME_READINESS_TIMEOUT_SECONDS = 300
+# A booted iOS 27 device keeps running hundreds of CPU-seconds of post-boot work
+# after bootstatus reports Finished. Tests start only once that work has stopped.
+# On the 3-core hosted runner that work held the device at 1.3-3 cores, then fell
+# to 0.35-0.75; 1 core leaves two thirds of the host to Xcode and the test runner.
+# The work is the same launch sequence on every runner, so its length scales with
+# runner speed: readiness took 495-532 s on two runners, about 730 s on a 1.35x
+# slower one that exhausted a 660 s budget just before settling, and 790 s on one
+# whose apsd and diagnosticd held the device above 1 core for about 130 s after
+# the hosted tests. One 1080 s budget, 1.29x the slowest boot, hosted and native
+# settles combined, covers both test phases, so readiness still fails with its
+# own evidence inside the 35-minute job.
+BOOT_TIMEOUT_SECONDS = 300
+READINESS_BUDGET_SECONDS = 1080
+SETTLE_INTERVAL_SECONDS = 5
+SETTLE_QUIET_CORES = 1.0
+SETTLE_QUIET_SAMPLES = 3
 
 UI_TESTS = ["ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()",
             "ModernSiriActionTests/testUnknownSpokenNameHandsOffToEditorWithoutBlockingLaterRequests()"]
@@ -190,18 +206,123 @@ def export_inventory(commands, bundle, name, validate):
     return 0
 
 
+def device_cpu_seconds(text, device):
+    """Cumulative CPU seconds by PID for the device's launchd_sim and its descendants."""
+    rows = {}
+    for line in text.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) == 4 and fields[0].isdigit() and fields[1].isdigit():
+            seconds = 0.0
+            try:
+                for part in fields[2].split(":"):
+                    seconds = seconds * 60 + float(part)
+            except ValueError:
+                continue
+            rows[int(fields[0])] = (int(fields[1]), seconds, fields[3])
+    tree = {pid for pid, (_, _, args) in rows.items() if "launchd_sim" in args and device in args}
+    while True:
+        children = {pid for pid, (parent, _, _) in rows.items() if parent in tree} - tree
+        if not children:
+            return {pid: rows[pid][1] for pid in tree}
+        tree |= children
+
+
+def settle_device(commands, device, phase, deadline, clock=time.monotonic, wait=None):
+    """Wait until the device's own processes use at most SETTLE_QUIET_CORES for consecutive intervals."""
+    started = clock()
+    samples = []
+    record = {"quiet_cores": SETTLE_QUIET_CORES, "quiet_samples": SETTLE_QUIET_SAMPLES,
+              "interval_seconds": SETTLE_INTERVAL_SECONDS, "budget_remaining_seconds": round(deadline - started, 3),
+              "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "samples": samples}
+    previous, previous_at, quiet = None, None, 0
+    cancelled = threading.Event()
+    received = []
+
+    def cancel(signum, _frame):
+        received.append(signum)
+        cancelled.set()
+
+    # Like supervised commands, cancellation ends the wait with 128+signal and keeps the evidence.
+    handlers = {sig: signal.signal(sig, cancel) for sig in (signal.SIGINT, signal.SIGTERM)}
+    wait = wait or cancelled.wait
+    try:
+        while True:
+            # Unsupervised: the listing goes only to its log, not the streamed job output.
+            code = commands.run(f"{phase}SettleProcesses", ["ps", "-axo", "pid=,ppid=,time=,args="], timeout=30)
+            now = clock()
+            if received:
+                record.update(exit_code=128 + received[0], signal=received[0])
+                return 128 + received[0]
+            current = device_cpu_seconds(commands.text(f"{phase}SettleProcesses"), device) if code == 0 else None
+            if current == {}:
+                # bootstatus already succeeded, so a missing device tree is not a state to wait out.
+                record.update(exit_code=1, error="No launchd_sim process tree for the owned device")
+                return 1
+            if current is None:
+                samples.append({"elapsed": round(now - started, 3), "ps_exit_code": code})
+                quiet = 0
+            elif previous is not None:
+                # New processes count in full, as does a reused PID whose CPU time went down.
+                # Processes that exited between samples are not seen, so short bursts can be missed.
+                used = 0.0
+                for pid, seconds in current.items():
+                    before = previous.get(pid)
+                    used += seconds - before if before is not None and seconds >= before else seconds
+                cores = used / (now - previous_at)
+                samples.append({"elapsed": round(now - started, 3), "cores": round(cores, 3),
+                                "processes": len(current)})
+                quiet = quiet + 1 if cores <= SETTLE_QUIET_CORES else 0
+                if quiet >= SETTLE_QUIET_SAMPLES and not received:
+                    record["exit_code"] = 0
+                    return 0
+            if now >= deadline and not received:
+                record.update(exit_code=124, timed_out=True)
+                return 124
+            previous, previous_at = current, now
+            if not received:
+                wait(SETTLE_INTERVAL_SECONDS)
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+        record["wall_seconds"] = round(clock() - started, 6)
+        (commands.output / f"{phase}Settle.json").write_text(json.dumps(record, indent=2) + "\n")
+
+
+def prepare_device(commands, device, phase, deadline):
+    """Own boot and post-boot work so neither overlaps an XCTest launch window."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        (commands.output / f"{phase}Settle.json").write_text(json.dumps(
+            {"exit_code": 124, "timed_out": True, "error": "Readiness budget already spent"}, indent=2) + "\n")
+        return 124
+    # -b boots the device again if a previous xcodebuild session shut it down.
+    code = commands.run(f"{phase}BootStatus", ["xcrun", "simctl", "bootstatus", device, "-b"],
+                        timeout=min(BOOT_TIMEOUT_SECONDS, remaining), supervised=True)
+    return code or settle_device(commands, device, phase, deadline)
+
+
 def run_phases(device, output, commands, sampled):
     """Preserve the first failure and raw results even if export or merging fails."""
     verdict = {"phases": [], "test_exit_code": 0, "manifest_exit_code": 0}
+    readiness_left = READINESS_BUDGET_SECONDS
     try:
         for phase in ("Build", "Hosted", "Native"):
             command = phase_command(device, output, phase)
             log = output / "SiriSchema.log" if phase == "Native" else commands.output / f"{phase}.log"
             sample = (lambda pid: sample_launch(commands.output, device, pid)) if sampled and phase == "Native" else None
-            started = time.monotonic()
-            record = {"phase": phase, "command": command,
-                      "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            record = {"phase": phase, "command": command}
             verdict["phases"].append(record)
+            if phase != "Build":
+                # Only readiness waits spend the budget; build and test time do not.
+                waited = time.monotonic()
+                record["device_ready_exit_code"] = code = prepare_device(
+                    commands, device, phase, waited + readiness_left)
+                readiness_left -= time.monotonic() - waited
+                if code:
+                    verdict["device_ready_exit_code"] = code
+                    return code
+            started = time.monotonic()
+            record["started_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             code = execute_test(command, log, sample)
             record.update(exit_code=code, wall_seconds=round(time.monotonic() - started, 6))
             verdict["test_exit_code"] = code
@@ -396,7 +517,7 @@ def run_tests(output, sampled=False):
         return code
     device = str(uuid.UUID(commands.text("Create").strip())).upper()
     (output / "SiriSimulatorID").write_text(device + "\n")
-    # Cache preparation is complete; Xcode still owns simulator boot and app launch.
+    # The hosted phase's readiness boots the device after the build, so the two do not contend.
     return run_phases(device, output, commands, sampled)
 
 
