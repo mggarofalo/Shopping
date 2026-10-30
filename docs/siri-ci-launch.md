@@ -248,3 +248,142 @@ registered". The bound covers the not-present wait. A single lookup that never
 returns stays unbounded, as the existing lookups already were.
 When a wait occurred, the native log records its duration. Selection, assertions,
 action bounds and launch timeouts are unchanged, and nothing is retried.
+
+## Post-boot simulator work saturates the runner (October 29)
+
+Main push run [40974416453](https://github.com/mggarofalo/Shopping/actions/runs/40974416453)
+on `d5ebd18` failed the first native case at `app.launch()`
+(`ModernSiriActionTests.swift:79`). SHOPPING-262's registration wait runs only
+after `launch()` returns, so it cannot cause this timeout. The native session log
+splits the 60-second launch window as follows:
+
+| UTC | Evidence |
+| --- | --- |
+| 23:49:58–50:01 | The native xcodebuild boots the simulator. The hosted session had shut it down. |
+| 23:50:50–51:47 | Installing the UI test runner takes 56.7 s. |
+| 23:52:45.419 | The runner creates the 60-second launch future. |
+| 23:52:48.121 | Xcode receives the launch request. Xcode then logs nothing for 56.8 s. |
+| 23:53:07–30 | The routine observer's `simctl list devices` and `ps -axo` each exceed 5 s. The host itself is stalled. |
+| 23:53:44.895 | Xcode stores launch token 1. It installs Shopping in 2.6 s. |
+| 23:53:45.459 | The runner times out. |
+| 23:55:08 | The restarted session's launch request receives its token in 15 ms. The app launches 0.3 s later. |
+
+Across 30 retained runs since `40748443094`, the request-to-token interval of
+the first launch in each xcodebuild process ranged from 0.9 s to 81.5 s
+(median about 15 s). The second launch in the same process always took under 0.1 s. Both
+failures (56.8 s and 81.5 s) and two near-misses (52.2 s, 49.4 s) were first
+launches. Within minutes of a boot, simple device operations were 10–30 times
+slower than later ones. Installing the runner took 30–91 s soon after a boot,
+compared with 1.5–4 s in the old single-invocation layout. The hosted
+cases waited 100–400 s for their runner. The earlier Accessibility-loading abort and
+service-hub timeout in this issue occurred in that same window.
+
+A local measurement on Xcode 27.1 explains the window. It used a fresh
+iPhone 18 Pro on iOS 27.0, on a 10-core Mac, with no tests running.
+`simctl bootstatus` reported Finished after 24 s. The device's own process tree
+(its `launchd_sim` and descendants) then used 5–9 cores for another 90 s. Load
+average peaked at 150. After its first boot the device had used 668 CPU-seconds,
+spread across about 300 daemons, widgets and extensions. No single process
+dominated. A second boot of the same device used 366 CPU-seconds in about
+65 s. Once that work finished, the device used less than 0.01 core apart from
+short single-daemon bursts. On a runner with a few vCPUs, the same work takes
+several minutes. Neither "Booted" nor bootstatus marks its end.
+
+The runner previously let each xcodebuild invocation boot the shut-down
+simulator. The native invocation therefore started its runner install, first
+launch request and Shopping install during a fresh post-boot storm. The 60-second
+launch budget then covered whatever share of the host that work left. This is
+the common cause of the launch-token timeout, the stalled Accessibility load and
+the slow hosted startup. The stale-PID failure fixed by session isolation was
+a separate defect.
+
+### Owned boot and settled device
+
+`siri-schema-ci.py` now owns the simulator lifecycle around each test session.
+Before the hosted and native `test-without-building` invocations, it:
+
+1. Runs `simctl bootstatus <device> -b`, bounded at 300 s. Before the hosted
+   phase this boots the device the runner created. Before the native phase it
+   would boot the device again if the hosted session had shut it down. The boot
+   happens after the build, so the build and the post-boot work do not contend
+   for the runner.
+2. Samples `ps` every 5 s and sums CPU time across the device's `launchd_sim`
+   tree. The phase starts only after three consecutive intervals at or below
+   1.0 core.
+
+One 660-second readiness budget covers both phases' bootstatus and settle
+waits. Only time spent in those waits counts against it; build and test time do
+not. A spent budget returns exit 124 and the test never starts. A device with no
+process tree fails immediately. SIGINT or SIGTERM during the wait returns 130 or
+143 and keeps the evidence, as for the supervised commands. A PID whose CPU time
+drops counts as a new process. Processes that exit between samples are not
+counted, so a burst of short-lived work can be missed. The three-interval run
+limits the effect of that.
+
+`SiriRegistration/<Phase>BootStatus.*` and `<Phase>Settle.json` retain each
+wait's samples, outcome and wall time. Each phase's `Verdict.json` record carries
+`device_ready_exit_code`. The phase's `started_at` and `wall_seconds` now exclude
+readiness. Selection, assertions, the 60-second XCTest launch budget, test
+timeouts and retry policy are unchanged. Because Xcode did not boot the device,
+it leaves it booted. The post-run capture therefore collects the live
+registration logs and metadata before its owned shutdown and delete.
+
+### Local and hosted calibration
+
+A local end-to-end run passed all 25 cases and the merged manifest. It used
+Xcode 27.1, an owned iOS 27.0 iPhone 18 Pro and a 10-core Mac, with the boot
+overlapping the build and a 0.5-core threshold. The device was still using about
+6 cores of post-boot work after the 97-second build, and the hosted phase
+settled after 56 s. The native bootstatus reported "Device already booted,
+nothing to do", and that phase settled in 26 s. Hosted startup took 7.6 s. The
+native runner installed in 0.1 s, and its first launch request received a token
+in 0.2 s.
+
+Hosted [Siri diagnostic 40979677660](https://github.com/mggarofalo/Shopping/actions/runs/40979677660)
+on that first candidate (`e77059a`) changed the design:
+
+- Overlapping boot and build stretched the build to 532 s.
+- The device then took another 386 s to settle. It ran at 1.3–3.0 cores, with
+  one isolated 0.58 sample, before falling to 0.35–0.57. The largest sample of
+  about 3 cores indicates a 3-core VM.
+- The hosted phase found the device already booted. It reached its runner in
+  21.9 s, compared with 100–400 s before, and all 23 hosted cases passed in 35 s.
+- After the hosted tests, the device ran steadily at 1.2–1.7 cores. Its largest
+  cumulative consumers were the simulator's `diagnosticd` (412 CPU-s) and `apsd`
+  (238 CPU-s). Locally, neither is significant.
+- That first candidate charged the hosted test time to the budget. The native
+  phase therefore failed readiness with exit 124 and never started. That
+  accounting error is fixed.
+
+The current candidate therefore boots after the build and uses a 1.0-core
+threshold. That is one third of the hosted VM: above the settled level
+(0.35–0.57 core), and below the sustained post-boot load (mostly 1.3–3.0
+cores). It sits below the 1.2–1.7 cores that run 40979677660 showed after its
+hosted tests. If that load recurs, native readiness fails with 124 instead of
+starting the test. It also raises the
+budget to 660 s, because a burst that does not overlap the build still has to
+finish inside the budget. Settling cannot remove contention from other tenants
+on the hosted machine. If launch timeouts recur while `Settle.json` shows a
+settled device, that is the next boundary to examine.
+
+Hosted [Siri diagnostic 40982349173](https://github.com/mggarofalo/Shopping/actions/runs/40982349173)
+on `2dcfff5` passed all 25 cases. The per-phase and merged manifests passed. The
+build took 155.9 s without contention. Hosted readiness then spent 76.6 s in
+bootstatus and 428.2 s settling. The device ran at 1.5–4.1 cores until it
+dropped to 0.36–0.47. That used 505 s of the 660 s budget. The hosted session
+reached its runner in 17.4 s, and its 23 cases took 29.2 s.
+
+The native bootstatus found the device already booted, and the device settled
+in 26.5 s. The native session installed its runner in 1.1 s, against 30–91 s in
+the split-session runs. It reached the runner in 3.6 s, against 84–325 s. Its
+first launch request received a token in 1.6 s, and the app launched 5.0 s
+after the request. The launch observer took no sample. The test step lasted
+13 min 59 s, about the same as before, because readiness takes the post-boot
+time that the tests used to spend.
+
+One pass does not prove that the intermittent failure is cured. The evidence to
+watch is the `HostedSettle.json` and `NativeSettle.json` wall times against the
+shared 660-second budget, and whether the native samples stay above 1.0 core
+after the hosted tests. A
+budget exit 124 would be a readiness failure with its samples retained, not a
+launch timeout.
