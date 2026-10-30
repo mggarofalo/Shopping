@@ -142,12 +142,9 @@ struct CatalogView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List(selection: $selectedIDs) {
-                    HomeScopeControl(allowsSwitching: false)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
                     catalogListRows
                 }
-                .listStyle(.insetGrouped)
+                .shoppingItemList()
                 .contentMargins(.top, 0, for: .scrollContent)
                 .accessibilityIdentifier("shopping.catalog.list")
                 .onChange(of: pendingRevealID) { _, _ in revealPendingItem(with: proxy) }
@@ -287,7 +284,11 @@ struct CatalogView: View {
 
     @ViewBuilder
     private var catalogListRows: some View {
+        // Like Groceries, the home and scope controls share one section above the items.
         Section {
+            HomeScopeControl(allowsSwitching: false)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             filterHeader
                 .buttonStyle(.borderless)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))

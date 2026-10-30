@@ -10,6 +10,8 @@ enum ShoppingListMetrics {
     /// Item text keeps this space inside the 44-point minimum, so multiline rows grow
     /// with their content while text stays clear of the rounded section corners.
     static let itemTextVerticalPadding: CGFloat = 8
+    /// Grocery, cart and Catalog item lists share this gap between category sections.
+    static let sectionSpacing: CGFloat = 8
     /// Native forms use the same floor as a padded item row, while growing for content.
     static let minimumListRowHeight = minimumRowHeight + 2 * contentVerticalPadding
         + rowInsets.top + rowInsets.bottom
@@ -20,6 +22,12 @@ extension View {
     func shoppingItemRow() -> some View {
         frame(minHeight: ShoppingListMetrics.minimumRowHeight)
             .padding(.vertical, ShoppingListMetrics.contentVerticalPadding)
+    }
+
+    /// Grocery, cart and Catalog item lists use this style so equivalent sections align.
+    func shoppingItemList() -> some View {
+        listStyle(.insetGrouped)
+            .listSectionSpacing(.custom(ShoppingListMetrics.sectionSpacing))
     }
 
     func shoppingListRowInsets() -> some View {

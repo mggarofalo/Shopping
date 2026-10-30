@@ -346,6 +346,64 @@ final class ShoppingAppearanceUITests: XCTestCase {
         }
     }
 
+    func testEquivalentGroceryAndCatalogRowsAndSectionsMatch() {
+        // Bananas has a quantity, Local honey a two-line store summary; all four exist on both pages.
+        let names = ["Bananas", "Chipotles in adobo", "Local honey", "Dinner rolls"]
+        for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["SHOPPING_UI_TEST_STORE_PATH"] = FileManager.default.temporaryDirectory
+                .appendingPathComponent("EquivalentRows-\(UUID().uuidString).sqlite").path
+            app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
+            let grocery = listMetrics(names, storeMenu: "shopping.store.menu", in: app) {
+                NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "shopping.grocery.row.", "Edit \($0)")
+            }
+            let quantity = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+                "shopping.checklist.quantity.edit.", "Edit quantity for Bananas")).firstMatch
+            for _ in 0..<8 where !quantity.isHittable { app.swipeDown() }
+            XCTAssertTrue(quantity.existsOrAppears(timeout: 3))
+            let bananasCell = app.collectionViews.cells.containing(.button, identifier: quantity.identifier).firstMatch
+            XCTAssertGreaterThanOrEqual(quantity.frame.height, 44, "Quantity keeps its 44-point hit region")
+            XCTAssertGreaterThanOrEqual(quantity.frame.width, 44)
+            XCTAssertTrue(bananasCell.frame.contains(quantity.frame), "The quantity hit region stays inside its row")
+            attach("Equivalent grocery rows \(size)", app)
+            app.tabBars.buttons["Catalog"].tap()
+            XCTAssertTrue(app.navigationBars["Catalog"].existsOrAppears(timeout: 3))
+            let catalog = listMetrics(names, storeMenu: "shopping.catalog.store.menu", in: app) {
+                NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "shopping.catalog.item.", "\($0),")
+            }
+            attach("Equivalent catalog rows \(size)", app)
+            XCTAssertEqual(grocery.firstHeaderTop, catalog.firstHeaderTop, accuracy: 0.5,
+                           "The first category header sits the same distance below the scope controls")
+            XCTAssertEqual(grocery.sectionGap, catalog.sectionGap, accuracy: 0.5, "Sections share their spacing")
+            XCTAssertEqual(grocery.headerToRow, catalog.headerToRow, accuracy: 0.5)
+            for name in names {
+                guard let row = grocery.rows[name], let reference = catalog.rows[name] else {
+                    XCTFail("\(name) was not measured on both pages at \(size)")
+                    continue
+                }
+                let context = "\(name) at \(size)"
+                XCTAssertEqual(row.cell.minX, reference.cell.minX, accuracy: 0.5, context)
+                XCTAssertEqual(row.cell.width, reference.cell.width, accuracy: 0.5, context)
+                XCTAssertEqual(row.titleLeading, reference.titleLeading, accuracy: 0.5, context)
+                XCTAssertEqual(row.titleTop, reference.titleTop, accuracy: 0.5, context)
+                XCTAssertEqual(row.storeTop, reference.storeTop, accuracy: 0.5, context)
+                if name == "Bananas" {
+                    // A quantity occupies the trailing edge, and at accessibility sizes its own line.
+                    if size == "UICTContentSizeCategoryL" {
+                        XCTAssertEqual(row.cell.height, reference.cell.height, accuracy: 0.5, context)
+                    }
+                } else {
+                    XCTAssertEqual(row.cell.height, reference.cell.height, accuracy: 0.5, context)
+                    XCTAssertEqual(row.storeTrailing, reference.storeTrailing, accuracy: 0.5, context)
+                }
+            }
+            app.terminate()
+        }
+    }
+
     func testManagementRowsKeepSharedSpacingWhenSelecting() {
         for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
             let app = XCUIApplication()
@@ -468,6 +526,59 @@ final class ShoppingAppearanceUITests: XCTestCase {
         XCTAssertTrue(destination.waitForNonExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["1 Selected"].exists)
         XCTAssertTrue(delete.isEnabled)
+    }
+
+    private struct RowMetrics {
+        let cell: CGRect
+        let titleLeading: CGFloat
+        let titleTop: CGFloat
+        let storeTop: CGFloat
+        let storeTrailing: CGFloat
+    }
+
+    private struct ListMetrics {
+        var rows: [String: RowMetrics] = [:]
+        var firstHeaderTop: CGFloat = 0
+        var sectionGap: CGFloat = 0
+        var headerToRow: CGFloat = 0
+    }
+
+    /// Reads the fixture's Produce, Pantry and Bakery layout from the top of a grocery or Catalog list.
+    private func listMetrics(_ names: [String], storeMenu: String, in app: XCUIApplication,
+                             row predicate: (String) -> NSPredicate) -> ListMetrics {
+        var metrics = ListMetrics()
+        let menu = app.buttons[storeMenu]
+        for _ in 0..<8 where !menu.isHittable { app.swipeDown() }
+        let produce = app.collectionViews.staticTexts["Produce"]
+        XCTAssertTrue(produce.existsOrAppears(timeout: 3))
+        metrics.firstHeaderTop = produce.frame.minY - menu.frame.maxY
+        var cells: [String: XCUIElement] = [:]
+        for name in names {
+            let button = app.buttons.matching(predicate(name)).firstMatch
+            for _ in 0..<8 where !button.isHittable { app.swipeUp() }
+            guard button.existsOrAppears(timeout: 3) else {
+                XCTFail("Missing row \(name)")
+                continue
+            }
+            let cell = app.collectionViews.cells.containing(.button, identifier: button.identifier).firstMatch
+            let title = button.staticTexts[name]
+            let store = button.staticTexts.matching(NSPredicate(format: "label != %@", name)).firstMatch
+            XCTAssertTrue(title.exists && store.exists, "\(name) shows its name and store summary")
+            let frame = cell.frame
+            metrics.rows[name] = RowMetrics(cell: frame, titleLeading: title.frame.minX - frame.minX,
+                titleTop: title.frame.minY - frame.minY, storeTop: store.frame.minY - frame.minY,
+                storeTrailing: frame.maxX - store.frame.maxX)
+            cells[name] = cell
+        }
+        // Local honey ends Pantry and Dinner rolls is Bakery's only row on both pages.
+        let bakery = app.collectionViews.staticTexts["Bakery"]
+        if let honey = cells["Local honey"], let rolls = cells["Dinner rolls"], bakery.exists {
+            metrics.sectionGap = bakery.frame.minY - honey.frame.maxY
+            metrics.headerToRow = rolls.frame.minY - bakery.frame.maxY
+        } else {
+            XCTFail("The Pantry and Bakery sections must be measurable")
+        }
+        return metrics
     }
 
     private func attach(_ name: String, _ app: XCUIApplication) {
