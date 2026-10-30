@@ -199,10 +199,21 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         if let authorityID, authorityID != nextAuthority { onChange?(.authorityInvalidated) }
         authorityID = nextAuthority
         let activeStores = Set(projection.stores.map(\.id))
-        let selectedStoreID = self.selectedStoreID
-        let eligible = { (entry: PersonalCartEntrySnapshot) in
-            RowContext.eligible(entry, selectedStoreID: selectedStoreID, activeStores: activeStores)
+        let buyAnywayCaptures: [UUID: PersonalCheckoutToken]
+        if writable, let selectedStoreID {
+            buyAnywayCaptures = await Task.detached(priority: .userInitiated) { [cart] in
+                var captures: [UUID: PersonalCheckoutToken] = [:]
+                for entry in own where !entry.purchaseNotices.isEmpty {
+                    captures[entry.id] = try? cart.prepareCheckout(tokens: [entry.token], storeID: selectedStoreID)
+                }
+                return captures
+            }.value
+        } else {
+            buyAnywayCaptures = [:]
         }
+        let rows = RowContext(authorityID: nextAuthority, accountBinding: session.accountBinding,
+            scope: projection.scope, selectedStoreID: selectedStoreID, activeStores: activeStores, writable: writable,
+            presence: presence, oneTimeIDs: projection.oneTimeIDs, buyAnywayCaptures: buyAnywayCaptures)
         let ownIDs = Set(own.map(\.needID))
         // Store choices summarize all remaining occurrences, independent of the selected store.
         let pending = projection.needs.filter { outstanding.contains($0.needID) && !ownIDs.contains($0.needID) }
@@ -220,26 +231,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             return value
         }
         let grocery = projection.needs.filter {
-            RowContext.isGrocery($0, writable: writable, outstanding: outstanding.contains($0.needID),
-                inOwnCart: ownIDs.contains($0.needID), selectedStoreID: selectedStoreID, activeStores: activeStores)
+            !ownIDs.contains($0.needID) && rows.isGrocery($0, outstanding: outstanding.contains($0.needID))
         }
         // A retained cart stays removable even when its old store or household disappears.
-        let visibleCart = selectedStoreID == nil ? own : own.filter { eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
-        let buyAnywayCaptures: [UUID: PersonalCheckoutToken]
-        if writable, let selectedStoreID {
-            buyAnywayCaptures = await Task.detached(priority: .userInitiated) { [cart] in
-                var captures: [UUID: PersonalCheckoutToken] = [:]
-                for entry in own where !entry.purchaseNotices.isEmpty {
-                    captures[entry.id] = try? cart.prepareCheckout(tokens: [entry.token], storeID: selectedStoreID)
-                }
-                return captures
-            }.value
-        } else {
-            buyAnywayCaptures = [:]
-        }
-        let rows = RowContext(authorityID: nextAuthority, accountBinding: session.accountBinding,
-            scope: projection.scope, selectedStoreID: selectedStoreID, activeStores: activeStores, writable: writable,
-            presence: presence, oneTimeIDs: projection.oneTimeIDs, buyAnywayCaptures: buyAnywayCaptures)
+        let visibleCart = selectedStoreID == nil ? own : own.filter { rows.eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
         let operations = try loaded.history.map { operation in
             let token = WatchRestoreToken(authorityID: nextAuthority, accountBinding: session.accountBinding,
                 householdID: projection.scope.householdID, listID: projection.scope.listID,
@@ -256,7 +251,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             grocerySections: projection.sections(grocery) { try rows.item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try rows.item($0, inCart: true) },
             recentCheckouts: operations,
-            canCheckout: writable && selectedStoreID != nil && visibleCart.contains { eligible($0) && $0.demandAvailable && $0.purchaseNotices.isEmpty },
+            canCheckout: writable && selectedStoreID != nil && visibleCart.contains { rows.eligible($0) && $0.demandAvailable && $0.purchaseNotices.isEmpty },
             statusMessage: attention ?? bootstrap?.accountStatusMessage,
             syncStatus: bootstrap?.syncStatus(additionalMessage: attention)
                 ?? WatchSyncStatus(attentionMessages: [attention].compactMap { $0 }))
@@ -489,24 +484,15 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let oneTimeIDs: Set<UUID>
         let buyAnywayCaptures: [UUID: PersonalCheckoutToken]
 
-        static func eligible(_ entry: PersonalCartEntrySnapshot, selectedStoreID: UUID?, activeStores: Set<UUID>) -> Bool {
+        func eligible(_ entry: PersonalCartEntrySnapshot) -> Bool {
             guard selectedStoreID != nil else { return false }
             return PurchaseFilter(selectedStoreID: selectedStoreID).matches(PurchaseRuleValue(explicitStoreIDs: entry.storeIDs,
                 anyStore: entry.anyStore, hasResolvedIdentity: entry.purchaseRulesResolved), activeStoreIDs: activeStores)
         }
 
-        static func isGrocery(_ need: PersonalCartEntrySnapshot, writable: Bool, outstanding: Bool, inOwnCart: Bool,
-                              selectedStoreID: UUID?, activeStores: Set<UUID>) -> Bool {
-            writable && outstanding && !inOwnCart && eligible(need, selectedStoreID: selectedStoreID, activeStores: activeStores)
-        }
-
-        func eligible(_ entry: PersonalCartEntrySnapshot) -> Bool {
-            Self.eligible(entry, selectedStoreID: selectedStoreID, activeStores: activeStores)
-        }
-
+        /// Groceries hold outstanding, eligible needs outside the shopper's own cart.
         func isGrocery(_ need: PersonalCartEntrySnapshot, outstanding: Bool) -> Bool {
-            Self.isGrocery(need, writable: writable, outstanding: outstanding, inOwnCart: false,
-                selectedStoreID: selectedStoreID, activeStores: activeStores)
+            writable && outstanding && eligible(need)
         }
 
         func item(_ entry: PersonalCartEntrySnapshot, inCart: Bool) throws -> WatchShoppingItem {
