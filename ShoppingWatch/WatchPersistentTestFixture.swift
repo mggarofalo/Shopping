@@ -36,7 +36,7 @@ enum WatchPersistentTestFixture {
             }
             return UnavailableWatchShoppingService()
         }
-        guard ["ready", "empty", "setup", "missing", "revoked"].contains(scenario) else {
+        guard ["ready", "rapid", "empty", "setup", "missing", "revoked"].contains(scenario) else {
             throw CocoaError(.coderInvalidValue)
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -56,6 +56,14 @@ enum WatchPersistentTestFixture {
         return PersistentWatchShoppingService(persistence: persistence, sessionProvider: provider,
             selectionURL: directory.appendingPathComponent("selection.json"),
             householdWritable: writable)
+    }
+
+    private static func seededNames(_ scenario: String) -> [String] {
+        switch scenario {
+        case "ready": ["Milk"]
+        case "rapid": ["Bread", "Eggs", "Milk"]
+        default: ["Milk", "Bread"]
+        }
     }
 
     private static func seed(_ persistence: PersistenceController, provider: FixedSession, scenario: String) throws {
@@ -78,7 +86,7 @@ enum WatchPersistentTestFixture {
             category.name = "Groceries"
             category.household = household
             if scenario != "empty" {
-                for name in scenario == "ready" ? ["Milk"] : ["Milk", "Bread"] {
+                for name in seededNames(scenario) {
                     let item = Item(context: context)
                     item.id = UUID()
                     item.name = name

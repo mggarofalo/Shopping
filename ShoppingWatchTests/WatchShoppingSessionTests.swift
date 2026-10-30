@@ -179,6 +179,92 @@ final class WatchShoppingSessionTests: XCTestCase {
         held?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "bananas-saved", quantity: 3)))
     }
 
+    func testRemoveFromPendingRowRenderedBeforeAddReceiptUsesOwnReceiptToken() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let started = expectation(description: "Add held")
+        var held: CheckedContinuation<WatchShoppingCommit, Error>?
+        service.commitHandler = { command in
+            if case .remove = command { return .item(occurrenceID: "bananas", item: nil) }
+            return try await withCheckedThrowingContinuation { held = $0; started.fulfill() }
+        }
+        XCTAssertTrue(session.add(try XCTUnwrap(session.snapshot.item(id: "bananas")), quantity: 3))
+        await fulfillment(of: [started], timeout: 2)
+        // The swipe began on the pending row; the receipt landed before the tap.
+        let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        XCTAssertEqual(rendered.commandToken, "bananas", "A pending row carries its Add token")
+        held?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "bananas-saved", quantity: 3)))
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
+        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.commandToken, "bananas-saved")
+        XCTAssertTrue(session.remove(rendered))
+        XCTAssertNil(session.snapshot.item(id: "bananas"), "The removal is shown at once")
+        XCTAssertFalse(session.remove(rendered), "A repeat tap from the same row is idempotent")
+        while service.commands.count < 2, clock.now < deadline { await Task.yield() }
+        XCTAssertEqual(service.commands, [.add(token: "bananas", quantity: 3), .remove(token: "bananas-saved")])
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testQuantityFromPendingRowRenderedBeforeAddReceiptUsesOwnReceiptToken() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.commitHandler = { command in
+            switch command {
+            case .add: return .item(occurrenceID: "bananas", item: self.localItem("bananas", token: "bananas-saved", quantity: 3))
+            case .setQuantity(_, let quantity):
+                return .item(occurrenceID: "bananas", item: self.localItem("bananas", token: "bananas-edited", quantity: quantity))
+            default: throw NSError(domain: "Unexpected command", code: 1)
+            }
+        }
+        XCTAssertTrue(session.add(try XCTUnwrap(session.snapshot.item(id: "bananas")), quantity: 3))
+        let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
+        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        XCTAssertTrue(session.setQuantity(rendered, quantity: 4))
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 4, "The edit is shown at once")
+        while service.commands.count < 2, clock.now < deadline { await Task.yield() }
+        XCTAssertEqual(service.commands.last, .setQuantity(token: "bananas-saved", quantity: 4))
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testRemoveFromRowRenderedBeforeRefreshNeverRebasesOntoRefreshedMembership() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        service.commitHandler = { command in
+            switch command {
+            case .add: return .item(occurrenceID: "bananas", item: self.localItem("bananas", token: "bananas-saved", quantity: 3))
+            // The phone replaced this membership after the Watch saved it.
+            default: throw PersonalCartError.staleEntry
+            }
+        }
+        let grocery = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        XCTAssertTrue(session.add(grocery, quantity: 3))
+        let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
+        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        var refreshed = service.value
+        refreshed.grocerySections = refreshed.grocerySections.compactMap { section in
+            var section = section
+            section.items.removeAll { $0.occurrenceID == "bananas" }
+            return section.items.isEmpty ? nil : section
+        }
+        refreshed.cartSections.append(WatchItemSection(id: "Produce", title: "Produce",
+            items: [localItem("bananas", token: "bananas-replaced", quantity: 1)]))
+        service.value = refreshed
+        await session.reload()
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.commandToken, "bananas-replaced")
+        XCTAssertTrue(session.remove(rendered))
+        XCTAssertNil(session.snapshot.item(id: "bananas"), "The removal is shown at once")
+        // The failed removal reconciles through a read that shows the phone's membership again.
+        while session.snapshot.item(id: "bananas") == nil, clock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(service.commands.last, .remove(token: "bananas-saved"), "Only the session's own receipt advances a token")
+        XCTAssertEqual(session.errorMessage, PersonalCartError.staleEntry.localizedDescription, "A real conflict still surfaces")
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.commandToken, "bananas-replaced")
+    }
+
     func testFailedOptimisticAddUsesLatestSnapshotAndCanRetryNilQuantity() async throws {
         let service = SpyService(), started = expectation(description: "Save held")
         let session = WatchShoppingSession(service: service)

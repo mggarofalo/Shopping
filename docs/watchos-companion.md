@@ -114,6 +114,21 @@ the rules above. Queue depth is unbounded: session tests cover 1, 2, 3 and 8
 queued Adds and a failure mid-queue; SQLite tests cover four Adds behind a held
 writer and a tap from a row rendered before a read replaced its token.
 
+SHOPPING-265: a Remove tapped from a row rendered while its Add was saving still
+carried the Add token, which names no membership, after the Add's receipt had
+already retired it. The service rejected it as a changed entry and the Watch
+reported a problem, although the removal matched the shopper's intent. The
+session now records each successor token that its own receipts return, and
+resolves a rendered Remove or Quantity token through that chain before it
+queues the edit. `WatchShoppingSession.remove(_:)` keys the optimistic removal
+by occurrence, so a row from before a read is hidden at once, and a repeat tap
+is a no-op; card quantity edits use `setQuantity(_:quantity:)` the same way. A
+token from a full read is never adopted, so the service still rejects a
+membership that another device changed, and that conflict is shown. A chain
+whose end is spent or uncertain is retired so its operation ID cannot replay.
+One narrower case remains: a row rendered before a read, tapped after another
+edit of the same item through the refreshed row, still reports a change.
+
 Private cart commands save promptly using the existing causal records and
 removal evidence. A fixed two-second window publishes the latest advisory
 presence for changed needs only; continuous tapping does not reset the window.

@@ -629,6 +629,127 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertNil(session.errorMessage)
     }
 
+    private func addGroceries(_ f: Fixture, _ names: [String]) throws {
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first)
+            let list = try XCTUnwrap(household.groceryList)
+            for name in names {
+                let item = Item(context: context); item.id = UUID(); item.name = name; item.notes = ""; item.anyStore = true
+                item.household = household
+                let need = Need(context: context); need.id = UUID(); need.title = name; need.notes = ""
+                need.kind = NeedKind.remembered.rawValue; need.urgency = NeedUrgency.normal.rawValue; need.item = item; need.list = list
+            }
+            try f.persistence.prepareForSave(context); try context.save()
+        }
+    }
+
+    private func holdWriter(_ f: Fixture) async -> DispatchSemaphore {
+        let entered = expectation(description: "Writer held")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            f.persistence.writer.performAndWait { entered.fulfill(); release.wait() }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        return release
+    }
+
+    private func settle(_ session: WatchShoppingSession, until done: @MainActor () -> Bool) async throws {
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(5)
+        while !done(), clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(done(), "Session settled")
+    }
+
+    func testRapidRemovesOfPendingAddsLeaveNoProblemAndNoEntries() async throws {
+        let f = try fixture()
+        try addGroceries(f, ["Bread", "Eggs", "Rice"])
+        let service = adapter(f)
+        let session = WatchShoppingSession(service: service, initialSnapshot: try await service.load(storeID: f.storeID))
+        let rows = session.snapshot.grocerySections.flatMap(\.items)
+        let release = await holdWriter(f)
+        defer { release.signal() }
+        for row in rows { XCTAssertTrue(session.add(row, quantity: nil)) }
+        for row in rows {
+            let pending = try XCTUnwrap(session.snapshot.item(id: row.occurrenceID))
+            XCTAssertTrue(pending.isPendingAdd && pending.canRemove)
+            XCTAssertTrue(session.remove(pending), "\(row.name) Remove accepted")
+        }
+        XCTAssertEqual(session.snapshot.cartCount, 0)
+        release.signal()
+        try await settle(session) { session.snapshot.grocerySections.flatMap(\.items).count == rows.count }
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertTrue(entries.isEmpty)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testRemoveFromPendingRowRenderedBeforeAddReceiptLeavesNoProblem() async throws {
+        let f = try fixture()
+        try addGroceries(f, ["Bread", "Eggs", "Rice"])
+        let service = adapter(f)
+        let session = WatchShoppingSession(service: service, initialSnapshot: try await service.load(storeID: f.storeID))
+        let rows = session.snapshot.grocerySections.flatMap(\.items)
+        let release = await holdWriter(f)
+        defer { release.signal() }
+        for row in rows { XCTAssertTrue(session.add(row, quantity: nil)) }
+        // Rows rendered while the adds were saving; the receipts land before the taps.
+        let rendered = try rows.map { try XCTUnwrap(session.snapshot.item(id: $0.occurrenceID)) }
+        release.signal()
+        try await settle(session) { !session.snapshot.cartSections.flatMap(\.items).contains(where: \.isPendingAdd) }
+        for row in rendered {
+            XCTAssertTrue(session.remove(row), "\(row.name) Remove accepted")
+            XCTAssertFalse(session.snapshot.item(id: row.occurrenceID)?.isInOwnCart ?? false, "Removal is shown at once")
+        }
+        try await settle(session) { session.snapshot.grocerySections.flatMap(\.items).count == rows.count }
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertTrue(entries.isEmpty)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testRemoveFromConfirmedRowRenderedBeforeRefreshReadLeavesNoProblem() async throws {
+        let f = try fixture()
+        try addGroceries(f, ["Bread", "Eggs", "Rice"])
+        let service = adapter(f)
+        let session = WatchShoppingSession(service: service, initialSnapshot: try await service.load(storeID: f.storeID))
+        let rows = session.snapshot.grocerySections.flatMap(\.items)
+        for row in rows { XCTAssertTrue(session.add(row, quantity: nil)) }
+        try await settle(session) { !session.snapshot.cartSections.flatMap(\.items).contains(where: \.isPendingAdd) }
+        let rendered = try rows.map { try XCTUnwrap(session.snapshot.item(id: $0.occurrenceID)) }
+        await session.reload()
+        for row in rendered {
+            XCTAssertNotEqual(session.snapshot.item(id: row.occurrenceID)?.commandToken, row.commandToken, "The read minted new tokens")
+        }
+        for row in rendered {
+            XCTAssertTrue(session.remove(row), "\(row.name) Remove accepted")
+            XCTAssertFalse(session.snapshot.item(id: row.occurrenceID)?.isInOwnCart ?? false, "Removal is shown at once")
+        }
+        try await settle(session) { session.snapshot.grocerySections.flatMap(\.items).count == rows.count }
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertTrue(entries.isEmpty)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testRemoveFromPendingRowAfterAnotherDeviceChangedMembershipStillReportsConflict() async throws {
+        let f = try fixture()
+        let service = adapter(f)
+        let session = WatchShoppingSession(service: service, initialSnapshot: try await service.load(storeID: f.storeID))
+        let row = try XCTUnwrap(session.snapshot.grocerySections.flatMap(\.items).first)
+        let release = await holdWriter(f)
+        defer { release.signal() }
+        XCTAssertTrue(session.add(row, quantity: nil))
+        let rendered = try XCTUnwrap(session.snapshot.item(id: row.occurrenceID))
+        release.signal()
+        try await settle(session) { !(session.snapshot.item(id: row.occurrenceID)?.isPendingAdd ?? true) }
+        // The shopper's phone changes the same membership before the Watch tap arrives.
+        let phoneEntry = try await Task.detached { try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID).first) }.value
+        try await Task.detached { try f.cart.setQuantity(4, token: phoneEntry.token) }.value
+        XCTAssertTrue(session.remove(rendered))
+        try await settle(session) { session.errorMessage != nil }
+        XCTAssertEqual(session.errorMessage, PersonalCartError.staleEntry.localizedDescription)
+        try await settle(session) { session.snapshot.item(id: row.occurrenceID)?.quantity == 4 }
+        let entries = try await Task.detached { try f.cart.entries(householdID: f.householdID, listID: f.listID) }.value
+        XCTAssertEqual(entries.map(\.quantity), [4], "The phone's newer membership is kept")
+    }
+
     func testAddFromRowRenderedBeforeRefreshReadIsShownAndSavedOnce() async throws {
         let f = try fixture()
         let context = f.persistence.container.viewContext

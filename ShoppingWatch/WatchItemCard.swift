@@ -53,7 +53,7 @@ struct WatchItemCard: View {
                 }
                 if item.isInOwnCart && item.canRemove {
                     Button("Remove from your cart", role: .destructive) {
-                        if session.submit(.remove(token: item.commandToken)) { dismiss() }
+                        if session.remove(item) { dismiss() }
                     }
                     .disabled(session.isBusy)
                     .accessibilityIdentifier("watch.item.remove")
@@ -142,7 +142,7 @@ struct WatchItemCard: View {
 
     private func setQuantity(_ quantity: Int?, item: WatchShoppingItem) {
         if item.isInOwnCart {
-            session.submit(.setQuantity(token: item.commandToken, quantity: quantity))
+            session.setQuantity(item, quantity: quantity)
         } else {
             draftQuantity = quantity
         }
