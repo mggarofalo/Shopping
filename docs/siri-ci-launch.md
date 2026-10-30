@@ -183,7 +183,8 @@ nor removes caches, and it does not boot a simulator or retry a test. The comman
 must succeed within a separate 300-second setup bound before simulator creation
 or testing can proceed. That bound allows a finite setup experiment; it is not
 an observed readiness target or a change to the native test's timeout. The
-existing 25-minute job limit remains unchanged.
+25-minute job limit was unchanged then; the
+[readiness budget calibration](#readiness-budget-calibration-october-30) later raised it to 35 minutes.
 
 `SiriRegistration/RuntimeReadiness.log` and `RuntimeReadiness.json` retain the
 command, start time, exit status, timeout/cancellation status, and wall time. The
@@ -311,8 +312,9 @@ Before the hosted and native `test-without-building` invocations, it:
    tree. The phase starts only after three consecutive intervals at or below
    1.0 core.
 
-One 660-second readiness budget covers both phases' bootstatus and settle
-waits. Only time spent in those waits counts against it; build and test time do
+One readiness budget, now 1080 seconds (see
+[the budget calibration](#readiness-budget-calibration-october-30)), covers both
+phases' bootstatus and settle waits. Only time spent in those waits counts against it; build and test time do
 not. A spent budget returns exit 124 and the test never starts. A device with no
 process tree fails immediately. SIGINT or SIGTERM during the wait returns 130 or
 143 and keeps the evidence, as for the supervised commands. A PID whose CPU time
@@ -383,7 +385,104 @@ time that the tests used to spend.
 
 One pass does not prove that the intermittent failure is cured. The evidence to
 watch is the `HostedSettle.json` and `NativeSettle.json` wall times against the
-shared 660-second budget, and whether the native samples stay above 1.0 core
+shared readiness budget, and whether the native samples stay above 1.0 core
 after the hosted tests. A
 budget exit 124 would be a readiness failure with its samples retained, not a
 launch timeout.
+
+## Readiness budget calibration (October 30)
+
+The first main push after the settle gate merged,
+[run 40989182159](https://github.com/mggarofalo/Shopping/actions/runs/40989182159)
+on `f2d3919`, failed Release SDK Build with readiness exit 124. No test ran.
+`HostedBootStatus.json` shows bootstatus took 98.6 s, against 54.9 s and 76.6 s on
+the two passing runs. `HostedSettle.json` then holds 63 samples over 562 s, all
+between 1.16 and 4.43 cores (median about 2.0), until the shared 660 s budget
+ran out at 02:19:41. The first sample came 47.6 s after the wait began, and the
+next twelve 12–30 s apart instead of 5 s, because `ps` itself was starved. The
+passing runs' early samples were also 9–17 s apart.
+
+The gate measured the right thing, but the budget was too small for that
+runner. Hosted [Siri diagnostic 40992872404](https://github.com/mggarofalo/Shopping/actions/runs/40992872404)
+on the first fix candidate (`9a07f2c`, 900 s budget) then passed all 25 cases,
+and needed 790 s of readiness:
+
+| Run | Bootstatus | Hosted settle | Busy samples | Settled samples | Native settle | Readiness |
+| --- | --- | --- | --- | --- | --- | --- |
+| [40982349173](https://github.com/mggarofalo/Shopping/actions/runs/40982349173) | 76.6 s | 428.2 s | 1.10–4.13 | 0.36–0.47 | 26.5 s (0.44–1.16) | 532 s |
+| [40984757588](https://github.com/mggarofalo/Shopping/actions/runs/40984757588) | 54.9 s | 416.2 s | 1.05–3.40, one 0.59 | 0.67–0.74 | 22.3 s (0.61–1.48) | 495 s |
+| [40989182159](https://github.com/mggarofalo/Shopping/actions/runs/40989182159) | 98.6 s | over 562 s | 1.16–4.43 | not reached | not reached | about 730 s (estimate) |
+| [40992872404](https://github.com/mggarofalo/Shopping/actions/runs/40992872404) | 93.2 s | 549.1 s | 1.19–4.42 | 0.41–0.48 | 146.4 s (0.40–2.09) | 790 s |
+
+- **The work is a fixed launch sequence.** The final `HostedSettleProcesses.log`
+  of each run lists the device's processes in PID order. All four runs launch
+  the same order of poster, widget, intelligence, Fitness and remote-management
+  services. Near its end each run launches `AppSSODaemon` and `GSSCred`. The
+  settled runs went quiet at 294–295 processes, within 16 s of reaching that
+  count. The failing run had reached `GSSCred` and 291 processes when its budget
+  expired, and had launched 18 of them in its last 47 s, so it was at the end
+  of the same work.
+- **The failing runner was slower, not stuck.** Its device's processes had used
+  1103 CPU-s, against 790–866 CPU-s for the whole settled sequence on the two
+  faster runners and 1044 CPU-s on 40992872404. The same daemons cost 1.26–1.47
+  times as much CPU time: `launchd_sim` 14.8 s against 10.1–10.9 s, and
+  `diagnosticd` 158.5 s against 109–126 s. Its boot was also 1.3–1.8 times
+  slower. No single daemon dominated on any run. `diagnosticd`, `apsd`,
+  `amsengagementd` and `STExtractionService` led, but none had more than 15% of
+  the total.
+- **The 1.0-core threshold separates the two states.** While the sequence ran,
+  three consecutive samples never fell at or below 1.0 core. Once it finished,
+  every hosted sample was at or below 0.74 core.
+- **After the hosted tests, a second, shorter tail can follow.** On
+  40992872404 the process count stayed at 306, so nothing new launched. The
+  device still ran at 1.2–2.1 cores, mostly 1.2–1.5, for 120 s, then fell to
+  0.40–0.76, apart from one 1.74 sample that restarted the quiet run. Of the
+  270 CPU-s the device used between the hosted and native process listings,
+  which also span the hosted tests, `diagnosticd` used 102 and `apsd` 61.
+  The earlier runs settled in 22–27 s. The 1.2–1.7 cores the first candidate
+  saw after its hosted tests (40979677660) were probably the same tail. On
+  40992872404 the tail
+  ended by itself, and the first native launch reached its automation session
+  12.3 s after the request.
+- **Other signals are weaker.** A gate that waited for named daemons would
+  encode this runtime's process list. A probe launch would add its own launch
+  to a starved device without measuring the starvation. Neither would see the
+  `apsd` and `diagnosticd` tail.
+
+### Budget
+
+Scaling the slower runner's CPU ratio (1.35) to the faster runners' busy
+period puts the end of its work near 578 s. The three quiet samples make that a
+hosted settle near 595 s, consistent with the 5–16 s the settled runs needed
+after their final process count. With its 98.6 s boot and a native settle near
+36 s, its readiness would have been about 730 s. 40992872404 measured 790 s.
+The slowest measured boot, hosted settle and native settle combined come to
+about 840 s.
+
+The runner now gives readiness 1080 s. That is 1.29 times the slowest
+combination, 1.37 times the slowest complete run, and about twice the two
+fastest. Before readiness, 40992872404 spent 519 s on runner contracts, a 290 s
+archive and a 174 s Siri build (40989182159 spent 450 s). Tests, capture and
+upload took at most 196 s, on 40984757588; 1.4 times that is 275 s. With
+1080 s of readiness, the worst case is 520 + 1080 + 275 = 1875 s. Job setup and one last `ps` overrunning the deadline
+add about 65 s. The Release SDK Build and Siri diagnostic jobs therefore allow
+35 minutes instead of 25. 40992872404 took 24 min 42 s, so the old 25-minute
+limit would have cancelled a run only slightly slower, before its evidence was
+retained. Overlapping the boot with the build is not an alternative: in
+40979677660 it stretched the build to 532 s and still left 386 s of settling.
+
+A contract replays the slowest measured phases through the real settle loop and
+its quiet-sample rule. The hosted trace runs at 2 cores until 578 s, then 0.5.
+The native trace runs at 1.3 cores for 131 s, close to the measured 146 s settle.
+Both must settle within the budget
+left after the 98.6 s boot, and the budget must exceed their total by a quarter.
+The same contract checks that every job running the suite has a limit that
+holds the worst case. A budget of 900 s or a 30-minute job limit fails it;
+the job-limit check has about 225 s of slack at 35 minutes.
+
+The threshold, sample count, interval, test selection, 60-second launch budget
+and retry policy are unchanged. A readiness exit 124 remains a failure with its
+samples retained. If a runner needs more than 1080 s, compare its
+`HostedSettleProcesses.log` with the sequence above, and the `apsd` and
+`diagnosticd` time between the hosted and native listings, before changing the
+budget again.

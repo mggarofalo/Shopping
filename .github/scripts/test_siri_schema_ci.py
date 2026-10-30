@@ -217,6 +217,41 @@ class SiriSchemaCITests(unittest.TestCase):
                        if "xcodebuild archive" in step.get("run", ""))
         self.assertLess(validation, archive)
 
+    def test_readiness_budget_covers_the_slowest_measured_phases_inside_the_job(self):
+        # The slowest measured boot (98.6 s, 40989182159), hosted settle and native
+        # settle must together fit the shared budget. 40989182159's device ran at
+        # about 2 cores until its 660 s budget ended at 562 s, at the end of the
+        # launch sequence that settled faster runners after 1/1.35 of the CPU time,
+        # so its work ends near 1.35 x 428 s. After the hosted tests on 40992872404,
+        # the device ran at 1.2-2.1 cores, mostly apsd and diagnosticd, for 131 s.
+        boot, budget = 98.6, siri.READINESS_BUDGET_SECONDS
+        def trace(busy_until, busy_cores):
+            cpu, samples = 0.0, [ps_listing(0.0)]
+            for elapsed in range(5, busy_until + 30, 5):
+                cpu += 5 * (busy_cores if elapsed <= busy_until else 0.5)
+                samples.append(ps_listing(cpu))
+            return samples
+        code, hosted = self.settle_with(trace(round(1.35 * 428), 2.0), budget=budget - boot)
+        self.assertEqual(code, 0, hosted["samples"][-4:])
+        self.assertGreater(hosted["wall_seconds"], 660 - boot)
+        code, native = self.settle_with(trace(131, 1.3), budget=budget - boot - hosted["wall_seconds"])
+        self.assertEqual(code, 0, native["samples"][-4:])
+        # A healthy runner already needed 790 s, so keep a quarter in reserve.
+        self.assertGreaterEqual(budget, 1.25 * (boot + hosted["wall_seconds"] + native["wall_seconds"]))
+        # The worst measured time before and after readiness must leave the whole
+        # budget inside each job that runs the suite: 520 s of contracts, archive
+        # and Siri build (40992872404), and 275 s of tests, capture and upload
+        # (1.4 x 40984757588).
+        workflow = json.loads(subprocess.check_output([
+            "ruby", "-rjson", "-ryaml", "-e",
+            "puts JSON.generate(YAML.safe_load(File.read(ARGV[0]), aliases: true))",
+            str(Path(__file__).resolve().parents[1] / "workflows/swift-ci.yml")]))
+        suites = {name: job for name, job in workflow["jobs"].items()
+                  if any("siri-schema-ci.py test" in step.get("run", "") for step in job.get("steps", []))}
+        self.assertEqual(set(suites), {"release-build", "siri-launch-diagnostic"})
+        for name, job in suites.items():
+            self.assertGreaterEqual(job["timeout-minutes"] * 60, 520 + siri.READINESS_BUDGET_SECONDS + 275, name)
+
     def test_parent_exit_bounds_inherited_pipe_drain_and_cleans_group(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
