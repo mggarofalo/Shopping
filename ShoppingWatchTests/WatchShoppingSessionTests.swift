@@ -53,13 +53,13 @@ final class WatchShoppingSessionTests: XCTestCase {
         let task = Task { reserved.fulfill(); return await model.perform(.add(token: "bananas", quantity: 9)) }
         await fulfillment(of: [reserved], timeout: 2)
         XCTAssertEqual(model.snapshot.item(id: "bananas")?.quantity, 9)
-        XCTAssertTrue(service.commands.isEmpty)
+        // A local edit never waits for a read (SHOPPING-269).
+        await fulfillment(of: [commandStarted], timeout: 2)
         // Another replica has already carted the same need with a different
         // membership ID and quantity. A repeated Add preserves that claim.
         let existing = savedBananas(old, quantity: 4)
         service.loadContinuation?.resume(returning: existing)
         await refresh.value
-        await fulfillment(of: [commandStarted], timeout: 2)
         XCTAssertEqual(model.snapshot.cartCount, 2)
         XCTAssertEqual(model.snapshot.item(id: "bananas")?.quantity, 4)
         XCTAssertTrue(model.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
@@ -177,6 +177,48 @@ final class WatchShoppingSessionTests: XCTestCase {
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(service.commands, [.add(token: "bananas-reread", quantity: 3)])
         held?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "bananas-saved", quantity: 3)))
+    }
+
+    // SHOPPING-269: commits never wait for a read, so a read that overlaps a receipt
+    // may predate it. It is discarded and read again; it never undoes the receipt.
+    func testReadOverlappingLocalReceiptsIsDiscardedThenReread() async throws {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
+        let before = service.value
+        let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
+        let read = expectation(description: "Read held")
+        service.suspendNextLoad = true
+        service.loadStarted = { read.fulfill() }
+        let refresh = Task { await session.reload() }
+        await fulfillment(of: [read], timeout: 2)
+        let saved = localItem("bananas", token: "bananas-saved", quantity: 3)
+        var restored = rendered
+        restored.commandToken = "bananas-grocery"
+        service.commitHandler = { command in
+            if case .remove = command { return .item(occurrenceID: "bananas", item: restored) }
+            return .item(occurrenceID: "bananas", item: saved)
+        }
+        XCTAssertTrue(session.add(rendered, quantity: 3))
+        try await waitUntil { session.snapshot.item(id: "bananas").map { $0.isInOwnCart && !$0.isPendingAdd } ?? false }
+        XCTAssertTrue(session.remove(try XCTUnwrap(session.snapshot.item(id: "bananas"))))
+        try await waitUntil { session.snapshot.item(id: "bananas")?.commandToken == "bananas-grocery" }
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isInOwnCart ?? true, "The removal receipt restores groceries")
+        XCTAssertEqual(service.commands.count, 2, "Both edits ran while the read was held")
+        let reread = expectation(description: "Fresh read after the discarded one")
+        service.onLoad = { if service.loadCount == 3 { reread.fulfill() } }
+        // The held read predates both receipts: Bananas in groceries with its old token.
+        service.loadContinuation?.resume(returning: before)
+        await refresh.value
+        XCTAssertEqual(session.snapshot.item(id: "bananas")?.commandToken, "bananas-grocery", "The older read was not applied")
+        await fulfillment(of: [reread], timeout: 2)
+        XCTAssertNil(session.errorMessage)
+    }
+
+    private func waitUntil(_ done: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
+        while !done(), clock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(done(), "Condition reached", file: file, line: line)
     }
 
     func testRemoveFromPendingRowRenderedBeforeAddReceiptUsesOwnReceiptToken() async throws {
@@ -968,10 +1010,12 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(session.isBusy, "Ordinary reads must not disable Add")
         let command = WatchShoppingCommand.add(token: "captured-occurrence", quantity: 3)
         let reserved = expectation(description: "Add reserved")
+        let dispatched = expectation(description: "Add dispatched while the read is held")
+        service.onCommand = { dispatched.fulfill() }
         let adding = Task { reserved.fulfill(); return await session.perform(command) }
         await fulfillment(of: [reserved], timeout: 2)
         XCTAssertFalse(session.isBusy, "A queued local edit must not disable independent rows")
-        XCTAssertTrue(service.commands.isEmpty, "Service operations must remain serialized")
+        await fulfillment(of: [dispatched], timeout: 2)
         let coalesced = expectation(description: "One coalesced follow-up read")
         service.onLoad = { if service.loadCount == 3 { coalesced.fulfill() } }
         for _ in 0..<20 { service.onChange?(.dataChanged) }
@@ -993,25 +1037,46 @@ final class WatchShoppingSessionTests: XCTestCase {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
         await session.reload()
+        let started = expectation(description: "Old-account Add held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let first = Task { await session.perform(.add(token: "first", quantity: nil)) }
+        await fulfillment(of: [started], timeout: 2)
+        let queued = Task { await session.perform(.add(token: "old-account", quantity: 2)) }
+        await Task.yield()
+        let replacementLoaded = expectation(description: "Replacement authority read")
+        service.onLoad = { if service.loadCount == 2 { replacementLoaded.fulfill() } }
+        service.value.authorityID = "replacement-account"
+        service.onChange?(.authorityInvalidated)
+        service.commandContinuation?.resume(returning: service.value)
+        let firstApplied = await first.value
+        let applied = await queued.value
+        XCTAssertFalse(firstApplied)
+        XCTAssertFalse(applied)
+        XCTAssertEqual(service.commands, [.add(token: "first", quantity: nil)], "The queued Add never ran")
+        await fulfillment(of: [replacementLoaded], timeout: 2)
+        XCTAssertEqual(session.snapshot.authorityID, "replacement-account")
+        XCTAssertNil(session.errorMessage)
+    }
+
+    func testReadFromReplacedAuthorityIsNeverApplied() async {
+        let service = SpyService()
+        let session = WatchShoppingSession(service: service)
+        await session.reload()
         let old = service.value
         let started = expectation(description: "Old-account read held")
         service.suspendNextLoad = true
         service.loadStarted = { started.fulfill() }
         let refresh = Task { await session.reload() }
         await fulfillment(of: [started], timeout: 2)
-        let reserved = expectation(description: "Old-account Add reserved")
-        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "old-account", quantity: 2)) }
-        await fulfillment(of: [reserved], timeout: 2)
         let replacementLoaded = expectation(description: "Replacement authority read")
         service.onLoad = { if service.loadCount == 3 { replacementLoaded.fulfill() } }
         service.value.authorityID = "replacement-account"
         service.onChange?(.authorityInvalidated)
-        await Task.yield()
+        XCTAssertNil(session.snapshot.authorityID, "The old snapshot is cleared at once")
         service.loadContinuation?.resume(returning: old)
         await refresh.value
-        let applied = await adding.value
-        XCTAssertFalse(applied)
-        XCTAssertTrue(service.commands.isEmpty)
+        XCTAssertNotEqual(session.snapshot.authorityID, old.authorityID, "The old-account read is discarded")
         await fulfillment(of: [replacementLoaded], timeout: 2)
         XCTAssertEqual(session.snapshot.authorityID, "replacement-account")
         XCTAssertNil(session.errorMessage)
@@ -1021,20 +1086,19 @@ final class WatchShoppingSessionTests: XCTestCase {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
         await session.reload()
-        let started = expectation(description: "Prior home read held")
-        service.suspendNextLoad = true
-        service.loadStarted = { started.fulfill() }
-        let refresh = Task { await session.reload() }
+        let started = expectation(description: "Prior-home Add held")
+        service.suspendCommand = true
+        service.commandStarted = { started.fulfill() }
+        let first = Task { await session.perform(.add(token: "first", quantity: nil)) }
         await fulfillment(of: [started], timeout: 2)
-        let reserved = expectation(description: "Old-home Add reserved")
-        let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "old-home", quantity: nil)) }
-        await fulfillment(of: [reserved], timeout: 2)
+        let queued = Task { await session.perform(.add(token: "old-home", quantity: nil)) }
+        await Task.yield()
         service.value.authorityID = "another-home"
-        service.loadContinuation?.resume(returning: service.value)
-        await refresh.value
-        let applied = await adding.value
+        service.commandContinuation?.resume(returning: service.value)
+        _ = await first.value
+        let applied = await queued.value
         XCTAssertFalse(applied)
-        XCTAssertTrue(service.commands.isEmpty)
+        XCTAssertEqual(service.commands, [.add(token: "first", quantity: nil)], "The queued Add never ran")
         XCTAssertEqual(session.errorMessage, PersonalCartError.scopeChanged.localizedDescription)
         await session.reload()
         XCTAssertNotNil(session.errorMessage)

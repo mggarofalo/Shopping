@@ -16,6 +16,8 @@ enum ShoppingPreviewCase: String, CaseIterable {
     case clearInterruption
     case performance
     case stress
+    /// A realistic household list for scrolling measurements.
+    case scrolling
 }
 
 struct ShoppingPreviewIDs {
@@ -67,6 +69,8 @@ enum ShoppingPreviewFixtures {
                 itemCount: fixture == .performance ? 500 : 1_000,
                 ids: &ids
             )
+        } else if fixture == .scrolling {
+            try populateScrolling(service: service, ids: &ids)
         } else if fixture == .promotionLinkExisting || fixture == .promotionConflict {
             try populatePromotion(service: service, hasActiveMatch: fixture == .promotionConflict, ids: &ids)
         } else if fixture == .clearInterruption {
@@ -187,6 +191,47 @@ enum ShoppingPreviewFixtures {
         }
         if fixture == .archivedCatalogItem {
             try service.setCatalogItemArchived(itemID: granola, householdID: householdID, archived: true)
+        }
+    }
+
+    /// Forty outstanding groceries across eight categories and five stores, with the row
+    /// details a real household list carries: notes, quantities, urgency, assigned people,
+    /// multi-store purchase rules and one-time needs.
+    private static func populateScrolling(service: NeedService, ids: inout ShoppingPreviewIDs) throws {
+        let householdID = ids.householdID
+        let stores = try ["Costco", "Publix", "Walmart", "Trader Joe's", "Whole Foods"].enumerated().map {
+            try service.createStore(name: $0.element, householdID: householdID, displayOrder: Int64($0.offset))
+        }
+        let categories = try ["Produce", "Dairy", "Meat", "Bakery", "Pantry", "Frozen", "Household", "Snacks"]
+            .enumerated().map {
+                try service.createCategory(name: $0.element, householdID: householdID, displayOrder: Int64($0.offset))
+            }
+        let people = try ["Alex", "Sam"].map { try service.createPerson(name: $0, householdID: householdID) }
+        let names = ["Bananas", "Avocados", "Baby spinach", "Honeycrisp apples", "Greek yogurt", "Oat milk",
+                     "Sharp cheddar", "Eggs", "Chicken thighs", "Ground beef", "Salmon fillets", "Sourdough loaf",
+                     "Bagels", "Tortillas", "Olive oil", "Basmati rice", "Black beans", "Peanut butter",
+                     "Frozen peas", "Ice cream", "Frozen berries", "Paper towels", "Dish soap", "Laundry pods",
+                     "Trash bags", "Tortilla chips", "Dark chocolate", "Almonds", "Granola bars", "Popcorn",
+                     "Lemons", "Butter", "Pasta", "Marinara", "Coffee beans", "Sparkling water"]
+        for (index, name) in names.enumerated() {
+            let storeIDs: Set<UUID> = index.isMultiple(of: 3) ? [] : index.isMultiple(of: 4)
+                ? [stores[index % 5], stores[(index + 2) % 5]] : [stores[index % 5]]
+            let grocery = try service.createRememberedGrocery(
+                householdID: householdID, listID: ids.listID,
+                catalog: CatalogItemValues(name: name, notes: "", categoryID: categories[index % categories.count],
+                    anyStore: storeIDs.isEmpty, storeIDs: storeIDs),
+                need: RememberedNeedValues(quantity: index.isMultiple(of: 2) ? Int64(index % 5 + 1) : nil,
+                    purchaseNotes: index.isMultiple(of: 5) ? "Check the unit price" : "",
+                    urgency: index.isMultiple(of: 7) ? .urgent : .normal),
+                personID: index.isMultiple(of: 6) ? people[index % 2] : nil)
+            ids.itemIDs["item-\(index)"] = grocery.itemID
+            ids.needIDs["need-\(index)"] = grocery.needID
+        }
+        for (index, title) in ["Birthday candles", "Picnic plates", "Gift card", "Party ice"].enumerated() {
+            ids.needIDs["oneTime-\(index)"] = try service.addOneTimeNeed(
+                title: title, notes: index.isMultiple(of: 2) ? "For Saturday" : "",
+                categoryID: categories[(index * 3) % categories.count], storeIDs: [stores[index]], anyStore: false,
+                quantity: Int64(index + 1), listID: ids.listID)
         }
     }
 

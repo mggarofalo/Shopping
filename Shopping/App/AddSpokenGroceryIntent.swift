@@ -27,6 +27,12 @@ struct AddSpokenGroceryIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<GroceryReminderEntity?> & ProvidesDialog {
         SiriActionLog.started("Spoken add")
+        do throws(SpokenGroceryError) {
+            try rejectUnsupportedDetails()
+        } catch {
+            SiriActionLog.finished("Spoken add", "declined \(error)")
+            throw error
+        }
         do {
             let runtime = ShoppingApplicationRuntime.shared
             let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
@@ -69,20 +75,32 @@ struct AddSpokenGroceryIntent: AppIntent {
     /// The editor request is queued only once the app is in front; a declined
     /// handoff queues nothing. When already in front, continuing stalled the action
     /// in system execution (SHOPPING-258), so the request is queued directly.
+    /// A handoff returns no reminder, which Siri AI treats as unfinished and re-runs
+    /// (SHOPPING-271); that re-run is refused before it can ask to continue again.
     @MainActor
     func handOff(_ dialogue: CatalogAddDialogue) async throws {
+        try dialogue.rejectRepeatedCreation()
         if systemContext.currentMode != .foreground {
             try await continueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?")
         }
         try dialogue.createInApp()
     }
 
-    @MainActor
-    func prepare(context: CatalogActionContext) async throws -> CatalogAddDialogue {
-        guard note == nil, isFlagged != true, images.isEmpty, tags.isEmpty, urls.isEmpty,
-              dueDate == nil, recurrence == nil, locationTrigger == nil, section == nil else {
+    /// Siri offers this app for any reminder (SHOPPING-270), and the schema cannot be
+    /// narrowed, so `perform()` declines a timed or repeating reminder before it waits
+    /// for the store. No location entity resolves, so a location trigger only lands here
+    /// if Siri supplies one. A grocery need has nowhere to keep the other details either.
+    func rejectUnsupportedDetails() throws(SpokenGroceryError) {
+        guard dueDate == nil, recurrence == nil, locationTrigger == nil else {
+            throw SpokenGroceryError.scheduledReminder
+        }
+        guard note == nil, isFlagged != true, images.isEmpty, tags.isEmpty, urls.isEmpty, section == nil else {
             throw SpokenGroceryError.unsupportedDetails
         }
+    }
+
+    @MainActor
+    func prepare(context: CatalogActionContext) async throws -> CatalogAddDialogue {
         guard list == nil || list?.id == GroceryListEntity(context: context).id else {
             throw ShoppingActionError.scopeChanged
         }
@@ -91,9 +109,14 @@ struct AddSpokenGroceryIntent: AppIntent {
 }
 
 enum SpokenGroceryError: LocalizedError {
-    case unsupportedDetails
+    case scheduledReminder, unsupportedDetails
     var errorDescription: String? {
-        "I can add a grocery name. Add notes or urgency in Milk & Bananas; scheduled reminders and attachments aren’t supported."
+        switch self {
+        case .scheduledReminder:
+            "Milk & Bananas only keeps your grocery list, so it can’t set timed or location reminders. Ask again and choose Reminders."
+        case .unsupportedDetails:
+            "I can add a grocery name. Add notes or urgency in Milk & Bananas; attachments and tags aren’t supported."
+        }
     }
 }
 #endif

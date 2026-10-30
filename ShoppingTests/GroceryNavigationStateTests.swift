@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import CoreData
 @testable import Shopping
 
@@ -149,6 +150,29 @@ final class GroceryNavigationStateTests: XCTestCase {
         restored.configure(householdID: household, activeStoreIDs: [active])
         XCTAssertNil(restored.selectedStoreID)
         XCTAssertEqual(restored.excludedStoreIDs, [active])
+    }
+
+    /// Screens sanitize on every store change, including CloudKit merges (SHOPPING-272).
+    func testSanitizeWithValidFiltersPublishesNothing() throws {
+        let suite = "GroceryNavigationStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UUID()
+        let category = UUID()
+        let state = GroceryNavigationState(defaults: defaults, keyPrefix: "test.filter")
+        state.configure(householdID: UUID(), activeStoreIDs: [store], activeCategoryIDs: [category])
+        state.selectStore(store)
+        state.setIncluded(true, storeID: store)
+        state.categoryID = category
+        var publications = 0
+        let observation = state.objectWillChange.sink { publications += 1 }
+        defer { observation.cancel() }
+
+        state.sanitize(activeStoreIDs: [store], activeCategoryIDs: [category])
+        XCTAssertEqual(publications, 0)
+        XCTAssertEqual(state.selectedStoreID, store)
+        XCTAssertEqual(state.includedStoreIDs, [store])
+        XCTAssertEqual(state.categoryID, category)
     }
 
     func testIncludeAndExcludeRemainIndependentAndExclusionWins() {

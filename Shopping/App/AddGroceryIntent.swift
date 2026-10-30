@@ -44,6 +44,7 @@ struct AddGroceryIntent: ForegroundContinuableIntent {
             return "\(need.title) is already on your grocery list."
         }
         if dialogue.candidates.isEmpty {
+            try dialogue.rejectRepeatedCreation()
             try await requestToContinueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?") {
                 try dialogue.createInApp()
             }

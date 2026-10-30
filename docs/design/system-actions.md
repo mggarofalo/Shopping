@@ -151,7 +151,51 @@ The app controls three things:
 `CFBundleSpokenName`, parameter summaries, `supportedModes` and entity synonyms
 have no documented effect on app choice.
 
-Both Add actions log start, outcome and error type, without grocery text, in the
+## Requests that aren't groceries (SHOPPING-270)
+
+Adopting `createReminder` makes the app a candidate for every reminder, so iOS
+may offer it for “Remind me at 9 am to call mom”. The schema cannot be narrowed:
+in the iOS 27 SDK `.reminders.createReminder` is only an identifier, the macro
+requires every reminder parameter, and Apple documents no way to declare a subset,
+decline a request kind, or opt out of the chooser. `isAssistantOnly` and
+`supportedModes` change visibility and execution, not routing.
+
+The app declines what it cannot be. The first step of the action, before it waits
+for the store, fails a request with a due date or recurrence with “Milk & Bananas
+only keeps your grocery list, so it can’t set timed or location reminders. Ask
+again and choose Reminders.” and logs `declined scheduledReminder`. (iOS resolves
+an explicit list parameter before the action runs, which can still wait for the
+store.) The location entity query returns nothing, so a location reminder either
+fails during Siri's parameter resolution or arrives without a trigger; a trigger
+that does arrive is declined the same way. Other reminder details still fail as
+unsupported. An untimed request such as “Remind me to call
+mom” is indistinguishable from a grocery name; it reaches the normal unknown-name
+handoff, which asks before opening the editor and saves nothing without Save.
+
+Removing `createReminder` would stop the chooser but would also end unqualified
+“Add milk to my shopping list” routing; only app-named App Shortcut phrases would
+remain. That is a product decision and is not made here.
+
+## Siri AI re-runs a handoff (SHOPPING-271)
+
+The 1.6.5 device sysdiagnose (October 30) shows why an unknown name produced extra
+Siri replies and then “Sorry, something went wrong”. The first run asked to continue,
+queued the editor and returned no reminder. Siri AI's planner could not resolve that
+empty result into a reminder (`ContentCollectionToTypedValueResolutionError` 200),
+treated the step as failed, re-planned, and ran the same action again three seconds
+later while the editor was open. The re-run asked to continue again; that prompt was
+dismissed, and the cancelled session surfaced as the failure.
+
+The router records a creation as open from the moment its request is delivered until
+the Add sheet closes, whether by Save or Cancel. The same name for the same Home while
+that request is queued or open is the re-run: both Add actions refuse it before any
+prompt with “That item is already open in Milk & Bananas. Save it there to add it to
+your list.” and queue nothing. Another name still waits behind the open sheet as
+before. This removes the second prompt; it cannot stop the planner from re-running,
+because only a returned reminder satisfies `createReminder`, and nothing is saved
+until the user chooses Save.
+
+Both Add actions log start, outcome and the error's type, domain and code, without grocery text, in the
 `com.mggarofalo.shopping` subsystem's `Siri` category at notice level, which
 sysdiagnose archives keep. A request with no “started” line never reached the app.
 

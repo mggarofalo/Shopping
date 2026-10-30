@@ -252,9 +252,12 @@ the iPhone/Watch pair and check the generated Siri metadata. It also runs
 `CatalogActionTests`, `SpokenGrocerySchemaTests`, and the two modern
 out-of-process action tests in `ModernSiriActionTests` on iOS 27. The dedicated
 `ShoppingSiri` scheme/plan with the three explicit `-only-testing` selections
-requires all 29 cases to pass (20 catalog, 7 schema, 2 native; SHOPPING-258 added
+requires all 32 cases to pass (20 catalog, 10 schema, 2 native; SHOPPING-258 added
 two catalog bound/failure contracts and the unknown-name handoff case; SHOPPING-266 added
-three catalog and one schema case for one-time names already on the list). Running the plan without those filters additionally
+three catalog and one schema case for one-time names already on the list; SHOPPING-270
+added two schema cases for declined timed reminders; SHOPPING-271 added one for a
+refused repeated handoff). `HOSTED_COUNTS` and `UI_TESTS` in
+`siri-schema-ci.py` are the manifest. Running the plan without those filters additionally
 runs the broader persistence suite. Its `ShoppingSiriTests`
 UI target requires iOS 27 and exclusively links AppIntentsTesting, whose SDK
 framework cannot load on the pinned iOS 26.5 Full runtime. Existing Full and

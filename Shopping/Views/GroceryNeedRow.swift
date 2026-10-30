@@ -2,19 +2,16 @@ import CoreData
 import SwiftUI
 import UIKit
 
-struct GroceryNeedRow: View {
+/// Displays `model` only. The screen rebuilds the model when its data changes, so the row
+/// doesn't observe the need and skips unchanged renders through `Equatable`.
+struct GroceryNeedRow: View, Equatable {
     @Environment(\.needService) private var service
     @Environment(\.persistenceSelection) private var selection
     @Environment(\.hapticFeedback) private var hapticFeedback
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
-    @ObservedObject var need: Need
-    let activeStores: [Store]
-    let selectedStoreID: UUID?
-    var personalCarted: Bool? = nil
-    var presenceNames: [String] = []
-    var cartActionAvailable = true
-    var quantityActionAvailable = true
+    /// The need the row's commands act on.
+    let need: Need
+    let model: GroceryRowModel
     var onEdit: ((Need) -> Void)? = nil
     var onCartedChange: ((Need, Bool) -> Void)? = nil
     var onQuantityChange: ((Need, Int64?) -> Void)? = nil
@@ -30,12 +27,20 @@ struct GroceryNeedRow: View {
     }
 
 
+#if DEBUG
+    /// Records each body evaluation, so tests can prove unchanged rows are skipped.
+    @MainActor static var renderedNeedIDs: [UUID] = []
+#endif
+
     var body: some View {
-        Group {
+#if DEBUG
+        let _ = Self.renderedNeedIDs.append(model.needID)
+#endif
+        return Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 2) {
                     detailsControl
-                    if hasSupportingDetails || need.quantity != nil {
+                    if model.hasSupportingDetails || model.quantity != nil {
                         HStack(alignment: .top, spacing: 8) {
                             supportingDetailsControl
                             // This row already has its own line, so the hit region stays inside it.
@@ -56,13 +61,13 @@ struct GroceryNeedRow: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if let onCartedChange {
                 Button {
-                    onCartedChange(need, !(personalCarted ?? need.carted))
+                    onCartedChange(need, !model.isCarted)
                 } label: {
                     Label(cartActionTitle, systemImage: cartActionSymbol).labelStyle(.iconOnly)
                 }
-                .tint((personalCarted ?? need.carted) ? .orange : .groceryAccent)
-                .disabled(!cartActionAvailable)
-                .accessibilityIdentifier("shopping.checklist.cart.\(need.id.uuidString)")
+                .tint(model.isCarted ? .orange : .groceryAccent)
+                .disabled(!model.cartActionAvailable)
+                .accessibilityIdentifier("shopping.checklist.cart.\(model.needID.uuidString)")
             }
             if onRemoved != nil {
                 // The cart action remains first, so a full swipe still carts/uncarts.
@@ -71,15 +76,15 @@ struct GroceryNeedRow: View {
                 }
                 .tint(.red)
                 .disabled(removalPending)
-                .accessibilityIdentifier("shopping.checklist.remove.\(need.id.uuidString)")
+                .accessibilityIdentifier("shopping.checklist.remove.\(model.needID.uuidString)")
             }
         }
         .accessibilityAction(named: Text(cartActionAccessibilityTitle)) {
-            onCartedChange?(need, !(personalCarted ?? need.carted))
+            onCartedChange?(need, !model.isCarted)
         }
         .accessibilityActions {
             if onRemoved != nil {
-                Button("Remove \(title)", action: remove)
+                Button("Remove \(model.title)", action: remove)
             }
         }
         .alert("Couldn’t remove item", isPresented: Binding(
@@ -118,24 +123,24 @@ struct GroceryNeedRow: View {
                 details
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Edit \(title)")
-            .accessibilityValue(accessibilityDetails + (presenceNames.isEmpty ? "" : ", In cart: " + presenceNames.joined(separator: ", ")))
-            .accessibilityIdentifier("shopping.grocery.row.\(need.id.uuidString)")
+            .accessibilityLabel("Edit \(model.title)")
+            .accessibilityValue(accessibilityValue)
+            .accessibilityIdentifier("shopping.grocery.row.\(model.needID.uuidString)")
         } else {
             details
-                .accessibilityLabel(title)
-                .accessibilityValue(accessibilityDetails + (presenceNames.isEmpty ? "" : ", In cart: " + presenceNames.joined(separator: ", ")))
+                .accessibilityLabel(model.title)
+                .accessibilityValue(accessibilityValue)
         }
     }
 
     @ViewBuilder
     private var quantityControl: some View {
-        if let quantity = need.quantity {
+        if let quantity = model.quantity {
             if let onQuantityChange {
                 // The 44-point hit region reaches into the row padding instead of growing the row.
                 ShoppingRowAccessoryLayout {
                     Button {
-                        quantityPresentation = QuantityPresentation(quantity: need.quantity, revision: need.revision)
+                        quantityPresentation = QuantityPresentation(quantity: model.quantity, revision: model.revision)
                     } label: {
                         Text("\(quantity)×")
                             .font(.subheadline.weight(.medium))
@@ -145,51 +150,55 @@ struct GroceryNeedRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .disabled(!quantityActionAvailable)
-                    .accessibilityLabel("Edit quantity for \(title)")
+                    .disabled(!model.quantityActionAvailable)
+                    .accessibilityLabel("Edit quantity for \(model.title)")
                     .accessibilityValue("\(quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.edit.\(need.id.uuidString)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.edit.\(model.needID.uuidString)")
                 }
                 .sheet(item: $quantityPresentation) { presentation in
-                    ShoppingQuantityEditor(itemName: title, quantity: presentation.quantity,
-                                           actionAvailable: quantityActionAvailable,
-                                           itemChanged: need.revision != presentation.revision) {
-                        guard quantityActionAvailable, need.revision == presentation.revision else { return }
+                    ShoppingQuantityEditor(itemName: model.title, quantity: presentation.quantity,
+                                           actionAvailable: model.quantityActionAvailable,
+                                           itemChanged: model.revision != presentation.revision) {
+                        guard model.quantityActionAvailable, need.revision == presentation.revision else { return }
                         onQuantityChange(need, $0)
                     }
                 }
             } else {
                 Text("\(quantity)×").foregroundStyle(Color.grocerySecondary)
                     .accessibilityLabel("Quantity \(quantity)")
-                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(need.id.uuidString)")
+                    .accessibilityIdentifier("shopping.checklist.quantity.value.\(model.needID.uuidString)")
             }
         }
     }
 
     private var storeMetadata: ShoppingItemStoreSummary {
-        ShoppingItemStoreSummary(anyStore: anyStore, storeLabels: storeLabels,
-            hasSavedStores: !assignedStores.isEmpty,
-            hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil,
-            symbol: storeIndicator?.symbol)
+        ShoppingItemStoreSummary(anyStore: model.anyStore, storeLabels: model.storeLabels,
+            hasSavedStores: model.hasSavedStores, hasResolvedIdentity: model.hasResolvedIdentity,
+            symbol: model.storeIndicator?.symbol)
+    }
+
+    private var accessibilityValue: String {
+        model.accessibilityDetails
+            + (model.presenceNames.isEmpty ? "" : ", In cart: " + model.presenceNames.joined(separator: ", "))
     }
 
     private var cartActionTitle: String {
-        (personalCarted ?? need.carted) ? "Remove from cart" : "In cart"
+        model.isCarted ? "Remove from cart" : "In cart"
     }
 
     private var cartActionSymbol: String {
-        (personalCarted ?? need.carted) ? "cart.badge.minus" : "cart.fill"
+        model.isCarted ? "cart.badge.minus" : "cart.fill"
     }
 
     private var cartActionAccessibilityTitle: String {
-        "\(cartActionTitle) \(title)"
+        "\(cartActionTitle) \(model.title)"
     }
 
     private var titleDetails: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             titleWithAssignment
-                .accessibilityLabel(title)
-            if need.urgency == NeedUrgency.urgent.rawValue {
+                .accessibilityLabel(model.title)
+            if model.isUrgent {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.body)
                     .foregroundStyle(Color.groceryUrgent)
@@ -214,7 +223,7 @@ struct GroceryNeedRow: View {
         ShoppingItemRowContent(storeSummary: storeMetadata) {
             VStack(alignment: .leading, spacing: 2) {
                 titleDetails
-                if !dynamicTypeSize.isAccessibilitySize && hasSupportingDetails { supportingDetails }
+                if !dynamicTypeSize.isAccessibilitySize && model.hasSupportingDetails { supportingDetails }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -225,7 +234,7 @@ struct GroceryNeedRow: View {
 
     private var supportingDetails: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if need.kind == NeedKind.oneTime.rawValue {
+            if model.isOneTime {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { metadataLabels }
                         .fixedSize(horizontal: true, vertical: false)
@@ -233,9 +242,9 @@ struct GroceryNeedRow: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if !need.notes.isEmpty { Text(need.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
-            if !presenceNames.isEmpty {
-                Text("In cart: " + presenceNames.joined(separator: ", "))
+            if !model.notes.isEmpty { Text(model.notes).font(.caption).foregroundStyle(Color.grocerySecondary) }
+            if !model.presenceNames.isEmpty {
+                Text("In cart: " + model.presenceNames.joined(separator: ", "))
                     .font(.caption).foregroundStyle(Color.grocerySecondary)
                     .accessibilityHidden(true)
             }
@@ -247,7 +256,7 @@ struct GroceryNeedRow: View {
 
     @ViewBuilder
     private var metadataLabels: some View {
-        if need.kind == NeedKind.oneTime.rawValue {
+        if model.isOneTime {
             Label("One-time", systemImage: "1.circle")
                 .labelStyle(.titleAndIcon)
                 .font(.caption).foregroundStyle(Color.grocerySecondary)
@@ -256,61 +265,15 @@ struct GroceryNeedRow: View {
     }
 
     private var titleWithAssignment: Text {
-        if let personLabel {
-            return Text("\(Text(title).font(.body)) \(Text("(\(personLabel))").font(.caption).foregroundColor(Color.grocerySecondary))")
+        if let personLabel = model.personLabel {
+            return Text("\(Text(model.title).font(.body)) \(Text("(\(personLabel))").font(.caption).foregroundColor(Color.grocerySecondary))")
         }
-        return Text(title).font(.body)
+        return Text(model.title).font(.body)
     }
 
-    private var title: String { need.item?.name ?? need.title }
-
-    private var hasSupportingDetails: Bool {
-        need.kind == NeedKind.oneTime.rawValue || !need.notes.isEmpty || !presenceNames.isEmpty
+    /// Commands are the screen's methods and read its current state when invoked, so a row
+    /// whose model is unchanged keeps those from an earlier render.
+    static func == (lhs: GroceryNeedRow, rhs: GroceryNeedRow) -> Bool {
+        lhs.need === rhs.need && lhs.model == rhs.model
     }
-
-    private var assignedStores: Set<Store> {
-        need.item?.stores ?? (need.kind == NeedKind.oneTime.rawValue ? need.oneTimeStores : nil) ?? []
-    }
-
-    private var anyStore: Bool {
-        need.item?.anyStore ?? (need.kind == NeedKind.oneTime.rawValue && need.oneTimeAnyStore)
-    }
-
-    private var storeLabels: [String] {
-        assignedStores.map { $0.isArchived ? "\($0.name) (archived)" : $0.name }.sorted()
-    }
-
-    private var storeSummary: String {
-        CatalogSuggestionPurchaseSummary.text(anyStore: anyStore, savedStoreLabels: storeLabels,
-            hasSavedStores: !assignedStores.isEmpty,
-            hasResolvedIdentity: need.kind == NeedKind.oneTime.rawValue || need.item != nil)
-    }
-
-    private var storeIndicator: GroceryStoreScopeIndicator? {
-        GroceryStoreScopeIndicator.value(
-            for: need,
-            selectedStoreID: selectedStoreID,
-            activeStoreIDs: Set(activeStores.map(\.id))
-        )
-    }
-
-    private var personLabel: String? {
-        GroceryPersonLabel.text(
-            for: need.person, people: Array(people), household: need.list?.household
-        )
-    }
-
-    private var accessibilityDetails: String {
-        var values: [String] = []
-        if need.urgency == NeedUrgency.urgent.rawValue { values.append("Urgent") }
-        if need.kind == NeedKind.oneTime.rawValue { values.append("One-time") }
-        if (personalCarted ?? need.carted) { values.append("In cart") }
-        if let storeIndicator { values.append(storeIndicator.title) }
-        values.append(storeSummary)
-        if let quantity = need.quantity { values.append("Quantity \(quantity)") }
-        if let personLabel { values.append("For \(personLabel)") }
-        if !need.notes.isEmpty { values.append(need.notes) }
-        return values.joined(separator: ", ")
-    }
-
 }

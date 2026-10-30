@@ -60,6 +60,25 @@ struct SpokenGrocerySchemaTests {
         #expect(try await context.items().isEmpty)
     }
 
+    /// SHOPPING-271: the re-run Siri sends after a handoff is refused before any prompt,
+    /// and queues nothing behind the editor the first request opened.
+    @Test func repeatedUnknownNameHandoffIsRefusedBeforePrompting() async throws {
+        guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
+        let (_, context) = try await fixture()
+        let intent = AddSpokenGroceryIntent(); intent.title = "Space pears"
+        let first = try await intent.prepare(context: context)
+        try first.rejectRepeatedCreation()
+        try first.createInApp()
+        #expect(try context.runtime.actions.take(presentationID: context.ready.presentation.id) == .createItem("Space pears"))
+        intent.title = "space pears"
+        let rerun = try await intent.prepare(context: context)
+        #expect(throws: ShoppingActionError.creationOpen) { try rerun.rejectRepeatedCreation() }
+        #expect(throws: ShoppingActionError.creationOpen) { try rerun.createInApp() }
+        #expect(context.runtime.actions.pending == nil)
+        context.runtime.actions.creationClosed()
+        try rerun.rejectRepeatedCreation()
+    }
+
     @Test func spokenOneTimeNameAlreadyOnListResolvesToThatNeed() async throws {
         guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
         let (environment, context) = try await fixture()
@@ -84,18 +103,41 @@ struct SpokenGrocerySchemaTests {
         #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
     }
 
-    @Test func unsupportedReminderDetailsFailBeforeAnyAdd() async throws {
+    @Test func unsupportedReminderDetailsAreRejected() async throws {
         guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
-        let (environment, context) = try await fixture()
-        _ = try create("Milk", environment)
         let intent = AddSpokenGroceryIntent(); intent.title = "Milk"
-        intent.dueDate = DateComponents(year: 2027, month: 1, day: 1)
-        await #expect(throws: SpokenGroceryError.self) { try await intent.prepare(context: context) }
-        intent.dueDate = nil; intent.note = AttributedString("Do not silently drop this")
-        await #expect(throws: SpokenGroceryError.self) { try await intent.prepare(context: context) }
+        #expect(throws: Never.self) { try intent.rejectUnsupportedDetails() }
+        intent.note = AttributedString("Do not silently drop this")
+        #expect(throws: SpokenGroceryError.unsupportedDetails) { try intent.rejectUnsupportedDetails() }
         intent.note = nil; intent.isFlagged = true
-        await #expect(throws: SpokenGroceryError.self) { try await intent.prepare(context: context) }
-        #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
+        #expect(throws: SpokenGroceryError.unsupportedDetails) { try intent.rejectUnsupportedDetails() }
+        intent.isFlagged = nil; intent.tags = ["errands"]
+        #expect(throws: SpokenGroceryError.unsupportedDetails) { try intent.rejectUnsupportedDetails() }
+    }
+
+    /// SHOPPING-270: "Remind me at 9 am to call mom" can be routed here. A time or
+    /// repeat is declined as a scheduled reminder, even when other details came too.
+    @Test func timedOrRepeatingReminderIsDeclinedAsScheduled() async throws {
+        guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
+        let intent = AddSpokenGroceryIntent(); intent.title = "call mom"
+        intent.dueDate = DateComponents(hour: 9, minute: 0)
+        #expect(throws: SpokenGroceryError.scheduledReminder) { try intent.rejectUnsupportedDetails() }
+        intent.note = AttributedString("Ask about Sunday")
+        #expect(throws: SpokenGroceryError.scheduledReminder) { try intent.rejectUnsupportedDetails() }
+        intent.dueDate = nil; intent.note = nil
+        intent.recurrence = Calendar.RecurrenceRule.daily(calendar: .current)
+        #expect(throws: SpokenGroceryError.scheduledReminder) { try intent.rejectUnsupportedDetails() }
+        let message = try #require(SpokenGroceryError.scheduledReminder.errorDescription)
+        #expect(message.contains("can’t set timed or location reminders") && message.contains("choose Reminders"))
+    }
+
+    /// The action itself, not only the check, surfaces the scheduled decline. That the
+    /// check precedes store readiness is shown by `perform()`'s order, not by this test.
+    @Test func timedReminderPerformIsDeclinedAsScheduled() async throws {
+        guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
+        let intent = AddSpokenGroceryIntent(); intent.title = "call mom"
+        intent.dueDate = DateComponents(hour: 9, minute: 0)
+        await #expect(throws: SpokenGroceryError.scheduledReminder) { _ = try await intent.perform() }
     }
 
     @Test func needQueriesRejectOtherHomeAndRetirementAndReturnCurrentNotes() async throws {

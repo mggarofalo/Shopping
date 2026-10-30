@@ -51,10 +51,19 @@ extension PersonalCartRepository {
             isDeleted: isHomeDeleted(householdID: householdID, listID: listID))
     }
 
+    /// Durable ledger facts plus this device's current native verification.
     func homeEffectMayPublish(kind: HomeEffectKind, subjectID: UUID,
                              householdID: UUID, listID: UUID) throws -> Bool {
         if try isHomeDeleted(householdID: householdID, listID: listID) { return false }
         guard try nativePublicationAllowed(householdID: householdID, listID: listID) else { return false }
+        return try homeEffectAuthorized(kind: kind, subjectID: subjectID, householdID: householdID, listID: listID)
+    }
+
+    /// Durable ledger facts only: deletion, membership loss and restrictions. A
+    /// pending native verification never withdraws an effect's authority.
+    func homeEffectAuthorized(kind: HomeEffectKind, subjectID: UUID,
+                              householdID: UUID, listID: UUID) throws -> Bool {
+        if try isHomeDeleted(householdID: householdID, listID: listID) { return false }
         let authority: HomeEffectAuthority
         switch kind {
         case .checkout:

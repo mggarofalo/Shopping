@@ -43,6 +43,11 @@ struct CatalogAddDialogue {
         return (item, receipt.needID, receipt.added)
     }
 
+    /// Checked before asking to continue in the app, so Siri's re-run never prompts twice.
+    func rejectRepeatedCreation() throws {
+        try context.rejectRepeatedCreation(name: name)
+    }
+
     func createInApp() throws {
         guard candidates.isEmpty, existingOneTime == nil else { throw CatalogActionError.conflictingSelection }
         try context.createInApp(name: name)

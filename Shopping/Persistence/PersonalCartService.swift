@@ -41,7 +41,7 @@ final class PersonalCartService: @unchecked Sendable {
             let request = Need.fetchRequest()
             request.predicate = NSPredicate(format: "list.id == %@ AND list.household.id == %@ AND archived == NO",
                                             listID as CVarArg, householdID as CVarArg)
-            let fulfilled = try PersonalDemandProjection.fulfilledNeedIDs(householdID: householdID,
+            let fulfilled = try PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: householdID,
                 persistence: self.persistence, in: repository.context, session: repository.session)
             return Set(try repository.context.fetch(request).map(\.id)).subtracting(fulfilled)
         }

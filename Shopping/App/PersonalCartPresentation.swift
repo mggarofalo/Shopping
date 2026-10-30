@@ -66,22 +66,29 @@ final class PersonalCartPresentation {
                 switch result {
                 case .success(let snapshot):
                     ShoppingPerformanceTrace.launchEvent("Cart snapshot published", "outstanding=\(snapshot.outstandingNeedIDs.count)")
-                    entries = snapshot.entries
-                    history = snapshot.history
-                    recovery = snapshot.recovery
-                    outstandingNeedIDs = snapshot.outstandingNeedIDs
-                    presence = snapshot.presence
-                    error = snapshot.householdError
-                    if snapshot.householdError == nil { hasLoadedSnapshot = true }
-                    pendingCartState = pendingCartState.filter { inFlightNeedIDs.contains($0.key) }
-                    pendingQuantityIDs.formIntersection(inFlightQuantityIDs)
+                    publish(\.entries, snapshot.entries)
+                    publish(\.history, snapshot.history)
+                    publish(\.recovery, snapshot.recovery)
+                    publish(\.outstandingNeedIDs, snapshot.outstandingNeedIDs)
+                    publish(\.presence, snapshot.presence)
+                    publish(\.error, snapshot.householdError)
+                    if snapshot.householdError == nil { publish(\.hasLoadedSnapshot, true) }
+                    publish(\.pendingCartState, pendingCartState.filter { inFlightNeedIDs.contains($0.key) })
+                    publish(\.pendingQuantityIDs, pendingQuantityIDs.intersection(inFlightQuantityIDs))
                 case .failure(let failure):
-                    error = failure
-                    pendingQuantityIDs.formIntersection(inFlightQuantityIDs)
+                    publish(\.error, failure)
+                    publish(\.pendingQuantityIDs, pendingQuantityIDs.intersection(inFlightQuantityIDs))
                 }
             } while refreshRequested
             refreshInProgress = false
         }
+    }
+
+    /// Every store change refreshes the cart, and `@Observable` notifies readers of any write,
+    /// even an equal one. Grocery rows read the cart, so unchanged values must not be rewritten.
+    private func publish<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<PersonalCartPresentation, Value>,
+                                           _ value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
     }
 
     nonisolated private static func readSnapshot(

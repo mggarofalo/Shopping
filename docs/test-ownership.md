@@ -2850,3 +2850,21 @@ immediately after the predicate held, and a stall spanning the deadline, both
 produced the correct verdict with the new loop. Starving XCTest's private
 delivery queue cannot be forced locally; the CI session log above is the
 direct evidence of that race.
+
+### A participant's own checkout (SHOPPING-273)
+
+`ParticipantOwnCheckoutTests` owns the shopper-view rule for an invited
+participant whose native verification hasn't answered: an offline checkout
+leaves the shopper's groceries and outstanding needs at once and after a
+relaunch, while the household rule still excludes it; verification then
+publishes one receipt. It also owns the defined outcomes when verification
+later observes a loss (the need returns, the purchase stays in history pending,
+and a rejoin never publishes it) or read-only access (the need returns until
+writable, then publishes once), and a re-add after an offline checkout renewing
+the same need rather than creating a second one.
+`PersistentWatchShoppingServiceTests.testParticipantOfflineCheckoutKeepsPurchasesOutOfGroceriesAcrossRelaunch`
+owns the same rule through the real Watch adapter and SQLite, including a
+relaunch while the native access refresh is held. Both use
+`OfflineParticipantShares`, a `HomeNativeShareSource` that reports a participant
+identity and no verified write. Existing household fulfillment, lineage and
+quarantine tests are unchanged.

@@ -98,6 +98,7 @@ struct PersonalCartView: View {
         .shoppingItemList()
         .navigationTitle("My cart")
         .navigationBarTitleDisplayMode(.inline)
+        .shoppingSearchable(text: $navigation.searchText, prompt: "Search groceries")
         .safeAreaInset(edge: .bottom) {
             Button("Check out") { prepare(visibleEntries) }
                 .buttonStyle(.borderedProminent)

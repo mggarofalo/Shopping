@@ -2119,7 +2119,7 @@ final class NeedService: @unchecked Sendable {
             let household = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
             let request = Need.fetchRequest()
             request.predicate = predicate(household)
-            let result = try self.outstanding(context.fetch(request), in: context).filter {
+            let result = try self.shopperOutstanding(context.fetch(request), in: context).filter {
                 $0.objectID.persistentStore == household.objectID.persistentStore &&
                 ($0.item.map { $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore } ?? true)
             }.map { GroceryActionNeed(id: $0.id, title: $0.kind == NeedKind.oneTime.rawValue ? $0.title : ($0.item?.name ?? $0.title), notes: $0.notes,
@@ -2265,7 +2265,7 @@ final class NeedService: @unchecked Sendable {
                 "list", "list.household", "item", "item.household", "item.stores", "item.category",
                 "oneTimeStores", "oneTimeCategory"
             ]
-            let activeNeeds = try self.outstanding(context.fetch(request), in: context)
+            let activeNeeds = try self.shopperOutstanding(context.fetch(request), in: context)
             try self.validateOccurrenceIdentities(activeNeeds)
             let candidateItemIDs = Set(activeNeeds.compactMap { need -> UUID? in
                 guard let item = need.item, item.id != PersistenceModel.unsetID else { return nil }
@@ -3759,12 +3759,26 @@ final class NeedService: @unchecked Sendable {
         return grouped.mapValues { $0.sorted { $0.id.uuidString < $1.id.uuidString } }
     }
 
+    /// Mutations and dedupe use the household rule, so a re-add agrees with the
+    /// replacement lineage that `HouseholdDemandJournal` records in the same save.
     private func outstanding(_ needs: [Need], in context: NSManagedObjectContext) throws -> [Need] {
+        try outstanding(needs, in: context, fulfilled: PersonalDemandProjection.fulfilledNeedIDs)
+    }
+
+    /// What this shopper sees: their own checkouts leave at once, verified or not.
+    private func shopperOutstanding(_ needs: [Need], in context: NSManagedObjectContext) throws -> [Need] {
+        try outstanding(needs, in: context, fulfilled: PersonalDemandProjection.shopperFulfilledNeedIDs)
+    }
+
+    private func outstanding(
+        _ needs: [Need], in context: NSManagedObjectContext,
+        fulfilled rule: (UUID, PersistenceController, NSManagedObjectContext, ShopperSession?) throws -> Set<UUID>
+    ) throws -> [Need] {
         guard persistence.personalCartsEnabled else { return needs }
         let householdIDs = Set(needs.compactMap { $0.list?.household?.id })
         var fulfilled: Set<UUID> = []
         for id in householdIDs {
-            fulfilled.formUnion(try PersonalDemandProjection.fulfilledNeedIDs(householdID: id, persistence: persistence, in: context))
+            fulfilled.formUnion(try rule(id, persistence, context, nil))
         }
         return needs.filter { !fulfilled.contains($0.id) }
     }

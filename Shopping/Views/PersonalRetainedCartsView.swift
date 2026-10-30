@@ -54,11 +54,13 @@ private struct RetainedCartDetail: View {
     let service: PersonalCartService
     let home: SavedCartHomeDisplay
     @State private var cart: PersonalCartPresentation?
+    /// A saved cart keeps its own search, separate from the current home's Groceries search.
+    @StateObject private var navigation = GroceryNavigationState()
 
     var body: some View {
         Group {
             if let cart {
-                PersonalCartView(cart: cart, navigation: GroceryNavigationState(), savedHome: home)
+                PersonalCartView(cart: cart, navigation: navigation, savedHome: home)
                     .toolbar {
                         NavigationLink("My purchases") { PersonalPurchaseHistoryView(cart: cart) }
                     }

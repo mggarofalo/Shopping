@@ -29,6 +29,7 @@ final class PersistenceController {
     var personalCartInitialBinding: String?
     var personalCartSessionProvider: (any ShopperSessionProviding)?
     let homeNativeAccess = HomeNativeAccessGate()
+    var homeNativeShares: any HomeNativeShareSource = CloudKitHomeNativeShareSource()
     let homeAccessRefreshQueue = HomeAccessRefreshQueue()
     let homeParticipantOperations = HomeParticipantOperationCoordinator()
     let writer: NSManagedObjectContext
