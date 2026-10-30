@@ -28,6 +28,8 @@ struct CatalogView: View {
     @State private var removalTargets: [UUID: CatalogNeedRemovalTarget] = [:]
     @State private var membershipConflicts: Set<UUID> = []
     @State private var membershipAvailable = false
+    /// The list and items the membership values above were read for.
+    @State private var membershipRead: CatalogMembershipRead?
     @State private var showingFilters = false
     @State private var renderedGroups: [ItemCollectionSection<CatalogCollectionSectionID, Item>] = []
     @State private var editor: CatalogEditSession?
@@ -341,7 +343,8 @@ struct CatalogView: View {
                 let source = CatalogRowSource(groupID: groupID, itemID: item.id)
                 Group {
                     if editMode.isEditing {
-                        CatalogItemRow(item: item, validStores: validStores)
+                        CatalogItemRow(model: CatalogRowModel(item: item, validStores: validStores))
+                            .equatable()
                             .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
                             .contentShape(Rectangle())
                             .shoppingListRowInsets()
@@ -442,7 +445,8 @@ struct CatalogView: View {
 
     private func catalogRow(_ item: Item, source: CatalogRowSource) -> some View {
         Button { edit(item) } label: {
-            CatalogItemRow(item: item, validStores: validStores)
+            CatalogItemRow(model: CatalogRowModel(item: item, validStores: validStores))
+                .equatable()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }
@@ -546,22 +550,27 @@ struct CatalogView: View {
             .accessibilityLabel("Remove filter: \(title)")
     }
 
+    /// Runs on every store change, including CloudKit merges, so it writes `filters` only when
+    /// a filter actually became invalid; any write would re-render the whole list (SHOPPING-272).
     private func sanitizeFilters() {
         guard presentation?.isActive != false else { return }
         let ids = Set(activeStores.map(\.id))
-        if let selectedStoreID = filters.selectedStoreID, !ids.contains(selectedStoreID) {
-            filters.selectedStoreID = nil
+        var sanitized = filters
+        if let selectedStoreID = sanitized.selectedStoreID, !ids.contains(selectedStoreID) {
+            sanitized.selectedStoreID = nil
         }
-        filters.includedStoreIDs.formIntersection(ids)
-        filters.excludedStoreIDs.formIntersection(ids)
-        filters.categoryIDs.formIntersection(Set(activeCategories.map(\.id)))
+        sanitized.includedStoreIDs.formIntersection(ids)
+        sanitized.excludedStoreIDs.formIntersection(ids)
+        sanitized.categoryIDs.formIntersection(Set(activeCategories.map(\.id)))
+        if sanitized != filters { filters = sanitized }
     }
 
     private func refresh() {
         guard presentation?.isActive != false else { return }
         guard let service, let householdID = selection.householdID else {
             projectedIDs = .loaded([])
-            removalTargets = [:]
+            membershipRead = nil
+            clearMembership()
             renderedGroups = []
             return
         }
@@ -581,7 +590,8 @@ struct CatalogView: View {
                 }.value
                 guard isCurrent() else { return }
                 ShoppingPerformanceTrace.launchEvent("Catalog projection published", "matches=\(refreshedIDs.count)")
-                projectedIDs = .loaded(refreshedIDs)
+                // Store changes reread the catalog; republishing equal results would re-render every row.
+                if projectedIDs != .loaded(refreshedIDs) { projectedIDs = .loaded(refreshedIDs) }
                 rebuildRenderedGroups(projectedIDs: refreshedIDs)
                 await refreshMembership(itemIDs: refreshedIDs, service: service,
                     householdID: householdID, listID: listID, isCurrent: isCurrent)
@@ -597,31 +607,49 @@ struct CatalogView: View {
 
     private func refreshMembership(itemIDs: Set<UUID>, service: NeedService, householdID: UUID,
                                    listID: UUID?, isCurrent: @escaping () -> Bool) async {
-        removalTargets = [:]
-        membershipConflicts = []
-        membershipAvailable = false
+        // Another Home or list must never show this list's targets, and newly shown items
+        // have none yet, so a different read clears them first. Rereading the same items keeps
+        // them while the read runs: every store change rereads, and clearing re-rendered every
+        // row (SHOPPING-272). Each target carries its revision, so removing one that changed
+        // meanwhile is rejected rather than misapplied.
+        let read = listID.map { CatalogMembershipRead(householdID: householdID, listID: $0, itemIDs: itemIDs) }
+        if read != membershipRead {
+            membershipRead = read
+            clearMembership()
+        }
         guard let listID else { return }
         do {
             let memberships = try await Task.detached(priority: .userInitiated) {
                 try service.catalogListMembership(itemIDs: itemIDs, householdID: householdID, listID: listID)
             }.value
             guard isCurrent() else { return }
+            var targets: [UUID: CatalogNeedRemovalTarget] = [:]
+            var conflicts: Set<UUID> = []
             for (itemID, membership) in memberships {
                 switch membership {
                 case .absent: break
-                case .ambiguous: membershipConflicts.insert(itemID)
+                case .ambiguous: conflicts.insert(itemID)
                 case .present(let needID, let revision):
-                    removalTargets[itemID] = CatalogNeedRemovalTarget(
+                    targets[itemID] = CatalogNeedRemovalTarget(
                         needID: needID, revision: revision, householdID: householdID, listID: listID
                     )
                 }
             }
-            membershipAvailable = true
+            if removalTargets != targets { removalTargets = targets }
+            if membershipConflicts != conflicts { membershipConflicts = conflicts }
+            if !membershipAvailable { membershipAvailable = true }
         } catch {
             guard isCurrent() else { return }
+            clearMembership()
             // Keep catalog editing available even if grocery membership cannot be read safely.
             errorMessage = CatalogErrorCopy.message(error)
         }
+    }
+
+    private func clearMembership() {
+        if !removalTargets.isEmpty { removalTargets = [:] }
+        if !membershipConflicts.isEmpty { membershipConflicts = [] }
+        if membershipAvailable { membershipAvailable = false }
     }
 
     private func rebuildRenderedGroups(projectedIDs ids: Set<UUID>? = nil) {
@@ -629,13 +657,15 @@ struct CatalogView: View {
         let items = scopedItems.filter {
             ids.contains($0.id) && $0.isArchived == filters.showArchived
         }
-        renderedGroups = makeVisibleGroups(from: items)
+        let groups = makeVisibleGroups(from: items)
+        if renderedGroups != groups { renderedGroups = groups }
     }
 
     private func refreshAndSanitizeSelection() {
         guard presentation?.isActive != false else { return }
         refresh()
-        selectedIDs.formIntersection(visibleItemIDs)
+        let selected = selectedIDs.intersection(visibleItemIDs)
+        if selected != selectedIDs { selectedIDs = selected }
     }
 
     private func resetFilters() { searchText = ""; filters = CatalogFilterState(); refresh() }

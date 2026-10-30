@@ -664,7 +664,7 @@ final class PersistenceBootstrap: ObservableObject {
     static func application(processInfo: ProcessInfo = .processInfo) -> PersistenceBootstrap {
         if let fixtureName = processInfo.environment["SHOPPING_PERFORMANCE_FIXTURE"],
            let fixture = ShoppingPreviewCase(rawValue: fixtureName),
-           fixture == .performance || fixture == .stress {
+           [.performance, .stress, .scrolling].contains(fixture) {
             do {
                 let storeURL = try performanceStoreURL(
                     for: fixture,

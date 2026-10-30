@@ -3,13 +3,22 @@ import SwiftUI
 import UIKit
 
 struct GroceriesView: View {
-    private struct StoreCountSnapshot {
+    private struct StoreCountSnapshot: Equatable {
         let scope: PersonalCartScopeSnapshot
         let presentationID: UUID?
         let values: [UUID: StorePurchaseCounts]
         let selectedStoreID: UUID?
         let shareableNeedIDs: Set<UUID>
-        let revision: Int
+    }
+
+    /// Which projection read was requested last and which one last published. It is
+    /// bookkeeping, not view state: a request must not re-render the screen, because every
+    /// CloudKit merge requests one and re-rendering rebuilt every row (SHOPPING-272).
+    private final class ProjectionRevision {
+        var requested = 0
+        var published = 0
+        /// A share tapped while a newer read ran; that read presents it when it publishes.
+        var shareWhenPublished = false
     }
 
     private struct VisibleNeedRows: Equatable {
@@ -34,10 +43,14 @@ struct GroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @FetchRequest(fetchRequest: NavigationFetchRequests.lists()) private var lists: FetchedResults<GroceryList>
     @FetchRequest(fetchRequest: NavigationFetchRequests.households()) private var households: FetchedResults<Household>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
+    /// Rows show catalog names and purchase rules from items, which no request here observes.
+    /// An item change re-renders the screen; rows whose models are unchanged skip.
+    @State private var itemRevision = 0
     @ObservedObject var navigation: GroceryNavigationState
     @State private var visibleRows: ProjectionLoad<VisibleNeedRows> = .loading
     @State private var projectionRefresh = CoalescedRefresh()
-    @State private var projectionRevision = 0
+    @State private var projectionRevision = ProjectionRevision()
     @State private var storeCountSnapshot: StoreCountSnapshot?
     @State private var pendingCartActionNeedIDs: Set<UUID> = []
     @State private var pendingNeedQuantityIDs: Set<UUID> = []
@@ -107,13 +120,16 @@ struct GroceriesView: View {
         )
     }
 
-    private var storeShareText: String {
+    /// The share sheet requires the latest read, so it can't share a store's list from counts
+    /// that a newer change is replacing. The button's enabled state doesn't, because requests
+    /// don't re-render the screen and it would otherwise stay disabled after an unchanged read.
+    private func storeShareText(requiringLatestRead: Bool) -> String {
         guard let snapshot = storeCountSnapshot,
               snapshot.scope.householdID == selection.householdID,
               snapshot.scope.listID == selection.listID,
               snapshot.presentationID == presentation?.id,
               snapshot.selectedStoreID == navigation.selectedStoreID,
-              snapshot.revision == projectionRevision,
+              !requiringLatestRead || projectionRevision.published == projectionRevision.requested,
               presentation?.isActive != false else { return "" }
         let outstanding = GroceryRowScope.validNeeds(Array(needs), canonicalList: canonicalList).filter {
             snapshot.shareableNeedIDs.contains($0.id) && isOutstanding($0) && !isInMyCart($0)
@@ -215,7 +231,11 @@ struct GroceriesView: View {
                 configureAndRefresh()
             }
             .onChange(of: stores.map { "\($0.id)-\($0.isArchived)" }) { _, _ in configureAndRefresh() }
-            .onChange(of: navigation.selectedStoreID) { _, _ in requestProjection() }
+            .onChange(of: navigation.selectedStoreID) { _, _ in
+                // A share tapped for the previous store must not open for this one.
+                projectionRevision.shareWhenPublished = false
+                requestProjection()
+            }
             .onChange(of: navigation.includedStoreIDs) { _, _ in requestProjection() }
             .onChange(of: navigation.excludedStoreIDs) { _, _ in requestProjection() }
             .onChange(of: navigation.urgentOnly) { _, _ in requestProjection() }
@@ -229,8 +249,9 @@ struct GroceriesView: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: .NSManagedObjectContextObjectsDidChange,
                 object: viewContext
-            )) { _ in
+            )) { notification in
                 guard presentation?.isActive != false else { return }
+                if notification.changesItems { itemRevision &+= 1 }
                 configureAndRefresh()
                 completeSaveFeedback()
                 focusRequestedNeed()
@@ -270,9 +291,13 @@ struct GroceriesView: View {
             }
             if navigation.selectedStoreID != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    let text = storeShareText
+                    let text = storeShareText(requiringLatestRead: false)
                     Button {
-                        let currentText = storeShareText
+                        guard projectionRevision.published == projectionRevision.requested else {
+                            projectionRevision.shareWhenPublished = true
+                            return
+                        }
+                        let currentText = storeShareText(requiringLatestRead: true)
                         guard !currentText.isEmpty else { return }
                         storeShare = GroceryStoreShare(text: currentText)
                     } label: {
@@ -353,16 +378,21 @@ struct GroceriesView: View {
                         .onAppear { ShoppingPerformanceTrace.launchEvent("Grocery empty state shown", emptyTitle) }
                 }
             case .rows:
+                // SwiftUI re-renders for state that body reads, so rows read the item revision.
+                let _ = itemRevision
+                let rowContext = GroceryRowContext(commandScope: presentation?.id, people: Array(people),
+                    selectedStoreID: navigation.selectedStoreID, activeStores: activeStores)
                 CompactGrocerySections(
                     sections: grocerySections,
                     itemID: \.objectID
                 ) { _, need in
-                    shoppingRow(need)
+                    shoppingRow(need, context: rowContext)
                 }
                 .onAppear { ShoppingPerformanceTrace.launchEvent("Grocery rows shown", "\(visibleNeeds.count)") }
             }
         }
         .shoppingItemList()
+        .accessibilityIdentifier("shopping.groceries.list")
         .scrollContentBackground(contentState == .rows ? .automatic : .hidden)
         .contentMargins(.top, 0, for: .scrollContent)
         .contentMargins(
@@ -737,14 +767,14 @@ struct GroceriesView: View {
     /// Rereads the rows only; filter and cart changes do not change the cart snapshot.
     private func requestProjection() {
         guard presentation?.isActive != false else { return }
-        projectionRevision += 1
-        let revision = projectionRevision
+        projectionRevision.requested += 1
+        let revision = projectionRevision.requested
         guard let householdID = selection.householdID, let listID = canonicalList?.id, let service else {
             // Without a selected list there are no groceries. A selected list this context
             // cannot resolve is a failure, not an empty list; resolving it requests a new read.
             visibleRows = selection.listID == nil ? .loaded(VisibleNeedRows(householdID: selection.householdID,
                 listID: nil, presentationID: presentation?.id, objectIDs: [])) : .failed
-            storeCountSnapshot = nil
+            if storeCountSnapshot != nil { storeCountSnapshot = nil }
             return }
         let filter = currentNeedFilter
         let cartedNeedIDs = personalCart?.cartedNeedIDs ?? []
@@ -768,11 +798,18 @@ struct GroceriesView: View {
                 }.value
                 guard isCurrent() else { return }
                 ShoppingPerformanceTrace.launchEvent("Grocery projection published", "matches=\(projected.ids.count)")
-                storeCountSnapshot = StoreCountSnapshot(
+                projectionRevision.published = revision
+                let counts = StoreCountSnapshot(
                     scope: PersonalCartScopeSnapshot(householdID: householdID, listID: listID),
                     presentationID: presentationID, values: projected.counts,
-                    selectedStoreID: filter.purchase.selectedStoreID, shareableNeedIDs: projected.shareIDs, revision: revision
+                    selectedStoreID: filter.purchase.selectedStoreID, shareableNeedIDs: projected.shareIDs
                 )
+                if storeCountSnapshot != counts { storeCountSnapshot = counts }
+                if projectionRevision.shareWhenPublished, revision == projectionRevision.requested {
+                    projectionRevision.shareWhenPublished = false
+                    let text = storeShareText(requiringLatestRead: true)
+                    if !text.isEmpty { storeShare = GroceryStoreShare(text: text) }
+                }
                 let matchingIDs = projected.ids
                 let rows = ProjectionLoad.loaded(VisibleNeedRows(
                     householdID: householdID, listID: listID, presentationID: presentationID,
@@ -783,6 +820,7 @@ struct GroceriesView: View {
                 if visibleRows != rows { visibleRows = rows }
             } catch {
                 guard isCurrent() else { return }
+                projectionRevision.shareWhenPublished = false
                 self.error = error
                 visibleRows = .failed
                 storeCountSnapshot = nil
@@ -810,16 +848,16 @@ struct GroceriesView: View {
         refreshProjection()
     }
 
-    private func shoppingRow(_ need: Need) -> some View {
+    private func shoppingRow(_ need: Need, context: GroceryRowContext) -> some View {
         GroceryNeedRow(
             need: need,
-            activeStores: activeStores,
-            selectedStoreID: navigation.selectedStoreID,
-            personalCarted: personalCart.map { $0.contains(need.id) },
-            presenceNames: personalCart?.presence.filter { $0.needID == need.id }.map { $0.name ?? "Another shopper" } ?? [],
-            cartActionAvailable: !(personalCart?.isCartTransitionPending(need.id) ?? false) &&
-                !pendingCartActionNeedIDs.contains(need.id),
-            quantityActionAvailable: !pendingNeedQuantityIDs.contains(need.id),
+            model: context.model(for: need,
+                personalCarted: personalCart.map { $0.contains(need.id) },
+                presenceNames: personalCart?.presence.filter { $0.needID == need.id }
+                    .map { $0.name ?? "Another shopper" } ?? [],
+                cartActionAvailable: !(personalCart?.isCartTransitionPending(need.id) ?? false) &&
+                    !pendingCartActionNeedIDs.contains(need.id),
+                quantityActionAvailable: !pendingNeedQuantityIDs.contains(need.id)),
             onEdit: focus,
             onCartedChange: setCarted,
             onQuantityChange: setQuantity,
@@ -830,6 +868,7 @@ struct GroceriesView: View {
                 ))
             }
         )
+        .equatable()
         .shoppingListRowInsets()
     }
 

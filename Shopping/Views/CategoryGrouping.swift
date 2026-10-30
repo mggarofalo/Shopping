@@ -7,6 +7,8 @@ struct ItemCollectionSection<SectionID: Hashable, Item>: Identifiable {
     let items: [Item]
 }
 
+extension ItemCollectionSection: Equatable where Item: Equatable {}
+
 struct ItemCollectionSections<SectionID: Hashable, ItemID: Hashable, Item, Row: View>: View {
     let sections: [ItemCollectionSection<SectionID, Item>]
     let itemID: KeyPath<Item, ItemID>

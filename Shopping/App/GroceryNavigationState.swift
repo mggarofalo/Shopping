@@ -140,18 +140,30 @@ final class GroceryNavigationState: ObservableObject {
         if pendingNeedFocusID == id { pendingNeedFocusID = nil }
     }
 
+    /// Drops filters whose store or category is no longer active. Screens call this on every
+    /// store change, including CloudKit merges, so valid filters are left untouched: writing
+    /// a `@Published` value, even an equal one, re-renders every observing screen.
     func sanitize(activeStoreIDs: Set<UUID>, activeCategoryIDs: Set<UUID> = []) {
         isRestoring = true
+        var changed = false
         if let selectedStoreID, !activeStoreIDs.contains(selectedStoreID) {
             self.selectedStoreID = nil
+            changed = true
         }
-        includedStoreIDs.formIntersection(activeStoreIDs)
-        excludedStoreIDs.formIntersection(activeStoreIDs)
+        if !includedStoreIDs.isSubset(of: activeStoreIDs) {
+            includedStoreIDs.formIntersection(activeStoreIDs)
+            changed = true
+        }
+        if !excludedStoreIDs.isSubset(of: activeStoreIDs) {
+            excludedStoreIDs.formIntersection(activeStoreIDs)
+            changed = true
+        }
         if let categoryID, !activeCategoryIDs.contains(categoryID) {
             self.categoryID = nil
+            changed = true
         }
         isRestoring = false
-        persist()
+        if changed { persist() }
     }
 
     private func persist() {

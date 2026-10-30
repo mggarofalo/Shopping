@@ -19,6 +19,10 @@ struct CartedGroceriesView: View {
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories:
         FetchedResults<Category>
+    @FetchRequest(fetchRequest: NavigationFetchRequests.people()) private var people: FetchedResults<Person>
+    /// Rows show catalog names and purchase rules from items, which no request here observes.
+    /// An item change re-renders the screen; rows whose models are unchanged skip.
+    @State private var itemRevision = 0
     @ObservedObject var navigation: GroceryNavigationState
     @State private var visibleNeedObjectIDs: Set<NSManagedObjectID> = []
     @State private var projectionTask: Task<Void, Never>?
@@ -55,6 +59,10 @@ struct CartedGroceriesView: View {
     private var activeBody: some View {
         let visibleCarted = visibleCartedNeeds
         let activeStores = validActiveStores
+        // SwiftUI re-renders for state that body reads, so rows read the item revision.
+        let _ = itemRevision
+        let rowContext = GroceryRowContext(commandScope: presentation?.id, people: Array(people),
+            selectedStoreID: navigation.selectedStoreID, activeStores: activeStores)
         List {
             HomeScopeControl(allowsSwitching: false)
                 .listRowBackground(Color.clear)
@@ -92,7 +100,7 @@ struct CartedGroceriesView: View {
                     sections: grocerySections,
                     itemID: \.objectID
                 ) { _, need in
-                    row(need, activeStores: activeStores)
+                    row(need, context: rowContext)
                 }
             }
         }
@@ -140,8 +148,9 @@ struct CartedGroceriesView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: .NSManagedObjectContextObjectsDidChange,
             object: viewContext
-        )) { _ in
+        )) { notification in
             guard presentation?.isActive != false else { return }
+            if notification.changesItems { itemRevision &+= 1 }
             configureAndRefresh()
         }
         .alert(
@@ -156,16 +165,17 @@ struct CartedGroceriesView: View {
         }
     }
 
-    private func row(_ need: Need, activeStores: [Store]) -> some View {
+    private func row(_ need: Need, context: GroceryRowContext) -> some View {
         GroceryNeedRow(
-            need: need, activeStores: activeStores,
-            selectedStoreID: navigation.selectedStoreID,
-            cartActionAvailable: !pendingCartNeedIDs.contains(need.id),
-            quantityActionAvailable: !pendingQuantityNeedIDs.contains(need.id),
+            need: need,
+            model: context.model(for: need,
+                cartActionAvailable: !pendingCartNeedIDs.contains(need.id),
+                quantityActionAvailable: !pendingQuantityNeedIDs.contains(need.id)),
             onEdit: onEdit,
             onCartedChange: setCarted, onQuantityChange: setQuantity,
             onRemoved: onRemoved
         )
+        .equatable()
         .shoppingListRowInsets()
     }
 

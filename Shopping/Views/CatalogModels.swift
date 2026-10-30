@@ -83,8 +83,15 @@ struct CatalogRefreshKey: Equatable {
     let archived: Bool
 }
 
+/// The list and catalog items one membership read covered.
+struct CatalogMembershipRead: Equatable {
+    let householdID: UUID
+    let listID: UUID
+    let itemIDs: Set<UUID>
+}
+
 /// Captures one displayed grocery occurrence so a stale swipe cannot remove a replacement.
-struct CatalogNeedRemovalTarget {
+struct CatalogNeedRemovalTarget: Equatable {
     let needID: UUID
     let revision: Int64
     let householdID: UUID

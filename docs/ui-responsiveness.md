@@ -23,6 +23,8 @@ CloudKit export, delivery, and import are system scheduled. A remote-change noti
 
 Commands that change authoritative state must keep the existing writer serialization, causal checkout and recovery rules. An optimistic UI update or a background task cannot substitute for the durable command result. Handle errors on the main actor after background work returns; do not silently convert failed reads into an empty household. A screen that has not finished its first read is loading, not empty: model it with `ProjectionLoad` and show empty-state copy only for a loaded empty result. Screen projections read committed rows on their own context and refresh through `CoalescedRefresh`, so launch sync cannot keep discarding finished reads.
 
+List screens must not rebuild rows for a context merge that changes nothing they show; CloudKit merges arrive while someone scrolls. Give each row an `Equatable` value model of exactly what it displays, render it with `.equatable()`, and leave closures out of `==`. Write `@State`, `@Published` and `@Observable` values only when they change, because an equal write still invalidates every reader. `ListScrollingWorkTests` guards this for Groceries and Catalog (SHOPPING-272).
+
 ## Verification when changing these paths
 
 1. Run `ShoppingFast` using the command in [AGENTS.md](../AGENTS.md). Keep the cart presentation blocked-writer test, Watch blocked-writer test, and CloudKit event burst test in their normal plans. Run the focused UI workflow for the screen you changed.

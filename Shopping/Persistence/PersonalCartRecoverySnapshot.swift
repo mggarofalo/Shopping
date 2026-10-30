@@ -1,7 +1,7 @@
 import CoreData
 
 /// Discovery for contextual links, separate from the authoritative cart snapshot.
-struct PersonalCartRecoverySnapshot: Sendable {
+struct PersonalCartRecoverySnapshot: Equatable, Sendable {
     let pendingLegacyReview: [LegacyCartReviewSnapshot]
     let legacyReviewError: String?
     let otherSavedScopes: [PersonalCartScopeSnapshot]

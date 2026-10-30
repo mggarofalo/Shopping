@@ -35,14 +35,46 @@ final class PerformanceFlowUITests: XCTestCase {
         exerciseCatalog(in: app)
     }
 
+    /// Hitches while flinging a realistic 40-item grocery list (SHOPPING-272).
+    func testGroceryListScrolling() {
+        let app = launchPerformanceFixture(runID: "scrolling-groceries", fixture: "scrolling", reset: true)
+        let list = app.collectionViews["shopping.groceries.list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 5))
+        measureScrolling(list)
+    }
+
+    /// Catalog shares the item row with Groceries, so it is measured the same way.
+    func testCatalogListScrolling() {
+        let app = launchPerformanceFixture(runID: "scrolling-catalog", fixture: "scrolling", reset: true)
+        tapTab("Catalog", in: app)
+        let list = app.collectionViews["shopping.catalog.list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Bananas"].waitForExistence(timeout: 5))
+        measureScrolling(list)
+    }
+
+    private func measureScrolling(_ list: XCUIElement) {
+        let options = XCTMeasureOptions()
+        options.invocationOptions = [.manuallyStop]
+        options.iterationCount = Int(ProcessInfo.processInfo.environment["SHOPPING_SCROLL_ITERATIONS"] ?? "") ?? 5
+        measure(metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric], options: options) {
+            list.swipeUp(velocity: .fast)
+            stopMeasuring()
+            list.swipeDown(velocity: .fast)
+        }
+    }
+
     private func seedPerformanceFixture(runID: String) {
         let app = launchPerformanceFixture(runID: runID, reset: true)
         app.terminate()
     }
 
-    private func launchPerformanceFixture(runID: String, reset: Bool = false) -> XCUIApplication {
+    private func launchPerformanceFixture(
+        runID: String, fixture: String = "performance", reset: Bool = false
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchEnvironment["SHOPPING_PERFORMANCE_FIXTURE"] = "performance"
+        app.launchEnvironment["SHOPPING_PERFORMANCE_FIXTURE"] = fixture
         app.launchEnvironment["SHOPPING_PERFORMANCE_RUN_ID"] = runID
         if reset {
             app.launchEnvironment["SHOPPING_PERFORMANCE_RESET"] = "1"
