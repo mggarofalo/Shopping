@@ -20,11 +20,16 @@ RUNTIME_READINESS_TIMEOUT_SECONDS = 300
 # A booted iOS 27 device keeps running hundreds of CPU-seconds of post-boot work
 # after bootstatus reports Finished. Tests start only once that work has stopped.
 # On the 3-core hosted runner that work held the device at 1.3-3 cores, then fell
-# to 0.35-0.6; 1 core leaves two thirds of the host to Xcode and the test runner.
-# One budget covers bootstatus and settling for both test phases, so readiness
-# fails with its own evidence well inside the 25-minute job.
+# to 0.35-0.75; 1 core leaves two thirds of the host to Xcode and the test runner.
+# The work is the same launch sequence on every runner, so its length scales with
+# runner speed: readiness took 495-532 s on two runners, about 730 s on a 1.35x
+# slower one that exhausted a 660 s budget just before settling, and 790 s on one
+# whose apsd and diagnosticd held the device above 1 core for about 130 s after
+# the hosted tests. One 1080 s budget, 1.29x the slowest boot, hosted and native
+# settles combined, covers both test phases, so readiness still fails with its
+# own evidence inside the 35-minute job.
 BOOT_TIMEOUT_SECONDS = 300
-READINESS_BUDGET_SECONDS = 660
+READINESS_BUDGET_SECONDS = 1080
 SETTLE_INTERVAL_SECONDS = 5
 SETTLE_QUIET_CORES = 1.0
 SETTLE_QUIET_SAMPLES = 3

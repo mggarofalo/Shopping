@@ -52,7 +52,8 @@ jobs:
     name: Release SDK Build (native)
     runs-on: xcode-27
     # Includes archive, a cold simulator boot and the separately compiled Siri suite.
-    timeout-minutes: 25
+    # The Siri runner's 1080 s readiness budget needs the extra ten minutes.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -100,7 +101,7 @@ jobs:
     needs: cheap-contracts
     name: Siri launch diagnostic
     runs-on: xcode-27
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
