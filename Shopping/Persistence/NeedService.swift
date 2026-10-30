@@ -2085,7 +2085,24 @@ final class NeedService: @unchecked Sendable {
 
     func groceryActionNeeds(ids: Set<UUID>, householdID: UUID, listID: UUID) throws -> [GroceryActionNeed] {
         guard !ids.isEmpty else { return [] }
-        return try readOnWriter { context in
+        return try groceryActionNeeds(householdID: householdID, listID: listID) { household in
+            NSPredicate(format: "id IN %@ AND list.id == %@ AND list.household == %@ AND archived == NO",
+                        Array(ids) as NSArray, listID as CVarArg, household)
+        }
+    }
+
+    /// Outstanding one-time needs, so a spoken add can report one that is already on the list.
+    func oneTimeGroceryActionNeeds(householdID: UUID, listID: UUID) throws -> [GroceryActionNeed] {
+        try groceryActionNeeds(householdID: householdID, listID: listID) { household in
+            NSPredicate(format: "kind == %@ AND list.id == %@ AND list.household == %@ AND archived == NO",
+                        NeedKind.oneTime.rawValue, listID as CVarArg, household)
+        }
+    }
+
+    private func groceryActionNeeds(
+        householdID: UUID, listID: UUID, predicate: @escaping (Household) -> NSPredicate
+    ) throws -> [GroceryActionNeed] {
+        try readOnWriter { context in
             try self.commandAuthority?.validate()
             let session = try self.persistence.personalCartSessionProvider?.currentSession()
             guard session?.accountBinding == self.persistence.personalCartInitialBinding else {
@@ -2093,8 +2110,7 @@ final class NeedService: @unchecked Sendable {
             }
             let household = try self.validatedCommandHousehold(householdID: householdID, listID: listID, in: context)
             let request = Need.fetchRequest()
-            request.predicate = NSPredicate(format: "id IN %@ AND list.id == %@ AND list.household == %@ AND archived == NO",
-                                            Array(ids) as NSArray, listID as CVarArg, household)
+            request.predicate = predicate(household)
             let result = try self.outstanding(context.fetch(request), in: context).filter {
                 $0.objectID.persistentStore == household.objectID.persistentStore &&
                 ($0.item.map { $0.household == household && $0.objectID.persistentStore == household.objectID.persistentStore } ?? true)

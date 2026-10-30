@@ -1,7 +1,6 @@
 #if compiler(>=6.4)
 import AppIntents
 import Foundation
-import os
 import UniformTypeIdentifiers
 
 @available(iOS 27.0, *)
@@ -27,13 +26,19 @@ struct AddSpokenGroceryIntent: AppIntent {
     /// No reminder exists for an unknown name until the user saves it in the app.
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<GroceryReminderEntity?> & ProvidesDialog {
+        SiriActionLog.started("Spoken add")
         do {
             let runtime = ShoppingApplicationRuntime.shared
             let context = try await CatalogActionContext(runtime: runtime, ready: runtime.ready())
             let dialogue = try await prepare(context: context)
+            if let need = dialogue.existingOneTime {
+                SiriActionLog.finished("Spoken add", "existing one-time need")
+                return .result(value: GroceryReminderEntity(snapshot: need, context: context),
+                               dialog: "\(need.title) is already on your grocery list.")
+            }
             if dialogue.candidates.isEmpty {
                 try await handOff(dialogue)
-                Self.log.info("Spoken add handed off to the editor")
+                SiriActionLog.finished("Spoken add", "handed off to the editor")
                 return .result(value: nil, dialog: "Review \(dialogue.name) in Milk & Bananas, then save and add it.")
             }
             let selectedID: String
@@ -50,13 +55,13 @@ struct AddSpokenGroceryIntent: AppIntent {
             guard let need = try await context.groceryNeeds(ids: [needID]).first else {
                 throw ShoppingActionError.scopeChanged
             }
-            Self.log.info("Spoken add finished; added: \(added, privacy: .public)")
+            SiriActionLog.finished("Spoken add", added ? "added" : "existing catalog need")
             let dialog: IntentDialog = added
                 ? "Added \(item.name) to your grocery list."
                 : "\(item.name) is already on your grocery list."
             return .result(value: GroceryReminderEntity(snapshot: need, context: context), dialog: dialog)
         } catch {
-            Self.log.error("Spoken add failed: \(String(describing: type(of: error)), privacy: .public)")
+            SiriActionLog.failed("Spoken add", error)
             throw error
         }
     }
@@ -83,8 +88,6 @@ struct AddSpokenGroceryIntent: AppIntent {
         }
         return try await CatalogAddDialogue(context: context, name: title, entityID: catalogChoice?.id)
     }
-
-    private static let log = Logger(subsystem: "com.mggarofalo.shopping", category: "Siri")
 }
 
 enum SpokenGroceryError: LocalizedError {

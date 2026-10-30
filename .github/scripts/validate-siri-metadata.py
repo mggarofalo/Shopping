@@ -27,9 +27,17 @@ def validate(app):
         raise ValueError('Expected only static Add and Search App Shortcuts.')
     for shortcut in shortcuts:
         for phrase in shortcut.get('phraseTemplates', []):
-            text = phrase.get('key', '').replace('${applicationName}', '')
-            if '${' in text:
+            key = phrase.get('key', '')
+            if '${' in key.replace('${applicationName}', ''):
                 raise ValueError('Shortcut trigger phrases must not enumerate catalog parameters.')
+            if '${applicationName}' not in key:
+                raise ValueError('Every shortcut phrase must name the app so Siri routes it without asking.')
+    # Only app-qualified phrases bypass the Reminders/app choice, so keep both list wordings (SHOPPING-266).
+    add = next(s for s in shortcuts if s.get('actionIdentifier') == 'AddGroceryIntent')
+    keys = {p.get('key', '') for p in add.get('phraseTemplates', [])}
+    for wording in ('grocery list', 'shopping list'):
+        if not any(wording in key for key in keys):
+            raise ValueError(f'Add shortcut needs an app-qualified "{wording}" phrase.')
     info = plistlib.loads((app / 'Info.plist').read_bytes())
     names = [s.get('INAlternativeAppName') for s in info.get('INAlternativeAppNames', [])]
     if 'Milk and Bananas' not in names:

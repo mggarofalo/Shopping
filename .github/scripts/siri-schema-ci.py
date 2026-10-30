@@ -40,10 +40,10 @@ def validate_selection(tree):
     selected = list(cases(tree))
     identifiers = [test["nodeIdentifier"] for test in selected]
     counts = Counter(identifier.split("/")[0] for identifier in identifiers)
-    if (len(selected) != 25 or len(set(identifiers)) != 25
-            or counts != {"CatalogActionTests": 17, "SpokenGrocerySchemaTests": 6, "ModernSiriActionTests": 2}
+    if (len(selected) != 29 or len(set(identifiers)) != 29
+            or counts != {"CatalogActionTests": 20, "SpokenGrocerySchemaTests": 7, "ModernSiriActionTests": 2}
             or not set(UI_TESTS) <= set(identifiers) or any(test.get("result") != "Passed" for test in selected)):
-        raise ValueError("Siri schema selection must contain exactly 25 unique passing cases (17 catalog, 6 schema, 2 native UI)")
+        raise ValueError("Siri schema selection must contain exactly 29 unique passing cases (20 catalog, 7 schema, 2 native UI)")
 
 
 class Commands:
@@ -168,7 +168,7 @@ def phase_command(device, output, phase):
 def validate_phase(tree, phase):
     selected = list(cases(tree))
     identifiers = [test["nodeIdentifier"] for test in selected]
-    expected = ({"CatalogActionTests": 17, "SpokenGrocerySchemaTests": 6}
+    expected = ({"CatalogActionTests": 20, "SpokenGrocerySchemaTests": 7}
                 if phase == "Hosted" else {"ModernSiriActionTests": 2})
     if (Counter(value.split("/")[0] for value in identifiers) != expected
             or len(set(identifiers)) != len(identifiers)

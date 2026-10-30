@@ -105,6 +105,49 @@ struct CatalogActionTests {
         #expect(try context.ready.service.allActiveNeedIDs(householdID: context.householdID).isEmpty)
     }
 
+    /// SHOPPING-266: a spoken one-time name already on the list is reported, not handed to the editor.
+    @Test func oneTimeNeedOnTheListIsReportedInsteadOfOfferingANewItem() async throws {
+        let (environment, context) = try await fixture()
+        let needID = try environment.service.addOneTimeNeed(title: "Birthday candles", listID: context.listID)
+        try environment.service.setCarted(true, needID: needID)
+        let dialogue = try await CatalogAddDialogue(context: context, name: "  birthday CANDLES ")
+        #expect(dialogue.existingOneTime?.id == needID)
+        #expect(dialogue.existingOneTime?.title == "Birthday candles")
+        #expect(dialogue.candidates.isEmpty)
+        #expect(throws: CatalogActionError.conflictingSelection) { try dialogue.createInApp() }
+        #expect(context.runtime.actions.pending == nil)
+        #expect(try await context.items().isEmpty)
+        #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID) == [needID])
+    }
+
+    @Test func exactCatalogNameOutranksOneTimeNeedButSubstringDoesNot() async throws {
+        let (environment, context) = try await fixture()
+        let candles = try create("Candles", in: environment)
+        _ = try create("Tea lights", in: environment)
+        let oneTime = try environment.service.addOneTimeNeed(title: "Candles", listID: context.listID)
+        let exact = try await CatalogAddDialogue(context: context, name: "candles")
+        #expect(exact.candidates.map(\.id) == [candles])
+        #expect(exact.existingOneTime == nil)
+        _ = try environment.service.addOneTimeNeed(title: "Tea", listID: context.listID)
+        let substring = try await CatalogAddDialogue(context: context, name: "tea")
+        #expect(substring.candidates.isEmpty)
+        #expect(substring.existingOneTime?.title == "Tea")
+        #expect(try environment.service.allActiveNeedIDs(householdID: context.householdID).contains(oneTime))
+    }
+
+    @Test func unknownNameIgnoresPartialOrOtherHomeOneTimeNeeds() async throws {
+        let (environment, context) = try await fixture()
+        let other = try environment.service.createHousehold(name: "Cabin")
+        _ = try environment.service.addOneTimeNeed(title: "Birthday candles", listID: context.listID)
+        _ = try environment.service.addOneTimeNeed(title: "Space pears", listID: other.listID)
+        #expect(try await CatalogAddDialogue(context: context, name: "candles").existingOneTime == nil)
+        let unknown = try await CatalogAddDialogue(context: context, name: "Space pears")
+        #expect(unknown.candidates.isEmpty && unknown.existingOneTime == nil)
+        try unknown.createInApp()
+        #expect(context.runtime.actions.pending?.destination == .createItem("Space pears"))
+        context.runtime.actions.cancel()
+    }
+
     @Test func scopedServiceRejectsRetiredReadEvenWithoutCoordinator() throws {
         let environment = try ShoppingPreviewFixtures.make(.empty)
         let authority = UICommandAuthority()
