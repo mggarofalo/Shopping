@@ -60,6 +60,25 @@ struct SpokenGrocerySchemaTests {
         #expect(try await context.items().isEmpty)
     }
 
+    /// SHOPPING-271: the re-run Siri sends after a handoff is refused before any prompt,
+    /// and queues nothing behind the editor the first request opened.
+    @Test func repeatedUnknownNameHandoffIsRefusedBeforePrompting() async throws {
+        guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
+        let (_, context) = try await fixture()
+        let intent = AddSpokenGroceryIntent(); intent.title = "Space pears"
+        let first = try await intent.prepare(context: context)
+        try first.rejectRepeatedCreation()
+        try first.createInApp()
+        #expect(try context.runtime.actions.take(presentationID: context.ready.presentation.id) == .createItem("Space pears"))
+        intent.title = "space pears"
+        let rerun = try await intent.prepare(context: context)
+        #expect(throws: ShoppingActionError.creationOpen) { try rerun.rejectRepeatedCreation() }
+        #expect(throws: ShoppingActionError.creationOpen) { try rerun.createInApp() }
+        #expect(context.runtime.actions.pending == nil)
+        context.runtime.actions.creationClosed()
+        try rerun.rejectRepeatedCreation()
+    }
+
     @Test func spokenOneTimeNameAlreadyOnListResolvesToThatNeed() async throws {
         guard #available(iOS 27.0, *) else { Issue.record("Siri schemas require iOS 27"); return }
         let (environment, context) = try await fixture()

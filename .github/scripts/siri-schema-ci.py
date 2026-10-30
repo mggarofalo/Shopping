@@ -34,7 +34,7 @@ SETTLE_INTERVAL_SECONDS = 5
 SETTLE_QUIET_CORES = 1.0
 SETTLE_QUIET_SAMPLES = 3
 
-HOSTED_COUNTS = {"CatalogActionTests": 20, "SpokenGrocerySchemaTests": 9}
+HOSTED_COUNTS = {"CatalogActionTests": 20, "SpokenGrocerySchemaTests": 10}
 UI_TESTS = ["ModernSiriActionTests/testModernSiriActionReturnsSavedEntityThroughSystemExecution()",
             "ModernSiriActionTests/testUnknownSpokenNameHandsOffToEditorWithoutBlockingLaterRequests()"]
 LAUNCH_MARKER = re.compile(r"t =\s+[0-9.]+s\s+Launch com\.mggarofalo\.shopping\s*$")

@@ -1,3 +1,4 @@
+import Foundation
 import os
 
 /// Records Siri action outcomes without grocery text, so a device capture can show
@@ -15,6 +16,12 @@ enum SiriActionLog {
     }
 
     static func failed(_ action: String, _ error: Error) {
-        logger.error("\(action, privacy: .public) failed: \(String(describing: type(of: error)), privacy: .public)")
+        logger.error("\(action, privacy: .public) failed: \(describe(error), privacy: .public)")
+    }
+
+    /// Type, domain and code identify a failure without the grocery text a message may hold.
+    static func describe(_ error: Error) -> String {
+        let bridged = error as NSError
+        return "\(type(of: error)) \(bridged.domain) \(bridged.code)"
     }
 }

@@ -75,8 +75,11 @@ struct AddSpokenGroceryIntent: AppIntent {
     /// The editor request is queued only once the app is in front; a declined
     /// handoff queues nothing. When already in front, continuing stalled the action
     /// in system execution (SHOPPING-258), so the request is queued directly.
+    /// A handoff returns no reminder, which Siri AI treats as unfinished and re-runs
+    /// (SHOPPING-271); that re-run is refused before it can ask to continue again.
     @MainActor
     func handOff(_ dialogue: CatalogAddDialogue) async throws {
+        try dialogue.rejectRepeatedCreation()
         if systemContext.currentMode != .foreground {
             try await continueInForeground("No catalog match for \(dialogue.name). Continue in Milk & Bananas to create it?")
         }

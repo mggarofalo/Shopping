@@ -45,13 +45,14 @@ final class ShoppingApplicationRuntime {
 }
 
 enum ShoppingActionError: LocalizedError, Equatable {
-    case homeUnavailable, loading, busy, scopeChanged, timedOut, unavailable
+    case homeUnavailable, loading, busy, creationOpen, scopeChanged, timedOut, unavailable
 
     var errorDescription: String? {
         switch self {
         case .homeUnavailable: return "Open Milk & Bananas and choose an available Home, then try again."
         case .loading: return "Your Home is still opening. Open Milk & Bananas and try again."
         case .busy: return "Finish or cancel the pending action in Milk & Bananas first."
+        case .creationOpen: return "That item is already open in Milk & Bananas. Save it there to add it to your list."
         case .scopeChanged: return "Your Home or account changed. Please start the action again."
         case .timedOut: return "Milk & Bananas didn’t respond in time. Open the app to check your grocery list."
         case .unavailable: return "Milk & Bananas couldn’t update that item. Open the app to review your grocery list."

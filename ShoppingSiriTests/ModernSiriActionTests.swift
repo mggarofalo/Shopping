@@ -45,6 +45,16 @@ final class ModernSiriActionTests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         XCTAssertTrue(app.navigationBars["New catalog item"].existsOrAppears(timeout: 10))
         XCTAssertEqual(app.textFields["shopping.catalog.name"].value as? String, "Ground beef")
+        // SHOPPING-271: Siri AI re-runs the same request seconds later, while this editor
+        // is open. The re-run must fail at once, without asking to continue again.
+        do {
+            _ = try await runWithinBound(add.makeIntent(title: "ground beef", list: list), seconds: 5)
+            XCTFail("A repeated handoff must not queue another editor")
+        } catch {
+            let described = String(describing: error) + " " + (error as NSError).localizedDescription
+            XCTAssertTrue(described.contains("already open"), described)
+        }
+        XCTAssertTrue(app.navigationBars["New catalog item"].exists)
         dismissEditor(in: app)
 
         let known = try await runWithinBound(add.makeIntent(title: "Café au lait", list: list))

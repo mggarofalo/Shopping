@@ -511,6 +511,8 @@ struct GroceriesView: View {
     }
 
     private func completeCatalogAdd() {
+        // Ends any editor a system creation opened, so asking again is a new request.
+        ShoppingApplicationRuntime.shared.actions.creationClosed()
         if let target = pendingOneTimeTarget {
             pendingOneTimeTarget = nil
             editor = target

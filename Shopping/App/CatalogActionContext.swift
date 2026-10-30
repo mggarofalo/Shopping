@@ -129,4 +129,9 @@ struct CatalogActionContext {
         try validate()
         try runtime.actions.enqueue(.createItem(name), presentationID: ready.presentation.id)
     }
+
+    func rejectRepeatedCreation(name: String) throws {
+        try validate()
+        try runtime.actions.rejectRepeatedCreation(name, presentationID: ready.presentation.id)
+    }
 }

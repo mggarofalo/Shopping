@@ -176,7 +176,26 @@ Removing `createReminder` would stop the chooser but would also end unqualified
 “Add milk to my shopping list” routing; only app-named App Shortcut phrases would
 remain. That is a product decision and is not made here.
 
-Both Add actions log start, outcome and error type, without grocery text, in the
+## Siri AI re-runs a handoff (SHOPPING-271)
+
+The 1.6.5 device sysdiagnose (October 30) shows why an unknown name produced extra
+Siri replies and then “Sorry, something went wrong”. The first run asked to continue,
+queued the editor and returned no reminder. Siri AI's planner could not resolve that
+empty result into a reminder (`ContentCollectionToTypedValueResolutionError` 200),
+treated the step as failed, re-planned, and ran the same action again three seconds
+later while the editor was open. The re-run asked to continue again; that prompt was
+dismissed, and the cancelled session surfaced as the failure.
+
+The router records a creation as open from the moment its request is delivered until
+the Add sheet closes, whether by Save or Cancel. The same name for the same Home while
+that request is queued or open is the re-run: both Add actions refuse it before any
+prompt with “That item is already open in Milk & Bananas. Save it there to add it to
+your list.” and queue nothing. Another name still waits behind the open sheet as
+before. This removes the second prompt; it cannot stop the planner from re-running,
+because only a returned reminder satisfies `createReminder`, and nothing is saved
+until the user chooses Save.
+
+Both Add actions log start, outcome and the error's type, domain and code, without grocery text, in the
 `com.mggarofalo.shopping` subsystem's `Siri` category at notice level, which
 sysdiagnose archives keep. A request with no “started” line never reached the app.
 

@@ -16,6 +16,38 @@ struct ShoppingActionTests {
         #expect(try router.take(presentationID: scope) == nil)
     }
 
+    /// SHOPPING-271: Siri AI re-ran a handed-off create while its editor was open. The same
+    /// name for the same Home is refused while queued or open; closing the editor, another
+    /// Home or another name makes a new request.
+    @Test func repeatedCreationIsRefusedOnlyWhileItsEditorIsQueuedOrOpen() throws {
+        let router = ShoppingActionRouter()
+        let scope = UUID()
+        try router.enqueue(.createItem("Café au lait"), presentationID: scope)
+        #expect(throws: ShoppingActionError.creationOpen) {
+            try router.rejectRepeatedCreation("cafe au lait", presentationID: scope)
+        }
+        #expect(try router.take(presentationID: scope) == .createItem("Café au lait"))
+        #expect(throws: ShoppingActionError.creationOpen) {
+            try router.rejectRepeatedCreation(" CAFÉ au lait", presentationID: scope)
+        }
+        #expect(throws: ShoppingActionError.creationOpen) {
+            try router.enqueue(.createItem("café au lait"), presentationID: scope)
+        }
+        #expect(router.pending == nil)
+        try router.rejectRepeatedCreation("Café au lait", presentationID: UUID())
+        try router.enqueue(.createItem("Sandwich bread"), presentationID: scope)
+        router.cancel()
+        router.creationClosed()
+        try router.enqueue(.createItem("Café au lait"), presentationID: scope)
+    }
+
+    @Test func siriFailureLogNamesDomainAndCodeOnly() {
+        let error = NSError(domain: "com.apple.siri.agentruntimeerror", code: 7,
+                            userInfo: [NSLocalizedDescriptionKey: "Birthday candles"])
+        #expect(SiriActionLog.describe(error) == "NSError com.apple.siri.agentruntimeerror 7")
+        #expect(SiriActionLog.describe(ShoppingActionError.creationOpen).hasPrefix("ShoppingActionError "))
+    }
+
     @Test func boundActionCannotCrossHomeOrAccountTransition() throws {
         let router = ShoppingActionRouter()
         try router.enqueue(.addItem, presentationID: UUID())
