@@ -23,9 +23,8 @@ struct CatalogView: View {
     @State private var searchText = ""
     @State private var searchPresented = false
     @State private var filters = CatalogFilterState()
-    @State private var projectedIDs: Set<UUID> = []
-    @State private var refreshTask: Task<Void, Never>?
-    @State private var refreshRevision = 0
+    @State private var projectedIDs: ProjectionLoad<Set<UUID>> = .loading
+    @State private var catalogRefresh = CoalescedRefresh()
     @State private var removalTargets: [UUID: CatalogNeedRemovalTarget] = [:]
     @State private var membershipConflicts: Set<UUID> = []
     @State private var membershipAvailable = false
@@ -63,7 +62,8 @@ struct CatalogView: View {
         validStores.filter { !$0.isArchived }
     }
     private var visibleItems: [Item] {
-        scopedItems.filter { projectedIDs.contains($0.id) && $0.isArchived == filters.showArchived }
+        guard let ids = projectedIDs.value else { return [] }
+        return scopedItems.filter { ids.contains($0.id) && $0.isArchived == filters.showArchived }
     }
     private var catalogRefreshKeys: [CatalogRefreshKey] {
         scopedItems.map { CatalogRefreshKey(id: $0.id, revision: $0.revision, archived: $0.isArchived) }
@@ -266,7 +266,12 @@ struct CatalogView: View {
             .onChange(of: searchText) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: filters) { _, _ in refreshAndSanitizeSelection() }
             .onChange(of: catalogRefreshKeys) { _, _ in refreshAndSanitizeSelection() }
-            .onChange(of: selection) { _, _ in clearSelection(); resetFilters() }
+            .onChange(of: selection) { _, _ in
+                // Items read for the previous Home are not this Home's catalog.
+                projectedIDs = .loading
+                clearSelection()
+                resetFilters()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { _ in
                 guard presentation?.isActive != false else { return }
                 sanitizeFilters()
@@ -295,7 +300,27 @@ struct CatalogView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         }
-        if visibleItems.isEmpty {
+        switch projectedIDs {
+        case .loading:
+            Section {
+                ProgressView("Loading catalog…")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .listRowBackground(Color.clear)
+                    .accessibilityIdentifier("shopping.catalog.loading")
+                    .onAppear { ShoppingPerformanceTrace.launchEvent("Catalog loading shown") }
+            }
+        case .failed:
+            Section {
+                ContentUnavailableView {
+                    Label("Couldn’t load catalog", systemImage: "exclamationmark.triangle")
+                } actions: {
+                    Button("Try Again", action: refresh)
+                }
+                .listRowBackground(Color.clear)
+                .accessibilityIdentifier("shopping.catalog.loadFailed")
+            }
+        case .loaded where visibleItems.isEmpty:
             Section {
                 ContentUnavailableView {
                     Label(hasNarrowing ? "No matching items" : "No remembered items", systemImage: "books.vertical")
@@ -306,8 +331,9 @@ struct CatalogView: View {
                     else { Button("New catalog item", action: create).disabled(household == nil) }
                 }
                 .listRowBackground(Color.clear)
+                .onAppear { ShoppingPerformanceTrace.launchEvent("Catalog empty state shown", hasNarrowing ? "narrowed" : "") }
             }
-        } else {
+        case .loaded:
             ItemCollectionSections(
                 sections: renderedGroups,
                 itemID: \.objectID
@@ -332,6 +358,7 @@ struct CatalogView: View {
                 )
                 .accessibilityValue(highlightedItemID == item.id ? "Recently added" : "")
             }
+            .onAppear { ShoppingPerformanceTrace.launchEvent("Catalog rows shown", "\(visibleItems.count)") }
         }
     }
 
@@ -532,11 +559,8 @@ struct CatalogView: View {
 
     private func refresh() {
         guard presentation?.isActive != false else { return }
-        refreshTask?.cancel()
-        refreshRevision += 1
-        let revision = refreshRevision
         guard let service, let householdID = selection.householdID else {
-            projectedIDs = []
+            projectedIDs = .loaded([])
             removalTargets = [:]
             renderedGroups = []
             return
@@ -544,24 +568,26 @@ struct CatalogView: View {
         let query = filters.query(text: searchText)
         let showArchived = filters.showArchived
         let listID = canonicalList?.id
-        refreshTask = Task {
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
+        catalogRefresh.request {
+            let isCurrent = {
+                selection.householdID == householdID && canonicalList?.id == listID &&
+                    filters.query(text: searchText) == query && filters.showArchived == showArchived &&
+                    presentation?.isActive != false
+            }
             do {
                 let refreshedIDs = try await Task.detached(priority: .userInitiated) {
                     Set(try service.filteredCatalogItemIDs(
                         householdID: householdID, filter: query, includeArchived: showArchived))
                 }.value
-                guard !Task.isCancelled, refreshRevision == revision,
-                      selection.householdID == householdID,
-                      presentation?.isActive != false else { return }
-                projectedIDs = refreshedIDs
+                guard isCurrent() else { return }
+                ShoppingPerformanceTrace.launchEvent("Catalog projection published", "matches=\(refreshedIDs.count)")
+                projectedIDs = .loaded(refreshedIDs)
                 rebuildRenderedGroups(projectedIDs: refreshedIDs)
                 await refreshMembership(itemIDs: refreshedIDs, service: service,
-                    householdID: householdID, listID: listID, revision: revision)
+                    householdID: householdID, listID: listID, isCurrent: isCurrent)
             } catch {
-                guard !Task.isCancelled, refreshRevision == revision else { return }
-                projectedIDs = []
+                guard isCurrent() else { return }
+                projectedIDs = .failed
                 removalTargets = [:]
                 renderedGroups = []
                 errorMessage = CatalogErrorCopy.message(error)
@@ -569,8 +595,8 @@ struct CatalogView: View {
         }
     }
 
-    private func refreshMembership(itemIDs: Set<UUID>, service: NeedService,
-                                   householdID: UUID, listID: UUID?, revision: Int) async {
+    private func refreshMembership(itemIDs: Set<UUID>, service: NeedService, householdID: UUID,
+                                   listID: UUID?, isCurrent: @escaping () -> Bool) async {
         removalTargets = [:]
         membershipConflicts = []
         membershipAvailable = false
@@ -579,8 +605,7 @@ struct CatalogView: View {
             let memberships = try await Task.detached(priority: .userInitiated) {
                 try service.catalogListMembership(itemIDs: itemIDs, householdID: householdID, listID: listID)
             }.value
-            guard !Task.isCancelled, refreshRevision == revision,
-                  selection.householdID == householdID else { return }
+            guard isCurrent() else { return }
             for (itemID, membership) in memberships {
                 switch membership {
                 case .absent: break
@@ -593,14 +618,14 @@ struct CatalogView: View {
             }
             membershipAvailable = true
         } catch {
-            guard !Task.isCancelled, refreshRevision == revision else { return }
+            guard isCurrent() else { return }
             // Keep catalog editing available even if grocery membership cannot be read safely.
             errorMessage = CatalogErrorCopy.message(error)
         }
     }
 
     private func rebuildRenderedGroups(projectedIDs ids: Set<UUID>? = nil) {
-        let ids = ids ?? projectedIDs
+        guard let ids = ids ?? projectedIDs.value else { return }
         let items = scopedItems.filter {
             ids.contains($0.id) && $0.isArchived == filters.showArchived
         }

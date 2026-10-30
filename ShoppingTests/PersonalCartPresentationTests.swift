@@ -225,6 +225,35 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testOutstandingNeedsAreUnknownUntilTheFirstSnapshotIsRead() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let itemID = try needs.createItem(name: "Milk", householdID: scope.householdID)
+        let needID = try needs.addRememberedNeed(itemID: itemID, listID: scope.listID, householdID: scope.householdID)
+        let provider = FixedSession(session: try ShopperSession.authenticated(
+            containerIdentifier: "iCloud.shopping.presentation-tests", environment: "Development", accountRecordName: "alice"))
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider)
+        let entered = expectation(description: "writer occupied")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            persistence.writer.performAndWait {
+                entered.fulfill()
+                _ = release.wait(timeout: .now() + 5)
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        let presentation = PersonalCartPresentation(service: service,
+            householdID: scope.householdID, listID: scope.listID)
+        // Groceries must show loading here, not an empty list.
+        XCTAssertFalse(presentation.hasLoadedSnapshot)
+        XCTAssertTrue(presentation.outstandingNeedIDs.isEmpty)
+        release.signal()
+        try await waitForState("first snapshot") { presentation.hasLoadedSnapshot }
+        XCTAssertEqual(presentation.outstandingNeedIDs, [needID])
+    }
+
+    @MainActor
     func testBlockedWriterDoesNotBlockMainActorDuringCartCommand() async throws {
         let persistence = try PersistenceController(inMemory: true)
         let needs = NeedService(persistence: persistence)
