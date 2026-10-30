@@ -245,9 +245,7 @@ struct GroceriesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        // A list laid out during launch otherwise hides the automatic drawer on the next push.
-        .searchable(text: $navigation.searchText, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Search groceries")
+        .shoppingSearchable(text: $navigation.searchText, prompt: "Search groceries")
         .onSubmit(of: .search, requestProjection)
         .onChange(of: navigation.searchText) { _, _ in requestProjection() }
         .toolbar {

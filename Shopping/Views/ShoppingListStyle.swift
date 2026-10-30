@@ -30,6 +30,17 @@ extension View {
             .listSectionSpacing(.custom(ShoppingListMetrics.sectionSpacing))
     }
 
+    /// The one search presentation: every searched list pins its field in the navigation
+    /// drawer. The automatic drawer collapses on scroll, on a pushed list and when a tab's
+    /// scrolled list reappears, which made the Catalog field vanish after a tab switch.
+    func shoppingSearchable(
+        text: Binding<String>,
+        isPresented: Binding<Bool>? = nil,
+        prompt: LocalizedStringKey
+    ) -> some View {
+        modifier(ShoppingSearchPresentation(text: text, isPresented: isPresented, prompt: prompt))
+    }
+
     func shoppingListRowInsets() -> some View {
         listRowInsets(ShoppingListMetrics.rowInsets)
     }
@@ -39,6 +50,22 @@ extension View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 2)
     }
+}
+
+private struct ShoppingSearchPresentation: ViewModifier {
+    let text: Binding<String>
+    let isPresented: Binding<Bool>?
+    let prompt: LocalizedStringKey
+
+    func body(content: Content) -> some View {
+        if let isPresented {
+            content.searchable(text: text, isPresented: isPresented, placement: placement, prompt: prompt)
+        } else {
+            content.searchable(text: text, placement: placement, prompt: prompt)
+        }
+    }
+
+    private var placement: SearchFieldPlacement { .navigationBarDrawer(displayMode: .always) }
 }
 
 struct ShoppingFeedbackBar<Action: View>: View {

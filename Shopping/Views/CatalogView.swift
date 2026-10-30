@@ -153,7 +153,7 @@ struct CatalogView: View {
             .environment(\.editMode, $editMode)
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle(editMode.isEditing ? "\(selectedIDs.count) Selected" : "Catalog")
-            .searchable(text: $searchText, isPresented: $searchPresented, prompt: "Search catalog")
+            .shoppingSearchable(text: $searchText, isPresented: $searchPresented, prompt: "Search catalog")
             .toolbar {
                 ShoppingCollectionToolbar(
                     isSelecting: editMode.isEditing, allSelected: selectedIDs == visibleItemIDs,

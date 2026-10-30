@@ -220,12 +220,7 @@ struct GroceryCatalogAddView: View {
             }
             .navigationTitle("Add to Groceries")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(
-                text: $searchText,
-                isPresented: $searchPresented,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search catalog"
-            )
+            .shoppingSearchable(text: $searchText, isPresented: $searchPresented, prompt: "Search catalog")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

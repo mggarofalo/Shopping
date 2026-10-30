@@ -100,7 +100,7 @@ struct CartedGroceriesView: View {
                 .contentMargins(.top, 0, for: .scrollContent)
         .navigationTitle("In cart")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $navigation.searchText, prompt: "Search groceries")
+        .shoppingSearchable(text: $navigation.searchText, prompt: "Search groceries")
         .sheet(isPresented: $showingFilters) {
             GroceryFiltersView(
                 navigation: navigation,

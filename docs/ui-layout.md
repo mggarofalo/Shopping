@@ -23,6 +23,12 @@ Catalog is the reference for item rows. Stores is the reference for selection an
 
 Use `ShoppingScopeLabel` for Store and Filters, including menus. Resolve the unselected Store placeholder at the caller; never replace a matching saved store name. It owns the font, symbol scale, multiline fitting and minimum label height. Keep the store picker left and Filters right in the scrolling list header; stack them at accessibility sizes. Keep the X to clear store scope. Do not add a redundant All control.
 
+## Search
+
+Every searched list uses `shoppingSearchable(text:isPresented:prompt:)`: Groceries, In cart, My cart, Catalog and Add to Groceries. It owns the one search presentation, a field pinned in the navigation drawer below the title. Do not call `.searchable` directly, choose another placement, or add a custom search field to a list. The automatic drawer collapses when a list scrolls, when a scrolled tab reappears and on a pushed list, which hid the Catalog field after a tab switch and the In cart field entirely (SHOPPING-268). A list that filters by search text must show that field: the In cart and My cart lists pushed from Groceries show the Groceries search they share, and a saved cart keeps its own. A text field that picks a record inside a form, such as the promotion catalog search, is not a list search.
+
+`SearchPresentationUITests` switches tabs on long lists, scrolls, pushes In cart and My cart and opens Add to Groceries, then checks that each field is hittable in the top drawer. Review its screenshot attachments for the shared style.
+
 ## Home selection
 
 Settings owns the home picker, placed at the start of its native scrolling list.
