@@ -195,13 +195,42 @@ every item to groceries; rapid quantity edits and removal surviving a relaunch
 while native verification never answers; and an import of the same shopper's
 phone edits plus a new household item, converging with each item once.
 
-Remaining decision, not changed here: for an invited participant,
-`PersonalDemandProjection` counts the shopper's own checkout as fulfilled only
-while native publication is verified, and a cached (offline) session never is.
-After an offline checkout the cart empties, but the purchased items show in that
-shopper's groceries again until verification succeeds online. Owners are not
-affected. The rule is shared with the iPhone and with household replacement
-lineage, so changing it is a sharing-policy decision. See SHOPPING-269 on Plane.
+### A participant's own checkout (SHOPPING-273)
+
+Two rules decide whether a checkout fulfills a need:
+
+- **The shopper's own view** (`PersonalDemandProjection.shopperFulfilledNeedIDs`):
+  groceries, outstanding needs and cart Add checks on the Watch and the iPhone.
+  The shopper's own checkout counts at once, while the durable access ledger
+  still authorizes it (`homeEffectAuthorized`). Pending native verification
+  doesn't matter, so an invited shopper's offline checkout leaves their own
+  groceries straight away, and stays out after an offline relaunch.
+- **The household rule** (`PersonalDemandProjection.fulfilledNeedIDs`): it feeds
+  replacement lineage in `HouseholdDemandJournal`. An own checkout counts only
+  while this device may publish it (`homeEffectMayPublish`: the ledger plus
+  verified native publication). This rule is unchanged. Other shoppers learn of
+  the purchase only from its published receipt. Remembered-need dedupe and
+  re-add use this rule too, so they agree with the lineage the journal records
+  in the same save. A re-add after an unpublished checkout renews the same need.
+  Its new demand evidence returns it to groceries, and the later receipt doesn't
+  fulfill it. One need, never two.
+
+When verification later:
+
+- **succeeds:** the outbox publishes the receipt once (stable receipt IDs), and
+  both rules agree. Nothing reappears or duplicates.
+- **observes a loss (left or revoked):** the durable block withdraws the
+  checkout's authority, and no later rejoin restores it. The need is
+  outstanding again for this shopper, because the household never learned of
+  the purchase. The purchase stays in purchase history, marked pending
+  publication; it's never deleted.
+- **observes read-only access:** the need shows again while the restriction
+  holds. When writable access returns, the checkout hides the need again and
+  publishes once.
+
+`HomeNativeShareSource` holds the native CloudKit facts (a participant home's
+share identity, and whether the session is verified and CloudKit lets it write).
+Tests substitute an offline participant source over real SQLite.
 
 The engine stays `NSPersistentCloudKitContainer` mirroring. Nothing above
 needed a different sync engine; Apple still controls export and import timing.

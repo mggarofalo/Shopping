@@ -347,7 +347,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 var need: (snapshot: PersonalCartEntrySnapshot, outstanding: Bool)?
                 if entry == nil, let value = try repository.need(token.needID, householdID: token.householdID,
                     listID: token.listID), !value.archived {
-                    let fulfilled = try PersonalDemandProjection.fulfilledNeedIDs(householdID: token.householdID,
+                    let fulfilled = try PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: token.householdID,
                         persistence: cart.persistence, in: repository.context, session: repository.session)
                     need = (try PersonalCartSnapshotBuilder.make(need: value, session: repository.session,
                         generation: value.id, evidence: [], quantity: value.quantity), !fulfilled.contains(token.needID))
