@@ -28,6 +28,26 @@ final class ProjectionLoadingTests: XCTestCase {
         XCTAssertEqual(finished, [1, 5], "The first slow read still completes and can publish")
     }
 
+    /// Hosted screen tests wait for this count before deleting a removed screen's store (SHOPPING-275).
+    @MainActor
+    func testRunningCountCoversTheFollowUpReadAndReturnsToIdle() async throws {
+        // The count spans every screen, so reads an earlier test left running must finish first.
+        try await waitForState("earlier reads finished") { CoalescedRefresh.runningCount == 0 }
+        let refresh = CoalescedRefresh()
+        var releaseFirstRead: CheckedContinuation<Void, Never>?
+        var releaseFollowUp: CheckedContinuation<Void, Never>?
+        refresh.request { await withCheckedContinuation { releaseFirstRead = $0 } }
+        XCTAssertEqual(CoalescedRefresh.runningCount, 1)
+        try await waitForState("first read in progress") { releaseFirstRead != nil }
+        refresh.request { await withCheckedContinuation { releaseFollowUp = $0 } }
+        XCTAssertEqual(CoalescedRefresh.runningCount, 1, "A request during a read joins the running loop")
+        releaseFirstRead?.resume()
+        try await waitForState("follow-up read in progress") { releaseFollowUp != nil }
+        XCTAssertEqual(CoalescedRefresh.runningCount, 1, "A pending follow-up keeps the loop running")
+        releaseFollowUp?.resume()
+        try await waitForState("reads finished") { CoalescedRefresh.runningCount == 0 }
+    }
+
     @MainActor
     func testContinuousChangesCannotStarveReads() async throws {
         let refresh = CoalescedRefresh()

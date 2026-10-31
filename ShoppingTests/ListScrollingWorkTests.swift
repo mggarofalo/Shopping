@@ -104,39 +104,39 @@ final class ListScrollingWorkTests: XCTestCase {
 
     private struct RowsNotShown: Error {}
 
-    @MainActor private struct MountedList {
+    /// A screen in its own window, reading the fixture through a counting coordinator.
+    @MainActor private struct HostedScreen {
         let window: UIWindow
         let previousWindow: UIWindow?
+        let context: NSManagedObjectContext
+        let coordinator: FetchCountingCoordinator
+        let fixture: ShoppingPreviewEnvironment
+    }
+
+    @MainActor private struct MountedList {
         let collection: UICollectionView
         let context: NSManagedObjectContext
         let coordinator: FetchCountingCoordinator
         let fixture: ShoppingPreviewEnvironment
-
-        /// Releases the screen before teardown resets its context and deletes its store.
-        func unmount() async throws {
-            window.isHidden = true
-            window.rootViewController = nil
-            previousWindow?.makeKeyAndVisible()
-            try await Task.sleep(for: .milliseconds(200))
-        }
     }
 
-    /// Mounts a screen, runs `body`, and unmounts on every exit, so a failed assertion never
-    /// leaves a screen reading a store that teardown deletes.
+    /// Mounts a screen, runs `body`, and releases the screen on every exit, so a failed assertion
+    /// never leaves a screen reading a store that teardown deletes.
     private func whileMounted<Content: View>(
         @ViewBuilder _ content: () -> Content, run body: (MountedList) async throws -> Void
     ) async throws {
-        let list = try await mount(content: content)
+        var screen: HostedScreen? = try host(content: content)
+        var failure: Error?
         do {
-            try await body(list)
+            try await body(try await rowsShown(in: try XCTUnwrap(screen)))
         } catch {
-            try await list.unmount()
-            throw error
+            failure = error
         }
-        try await list.unmount()
+        try await release(&screen)
+        if let failure { throw failure }
     }
 
-    private func mount<Content: View>(@ViewBuilder content: () -> Content) async throws -> MountedList {
+    private func host<Content: View>(@ViewBuilder content: () -> Content) throws -> HostedScreen {
         let lifetime = fixtureLifetime
         addTeardownBlock { try lifetime.cleanup() }
         let storeURL = try fixtureLifetime.makeDirectory().appendingPathComponent("scrolling.sqlite")
@@ -159,28 +159,44 @@ final class ListScrollingWorkTests: XCTestCase {
             .environment(\.needService, fixture.service)
             .environment(\.persistenceSelection, fixture.selection))
         window.makeKeyAndVisible()
+        return HostedScreen(window: window, previousWindow: previousWindow, context: context,
+                            coordinator: coordinator, fixture: fixture)
+    }
 
-        // The fixture's rows fill several screens once its projection read publishes.
+    /// Waits until the fixture's rows fill several screens, which happens once the projection read publishes.
+    private func rowsShown(in screen: HostedScreen) async throws -> MountedList {
         var list: UICollectionView?
         try await waitForState("rows shown", timeout: .seconds(10)) {
-            list = window.firstDescendant(UICollectionView.self) {
+            list = screen.window.firstDescendant(UICollectionView.self) {
                 $0.contentSize.height > 2 * $0.bounds.height && $0.bounds.height > 0
             }
             return list != nil
         }
-        guard let collection = list else {
-            window.isHidden = true
-            window.rootViewController = nil
-            try await settle()
-            // `waitForState` has recorded the failure; stop this test without a mounted screen.
-            throw RowsNotShown()
-        }
+        // `waitForState` has recorded the failure; stop this test.
+        guard let collection = list else { throw RowsNotShown() }
         try await settle()
-        return MountedList(window: window, previousWindow: previousWindow, collection: collection,
-                           context: context, coordinator: coordinator, fixture: fixture)
+        return MountedList(collection: collection, context: screen.context,
+                           coordinator: screen.coordinator, fixture: screen.fixture)
     }
 
-    /// Lets the screen's deferred reads and updates finish.
+    /// Removes the screen and waits until its view graph and every read it started have finished.
+    /// Releasing takes 0.1–0.4 s on hosted runners, so a fixed 200 ms delay let a live screen
+    /// refetch into the context during teardown and keep running into the next test (SHOPPING-275).
+    /// Teardown's reset then proves nothing still reads the context.
+    private func release(_ screen: inout HostedScreen?) async throws {
+        weak var hostingController: UIViewController?
+        if let hosted = screen {
+            hostingController = hosted.window.rootViewController
+            hosted.window.isHidden = true
+            hosted.window.rootViewController = nil
+            hosted.previousWindow?.makeKeyAndVisible()
+        }
+        screen = nil
+        try await waitForState("screen and its reads finished") {
+            hostingController == nil && CoalescedRefresh.runningCount == 0
+        }
+    }
+
     /// A real data change may refresh the cells List has on screen; rows off screen must not
     /// rebuild. Before SHOPPING-272 every update rebuilt all rows, twice.
     private func assertOnlyOnScreenRowsRebuilt(_ rendered: [UUID], in list: MountedList, total: Int) {
@@ -189,6 +205,7 @@ final class ListScrollingWorkTests: XCTestCase {
         XCTAssertLessThanOrEqual(Set(rendered).count, onScreen, "Rows off screen were rebuilt")
     }
 
+    /// Lets the screen's deferred reads and updates finish.
     private func settle() async throws {
         try await Task.sleep(for: .milliseconds(500))
     }
