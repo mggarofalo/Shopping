@@ -15,6 +15,9 @@ final class CoalescedRefresh {
         pending = read
         guard !running else { return }
         running = true
+        #if DEBUG
+        Self.runningCount += 1
+        #endif
         Task {
             while let next = pending {
                 pending = nil
@@ -24,10 +27,17 @@ final class CoalescedRefresh {
                 await next()
             }
             running = false
+            #if DEBUG
+            Self.runningCount -= 1
+            #endif
         }
     }
 
     #if DEBUG
+    /// Reads still running on any screen. A read outlives a removed screen and still reads that
+    /// screen's context, so hosted tests wait for zero before deleting the store (SHOPPING-275).
+    private(set) static var runningCount = 0
+
     /// Lets UI tests hold every projection read open to observe the loading state.
     private static let uiTestReadDelay: Duration? = ProcessInfo.processInfo
         .environment["SHOPPING_UI_TEST_PROJECTION_DELAY_MS"].flatMap(Int.init).map { .milliseconds($0) }
