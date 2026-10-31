@@ -183,6 +183,11 @@ final class ListScrollingWorkTests: XCTestCase {
     /// Releasing takes 0.1–0.4 s on hosted runners, so a fixed 200 ms delay let a live screen
     /// refetch into the context during teardown and keep running into the next test (SHOPPING-275).
     /// Teardown's reset then proves nothing still reads the context.
+    ///
+    /// This does not wait for the context itself to be released. Once a `@FetchRequest` reports a
+    /// change to one of its objects, SwiftUI keeps that request's controller, and through it the
+    /// context, alive after the view is gone (iOS 18.5 and 26.5), so Catalog edits never release it
+    /// (SHOPPING-276).
     private func release(_ screen: inout HostedScreen?) async throws {
         weak var hostingController: UIViewController?
         if let hosted = screen {
