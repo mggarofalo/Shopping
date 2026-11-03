@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify dispatched candidate
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
@@ -55,7 +55,7 @@ jobs:
     # The Siri runner's 1080 s readiness budget needs the extra ten minutes.
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select upload Xcode version
         run: sudo xcode-select -s /Applications/Xcode_27.0.app
@@ -87,7 +87,7 @@ jobs:
 
       - name: Retain Siri schema test evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: siri-schema-results
           path: |
@@ -103,7 +103,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate diagnostic contracts
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_siri_schema_ci.py
@@ -135,7 +135,7 @@ jobs:
 
       - name: Retain Siri diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: siri-launch-diagnostic
           path: |
@@ -152,7 +152,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate CI policy
         run: |
@@ -284,7 +284,7 @@ jobs:
       - name: Upload raw validation logs
         if: failure() || cancelled()
         timeout-minutes: 1
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fast-failure-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -302,7 +302,7 @@ jobs:
         id: raw-results
         if: failure() || cancelled()
         timeout-minutes: 2
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -367,7 +367,7 @@ jobs:
 
       - name: Upload fast summary
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fast-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -395,7 +395,7 @@ jobs:
       - name: Upload results after reporting failure
         if: (failure() || cancelled()) && steps.raw-results.outcome == 'skipped'
         timeout-minutes: 2
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fast-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -416,7 +416,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned compatibility Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
       - name: Validate canary tooling before simulator allocation
@@ -430,7 +430,7 @@ jobs:
           python3 .github/scripts/run-compatibility-canary.py --simulator "$simulator_id" --artifacts "$RUNNER_TEMP/Compatibility"
       - name: Retain compatibility evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compatibility-${{ github.sha }}
           path: |

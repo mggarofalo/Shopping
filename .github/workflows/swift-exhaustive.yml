@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify dispatched candidate
         env:
@@ -70,7 +70,7 @@ jobs:
       TEST_PLAN: ${{ github.event_name == 'workflow_dispatch' && inputs.suite == 'performance' && 'ShoppingPerformance' || 'ShoppingFull' }}
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
 
       - name: Select Xcode version
@@ -133,7 +133,7 @@ jobs:
       - name: Upload exhaustive raw logs
         if: always()
         timeout-minutes: 1
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: exhaustive-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -147,7 +147,7 @@ jobs:
       - name: Upload exhaustive raw results
         if: always()
         timeout-minutes: 3
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: exhaustive-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: ExhaustiveResults.xcresult
@@ -200,7 +200,7 @@ jobs:
       - name: Upload exhaustive summary
         timeout-minutes: 1
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: exhaustive-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
