@@ -107,7 +107,8 @@ struct PersonalCartView: View {
                 ToolbarItem(placement: .bottomBar) {
                     Button("Check out (\(visibleEntries.count))") { prepare(visibleEntries) }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isPreparingCheckout || visibleEntries.isEmpty || cart.error != nil ||
+                        // Only local pending edits disable checkout; household sync state never does.
+                        .disabled(isPreparingCheckout || visibleEntries.isEmpty ||
                             visibleEntries.contains { pendingRemovalIDs.contains($0.id) || cart.isQuantityTransitionPending($0.id) ||
                                 cart.isCartTransitionPending($0.needID) })
                         .accessibilityIdentifier("shopping.personalCart.checkout")
@@ -150,16 +151,13 @@ struct PersonalCartView: View {
         guard !isPreparingCheckout,
               !entries.contains(where: { cart.isQuantityTransitionPending($0.id) || cart.isCartTransitionPending($0.needID) }) else { return }
         isPreparingCheckout = true
-        let service = cart.service
         let tokens = entries.map(\.token)
         let storeID = navigation.selectedStoreID
         let storeName = stores.first { $0.id == storeID }?.name
         Task {
             defer { isPreparingCheckout = false }
             do {
-                let token = try await Task.detached(priority: .userInitiated) {
-                    try service.prepareCheckout(tokens: tokens, storeID: storeID)
-                }.value
+                let token = try await cart.prepareCheckout(tokens: tokens, storeID: storeID)
                 checkout = PersonalCheckoutSheet(token: token, storeName: storeName)
             } catch { self.error = error.localizedDescription }
         }

@@ -1,5 +1,6 @@
 import CoreData
 import Observation
+import os
 import SwiftUI
 
 @Observable @MainActor
@@ -29,22 +30,32 @@ final class PersonalCartPresentation {
     private(set) var error: String?
     /// False until a complete snapshot is read. Until then, empty sets mean "unknown", not "empty".
     private(set) var hasLoadedSnapshot = false
+    /// Local edits whose commit has not yet returned. A command's receipt clears them.
     private var pendingCartState: [UUID: Bool] = [:]
     private var pendingQuantityIDs: Set<UUID> = []
-    private var inFlightNeedIDs: Set<UUID> = []
-    private var inFlightQuantityIDs: Set<UUID> = []
     private var refreshInProgress = false
     private var refreshRequested = false
+    /// Counts receipts and edits. A read that overlaps one may predate it, so it is
+    /// discarded and read again rather than applied over the receipt.
     private var mutationRevision = 0
+    private let presencePublisher: PersonalCartPresencePublisher
 
-    init(service: PersonalCartService, householdID: UUID, listID: UUID) {
+    init(service: PersonalCartService, householdID: UUID, listID: UUID, presenceDelay: Duration = .seconds(2)) {
         self.service = service
         self.householdID = householdID
         self.listID = listID
+        presencePublisher = PersonalCartPresencePublisher(delay: presenceDelay) { [service] needIDs in
+            await BlockingWriterWork.run(qos: .utility) {
+                let state = PersonalCartService.signposter.beginInterval("Cart presence batch", "needs=\(needIDs.count)")
+                defer { PersonalCartService.signposter.endInterval("Cart presence batch", state) }
+                return service.republishPresence(each: needIDs)
+            }
+        }
         refresh()
     }
 
     func refresh() {
+        presencePublisher.retry()
         refreshRequested = true
         guard !refreshInProgress else { return }
         refreshInProgress = true
@@ -56,9 +67,9 @@ final class PersonalCartPresentation {
                 let service = self.service
                 let householdID = self.householdID
                 let listID = self.listID
-                let result = await Task.detached(priority: .userInitiated) {
+                let result = await BlockingWriterWork.run {
                     Self.readSnapshot(service: service, householdID: householdID, listID: listID)
-                }.value
+                }
                 guard requestedRevision == mutationRevision else {
                     refreshRequested = true
                     continue
@@ -73,11 +84,8 @@ final class PersonalCartPresentation {
                     publish(\.presence, snapshot.presence)
                     publish(\.error, snapshot.householdError)
                     if snapshot.householdError == nil { publish(\.hasLoadedSnapshot, true) }
-                    publish(\.pendingCartState, pendingCartState.filter { inFlightNeedIDs.contains($0.key) })
-                    publish(\.pendingQuantityIDs, pendingQuantityIDs.intersection(inFlightQuantityIDs))
                 case .failure(let failure):
                     publish(\.error, failure)
-                    publish(\.pendingQuantityIDs, pendingQuantityIDs.intersection(inFlightQuantityIDs))
                 }
             } while refreshRequested
             refreshInProgress = false
@@ -149,69 +157,88 @@ final class PersonalCartPresentation {
         }
     }
 
+    /// An action completes when its local commit returns. Its receipt patches the
+    /// cart at once; presence publication and the confirming read follow later.
     func cart(_ needID: UUID) async throws {
-        guard !inFlightNeedIDs.contains(needID) else { return }
+        guard pendingCartState[needID] == nil else { return }
         pendingCartState[needID] = true
-        inFlightNeedIDs.insert(needID)
         mutationRevision += 1
-        do {
-            let service = self.service, householdID = self.householdID, listID = self.listID
-            try await Task.detached(priority: .userInitiated) {
-                try service.cart(needID: needID, householdID: householdID, listID: listID)
-            }.value
-            inFlightNeedIDs.remove(needID)
-            mutationRevision += 1
-            refresh()
-        } catch {
-            inFlightNeedIDs.remove(needID)
-            pendingCartState.removeValue(forKey: needID)
-            mutationRevision += 1
-            refresh()
-            throw error
+        defer { finishEdit { pendingCartState.removeValue(forKey: needID) } }
+        let service = self.service, householdID = self.householdID, listID = self.listID
+        let receipt = try await BlockingWriterWork.run {
+            try service.cart(needID: needID, householdID: householdID, listID: listID, presencePolicy: .deferred)
         }
+        apply(receipt)
     }
 
     func uncart(_ entry: PersonalCartEntrySnapshot) async throws {
-        guard !inFlightNeedIDs.contains(entry.needID) else { return }
+        guard pendingCartState[entry.needID] == nil else { return }
         pendingCartState[entry.needID] = false
-        inFlightNeedIDs.insert(entry.needID)
         mutationRevision += 1
-        do {
-            let service = self.service
-            try await Task.detached(priority: .userInitiated) { try service.uncart(entry.token) }.value
-            entries.removeAll { $0.needID == entry.needID }
-            inFlightNeedIDs.remove(entry.needID)
-            mutationRevision += 1
-            refresh()
-        } catch {
-            inFlightNeedIDs.remove(entry.needID)
-            pendingCartState.removeValue(forKey: entry.needID)
-            mutationRevision += 1
-            refresh()
-            throw error
+        defer { finishEdit { pendingCartState.removeValue(forKey: entry.needID) } }
+        let service = self.service
+        let receipt = try await BlockingWriterWork.run {
+            try service.uncart(entry.token, presencePolicy: .deferred)
         }
+        apply(receipt)
     }
 
     func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) async throws {
         guard !pendingQuantityIDs.contains(entry.id) else { return }
         pendingQuantityIDs.insert(entry.id)
-        inFlightQuantityIDs.insert(entry.id)
         mutationRevision += 1
-        do {
-            let service = self.service
-            try await Task.detached(priority: .userInitiated) {
-                try service.setQuantity(quantity, token: entry.token)
-            }.value
-            inFlightQuantityIDs.remove(entry.id)
-            mutationRevision += 1
-            refresh()
-        } catch {
-            inFlightQuantityIDs.remove(entry.id)
-            pendingQuantityIDs.remove(entry.id)
-            mutationRevision += 1
-            refresh()
-            throw error
+        defer { finishEdit { pendingQuantityIDs.remove(entry.id) } }
+        let service = self.service
+        let receipt = try await BlockingWriterWork.run {
+            try service.setQuantity(quantity, token: entry.token, presencePolicy: .deferred)
         }
+        apply(receipt)
+    }
+
+    func prepareCheckout(tokens: [PersonalCartEntryToken], storeID: UUID?) async throws -> PersonalCheckoutToken {
+        let service = self.service
+        return try await BlockingWriterWork.run { try service.prepareCheckout(tokens: tokens, storeID: storeID) }
+    }
+
+    /// Purchased entries leave the cart and groceries as soon as the intent is saved.
+    func checkout(_ token: PersonalCheckoutToken, buyAnywayReceiptIDs: Set<UUID>) async throws -> PersonalCheckoutOutcome {
+        mutationRevision += 1
+        defer { finishEdit {} }
+        let service = self.service
+        let outcome = try await BlockingWriterWork.run {
+            try service.checkout(token, buyAnywayReceiptIDs: buyAnywayReceiptIDs, operationID: token.id,
+                                 presencePolicy: .deferred)
+        }
+        publish(\.entries, entries.filter { !outcome.purchasedNeedIDs.contains($0.needID) })
+        publish(\.outstandingNeedIDs, outstandingNeedIDs.subtracting(outcome.purchasedNeedIDs))
+        outcome.purchasedNeedIDs.forEach(presencePublisher.markDirty)
+        return outcome
+    }
+
+    func restore(checkoutID: UUID) async throws -> PersonalCheckoutOutcome {
+        mutationRevision += 1
+        defer { finishEdit {} }
+        let service = self.service
+        let outcome = try await BlockingWriterWork.run {
+            try service.restore(checkoutID: checkoutID, presencePolicy: .deferred)
+        }
+        outcome.purchasedNeedIDs.forEach(presencePublisher.markDirty)
+        return outcome
+    }
+
+    private func apply(_ receipt: PersonalCartReceipt) {
+        var patched = entries.filter { $0.needID != receipt.needID }
+        if let entry = receipt.entry { patched.append(entry) }
+        publish(\.entries, patched)
+        presencePublisher.markDirty(receipt.needID)
+    }
+
+    /// Clears the edit's pending state whether it committed or failed, then reads
+    /// again. Any read already in flight predates this edit and is discarded.
+    private func finishEdit(_ clearPending: () -> Void) {
+        clearPending()
+        mutationRevision += 1
+        refresh()
     }
 }
 

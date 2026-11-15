@@ -191,7 +191,7 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         let f = try fixture(), service = adapter(f)
         let initial = try await service.load(storeID: f.storeID)
         let grocery = try XCTUnwrap(initial.grocerySections.first?.items.first)
-        try await Task.detached {
+        _ = try await Task.detached {
             try f.cart.cart(needID: f.needID, householdID: f.householdID, listID: f.listID,
                 initialQuantity: 4, presencePolicy: .deferred)
         }.value
@@ -816,7 +816,7 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         try await settle(session) { !(session.snapshot.item(id: row.occurrenceID)?.isPendingAdd ?? true) }
         // The shopper's phone changes the same membership before the Watch tap arrives.
         let phoneEntry = try await Task.detached { try XCTUnwrap(f.cart.entries(householdID: f.householdID, listID: f.listID).first) }.value
-        try await Task.detached { try f.cart.setQuantity(4, token: phoneEntry.token) }.value
+        _ = try await Task.detached { try f.cart.setQuantity(4, token: phoneEntry.token) }.value
         XCTAssertTrue(session.remove(rendered))
         try await settle(session) { session.errorMessage != nil }
         XCTAssertEqual(session.errorMessage, PersonalCartError.staleEntry.localizedDescription)
@@ -1308,7 +1308,7 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         let phone = PersonalCartService(persistence: f.persistence, sessionProvider: f.provider)
         let eggsID = try XCTUnwrap(UUID(uuidString: eggs.occurrenceID))
         let riceID = UUID()
-        try await Task.detached {
+        _ = try await Task.detached {
             try phone.cart(needID: eggsID, householdID: f.householdID, listID: f.listID, initialQuantity: nil, presencePolicy: .deferred)
         }.value
         let context = f.persistence.simulationContext()

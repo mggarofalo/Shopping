@@ -110,7 +110,8 @@ extension PersonalCartService {
     }
 
     func decideLegacyReview(id: UUID, claim: Bool) throws {
-        try transact { repository in
+        // Only a claim adds a cart edit, so only its need has new presence.
+        let claimed = try transact { repository -> UUID? in
             guard let matches = try self.legacyRecordGroups(repository: repository)[id] else {
                 throw PersonalCartError.unavailable
             }
@@ -122,7 +123,7 @@ extension PersonalCartService {
             if try repository.values(UUID.self, kind: "legacyClaim").values.contains(id)
                 || repository.privateRecords(kind: "cart").contains(where: { $0.id == immutableClaimID }) {
                 guard claim else { throw PersonalCartError.reusedOperationID }
-                return
+                return nil
             }
             let decision = claim ? "claimed" : "discarded"
             let existing = try self.legacyReview(repository: repository).first { $0.id == id }?.decision
@@ -134,7 +135,7 @@ extension PersonalCartService {
                 else { throw PersonalCartError.accountChanged }
                 try repository.insert(id: PersonalCartCoding.stableID("legacy-claim", id.uuidString),
                     kind: "legacyClaim", command: id, value: id)
-                return
+                return nil
             }
             let review = try PersonalCartCoding.decode(LegacyCartReviewSnapshot.self, record.payload)
             if claim {
@@ -162,7 +163,8 @@ extension PersonalCartService {
                     kind: "legacyDiscard", command: id, value: id)
             }
             for record in matches { record.decision = decision }
+            return claim ? review.needID : nil
         }
-        try? republishPresence()
+        if let claimed { republishPresence(each: [claimed]) }
     }
 }

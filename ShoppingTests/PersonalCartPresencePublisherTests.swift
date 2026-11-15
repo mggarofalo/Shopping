@@ -1,8 +1,8 @@
 import XCTest
-@testable import ShoppingWatch
+@testable import Shopping
 
 @MainActor
-final class WatchPresencePublisherTests: XCTestCase {
+final class PersonalCartPresencePublisherTests: XCTestCase {
     /// Intentionally ignores cancellation so invalidation tests also exercise
     /// late callbacks from work that cannot be stopped once it has begun.
     private final class Gate {
@@ -31,7 +31,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         let first = UUID(), second = UUID()
         var batches: [Set<UUID>] = []
         var requestedDelays: [Duration] = []
-        let publisher = WatchPresencePublisher(sleep: { duration in
+        let publisher = PersonalCartPresencePublisher(sleep: { duration in
             requestedDelays.append(duration)
             await delay.wait()
         }, publish: { needs in
@@ -63,7 +63,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         publication.onStart = { _ in firstBatch.fulfill() }
         let need = UUID()
         var batches: [Set<UUID>] = []
-        let publisher = WatchPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
+        let publisher = PersonalCartPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
             batches.append(needs)
             if batches.count == 1 { await publication.wait() }
             else { finished.fulfill() }
@@ -94,7 +94,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         delay.onStart = { count in (count == 1 ? firstWindow : retryWindow).fulfill() }
         let failed = UUID(), succeeded = UUID()
         var batches: [Set<UUID>] = []
-        let publisher = WatchPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
+        let publisher = PersonalCartPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
             batches.append(needs)
             if batches.count == 1 { firstBatch.fulfill(); return [succeeded] }
             retryBatch.fulfill()
@@ -130,7 +130,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         // if account-scoped work happens to carry matching domain identifiers.
         let need = UUID()
         var batches = 0
-        let publisher = WatchPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
+        let publisher = PersonalCartPresencePublisher(sleep: { _ in await delay.wait() }, publish: { needs in
             batches += 1
             if batches == 1 {
                 await publication.wait()
@@ -161,7 +161,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         let returned = expectation(description: "Cancelled sleep returned")
         delay.onStart = { _ in window.fulfill() }
         var batches = 0
-        let publisher = WatchPresencePublisher(sleep: { _ in
+        let publisher = PersonalCartPresencePublisher(sleep: { _ in
             await delay.wait()
             returned.fulfill()
         }, publish: { needs in
@@ -183,7 +183,7 @@ final class WatchPresencePublisherTests: XCTestCase {
         let cancelled = expectation(description: "Released publisher cancels its sleeper")
         delay.onStart = { _ in window.fulfill() }
         var batches = 0
-        var publisher: WatchPresencePublisher? = WatchPresencePublisher(sleep: { _ in
+        var publisher: PersonalCartPresencePublisher? = PersonalCartPresencePublisher(sleep: { _ in
             await delay.wait()
             XCTAssertTrue(Task.isCancelled)
             cancelled.fulfill()

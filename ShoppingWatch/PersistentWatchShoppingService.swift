@@ -33,7 +33,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var receiptRevision = 0
     private var startupError: Error?
     private var currentAttention: String?
-    private lazy var presencePublisher = WatchPresencePublisher(delay: presenceDelay) { [weak self] needIDs in
+    private lazy var presencePublisher = PersonalCartPresencePublisher(delay: presenceDelay) { [weak self] needIDs in
         guard let cart = self?.cart else { return [] }
         return await Task.detached(priority: .utility) {
             let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
@@ -295,19 +295,19 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             guard token.membership == nil else { throw PersonalCartError.staleEntry }
             // The durable command checks the active store, eligibility, demand and
             // household access in its own writer transaction.
-            try await Task.detached(priority: .userInitiated) {
+            _ = try await Task.detached(priority: .userInitiated) {
                 try cart.cart(needID: token.needID, householdID: token.householdID, listID: token.listID,
                     initialQuantity: quantity.map(Int64.init), expectedStoreID: token.storeID, operationID: token.operationID,
                     presencePolicy: .deferred)
             }.value
         case .remove:
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
-            try await Task.detached(priority: .userInitiated) {
+            _ = try await Task.detached(priority: .userInitiated) {
                 try cart.uncart(membership, operationID: token.operationID, presencePolicy: .deferred)
             }.value
         case .setQuantity(_, let quantity):
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
-            try await Task.detached(priority: .userInitiated) {
+            _ = try await Task.detached(priority: .userInitiated) {
                 try cart.setQuantity(quantity.map(Int64.init), token: membership, operationID: token.operationID, presencePolicy: .deferred)
             }.value
         case .buyAnyway:

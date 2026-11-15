@@ -287,7 +287,8 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testCartMutationIsVisibleUntilBackgroundSnapshotCatchesUp() async throws {
+    /// SHOPPING-277: the command's receipt completes the action; no re-read is needed.
+    func testCartMutationReceiptIsVisibleWhenCommandReturns() async throws {
         let persistence = try PersistenceController(inMemory: true)
         let needs = NeedService(persistence: persistence)
         let scope = try needs.createHousehold()
@@ -302,14 +303,15 @@ final class PersonalCartPresentationTests: XCTestCase {
 
         try await presentation.cart(needID)
         XCTAssertTrue(presentation.contains(needID))
-        XCTAssertTrue(presentation.isCartTransitionPending(needID))
-        try await waitUntil { !presentation.isCartTransitionPending(needID) }
+        XCTAssertFalse(presentation.isCartTransitionPending(needID))
         let entry = try XCTUnwrap(presentation.entries.first)
+        XCTAssertEqual(entry.needID, needID)
         try await presentation.uncart(entry)
         XCTAssertFalse(presentation.contains(needID))
+        XCTAssertFalse(presentation.isCartTransitionPending(needID))
         XCTAssertTrue(presentation.entries.isEmpty)
-        try await waitUntil { !presentation.isCartTransitionPending(needID) }
-        XCTAssertTrue(presentation.entries.isEmpty)
+        try await waitUntil { !presentation.cartedNeedIDs.contains(needID) && presentation.hasLoadedSnapshot }
+        XCTAssertTrue(presentation.entries.isEmpty, "A later read agrees with the receipt")
     }
 
     @MainActor

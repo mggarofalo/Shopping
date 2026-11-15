@@ -17,6 +17,23 @@ extension PersonalCartRepository {
         guard let identity = try nativeAccessIdentity(for: home) else { return nil }
         return persistence.homeNativeAccess.observedAccess(identity)
     }
+
+    /// A private command names the home's share from the durable ledger, never a
+    /// live CloudKit share fetch, so it cannot queue behind mirroring. A home with
+    /// no stored share has no native observation; the ledger still governs it.
+    func ledgerNativeCommandAccess(for home: Household, access: HomeEffectAccess) -> HomeNativeAccessGate.Access? {
+        guard let list = home.groceryList, let storeID = home.objectID.persistentStore?.identifier else { return nil }
+        let current = Set(access.currentGrants.map(\.share))
+        let shares = current.isEmpty ? Set(access.records.map(\.share)) : current
+        let observed = shares.compactMap { share in
+            persistence.homeNativeAccess.observedAccess(HomeNativeAccessIdentity(
+                scope: homeEffectScope(householdID: home.id, listID: list.id), storeIdentifier: storeID,
+                rootURI: home.objectID.uriRepresentation().absoluteString, share: share))
+        }
+        if observed.contains(.lost) { return .lost }
+        if observed.contains(.readOnly) { return .readOnly }
+        return observed.isEmpty ? nil : .writable
+    }
 }
 
 /// Native CloudKit facts about an attached participant home. An owned or local

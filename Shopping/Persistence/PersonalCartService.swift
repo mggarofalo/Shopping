@@ -1,7 +1,12 @@
 import CoreData
+import os
 
 /// Commands serialize on the existing persistence writer; tokens carry values across queues.
 final class PersonalCartService: @unchecked Sendable {
+    /// Points of Interest intervals for every writer transaction. See
+    /// docs/ui-responsiveness.md for reading them in Instruments.
+    static let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "com.mggarofalo.shopping",
+                                         category: .pointsOfInterest)
     let persistence: PersistenceController
     let sessionProvider: any ShopperSessionProviding
     let initialAccountBinding: String?
@@ -30,10 +35,13 @@ final class PersonalCartService: @unchecked Sendable {
     }
 
     func entries(householdID: UUID, listID: UUID) throws -> [PersonalCartEntrySnapshot] {
-        try transact(save: false) { repository in
-            do { return try self.entries(householdID: householdID, listID: listID, repository: repository) }
-            catch { return try self.entries(householdID: householdID, listID: listID, repository: repository, includeShared: false) }
-        }
+        try transact(save: false) { try self.displayEntries(householdID: householdID, listID: listID, repository: $0) }
+    }
+
+    /// The cart as shown: an incomplete household import cannot hide private entries.
+    func displayEntries(householdID: UUID, listID: UUID, repository: PersonalCartRepository) throws -> [PersonalCartEntrySnapshot] {
+        do { return try entries(householdID: householdID, listID: listID, repository: repository) }
+        catch { return try entries(householdID: householdID, listID: listID, repository: repository, includeShared: false) }
     }
 
     func outstandingNeedIDs(householdID: UUID, listID: UUID) throws -> Set<UUID> {
@@ -145,7 +153,7 @@ final class PersonalCartService: @unchecked Sendable {
         return Set(results.values.compactMap(\.edit).filter { $0.snapshot.needID == needID }.map(\.id))
     }
 
-    func transact<T>(save: Bool = true, additionalAuthority: UICommandAuthority? = nil,
+    func transact<T>(save: Bool = true, additionalAuthority: UICommandAuthority? = nil, caller: String = #function,
         _ body: (PersonalCartRepository) throws -> T) throws -> T {
         let session = try sessionProvider.currentSession()
         guard session.accountBinding == initialAccountBinding else { throw PersonalCartError.accountChanged }
@@ -156,7 +164,14 @@ final class PersonalCartService: @unchecked Sendable {
         }
         var result: Result<T, Error>!
         var saved = false
+        // Wait spans enqueued to acquired: queueing behind other writer work.
+        // Work spans acquired to finished: replay, fetches and the save itself.
+        let signposter = Self.signposter, signpostID = signposter.makeSignpostID()
+        let waiting = signposter.beginInterval("Cart writer wait", id: signpostID, "\(caller, privacy: .public)")
         persistence.writer.performAndWait {
+            signposter.endInterval("Cart writer wait", waiting)
+            let working = signposter.beginInterval("Cart writer work", id: signpostID, "\(caller, privacy: .public)")
+            defer { signposter.endInterval("Cart writer work", working, "saved=\(saved)") }
             let context = persistence.writer
             context.reset()
             context.userInfo.removeObject(forKey: HomeDeletionSaveAuthority.key)
@@ -177,6 +192,8 @@ final class PersonalCartService: @unchecked Sendable {
                     try persistence.prepareForSave(context)
                     try commandAuthority?.validate()
                     try additionalAuthority?.validate()
+                    let saving = signposter.beginInterval("Cart writer save", id: signpostID)
+                    defer { signposter.endInterval("Cart writer save", saving) }
                     try context.save()
                     saved = true
                 }

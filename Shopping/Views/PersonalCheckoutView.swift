@@ -57,23 +57,19 @@ struct PersonalCheckoutView: View {
     private func confirm() {
         guard !isConfirming, presentation?.isActive != false else { return }
         isConfirming = true
-        let service = cart.service
         let capture = token
         let acknowledged = self.acknowledged
         Task {
             defer { isConfirming = false }
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try service.checkout(capture, buyAnywayReceiptIDs: acknowledged, operationID: capture.id)
-                }.value
+                let result = try await cart.checkout(capture, buyAnywayReceiptIDs: acknowledged)
                 guard presentation?.isActive != false else { return }
-                cart.refresh()
                 var message = "Checked out \(result.purchasedCount) items."
                 if result.skippedCount > 0 { message += " Kept \(result.skippedCount) changed items." }
                 if result.pendingPublication { message += " Household sync pending." }
                 toastCenter?.show(message, duration: .attention)
                 dismiss()
-            } catch { self.error = error.localizedDescription; cart.refresh() }
+            } catch { self.error = error.localizedDescription }
         }
     }
 }
