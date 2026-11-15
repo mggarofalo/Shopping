@@ -96,6 +96,7 @@ struct CategoryManagementView: View {
                 }
             )
         }
+        .shoppingToastHost()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if editMode.isEditing {
                 Divider()

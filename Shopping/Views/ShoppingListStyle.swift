@@ -70,10 +70,12 @@ private struct ShoppingSearchPresentation: ViewModifier {
 
 struct ShoppingFeedbackBar<Action: View>: View {
     let message: String
+    private let dismiss: (() -> Void)?
     private let action: Action
 
-    init(message: String, @ViewBuilder action: () -> Action) {
+    init(message: String, dismiss: (() -> Void)? = nil, @ViewBuilder action: () -> Action) {
         self.message = message
+        self.dismiss = dismiss
         self.action = action()
     }
 
@@ -90,7 +92,10 @@ struct ShoppingFeedbackBar<Action: View>: View {
             }
         }
         .padding()
-        .background(.bar)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // A floating card reads as transient feedback, distinct from a bottom toolbar beneath it.
+        .background(.bar, in: .rect(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
         .accessibilityElement(children: .contain)
     }
 
@@ -99,12 +104,15 @@ struct ShoppingFeedbackBar<Action: View>: View {
             .font(.subheadline)
             .shoppingMultilineText()
             .accessibilityIdentifier("shopping.feedback.message")
+            .accessibilityActions {
+                if let dismiss { Button("Dismiss", action: dismiss) }
+            }
     }
 }
 
 extension ShoppingFeedbackBar where Action == EmptyView {
-    init(message: String) {
-        self.init(message: message) { EmptyView() }
+    init(message: String, dismiss: (() -> Void)? = nil) {
+        self.init(message: message, dismiss: dismiss) { EmptyView() }
     }
 }
 

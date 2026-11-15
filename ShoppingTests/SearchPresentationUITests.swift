@@ -61,9 +61,14 @@ final class SearchPresentationUITests: XCTestCase {
         let app = launchApp(fixture: "populated", personalCart: true)
         openCart(in: app, titled: "My cart")
         assertSearchField("Search groceries", in: app, screen: "My cart")
+        // My cart hides the tab bar under its Checkout toolbar (SHOPPING-280), so the round trip starts from Groceries.
+        XCTAssertFalse(app.tabBars.buttons["Catalog"].isHittable)
+        app.navigationBars["My cart"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
         app.tabBars.buttons["Catalog"].tap()
-        assertSearchField("Search catalog", in: app, screen: "Catalog with My cart pushed")
+        assertSearchField("Search catalog", in: app, screen: "Catalog after leaving My cart")
         app.tabBars.buttons["Groceries"].tap()
+        openCart(in: app, titled: "My cart")
         assertSearchField("Search groceries", in: app, screen: "My cart after tab round trip")
     }
 

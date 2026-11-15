@@ -885,7 +885,8 @@ struct GroceriesView: View {
                       selection.householdID == householdID, selection.listID == listID else { return }
                 hapticFeedback.play(.lightImpact)
                 refreshProjection()
-                if carted { showActionFeedback("\(name) moved to In cart.") }
+                // The toast host announces each change, including the coalesced count.
+                if carted { toastCenter?.show("\(name) moved to In cart.", duration: .success, coalescing: .movedToInCart) }
             } catch { self.error = error }
         }
     }
@@ -933,5 +934,11 @@ struct GroceriesView: View {
                 }.value
             } catch { self.error = error }
         }
+    }
+}
+
+private extension ShoppingToastCoalescing {
+    static var movedToInCart: ShoppingToastCoalescing {
+        ShoppingToastCoalescing(key: "movedToInCart") { "\($0) items moved to In cart." }
     }
 }

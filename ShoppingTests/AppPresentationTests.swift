@@ -145,6 +145,94 @@ final class AppPresentationTests: XCTestCase {
         center.performAction(for: toast)
         XCTAssertTrue(center.toasts.isEmpty)
     }
+
+    @MainActor
+    func testConsecutiveSameKindToastsCoalesceIntoOneCountedSummary() {
+        let center = ShoppingToastCenter { _ in try await Task.sleep(for: .seconds(60)) }
+        let moved = ShoppingToastCoalescing(key: "moved") { "\($0) items moved to In cart." }
+        let first = center.show("Milk moved to In cart.", duration: .success, coalescing: moved)
+        XCTAssertEqual(center.toasts.map(\.message), ["Milk moved to In cart."])
+
+        XCTAssertEqual(center.show("Eggs moved to In cart.", duration: .success, coalescing: moved), first)
+        XCTAssertEqual(center.show("Bread moved to In cart.", duration: .success, coalescing: moved), first)
+        XCTAssertEqual(center.toasts.map(\.id), [first])
+        XCTAssertEqual(center.toasts.map(\.message), ["3 items moved to In cart."])
+
+        center.dismiss(first)
+        center.show("Jam moved to In cart.", duration: .success, coalescing: moved)
+        XCTAssertEqual(center.toasts.map(\.message), ["Jam moved to In cart."])
+    }
+
+    @MainActor
+    func testToastCenterAnnouncesEachNewOrCoalescedMessageOnce() {
+        var announced: [String] = []
+        let center = ShoppingToastCenter(sleeper: { _ in try await Task.sleep(for: .seconds(60)) },
+            announce: { announced.append($0) })
+        let moved = ShoppingToastCoalescing(key: "moved") { "\($0) items moved to In cart." }
+        center.show("Milk moved to In cart.", duration: .success, coalescing: moved)
+        center.show("Eggs moved to In cart.", duration: .success, coalescing: moved)
+        center.show("Item removed", duration: .undo)
+        XCTAssertEqual(announced, ["Milk moved to In cart.", "2 items moved to In cart.", "Item removed"])
+    }
+
+    @MainActor
+    func testCoalescingNeverMergesAcrossOtherToastsOrActions() {
+        let center = ShoppingToastCenter { _ in try await Task.sleep(for: .seconds(60)) }
+        let moved = ShoppingToastCoalescing(key: "moved") { "\($0) items moved to In cart." }
+        let other = ShoppingToastCoalescing(key: "other") { "\($0) other" }
+        center.show("Milk moved to In cart.", duration: .success, coalescing: moved)
+        center.show("Item removed", duration: .undo, action: ShoppingToastAction(
+            title: "Undo", accessibilityIdentifier: "undo"
+        ) { true })
+        center.show("Eggs moved to In cart.", duration: .success, coalescing: moved)
+        center.show("Other", duration: .success, coalescing: other)
+        center.show("Bread moved to In cart.", duration: .success, coalescing: moved)
+        XCTAssertEqual(center.toasts.map(\.message), [
+            "Milk moved to In cart.", "Item removed", "Eggs moved to In cart.", "Other", "Bread moved to In cart.",
+        ])
+    }
+
+    @MainActor
+    func testCoalescedToastRestartsItsDismissalWindow() async throws {
+        var delays: [TimeInterval] = []
+        let center = ShoppingToastCenter { delay in
+            delays.append(delay)
+            try await Task.sleep(for: .seconds(60))
+        }
+        let moved = ShoppingToastCoalescing(key: "moved") { "\($0) items moved to In cart." }
+        let id = center.show("Milk moved to In cart.", duration: .success, coalescing: moved)
+        center.show("Eggs moved to In cart.", duration: .success, coalescing: moved)
+        try await waitForState("both dismissal windows scheduled") { delays.count == 2 }
+        XCTAssertEqual(delays, [3, 3])
+        // The superseded window was cancelled, not allowed to dismiss the coalesced toast.
+        XCTAssertEqual(center.toasts.map(\.id), [id])
+        center.dismiss(id)
+        XCTAssertTrue(center.toasts.isEmpty)
+    }
+
+    @MainActor
+    func testUITestLaunchCanHoldToastsUntilDismissed() async throws {
+        let center = ShoppingToastCenter.forLaunch(environment: [
+            "SHOPPING_UI_TEST_STORE_PATH": "/tmp/store.sqlite", "SHOPPING_UI_TEST_HOLD_TOASTS": "1",
+        ])
+        let id = center.show("Milk moved to In cart.", duration: .success)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(center.toasts.map(\.id), [id])
+        center.dismiss(id)
+        XCTAssertTrue(center.toasts.isEmpty)
+    }
+
+    @MainActor
+    func testScreenHostClaimsAreBalanced() {
+        let center = ShoppingToastCenter()
+        center.claimScreenHost()
+        center.claimScreenHost()
+        center.releaseScreenHost()
+        XCTAssertEqual(center.screenHostCount, 1)
+        center.releaseScreenHost()
+        center.releaseScreenHost()
+        XCTAssertEqual(center.screenHostCount, 0)
+    }
 }
 
 private actor AsyncGate {

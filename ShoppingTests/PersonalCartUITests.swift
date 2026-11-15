@@ -298,6 +298,78 @@ final class PersonalCartUITests: XCTestCase {
 
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    func testCheckoutStaysHittableBesideDismissibleCoalescedCartToasts() {
+        // Held toasts never time out, so dismissal and placement proof cannot be satisfied by the timer.
+        let app = launch(holdToasts: true)
+        let messages = app.staticTexts.matching(identifier: "shopping.feedback.message")
+        let toast = app.otherElements.matching(identifier: "shopping.toast.host")
+            .containing(.staticText, identifier: "shopping.feedback.message").firstMatch
+        cartGrocery("Granola", app: app)
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].existsOrAppears(timeout: 3))
+        app.buttons["In cart (1)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        let checkout = app.buttons["shopping.personalCart.checkout"]
+        XCTAssertTrue(checkout.existsOrAppears(timeout: 3))
+        XCTAssertTrue(toast.exists)
+        attach("Toast above Checkout", app)
+        XCTAssertTrue(checkout.isHittable)
+        XCTAssertLessThanOrEqual(toast.frame.maxY, checkout.frame.minY, "The toast must sit above the bottom toolbar")
+        XCTAssertEqual(checkout.label, "Check out (1)")
+
+        app.staticTexts["Granola moved to In cart."].swipeDown()
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 3))
+        XCTAssertEqual(messages.count, 0)
+        app.navigationBars["My cart"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 3))
+
+        cartGrocery("Bananas", app: app)
+        XCTAssertTrue(app.staticTexts["Bananas moved to In cart."].existsOrAppears(timeout: 3))
+        cartGrocery("Strawberries", app: app)
+        XCTAssertTrue(app.staticTexts["2 items moved to In cart."].existsOrAppears(timeout: 3))
+        XCTAssertEqual(messages.count, 1)
+        attach("Coalesced cart toast", app)
+
+        app.buttons["In cart (3)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(checkout.existsOrAppears(timeout: 3))
+        XCTAssertEqual(checkout.label, "Check out (3)")
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertTrue(checkout.isHittable)
+        checkout.tap()
+        XCTAssertTrue(app.navigationBars["Check out"].existsOrAppears(timeout: 3))
+        app.buttons["Confirm"].tap()
+        XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].existsOrAppears(timeout: 3))
+        XCTAssertFalse(checkout.exists, "Checkout is hidden while the cart is empty")
+        attach("Empty cart hides Checkout", app)
+    }
+
+    /// My cart hides the tab bar under its Checkout toolbar for everything pushed above it,
+    /// so a saved cart opened from My cart returns to Groceries before switching tabs.
+    private func popSavedCartToGroceries(_ app: XCUIApplication) {
+        for title in ["Saved carts", "My cart", "Groceries"] {
+            app.navigationBars.buttons.firstMatch.tap()
+            XCTAssertTrue(app.navigationBars[title].existsOrAppears(timeout: 3))
+        }
+    }
+
+    private func cartGrocery(_ name: String, app: XCUIApplication) {
+        let row = groceryRow(name, app: app)
+        XCTAssertTrue(row.existsOrAppears(timeout: 8))
+        let needID = String(row.identifier.dropFirst("shopping.grocery.row.".count))
+        row.swipeLeft()
+        let cart = app.buttons["shopping.checklist.cart.\(needID)"]
+        XCTAssertTrue(cart.existsOrAppears(timeout: 3))
+        cart.tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+    }
+
+    private func attach(_ name: String, _ app: XCUIApplication) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testPersonalCheckoutAndRecoverySurviveRelaunch() {
         let app = launch()
         let grocery = groceryRow("Granola", app: app)
@@ -311,7 +383,8 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
-        let checkout = app.buttons["Check out"]
+        let checkout = app.buttons["shopping.personalCart.checkout"]
+        XCTAssertEqual(checkout.label, "Check out (1)")
         XCTAssertTrue(checkout.isHittable)
         checkout.tap()
         XCTAssertTrue(app.navigationBars["Check out"].existsOrAppears(timeout: 3))
@@ -564,6 +637,7 @@ final class PersonalCartUITests: XCTestCase {
         XCTAssertNotEqual(savedHome.elementType, .button, "A saved cart must not claim to switch the selected home")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
             "shopping.personalCart.item.", "Granola")).element.existsOrAppears(timeout: 5))
+        popSavedCartToGroceries(app)
         app.tabBars.buttons["Settings"].tap()
         assertActiveHome("Second home", on: "Settings", app: app)
         openManageHomes(app)
@@ -586,6 +660,7 @@ final class PersonalCartUITests: XCTestCase {
         let reopenedHome = app.descendants(matching: .any)["shopping.personalCart.savedHome"]
         XCTAssertTrue(reopenedHome.existsOrAppears(timeout: 5))
         XCTAssertEqual(reopenedHome.value as? String, "Preview household")
+        popSavedCartToGroceries(app)
         app.tabBars.buttons["Settings"].tap()
         assertActiveHome("Second home", on: "Settings", app: app)
         openManageHomes(app)
@@ -765,7 +840,7 @@ final class PersonalCartUITests: XCTestCase {
         return matches.element(boundBy: 0)
     }
 
-    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, secondHome: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false) -> XCUIApplication {
+    private func launch(purchaseNotice: Bool = false, revoked: Bool = false, personalCart: Bool = true, unavailableSetup: Bool = false, activeHomes: Bool = false, secondHome: Bool = false, pendingInvitation: Bool = false, homeAdoption: Bool = false, holdToasts: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -773,6 +848,7 @@ final class PersonalCartUITests: XCTestCase {
             .appendingPathComponent("\(directory.lastPathComponent).sqlite").path
         app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
         if homeAdoption { app.launchEnvironment["SHOPPING_UI_TEST_HOME_ADOPTION"] = "1" }
+        if holdToasts { app.launchEnvironment["SHOPPING_UI_TEST_HOLD_TOASTS"] = "1" }
         if pendingInvitation { app.launchEnvironment["SHOPPING_UI_TEST_PENDING_INVITATION"] = "1" }
         if activeHomes { app.launchEnvironment["SHOPPING_UI_TEST_ACTIVE_HOMES"] = "1" }
         if secondHome { app.launchEnvironment["SHOPPING_UI_TEST_SECOND_HOME"] = "1" }

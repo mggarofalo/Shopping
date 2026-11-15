@@ -168,6 +168,7 @@ struct CatalogView: View {
                     }
                 )
             }
+            .shoppingToastHost()
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if editMode.isEditing {
