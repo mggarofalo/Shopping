@@ -31,7 +31,8 @@ saved catalog item is retained and the partial result is explained. Existing
 needs, including carted ones, are reported without silently renewing or editing
 quantity, person or urgency. Reads and writes retain the captured Home/account.
 
-No persistent Spotlight donation or remote inference is introduced. Siri speech
+No Spotlight indexing or remote inference is introduced. In-app adds are donated
+to iOS (see “Donating in-app adds”); nothing else is. Siri speech
 processing is controlled by iOS; app-qualified phrases and actual supported
 language/device behavior need system-level evidence, independently of tests.
 
@@ -144,12 +145,51 @@ The app controls three things:
 - The list query accepts the app name, so “Add bread to Milk and Bananas” resolves
   the list once Siri has chosen this app.
 - Donating `createReminder` after in-app adds is Apple's only documented cue for
-  learning the preferred app (WWDC26 session 343). It would put grocery names in
-  the system's on-device donation store and reverses the “no persistent donation”
-  choice above, so it is not adopted without a product decision.
+  learning the preferred app (WWDC26 session 343). The user chose to adopt it on
+  November 14 (SHOPPING-282); see “Donating in-app adds”.
 
 `CFBundleSpokenName`, parameter summaries, `supportedModes` and entity synonyms
 have no documented effect on app choice.
+
+## Donating in-app adds (SHOPPING-282)
+
+When the user adds a grocery in the app's own screens, the app donates the iOS 27
+`createReminder` action (`AddSpokenGroceryIntent`) with the grocery's name and the
+Home's grocery list. WWDC26 session 343 says the system keeps donations “as
+schema-conforming App Intents” to give Siri context, and Apple Intelligence uses
+them to choose an app for vague requests. So the schema action is donated, and the
+older Add action (`AddGroceryIntent`) is not: it has no schema, and the session
+gives no role to donations of other intents. Apple promises no particular effect.
+
+The session also says that iOS already learns from Siri and Shortcuts runs, and to
+donate UI actions only. So these donate:
+
+- choosing an item, or saving a new catalog item, in the Add sheet;
+- saving a new grocery in the editor, including choosing one of its suggestions;
+- Need again on a purchased catalog item;
+- adding suggested items to a category;
+- adding from the Catalog tab, one item or a selection, once the add has applied.
+  A batch where any item failed donates nothing, because the result does not say
+  which items applied.
+
+These never donate: both Siri actions, adds in an Add sheet or editor opened by a
+Siri or Shortcuts handoff, editing a grocery, moving one out of the cart, sync and
+imports, Watch receipts, previews and every test host. The icon menu's Add item
+opens the normal Add sheet, and adds there donate. Only the UI layer calls the donor (`GroceryAddDonor`); persistence, sync and
+Watch code cannot reach it.
+
+The donation is detached from the add at utility priority. It never delays the add,
+and a failed donation is logged by error type in the `Siri` log category, without
+the grocery name. A donation names the list by the same Home-qualified identifier
+Siri resolves, and an add for a Home that is no longer the ready one is not donated.
+Donation needs iOS 27 and an Xcode 27 build; older systems and Swift 6.1 CI builds
+donate nothing. The release metadata guard checks that the donated action still
+names its list with `GroceryListEntity`.
+
+**Privacy.** A donation stores the grocery's name, and the list identifier, in
+iOS's on-device donation and suggestion data. The user accepted this. Quantity,
+notes, urgency, stores, category, person and cart state are never donated. The app
+does not delete donations; iOS manages that data.
 
 ## Requests that aren't groceries (SHOPPING-270)
 

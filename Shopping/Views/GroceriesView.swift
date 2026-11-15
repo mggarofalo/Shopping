@@ -181,11 +181,16 @@ struct GroceriesView: View {
                         categoryID: category.id,
                         categoryName: category.name,
                         purchaseFilter: currentPurchaseFilter
-                    ) { count in
+                    ) { titles in
+                        let count = titles.count
                         toastCenter?.show(
                             "Added \(count) \(count == 1 ? "item" : "items")",
                             duration: .success
                         )
+                        if let householdID = selection.householdID, let listID = selection.listID {
+                            ShoppingApplicationRuntime.shared.donations.userAdded(
+                                titles, householdID: householdID, listID: listID)
+                        }
                         refreshProjection()
                     }
                 }
@@ -515,10 +520,7 @@ struct GroceriesView: View {
         guard navigation.systemAddRequestID != nil else { return }
         navigation.systemAddRequestID = nil
         systemCreationName = navigation.systemNewItemName
-        addPickerScope = GroceryAddScope(
-            householdID: selection.householdID, listID: selection.listID,
-            selectedStoreID: nil, selectedStoreName: nil
-        )
+        addPickerScope = navigation.systemAddScope(householdID: selection.householdID, listID: selection.listID)
     }
 
     private func presentAdd() {
@@ -550,14 +552,7 @@ struct GroceriesView: View {
         pendingCatalogScope = nil
         switch completion {
         case .added(let id):
-            pendingSavedNeed = PendingSavedNeed(
-                id: id,
-                scope: scope,
-                expectsUncarted: true,
-                originalCategoryID: nil,
-                savedCategoryID: nil,
-                wasEditing: false
-            )
+            pendingSavedNeed = .catalogAdd(id, scope: scope)
             refreshProjection()
             completeSaveFeedback()
         case .focusExisting(let id):
@@ -589,15 +584,9 @@ struct GroceriesView: View {
     }
 
     private func saved(_ id: UUID, categoryID: UUID?) {
-        if let scope = editor?.scope {
-            pendingSavedNeed = PendingSavedNeed(
-                id: id,
-                scope: scope,
-                expectsUncarted: editor?.need.map(isInMyCart) != true,
-                originalCategoryID: editor?.originalCategoryID,
-                savedCategoryID: categoryID,
-                wasEditing: editor?.needID != nil
-            )
+        if let editor {
+            pendingSavedNeed = .editorSave(id, target: editor, savedCategoryID: categoryID,
+                                           expectsUncarted: editor.need.map(isInMyCart) != true)
         }
         editor = nil
         refreshProjection()
@@ -621,6 +610,9 @@ struct GroceriesView: View {
         let savedWhileFiltered = !isInMyCart(need) && hasViewNarrowing &&
             visibleNeedObjectIDs?.contains(need.objectID) != true
         let name = need.item?.name ?? need.title
+        if pending.donatesAdd, let householdID = pending.scope.householdID, let listID = pending.scope.listID {
+            ShoppingApplicationRuntime.shared.donations.userAdded([name], householdID: householdID, listID: listID)
+        }
         if pending.wasEditing, pending.originalCategoryID != pending.savedCategoryID {
             let message = "\(name) moved to \(categoryName(for: need))."
             if savedWhileFiltered {
@@ -671,6 +663,7 @@ struct GroceriesView: View {
             defer { pendingNeedAgainIDs.remove(needID) }
             do {
                 let id: UUID
+                var addedToList = false
                 if let personalCart, let entry = personalCart.entries.first(where: { $0.needID == needID }) {
                     try await personalCart.uncart(entry)
                     id = needID
@@ -678,6 +671,7 @@ struct GroceriesView: View {
                     id = try await Task.detached(priority: .userInitiated) {
                         try service.addRememberedNeed(itemID: itemID, listID: listID, householdID: householdID)
                     }.value
+                    addedToList = true
                 } else if isOneTime {
                     try await Task.detached(priority: .userInitiated) {
                         try service.uncartNeed(needID: needID, householdID: householdID, listID: listID)
@@ -686,8 +680,8 @@ struct GroceriesView: View {
                 } else { return }
                 guard presentation?.isActive != false,
                       selection.householdID == householdID, selection.listID == listID else { return }
-                pendingSavedNeed = PendingSavedNeed(id: id, scope: scope, expectsUncarted: true,
-                    originalCategoryID: nil, savedCategoryID: savedCategoryID, wasEditing: false)
+                pendingSavedNeed = .needAgain(id, scope: scope, savedCategoryID: savedCategoryID,
+                                              addedToList: addedToList)
                 refreshProjection()
                 completeSaveFeedback()
             } catch { self.error = error }
@@ -695,17 +689,10 @@ struct GroceriesView: View {
     }
 
     private func uncarted(_ needID: UUID, householdID: UUID, listID: UUID) {
-        pendingSavedNeed = PendingSavedNeed(
-            id: needID,
-            scope: GroceryAddScope(
-                householdID: householdID, listID: listID,
-                selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
-            ),
-            expectsUncarted: true,
-            originalCategoryID: nil,
-            savedCategoryID: nil,
-            wasEditing: false
-        )
+        pendingSavedNeed = .uncarted(needID, scope: GroceryAddScope(
+            householdID: householdID, listID: listID,
+            selectedStoreID: navigation.selectedStoreID, selectedStoreName: selectedStoreName
+        ))
         completeSaveFeedback()
     }
 

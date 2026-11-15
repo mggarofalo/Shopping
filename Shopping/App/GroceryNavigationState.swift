@@ -39,6 +39,13 @@ final class GroceryNavigationState: ObservableObject {
         }
     }
 
+    /// The Add sheet a system request opens. A request that names a new item came from
+    /// Siri or Shortcuts; the icon menu's Add item names none.
+    func systemAddScope(householdID: UUID?, listID: UUID?) -> GroceryAddScope {
+        GroceryAddScope(householdID: householdID, listID: listID, selectedStoreID: nil, selectedStoreName: nil,
+                        origin: systemNewItemName == nil ? .app : .systemCreation)
+    }
+
     @Published private(set) var pendingNeedFocusID: UUID?
 
     private struct SavedFilter: Codable, Equatable {
@@ -187,6 +194,10 @@ final class GroceryNavigationState: ObservableObject {
 }
 
 struct GroceryAddScope: Identifiable, Equatable {
+    /// A Siri or Shortcuts request that opened the app's editor. iOS already knows about
+    /// that request, so adds made from it are not donated (SHOPPING-282).
+    enum Origin: Equatable { case app, systemCreation }
+
     let id = UUID()
     let householdID: UUID?
     let listID: UUID?
@@ -197,6 +208,7 @@ struct GroceryAddScope: Identifiable, Equatable {
     let categoryID: UUID?
     let textFilter: String
     let urgentOnly: Bool
+    let origin: Origin
 
     init(
         householdID: UUID?,
@@ -207,7 +219,8 @@ struct GroceryAddScope: Identifiable, Equatable {
         excludedStoreIDs: Set<UUID> = [],
         categoryID: UUID? = nil,
         textFilter: String = "",
-        urgentOnly: Bool = false
+        urgentOnly: Bool = false,
+        origin: Origin = .app
     ) {
         self.householdID = householdID
         self.listID = listID
@@ -218,6 +231,7 @@ struct GroceryAddScope: Identifiable, Equatable {
         self.categoryID = categoryID
         self.textFilter = textFilter
         self.urgentOnly = urgentOnly
+        self.origin = origin
     }
 
     func addOneTime(

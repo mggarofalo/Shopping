@@ -108,6 +108,19 @@ struct AddSpokenGroceryIntent: AppIntent {
     }
 }
 
+@available(iOS 27.0, *)
+extension AddSpokenGroceryIntent {
+    /// Donates the schema action, not the older Add action: Siri stores donations as
+    /// schema-conforming intents to choose an app for vague requests (WWDC26 session 343).
+    /// Only the name and list are set; nothing else from the grocery leaves the app.
+    static func donate(_ donation: GroceryAddDonation) async throws {
+        let intent = AddSpokenGroceryIntent()
+        intent.title = donation.title
+        intent.list = GroceryListEntity(id: donation.listEntityID)
+        try await IntentDonationManager.shared.donate(intent: intent)
+    }
+}
+
 enum SpokenGroceryError: LocalizedError {
     case scheduledReminder, unsupportedDetails
     var errorDescription: String? {

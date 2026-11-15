@@ -22,7 +22,10 @@ class SiriMetadataTests(unittest.TestCase):
             'assistantDefinedSchemas': [{'domain': 'reminders', 'name': 'CreateReminderIntent'}],
             'authenticationPolicy': 2,
             'supportedModes': 9,
-            'parameters': [{'name': 'title', 'valueType': {'primitive': {'wrapper': {'typeIdentifier': 0}}}}],
+            'parameters': [
+                {'name': 'title', 'valueType': {'primitive': {'wrapper': {'typeIdentifier': 0}}}},
+                {'name': 'list', 'valueType': {'entity': {'wrapper': {'typeName': 'GroceryListEntity'}}}},
+            ],
         }
         self.metadata = {'actions': {'AddSpokenGroceryIntent': self.action}, 'autoShortcuts': [
             {'actionIdentifier': 'AddGroceryIntent', 'phraseTemplates': [
@@ -49,6 +52,11 @@ class SiriMetadataTests(unittest.TestCase):
     def test_entity_title_fails(self):
         self.action['parameters'][0]['valueType'] = {'entity': {'typeName': 'CatalogItemEntity'}}
         with self.assertRaisesRegex(ValueError, 'free-form String'):
+            self.validate()
+
+    def test_donated_list_without_list_entity_fails(self):
+        self.action['parameters'].pop()
+        with self.assertRaisesRegex(ValueError, 'GroceryListEntity'):
             self.validate()
 
     def test_unauthenticated_action_fails(self):
