@@ -1,7 +1,8 @@
 import Foundation
 
 /// Runs synchronous persistence-writer work on a GCD thread and resumes the
-/// caller when it finishes (SHOPPING-277).
+/// caller when it finishes (SHOPPING-277). The iPhone and the Watch both use it
+/// for every call into blocking writer work (SHOPPING-288).
 ///
 /// Writer work blocks in `performAndWait` while CloudKit mirroring or another
 /// command holds the writer. A `Task.detached` body would park a thread of the

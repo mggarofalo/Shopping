@@ -35,7 +35,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var currentAttention: String?
     private lazy var presencePublisher = PersonalCartPresencePublisher(delay: presenceDelay) { [weak self] needIDs in
         guard let cart = self?.cart else { return [] }
-        return await Task.detached(priority: .utility) {
+        return await BlockingWriterWork.run(qos: .utility) {
             let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
             os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch presence batch", signpostID: signpostID)
             defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch presence batch", signpostID: signpostID) }
@@ -45,7 +45,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 catch { /* Retain this need without blocking other homes. */ }
             }
             return succeeded
-        }.value
+        }
     }
     private let presenceDelay: Duration
 
@@ -137,7 +137,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let selectionURL = self.selectionURL
         let recoveryPolicy = loadRecoveryPolicy ?? (cart.persistence.configuration.isManaged
             ? .verifiedBackgroundReplay : .localReplay)
-        let loaded = try await Task.detached(priority: .userInitiated) { [cart] () throws -> LoadedValues? in
+        let loaded = try await BlockingWriterWork.run { [cart] () throws -> LoadedValues? in
             let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
             os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch snapshot read", signpostID: signpostID)
             defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch snapshot read", signpostID: signpostID) }
@@ -164,7 +164,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             return LoadedValues(projection: projection, own: own, outstanding: outstanding ?? [],
                 presence: presence, history: history ?? [], importPending: outstanding == nil || history == nil,
                 recoveryMessage: recoveryMessage, savedSelection: saved)
-        }.value
+        }
         guard self.cart === cart, try provider?.currentSession() == session else {
             throw PersonalCartError.accountChanged
         }
@@ -191,13 +191,13 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let activeStores = Set(projection.stores.map(\.id))
         let buyAnywayCaptures: [UUID: PersonalCheckoutToken]
         if writable, let selected {
-            buyAnywayCaptures = await Task.detached(priority: .userInitiated) { [cart] in
+            buyAnywayCaptures = await BlockingWriterWork.run { [cart] in
                 var captures: [UUID: PersonalCheckoutToken] = [:]
                 for entry in own where !entry.purchaseNotices.isEmpty {
                     captures[entry.id] = try? cart.prepareCheckout(tokens: [entry.token], storeID: selected)
                 }
                 return captures
-            }.value
+            }
         } else {
             buyAnywayCaptures = [:]
         }
@@ -258,10 +258,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             let selection = Selection(accountBinding: session.accountBinding, householdID: projection.scope.householdID,
                 storeID: selected)
             if selection != loaded.savedSelection {
-                try await Task.detached(priority: .utility) {
+                try await BlockingWriterWork.run(qos: .utility) {
                     try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try JSONEncoder().encode(selection).write(to: selectionURL, options: .atomic)
-                }.value
+                }
             }
         }
         return snapshot
@@ -295,35 +295,35 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             guard token.membership == nil else { throw PersonalCartError.staleEntry }
             // The durable command checks the active store, eligibility, demand and
             // household access in its own writer transaction.
-            _ = try await Task.detached(priority: .userInitiated) {
+            _ = try await BlockingWriterWork.run {
                 try cart.cart(needID: token.needID, householdID: token.householdID, listID: token.listID,
                     initialQuantity: quantity.map(Int64.init), expectedStoreID: token.storeID, operationID: token.operationID,
                     presencePolicy: .deferred)
-            }.value
+            }
         case .remove:
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
-            _ = try await Task.detached(priority: .userInitiated) {
+            _ = try await BlockingWriterWork.run {
                 try cart.uncart(membership, operationID: token.operationID, presencePolicy: .deferred)
-            }.value
+            }
         case .setQuantity(_, let quantity):
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
-            _ = try await Task.detached(priority: .userInitiated) {
+            _ = try await BlockingWriterWork.run {
                 try cart.setQuantity(quantity.map(Int64.init), token: membership, operationID: token.operationID, presencePolicy: .deferred)
-            }.value
+            }
         case .buyAnyway:
             try requireSelectedStore(token.storeID, rows: rows)
             guard let membership = token.membership, !token.acknowledgedReceipts.isEmpty else { throw PersonalCartError.staleEntry }
             guard let capture = token.buyAnywayCapture, capture.entries == [membership] else { throw PersonalCartError.staleEntry }
             try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
-            let result = try await Task.detached(priority: .userInitiated) {
+            let result = try await BlockingWriterWork.run {
                 try cart.checkout(capture, buyAnywayReceiptIDs: token.acknowledgedReceipts, operationID: token.operationID)
-            }.value
+            }
             guard result.purchasedCount > 0 else { throw PersonalCartError.purchasedNoticeRequired }
             return .snapshot(try await load(storeID: selectedStoreID))
         }
         try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
         presencePublisher.markDirty(token.needID)
-        let (entry, need, mayRebase) = try await Task.detached(priority: .userInitiated) {
+        let (entry, need, mayRebase) = try await BlockingWriterWork.run {
             try cart.transact(save: false) { repository in
                 // Shared purchase notices still arriving never hide the durable entry.
                 let entries = try (try? cart.entries(householdID: token.householdID, listID: token.listID,
@@ -353,7 +353,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 }
                 return (entry, need, mayRebase)
             }
-        }.value
+        }
         try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
         let row: WatchShoppingItem?
         if let entry {
@@ -388,9 +388,9 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
             return membership
         }
-        let capture = try await Task.detached(priority: .userInitiated) {
+        let capture = try await BlockingWriterWork.run {
             try cart.prepareCheckout(tokens: tokens, storeID: storeID)
-        }.value
+        }
         try validate(authority: capturedAuthority, binding: session.accountBinding, session: session)
         let token = WatchCheckoutToken(authorityID: capturedAuthority, capture: capture)
         return WatchCheckoutPreview(id: capture.id, token: try WatchTokenCoding.encode(token),
@@ -407,9 +407,9 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         try requireSelectedStore(captured.capture.storeID, rows: rows)
         try await requirePublication(cart, scope: rows.scope)
         try validate(authority: captured.authorityID, binding: captured.capture.accountBinding, session: session)
-        let outcome = try await Task.detached(priority: .userInitiated) {
+        let outcome = try await BlockingWriterWork.run {
             try cart.checkout(captured.capture, operationID: captured.capture.id)
-        }.value
+        }
         // A read that began before this intent must not replace its result.
         receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
@@ -429,11 +429,11 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         try await requirePublication(cart, scope: PersonalCartScopeSnapshot(householdID: captured.householdID,
             listID: captured.listID))
         try validate(authority: captured.authorityID, binding: captured.accountBinding, session: session)
-        let (history, result) = try await Task.detached(priority: .userInitiated) {
+        let (history, result) = try await BlockingWriterWork.run {
             let history = try cart.history(householdID: captured.householdID, listID: captured.listID)
             let result = try cart.restore(checkoutID: captured.checkoutID, operationID: captured.operationID)
             return (history, result)
-        }.value
+        }
         receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
         return WatchActionResult(id: result.operationID, title: "Restore saved",
@@ -458,12 +458,12 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     /// Rechecks local durable access only: the ledger and the last finished native
     /// observation. An observation that finished after the snapshot still blocks.
     private func requirePublication(_ cart: PersonalCartService, scope: PersonalCartScopeSnapshot) async throws {
-        let permitted = try await Task.detached(priority: .userInitiated) {
+        let permitted = try await BlockingWriterWork.run {
             try cart.transact(save: false) { repository in
                 WatchPersistentProjection.mayPublish(repository,
                     household: try? repository.household(scope.householdID), scope: scope)
             }
-        }.value
+        }
         guard permitted, self.cart === cart else { throw PersonalCartError.permissionDenied }
     }
 

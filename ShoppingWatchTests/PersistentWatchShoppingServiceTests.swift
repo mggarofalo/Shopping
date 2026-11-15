@@ -494,6 +494,10 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         let retirement = WatchPersistenceBootstrap.retireStore(f.persistence)
         XCTAssertLessThan(ContinuousClock.now - started, .milliseconds(250),
             "Closing an old account store must not wait for the writer on the UI actor")
+        // Retirement runs at utility priority, so probe that cooperative-pool bucket.
+        try await Task.detached(priority: .utility) { try await Task.sleep(for: .milliseconds(100)) }.value
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1),
+            "Retirement waiting for the writer must not hold a cooperative-pool thread")
         try await retirement.value
     }
 
