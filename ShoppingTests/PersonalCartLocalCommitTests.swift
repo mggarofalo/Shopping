@@ -65,6 +65,8 @@ final class PersonalCartLocalCommitTests: XCTestCase {
             return nil
         }
 
+        func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool { false }
+
         func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { true }
     }
 

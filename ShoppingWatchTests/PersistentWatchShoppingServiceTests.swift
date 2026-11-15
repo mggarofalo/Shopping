@@ -78,6 +78,8 @@ private final class OfflineParticipantShares: HomeNativeShareSource {
             storeIdentifier: "participant-store", rootURI: home.objectID.uriRepresentation().absoluteString, share: Self.share)
     }
 
+    func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool { true }
+
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { online }
 }
 
@@ -86,6 +88,8 @@ private final class UnimportedShares: HomeNativeShareSource {
     func identity(for home: Household, in repository: PersonalCartRepository) throws -> HomeNativeAccessIdentity? {
         throw PersonalCartError.unavailable
     }
+
+    func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool { true }
 
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { false }
 }
@@ -1160,7 +1164,13 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         let result = try await service.checkout(token: preview.token)
         XCTAssertEqual(result.snapshot.cartCount, 0)
         XCTAssertEqual(result.snapshot.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
-        // An owner home needs no native verification; a participant's purchase waits for it.
+        // An owner home needs no native verification, so the outbox publishes its
+        // purchase after checkout returns (SHOPPING-287); a participant's purchase
+        // waits for verification.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while role == .owner, try recordCount(f.cart, kind: "purchase") == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertEqual(try recordCount(f.cart, kind: "purchase"), role == .owner ? 1 : 0)
 
         // Relaunch from the same SQLite file while native verification never answers.

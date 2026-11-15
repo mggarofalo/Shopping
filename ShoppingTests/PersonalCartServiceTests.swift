@@ -273,7 +273,8 @@ final class PersonalCartServiceTests: XCTestCase {
             record.payload = nil
             try context.save()
         }
-        XCTAssertThrowsError(try f.cart.prepareCheckout(tokens: [entry.token]))
+        // The purchase names no need until its payload arrives, so it holds back no checkout (SHOPPING-285).
+        XCTAssertNoThrow(try f.cart.prepareCheckout(tokens: [entry.token]))
         try f.cart.setQuantity(9, token: entry.token)
         let reopened = try fixtureLifetime.own(PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite")))
         let cart = PersonalCartService(persistence: reopened, sessionProvider: try session())

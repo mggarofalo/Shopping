@@ -1,19 +1,26 @@
 import CoreData
 
 enum HouseholdDemandProjection {
-    static func evidence(needID: UUID, householdID: UUID, in context: NSManagedObjectContext) throws -> Set<UUID> {
-        let events = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID, in: context)
+    static func evidence(needID: UUID, householdID: UUID, reading: HouseholdImportReading = .complete,
+                         in context: NSManagedObjectContext) throws -> Set<UUID> {
+        let events = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID,
+                                                             reading: reading, in: context)
         return Set(events.values.filter { $0.needID == needID }.map(\.id))
     }
 
-    static func superseded(householdID: UUID, in context: NSManagedObjectContext) throws -> Set<UUID> {
-        let events = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID, in: context)
+    static func superseded(householdID: UUID, reading: HouseholdImportReading = .complete,
+                           in context: NSManagedObjectContext) throws -> Set<UUID> {
+        let events = try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID,
+                                                             reading: reading, in: context)
         return events.values.reduce(into: Set<UUID>()) { $0.formUnion($1.replaces) }
     }
 
-    static func purchases(householdID: UUID, in context: NSManagedObjectContext) throws -> [HouseholdPurchaseEvent] {
-        let receipts = try PersonalCartRepository.sharedValues(HouseholdPurchaseEvent.self, kind: "purchase", householdID: householdID, in: context)
-        let retractions = try PersonalCartRepository.sharedValues(HouseholdRetractionEvent.self, kind: "retraction", householdID: householdID, in: context)
+    static func purchases(householdID: UUID, reading: HouseholdImportReading = .complete,
+                          in context: NSManagedObjectContext) throws -> [HouseholdPurchaseEvent] {
+        let receipts = try PersonalCartRepository.sharedValues(HouseholdPurchaseEvent.self, kind: "purchase", householdID: householdID,
+                                                               reading: reading, in: context)
+        let retractions = try PersonalCartRepository.sharedValues(HouseholdRetractionEvent.self, kind: "retraction", householdID: householdID,
+                                                                  reading: reading, in: context)
         let retracted = retractions.values.reduce(into: Set<UUID>()) { $0.formUnion($1.receiptIDs) }
         return receipts.values.filter { !retracted.contains($0.id) }
     }

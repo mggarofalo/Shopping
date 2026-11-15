@@ -1,9 +1,11 @@
 import CoreData
 
-/// Deferral affects advisory household presence only. The private causal command
-/// is always saved before returning and remains recoverable by resumePending().
-/// Deferred callers mark the need dirty in a PersonalCartPresencePublisher.
-enum PersonalCartPresencePolicy: Sendable {
+/// When a command's household effects run. The private causal command is always
+/// saved before returning and remains recoverable by resumePending(). Deferral
+/// leaves advisory presence to the caller's PersonalCartPresencePublisher, where
+/// the caller marks the need dirty, and leaves Checkout and Restore receipts to
+/// the checkout outbox (SHOPPING-287).
+enum PersonalCartEffectPolicy: Sendable {
     case immediate
     case deferred
 }
@@ -18,17 +20,17 @@ struct PersonalCartReceipt: Equatable, Sendable {
 
 extension PersonalCartService {
     @discardableResult
-    func cart(needID: UUID, householdID: UUID, listID: UUID, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
+    func cart(needID: UUID, householdID: UUID, listID: UUID, operationID: UUID = UUID(), presencePolicy: PersonalCartEffectPolicy = .immediate) throws -> PersonalCartReceipt {
         try add(needID: needID, householdID: householdID, listID: listID, quantityOverride: nil, expectedStoreID: nil, operationID: operationID, presencePolicy: presencePolicy)
     }
 
     @discardableResult
-    func cart(needID: UUID, householdID: UUID, listID: UUID, initialQuantity: Int64?, expectedStoreID: UUID? = nil, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
+    func cart(needID: UUID, householdID: UUID, listID: UUID, initialQuantity: Int64?, expectedStoreID: UUID? = nil, operationID: UUID = UUID(), presencePolicy: PersonalCartEffectPolicy = .immediate) throws -> PersonalCartReceipt {
         if let initialQuantity, !(1...99).contains(initialQuantity) { throw PersonalCartError.invalidQuantity }
         return try add(needID: needID, householdID: householdID, listID: listID, quantityOverride: .some(initialQuantity), expectedStoreID: expectedStoreID, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    private func add(needID: UUID, householdID: UUID, listID: UUID, quantityOverride: Int64??, expectedStoreID: UUID?, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws -> PersonalCartReceipt {
+    private func add(needID: UUID, householdID: UUID, listID: UUID, quantityOverride: Int64??, expectedStoreID: UUID?, operationID: UUID, presencePolicy: PersonalCartEffectPolicy) throws -> PersonalCartReceipt {
         let command: PersonalCartCommand
         if let quantity = quantityOverride {
             command = .cartWithQuantity(needID: needID, householdID: householdID, listID: listID, quantity: quantity, expectedStoreID: expectedStoreID)
@@ -78,17 +80,17 @@ extension PersonalCartService {
     }
 
     @discardableResult
-    func uncart(_ token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
+    func uncart(_ token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartEffectPolicy = .immediate) throws -> PersonalCartReceipt {
         try change(token, quantity: nil, removing: true, operationID: operationID, presencePolicy: presencePolicy)
     }
 
     @discardableResult
-    func setQuantity(_ quantity: Int64?, token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
+    func setQuantity(_ quantity: Int64?, token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartEffectPolicy = .immediate) throws -> PersonalCartReceipt {
         if let quantity, !(1...99).contains(quantity) { throw PersonalCartError.invalidQuantity }
         return try change(token, quantity: quantity, removing: false, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    private func change(_ token: PersonalCartEntryToken, quantity: Int64?, removing: Bool, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws -> PersonalCartReceipt {
+    private func change(_ token: PersonalCartEntryToken, quantity: Int64?, removing: Bool, operationID: UUID, presencePolicy: PersonalCartEffectPolicy) throws -> PersonalCartReceipt {
         let command: PersonalCartCommand = removing ? .uncart(token) : .quantity(token, quantity)
         let receipt = try transact { repository -> PersonalCartReceipt? in
             guard token.accountBinding == repository.session.accountBinding else { throw PersonalCartError.accountChanged }

@@ -316,8 +316,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             guard let capture = token.buyAnywayCapture, capture.entries == [membership] else { throw PersonalCartError.staleEntry }
             try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
             let result = try await BlockingWriterWork.run {
-                try cart.checkout(capture, buyAnywayReceiptIDs: token.acknowledgedReceipts, operationID: token.operationID)
+                try cart.checkout(capture, buyAnywayReceiptIDs: token.acknowledgedReceipts, operationID: token.operationID,
+                                  effects: .deferred)
             }
+            result.purchasedNeedIDs.forEach(presencePublisher.markDirty)
             guard result.purchasedCount > 0 else { throw PersonalCartError.purchasedNoticeRequired }
             return .snapshot(try await load(storeID: selectedStoreID))
         }
@@ -408,8 +410,9 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         try await requirePublication(cart, scope: rows.scope)
         try validate(authority: captured.authorityID, binding: captured.capture.accountBinding, session: session)
         let outcome = try await BlockingWriterWork.run {
-            try cart.checkout(captured.capture, operationID: captured.capture.id)
+            try cart.checkout(captured.capture, operationID: captured.capture.id, effects: .deferred)
         }
+        outcome.purchasedNeedIDs.forEach(presencePublisher.markDirty)
         // A read that began before this intent must not replace its result.
         receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
@@ -431,9 +434,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         try validate(authority: captured.authorityID, binding: captured.accountBinding, session: session)
         let (history, result) = try await BlockingWriterWork.run {
             let history = try cart.history(householdID: captured.householdID, listID: captured.listID)
-            let result = try cart.restore(checkoutID: captured.checkoutID, operationID: captured.operationID)
+            let result = try cart.restore(checkoutID: captured.checkoutID, operationID: captured.operationID, effects: .deferred)
             return (history, result)
         }
+        result.purchasedNeedIDs.forEach(presencePublisher.markDirty)
         receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
         return WatchActionResult(id: result.operationID, title: "Restore saved",

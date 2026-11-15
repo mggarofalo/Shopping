@@ -26,6 +26,8 @@ enum WatchPersistentTestFixture {
                 share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"))
         }
 
+        func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool { true }
+
         func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { false }
     }
 

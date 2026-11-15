@@ -58,9 +58,20 @@ struct PersonalCheckoutOutcome: Codable, Equatable, Sendable {
     let operationID: UUID
     let purchasedNeedIDs: Set<UUID>
     let skippedNeedIDs: Set<UUID>
+    /// The household can't be updated now, so it learns of this later. Deferred
+    /// publication that isn't held is not pending: the outbox runs it shortly.
     let pendingPublication: Bool
     var purchasedCount: Int { purchasedNeedIDs.count }
     var skippedCount: Int { skippedNeedIDs.count }
+}
+
+/// A saved checkout's household receipts, including those of its restores.
+enum PersonalPublicationState: Equatable, Sendable {
+    case published
+    /// Waiting for the checkout outbox.
+    case pending
+    /// Waiting for a local fact to change, such as lost access or a native verification.
+    case held
 }
 
 struct PersonalCheckoutHistoryEntry: Identifiable, Equatable, Sendable {
@@ -70,7 +81,8 @@ struct PersonalCheckoutHistoryEntry: Identifiable, Equatable, Sendable {
     let storeName: String?
     let restored: Bool
     let restoredNeedIDs: Set<UUID>
-    let pendingPublication: Bool
+    let publication: PersonalPublicationState
+    var pendingPublication: Bool { publication != .published }
 }
 
 struct PersonalCartPresenceSnapshot: Equatable, Sendable {

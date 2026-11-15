@@ -11,6 +11,10 @@ final class PersonalCartService: @unchecked Sendable {
     let sessionProvider: any ShopperSessionProviding
     let initialAccountBinding: String?
     private let commandAuthority: UICommandAuthority?
+    let checkoutPublication: PersonalCheckoutPublicationQueue
+    /// Runs deferred publication for a scoped service. An intent saved under a UI
+    /// authority stays publishable after that authority retires. Nil when unscoped.
+    private let unscoped: PersonalCartService?
     var failurePoint: ((String) throws -> Void)?
 
     init(persistence: PersistenceController, sessionProvider: any ShopperSessionProviding) {
@@ -18,6 +22,8 @@ final class PersonalCartService: @unchecked Sendable {
         self.sessionProvider = sessionProvider
         self.initialAccountBinding = try? sessionProvider.currentSession().accountBinding
         self.commandAuthority = nil
+        self.checkoutPublication = PersonalCheckoutPublicationQueue()
+        self.unscoped = nil
         persistence.personalCartsEnabled = true
         persistence.personalCartSessionProvider = sessionProvider
         persistence.personalCartInitialBinding = initialAccountBinding
@@ -28,7 +34,11 @@ final class PersonalCartService: @unchecked Sendable {
         sessionProvider = service.sessionProvider
         initialAccountBinding = service.initialAccountBinding
         commandAuthority = authority
+        checkoutPublication = service.checkoutPublication
+        unscoped = service.unscoped ?? service
     }
+
+    var outboxService: PersonalCartService { unscoped ?? self }
 
     func scoped(to authority: UICommandAuthority) -> PersonalCartService {
         PersonalCartService(service: self, authority: authority)
@@ -84,8 +94,7 @@ final class PersonalCartService: @unchecked Sendable {
         try transact(save: false) { repository in
             let intents = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
             let restores = try repository.values(PersonalRestoreIntent.self, kind: "restore")
-            let completed = try repository.values(UUID.self, kind: "published")
-            let restoreCompleted = Set(try repository.values(UUID.self, kind: "restorePublished").values)
+            let published = try repository.publishedEffects()
             return intents.compactMap { id, intent in
                 guard intent.token.householdID == householdID, intent.token.listID == listID else { return nil }
                 let restoredIDs = restores.values.filter { $0.checkoutID == id }
@@ -95,10 +104,26 @@ final class PersonalCartService: @unchecked Sendable {
                     storeName: intent.token.storeName,
                     restored: !intent.accepted.isEmpty && intent.accepted.isSubset(of: restoredIDs),
                     restoredNeedIDs: restoredIDs,
-                    pendingPublication: !completed.values.contains(id)
-                        || restores.contains { $0.value.checkoutID == id && !restoreCompleted.contains($0.key) })
+                    publication: publication(of: id, scope: intent.token, restores: restores, published: published,
+                        repository: repository))
             }.sorted { $0.createdAt > $1.createdAt }
         }
+    }
+
+    /// Published once the checkout's receipts and those of its restores are written;
+    /// held while a local fact holds any receipt still unwritten.
+    private func publication(of checkoutID: UUID, scope: PersonalCheckoutToken, restores: [UUID: PersonalRestoreIntent],
+                             published: PersonalCartRepository.PublishedEffects,
+                             repository: PersonalCartRepository) -> PersonalPublicationState {
+        var unpublished: [(HomeEffectKind, UUID)] = published.checkouts.contains(checkoutID) ? [] : [(.checkout, checkoutID)]
+        unpublished += restores.filter { $0.value.checkoutID == checkoutID && !published.restores.contains($0.key) }
+            .map { (.restore, $0.key) }
+        guard !unpublished.isEmpty else { return .published }
+        let held = unpublished.contains { kind, id in
+            (try? repository.homeEffectPublicationHeld(kind: kind, subjectID: id,
+                householdID: scope.householdID, listID: scope.listID)) ?? true
+        }
+        return held ? .held : .pending
     }
 
     func entries(householdID: UUID, listID: UUID, repository: PersonalCartRepository, includeShared: Bool = true) throws -> [PersonalCartEntrySnapshot] {
@@ -113,7 +138,10 @@ final class PersonalCartService: @unchecked Sendable {
         }
         let checkouts = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
         let restores = try repository.values(PersonalRestoreIntent.self, kind: "restore")
-        var purchases = includeShared ? try HouseholdDemandProjection.purchases(householdID: householdID, in: repository.context) : []
+        // A household record still importing concerns no need yet, so it never fails
+        // the cart or checkout of unrelated needs (SHOPPING-285).
+        var purchases = includeShared ? try HouseholdDemandProjection.purchases(householdID: householdID,
+            reading: .arrived, in: repository.context) : []
         for (id, intent) in checkouts where intent.token.householdID == householdID {
             for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
                 guard !restores.values.contains(where: { $0.checkoutID == id && $0.restoredNeedIDs.contains(capture.entry.needID) }) else { continue }
@@ -124,7 +152,8 @@ final class PersonalCartService: @unchecked Sendable {
                 }
             }
         }
-        let demandEvents: [UUID: HouseholdDemandEvent] = includeShared ? try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID, in: repository.context) : [:]
+        let demandEvents: [UUID: HouseholdDemandEvent] = includeShared ? try PersonalCartRepository.sharedValues(HouseholdDemandEvent.self, kind: "demand", householdID: householdID,
+            reading: .arrived, in: repository.context) : [:]
         let evidence = Dictionary(grouping: demandEvents.values, by: \.needID).mapValues { Set($0.map(\.id)) }
         let superseded = demandEvents.values.reduce(into: Set<UUID>()) { $0.formUnion($1.replaces) }
         let reducer = PersonalCartReducer(edits: edits, checkouts: checkouts, restores: restores,
