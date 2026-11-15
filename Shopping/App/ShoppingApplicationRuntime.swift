@@ -7,8 +7,12 @@ final class ShoppingApplicationRuntime {
 
     let bootstrap: PersistenceBootstrap
     let actions = ShoppingActionRouter()
+    let donations: GroceryAddDonor
 
-    init(bootstrap: PersistenceBootstrap) { self.bootstrap = bootstrap }
+    init(bootstrap: PersistenceBootstrap, donationSink: GroceryAddDonor.Sink? = GroceryAddDonor.systemSink()) {
+        self.bootstrap = bootstrap
+        donations = GroceryAddDonor(bootstrap: bootstrap, sink: donationSink)
+    }
 
     /// The deadline covers the loading transition too: Siri waits on this call.
     func ready(timeout: Duration = .seconds(15)) async throws -> PersistenceBootstrap.ReadyState {

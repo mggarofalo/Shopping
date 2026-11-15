@@ -58,6 +58,37 @@ struct PendingSavedNeed {
     let originalCategoryID: UUID?
     let savedCategoryID: UUID?
     let wasEditing: Bool
+    /// The save put an item on the list, rather than editing a need or moving one out of the cart.
+    let isAdd: Bool
+
+    /// Only adds the user made in the app's screens are donated to Siri (SHOPPING-282).
+    var donatesAdd: Bool { isAdd && scope.origin == .app }
+
+    /// The Add sheet put a catalog item on the list.
+    static func catalogAdd(_ id: UUID, scope: GroceryAddScope) -> Self {
+        Self(id: id, scope: scope, expectsUncarted: true, originalCategoryID: nil,
+             savedCategoryID: nil, wasEditing: false, isAdd: true)
+    }
+
+    /// The editor created a grocery, or saved changes to the need it opened with.
+    static func editorSave(_ id: UUID, target: GroceryEditorTarget, savedCategoryID: UUID?,
+                           expectsUncarted: Bool) -> Self {
+        Self(id: id, scope: target.scope, expectsUncarted: expectsUncarted,
+             originalCategoryID: target.originalCategoryID, savedCategoryID: savedCategoryID,
+             wasEditing: target.needID != nil, isAdd: target.needID == nil)
+    }
+
+    /// Need again re-added a purchased catalog item, or only moved a need out of the cart.
+    static func needAgain(_ id: UUID, scope: GroceryAddScope, savedCategoryID: UUID?, addedToList: Bool) -> Self {
+        Self(id: id, scope: scope, expectsUncarted: true, originalCategoryID: nil,
+             savedCategoryID: savedCategoryID, wasEditing: false, isAdd: addedToList)
+    }
+
+    /// Undoing a cart move restored a need that was already on the list.
+    static func uncarted(_ id: UUID, scope: GroceryAddScope) -> Self {
+        Self(id: id, scope: scope, expectsUncarted: true, originalCategoryID: nil,
+             savedCategoryID: nil, wasEditing: false, isAdd: false)
+    }
 }
 
 enum GroceryRowScope {

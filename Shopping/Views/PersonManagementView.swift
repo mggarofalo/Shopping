@@ -52,6 +52,7 @@ struct PersonManagementView: View {
                 }
             )
         }
+        .shoppingToastHost()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if editMode.isEditing {
                 VStack(spacing: 0) {

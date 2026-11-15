@@ -11,7 +11,11 @@ struct GroceryListEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 
     @MainActor init(context: CatalogActionContext) {
-        id = context.entityID(for: context.listID)
+        self.init(id: context.entityID(for: context.listID))
+    }
+
+    init(id: String) {
+        self.id = id
         name = "Grocery List"
         type = .standard
     }

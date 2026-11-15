@@ -938,11 +938,16 @@ cart reducers or expanding the quick acceptance selection.
   own independent invitation decisions, explicit selection, late-import stability,
   and return to the original groceries/private cart. Two SQLite stores substitute
   CloudKit attachment; marking import ready is the substituted journal boundary.
-- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityRestoresHomeCartAndDraftButRejectsLateDiscovery`
-  owns A → temporarily unavailable → A through the real account provider,
-  presentation retirement, store detach/reopen, held stale discovery completion,
-  original cart/draft retention and rejection of captured checkout authority.
-  Its held read finishes before detach; only delivery of the value is delayed.
+- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityKeepsMountedHomeCartCheckoutAndDraft`
+  owns A → temporarily unavailable → A through the real account provider
+  (SHOPPING-278): the mounted presentation, stores, draft and captured checkout
+  stay usable on the saved account, sync details say "Using saved account", and
+  foreground re-verification keeps the same presentation.
+  `testAccountStatusNotificationForSameAccountKeepsMountedHomeCartAndDraft`,
+  `testAccountStatusNotificationNetworkFailureKeepsSavedAccountMounted` and
+  `testAccountNotificationDuringReverificationIgnoresLateIdentity` own the
+  CKAccountChanged re-check: no retirement for the same account or an
+  indeterminate answer, and a late answer never replaces a newer one.
 - `ActiveHomeBootstrapTests.testTwoHomesRequireChoiceAndSwitchRetiresCapturedCommands`
   now also owns checkout capture and editor lease retirement across a home switch,
   absence of unintended history, and restoration of the original cart/draft.
@@ -1768,11 +1773,12 @@ while offline and retires it on verification before returning to A.
 owns the imported-ready automatic activation path with native verification held,
 a prior selected home, cold return, and a later explicit Open.
 `testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification`
-owns the interrupted provider invalidation before any inbox write, including
+owns the interrupted provider invalidation (a sign-out) before any inbox write, including
 the same account being freshly verified on restart.
-`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityAcrossFastReverificationAndSignOut`
-owns the exact outgoing identity carried by account-change and sign-out events
-even if the provider resolves again before Bootstrap handles the event.
+`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityOnSignOut`
+and `testObservedAccountChangeToSignedOutInvalidatesAndSurvivesRelaunch` own the
+exact outgoing identity carried by sign-out events. Since SHOPPING-278,
+CKAccountChanged announces no invalidation; only a definitive answer does.
 `testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection`
 owns the separate conversion-command versus navigation-intent result: A's copy
 recovers after B without selecting it over A's saved home. These isolated stores
@@ -1863,11 +1869,10 @@ through the same selection command so reaffirmation is recorded.
 holds account verification before the copy journal is prepared, accepts a newer
 invitation, then drains the copy consumer. The copy may commit, but its older
 navigation choice must not be installed after the newer invitation arrives.
-`testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
-holds that same lookup across an exact CloudKit account invalidation and a fresh
-verification of the same account. It waits for the actual in-flight approval to
-retire before releasing the old lookup; a committed copy must leave the prior
-account home selected. The preparation task and copy consumer have bounded
+`testSameAccountChangeNotificationDuringCopyLookupKeepsCopyApproval`
+holds that same lookup across a CKAccountChanged re-check of the same account.
+Since SHOPPING-278 that notification is not an invalidation, so the in-flight
+approval survives and the committed copy opens as an uninterrupted copy does. The preparation task and copy consumer have bounded
 completion checks before fixture cleanup.
 The existing account-change copy test continues to own the different-account
 deferral rule. CI coverage passed its app and domain gates; no baseline changed.
@@ -2034,7 +2039,7 @@ assertions passed. Full result, logs and summaries are retained under
 `/tmp/shopping-phase24-ci-summary-37050761193`.
 
 `testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
-and `testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+and `testSameAccountChangeNotificationDuringCopyLookupKeepsCopyApproval`
 remain the proof owners for newer navigation intent during held account lookup.
 The owned conversion-consumer chain does not own a later startup/history
 request that supersedes its discovery. These tests now separately observe the
@@ -2868,3 +2873,41 @@ relaunch while the native access refresh is held. Both use
 `OfflineParticipantShares`, a `HomeNativeShareSource` that reports a participant
 identity and no verified write. Existing household fulfillment, lineage and
 quarantine tests are unchanged.
+
+## Catalog need-state captions (SHOPPING-281)
+
+`CatalogNeedStatus` owns the need-state wording that Add to Groceries results and
+editor suggestions share. A search result never says "Saved in Catalog"; an item
+already needed shows "On grocery list" or "In cart" on its own caption line.
+`PersonalCartPresentationTests.testCatalogNeedStatusTrustsThePersonalCartOverTheLegacyFlag`
+owns the state rule and spoken value, and
+`PreviewFixtureTests.testCatalogNeedStatesFixtureHasOneItemPerState` owns the
+`catalogNeedStates` fixture shape. In the Full plan,
+`CatalogRefreshUITests/testGroceryAddResultsShowNeedStateOnItsOwnLineWithAnEditAffordance`
+checks each picker state's Add/Edit label (the plus or pencil) and caption value,
+and that an in-cart result opens the editor.
+`GroceryEditingUITests/testSuggestionsShowNeedStateOnItsOwnLine` checks the
+editor's suggestions and that only an in-cart item offers Need again. Review both
+screenshot attachments.
+### Shopping with only the Watch (SHOPPING-279)
+
+`PersistentWatchShoppingServiceTests.testOfflineOwnerShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport`
+and its participant twin own the Watch's local-only gates over real SQLite.
+Another shopper's presence record is half imported and the native access
+refresh is held; Add, Quantity, Remove, capture, Checkout, relaunch, Restore and
+a second relaunch all succeed, then verified publication writes exactly one
+purchase and one retraction. `testParticipantWithoutImportedShareMetadataChecksOutAndRestores`
+owns a participant whose share metadata never imported (no native identity).
+`testIncompleteImportsDegradeWhatTheyDescribeNeverTheWholeCart` owns the
+per-record degradation: an unidentified need is left out, a half-imported
+purchase receipt withholds groceries, and the cart stays editable.
+`testCheckoutAndRestoreNeverWaitForAHeldRefreshRead` owns the session rule that
+Checkout and Restore never wait for an in-flight read, and
+`WatchShoppingSessionTests.testPeriodicRefreshCoalescesWhileLoadHeldAndStoreChoiceNeverWaitsForIt`
+owns the same rule for store choice, including discarding the held read.
+`testObservedPermissionLossBlocksCapturedRestoreButAllowsOwnRemoval` now uses a
+durable read-only record instead of an injected closure. The Watch UI workflow
+`testDurableOfflineParticipantChecksOutAndRestoresAcrossRelaunch` uses the
+`offline` durable fixture (an unverified participant with a half-imported
+presence record) for checkout, relaunch and restore. The `revoked` fixture now
+retains a durable read-only observation.

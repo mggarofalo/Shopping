@@ -11,7 +11,8 @@ struct CategoryFillSuggestionsView: View {
     let categoryID: UUID
     let categoryName: String
     let purchaseFilter: PurchaseFilter
-    let onAdded: (Int) -> Void
+    /// Receives the names put on the list.
+    let onAdded: ([String]) -> Void
 
     @State private var candidates: [CategoryFillCandidate] = []
     @State private var categoryRevision: Int64?
@@ -152,8 +153,8 @@ struct CategoryFillSuggestionsView: View {
         let purchaseFilter = self.purchaseFilter, categoryID = self.categoryID
         Task {
             defer { isAdding = false }
-            let counts = await Task.detached(priority: .userInitiated) { () -> (Int, Int) in
-                var added = 0, skipped = 0
+            let counts = await Task.detached(priority: .userInitiated) { () -> ([String], Int) in
+                var added: [String] = [], skipped = 0
                 for candidate in selected {
                     do {
                         switch try service.applyCatalogSuggestion(itemID: candidate.itemID,
@@ -162,7 +163,7 @@ struct CategoryFillSuggestionsView: View {
                             purchaseFilter: purchaseFilter, categoryID: categoryID,
                             expectedCategoryRevision: categoryRevision, textFilter: "",
                             urgentOnly: false, renewCarted: false) {
-                        case .added: added += 1
+                        case .added: added.append(candidate.name)
                         case .renewed, .focusExisting: skipped += 1
                         }
                     } catch { skipped += 1 }
@@ -171,14 +172,15 @@ struct CategoryFillSuggestionsView: View {
             }.value
             guard persistenceSelection.householdID == householdID,
                   persistenceSelection.listID == listID else { return }
-            let (addedCount, skippedCount) = counts
+            let (added, skippedCount) = counts
+            let addedCount = added.count
             guard addedCount > 0 else {
                 errorMessage = "Those items changed or are already on the list. Nothing was added."
                 loadCandidates()
                 return
             }
             hapticFeedback.play(.success)
-            onAdded(addedCount)
+            onAdded(added)
             if skippedCount == 0 {
                 dismiss()
             } else {

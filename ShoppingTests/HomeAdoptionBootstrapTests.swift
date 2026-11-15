@@ -626,7 +626,7 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         XCTAssertTrue(invitations.allEntries.contains { $0.id == entry.id && $0.openRequested })
     }
 
-    func testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification() async throws {
+    func testSameAccountChangeNotificationDuringCopyLookupKeepsCopyApproval() async throws {
         let fixture = try fixture()
         let held = expectation(description: "Copy account lookup held before invalidation")
         let gate = CopyProviderRefreshGate()
@@ -657,15 +657,16 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         }
         await fulfillment(of: [held], timeout: 5)
         XCTAssertTrue(bootstrap.hasPendingLocalCopyPreparation)
-        center.post(name: .CKAccountChanged, object: nil)
-        await provider.refresh()
-        XCTAssertEqual(try provider.currentSession(), sessionA)
-        let invalidationDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while bootstrap.hasPendingLocalCopyPreparation, ContinuousClock.now < invalidationDeadline {
-            try await Task.sleep(for: .milliseconds(10))
+        // A change notification is only a prompt to re-check; the same account keeps its approval.
+        let reverified = expectation(description: "Re-check verifies the same account")
+        let observer = provider.observeSessionChanges { state, _ in
+            if state == .ready(sessionA) { reverified.fulfill() }
         }
-        XCTAssertFalse(bootstrap.hasPendingLocalCopyPreparation,
-            "The exact account invalidation must retire the in-flight copy approval")
+        center.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [reverified], timeout: 5)
+        provider.removeSessionObserver(observer)
+        XCTAssertTrue(bootstrap.hasPendingLocalCopyPreparation,
+            "Re-verifying the same account must not retire the in-flight copy approval")
 
         await gate.release()
         let prepared = await self.waitForCopyPreparation(copy)
@@ -676,8 +677,10 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
         try await waitForCopiedHomeRoster(bootstrap)
         XCTAssertEqual(bootstrap.retainedLocalCopyState, .copied)
         XCTAssertEqual(bootstrap.homeEntry.homes.count, 2)
-        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Account home")
-        XCTAssertFalse(bootstrap.homeEntry.homes.first { $0.name == "Original home" }?.isSelected == true)
+        try await waitForState("copied home to open") {
+            bootstrap.homeEntry.homes.contains { $0.name == "Original home" && $0.isSelected }
+        }
+        XCTAssertEqual(bootstrap.homeEntry.currentHomeName, "Original home")
     }
 
     func testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection() async throws {
@@ -1639,13 +1642,15 @@ final class HomeAdoptionBootstrapTests: XCTestCase {
     }
 
     func testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification() async throws {
-        let center = NotificationCenter()
-        let fixture = try await importedInvitation(notifications: center)
+        let fixture = try await importedInvitation()
         let original = try saveOriginalHomeSelection(fixture)
         let session = try fixture.provider.currentSession()
-        // Simulate a process ending after the provider durably invalidates its
+        // Simulate a process ending after a sign-out durably invalidates the
         // cached account but before Bootstrap can write the invitation journal.
-        center.post(name: .CKAccountChanged, object: nil)
+        let signedOut = try ShopperSessionProvider(containerIdentifier: session.containerIdentifier,
+            environment: session.environment, cacheDirectory: fixture.directory.appendingPathComponent("Bindings"),
+            lookup: .init(status: { .noAccount }, recordName: { "unused" }), notifications: NotificationCenter())
+        await signedOut.refresh()
         let provider = try ShopperSessionProvider(containerIdentifier: session.containerIdentifier,
             environment: session.environment, cacheDirectory: fixture.directory.appendingPathComponent("Bindings"),
             lookup: .init(status: { .available }, recordName: { "account-A" }),

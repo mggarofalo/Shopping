@@ -16,6 +16,9 @@ def validate(app):
     parameters = {p['name']: p for p in action.get('parameters', [])}
     if parameters.get('title', {}).get('valueType', {}).get('primitive', {}).get('wrapper', {}).get('typeIdentifier') != 0:
         raise ValueError('Siri item title must be a free-form String.')
+    # In-app adds donate this action with the list entity Siri resolves (SHOPPING-282).
+    if parameters.get('list', {}).get('valueType', {}).get('entity', {}).get('wrapper', {}).get('typeName') != 'GroceryListEntity':
+        raise ValueError('Donated Siri add must name its list with GroceryListEntity.')
     if action.get('authenticationPolicy') != 2:
         raise ValueError('Siri add must require local device authentication.')
     # Observed Xcode 27 encoding: background 1, dynamic foreground 8 (openAppWhenRun is 2).

@@ -397,21 +397,16 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertEqual(bootstrap.homeCoordinator.homes.count, 2)
     }
 
-    func testTemporaryAccountUnavailabilityRestoresHomeCartAndDraftButRejectsLateDiscovery() async throws {
+    func testTemporaryAccountUnavailabilityKeepsMountedHomeCartCheckoutAndDraft() async throws {
         let account = BootstrapAccountAvailability()
-        let discovery = BootstrapHeldDiscovery()
-        let started = expectation(description: "Old account discovery captured")
         var observedProvider: ShopperSessionProvider?
         let bootstrap = try await makeBootstrap(homeCount: 2, accountStatus: { await account.status },
-            observeProvider: { observedProvider = $0 }, discoverHomes: { service in
-                let snapshot = try await Task.detached(priority: .utility) { try service.discover() }.value
-                if BootstrapDiscoveryRequest.hold { await discovery.hold { started.fulfill() } }
-                return snapshot
-            })
+            observeProvider: { observedProvider = $0 })
         let provider = try XCTUnwrap(observedProvider)
         try await bootstrap.selectHome(try XCTUnwrap(bootstrap.homeCoordinator.homes.first).graph)
         let original = try ready(bootstrap)
         let scope = try XCTUnwrap(original.homeScope)
+        let session = try provider.currentSession()
         let cart = try XCTUnwrap(original.personalCartService)
         let needID = try original.service.addOneTimeNeed(title: "Retained groceries", quantity: 3,
             householdID: scope.graph.householdID, listID: scope.graph.listID)
@@ -421,56 +416,30 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         let draft = CatalogEditorDraft(itemID: nil, name: "Still editing", notes: "Account A notes",
             categoryID: nil, anyStore: true, storeIDs: [])
         try bootstrap.editorDrafts.save(draft, scope: scope, editor: "catalog.new")
-        let oldDiscovery = Task {
-            try await BootstrapDiscoveryRequest.$hold.withValue(true) { try await bootstrap.refreshHomes() }
-        }
-        addTeardownBlock {
-            await discovery.release()
-            _ = await oldDiscovery.result
-        }
-        await fulfillment(of: [started], timeout: 5)
+
+        // Apple: for temporarilyUnavailable, don't delete cached data. The saved account keeps shopping.
         await account.setUnavailable(true)
         await provider.refresh()
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while original.presentation.isActive, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        XCTAssertFalse(original.presentation.isActive)
-        await bootstrap.runLoadingTransition()
-        guard case .failed(let error) = bootstrap.state else {
-            return XCTFail("Temporary account loss must retire the mounted account presentation")
-        }
-        XCTAssertEqual(error as? ShopperSessionError, .temporarilyUnavailable)
-        XCTAssertNil(bootstrap.homeCoordinator.activeScope)
-        XCTAssertTrue(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
-        XCTAssertThrowsError(try cart.checkout(checkout))
+        XCTAssertEqual(provider.state, .cached(session))
+        await Task.yield()
+        XCTAssertTrue(original.presentation.isActive, "A transient answer must not retire the mounted home")
+        XCTAssertEqual(try ready(bootstrap).presentation.id, original.presentation.id)
+        XCTAssertEqual(bootstrap.homeCoordinator.activeScope, scope)
+        XCTAssertEqual(bootstrap.homeSharingStatus.summary.title, "Using saved account")
+        XCTAssertFalse(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        XCTAssertEqual(try bootstrap.editorDrafts.load(CatalogEditorDraft.self, scope: scope, editor: "catalog.new"), draft)
+        _ = try cart.checkout(checkout)
+        XCTAssertTrue(try cart.entries(householdID: scope.graph.householdID, listID: scope.graph.listID).isEmpty)
+        XCTAssertFalse(try cart.history(householdID: scope.graph.householdID, listID: scope.graph.listID).isEmpty)
 
         await account.setUnavailable(false)
-        bootstrap.retry()
-        await bootstrap.runLoadingTransition()
-        try await waitForReady(bootstrap)
-        let returned = try ready(bootstrap)
-        XCTAssertEqual(try provider.currentSession().accountBinding, scope.accountBinding)
-        XCTAssertEqual(returned.homeScope, scope)
-        XCTAssertNotEqual(returned.presentation.id, original.presentation.id)
-        XCTAssertTrue(returned.presentation.isActive)
-        await discovery.release()
-        try await oldDiscovery.value
-        XCTAssertEqual(try ready(bootstrap).presentation.id, returned.presentation.id)
-        XCTAssertEqual(bootstrap.homeCoordinator.activeScope, scope)
-        XCTAssertNil(bootstrap.homeDiscoveryError)
-        XCTAssertThrowsError(try cart.checkout(checkout)) { error in
-            XCTAssertEqual(error as? UICommandAuthority.Failure, .retired)
-        }
-        let freshCart = try XCTUnwrap(returned.personalCartService)
-        XCTAssertEqual(try freshCart.entries(householdID: scope.graph.householdID, listID: scope.graph.listID), entries)
-        XCTAssertEqual(try freshCart.outstandingNeedIDs(householdID: scope.graph.householdID, listID: scope.graph.listID), [needID])
-        XCTAssertTrue(try freshCart.history(householdID: scope.graph.householdID, listID: scope.graph.listID).isEmpty)
-        XCTAssertEqual(try bootstrap.editorDrafts.load(CatalogEditorDraft.self, scope: scope, editor: "catalog.new"), draft)
-        _ = try returned.service.createCategory(name: "Usable again", householdID: scope.graph.householdID)
+        bootstrap.applicationDidEnterForeground()
+        try await waitForState("foreground re-verification") { provider.state == .ready(session) }
+        XCTAssertEqual(try ready(bootstrap).presentation.id, original.presentation.id)
+        XCTAssertTrue(original.presentation.isActive)
     }
 
-    func testAccountStatusNotificationAutomaticallyReopensSameHomeCartAndDraft() async throws {
+    func testAccountStatusNotificationForSameAccountKeepsMountedHomeCartAndDraft() async throws {
         let center = NotificationCenter()
         let account = BootstrapMutableAccount()
         var observedProvider: ShopperSessionProvider?
@@ -479,6 +448,7 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         let provider = try XCTUnwrap(observedProvider)
         let original = try ready(bootstrap)
         let scope = try XCTUnwrap(original.homeScope)
+        let session = try provider.currentSession()
         let cart = try XCTUnwrap(original.personalCartService)
         let needID = try original.service.addOneTimeNeed(title: "Retained groceries", quantity: 3,
             householdID: scope.graph.householdID, listID: scope.graph.listID)
@@ -489,34 +459,20 @@ final class ActiveHomeBootstrapTests: XCTestCase {
             categoryID: nil, anyStore: true, storeIDs: [])
         try bootstrap.editorDrafts.save(draft, scope: scope, editor: "catalog.new")
         bootstrap.presentationDidAppear(original.presentation.id)
-        let lookupsBefore = await account.recordLookupCount
 
-        // A burst invalidates authority synchronously, but schedules one reopen.
+        // A burst is a prompt to re-check. The saved account stays usable meanwhile.
         for _ in 0..<3 { center.post(name: .CKAccountChanged, object: nil) }
-        XCTAssertThrowsError(try provider.currentSession())
-        try await waitForRetirement(original, in: bootstrap)
-        XCTAssertThrowsError(try cart.checkout(checkout))
-        await bootstrap.runLoadingTransition()
-        XCTAssertFalse(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty,
-            "The mounted hierarchy must retire before stores detach")
-        bootstrap.presentationDidDisappear(original.presentation.id)
-        await bootstrap.runLoadingTransition()
-        try await waitForReady(bootstrap)
-
-        let returned = try ready(bootstrap)
-        XCTAssertNotEqual(returned.presentation.id, original.presentation.id)
-        XCTAssertEqual(returned.homeScope, scope)
-        XCTAssertTrue(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
-        XCTAssertEqual(try provider.currentSession().accountBinding, scope.accountBinding)
-        let lookupsAfter = await account.recordLookupCount
-        XCTAssertEqual(lookupsAfter, lookupsBefore + 1)
-        let returnedCart = try XCTUnwrap(returned.personalCartService)
-        XCTAssertEqual(try returnedCart.entries(householdID: scope.graph.householdID, listID: scope.graph.listID), entries)
-        XCTAssertEqual(try returnedCart.outstandingNeedIDs(householdID: scope.graph.householdID,
-            listID: scope.graph.listID), [needID])
-        XCTAssertTrue(try returnedCart.history(householdID: scope.graph.householdID, listID: scope.graph.listID).isEmpty)
+        XCTAssertEqual(try provider.currentSession(), session)
+        try await waitForState("same-account re-verification") { provider.state == .ready(session) }
+        await Task.yield()
+        XCTAssertTrue(original.presentation.isActive, "Re-verifying the same account must not retire the home")
+        XCTAssertEqual(try ready(bootstrap).presentation.id, original.presentation.id)
+        XCTAssertFalse(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         XCTAssertEqual(try bootstrap.editorDrafts.load(CatalogEditorDraft.self, scope: scope, editor: "catalog.new"), draft)
-        XCTAssertThrowsError(try cart.checkout(checkout))
+        XCTAssertEqual(try cart.outstandingNeedIDs(householdID: scope.graph.householdID,
+            listID: scope.graph.listID), [needID])
+        _ = try cart.checkout(checkout)
+        XCTAssertTrue(try cart.entries(householdID: scope.graph.householdID, listID: scope.graph.listID).isEmpty)
     }
 
     func testAccountStatusNotificationSwitchesStoresAndReturningPreservesOriginalCart() async throws {
@@ -581,13 +537,14 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         await account.holdNextRecord { held.fulfill() }
         addTeardownBlock { await account.releaseRecord() }
         center.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [held], timeout: 5)
+        XCTAssertTrue(original.presentation.isActive, "An unanswered re-check does not retire the mounted home")
+        await account.releaseRecord()
         try await waitForRetirement(original, in: bootstrap)
         await bootstrap.runLoadingTransition()
-        await fulfillment(of: [held], timeout: 5)
-        XCTAssertFalse(controller.allEntries.first { $0.id == entry.id }?.openRequested == true,
-            "The old intent is committed before the replacement account can mount")
-        await account.releaseRecord()
         try await waitForReady(bootstrap)
+        XCTAssertFalse(controller.allEntries.first { $0.id == entry.id }?.openRequested == true,
+            "The old intent is committed before the replacement account mounts")
         XCTAssertNil(try ready(bootstrap).homeScope)
 
         bootstrap.retireAndFail(ShopperSessionError.temporarilyUnavailable)
@@ -703,11 +660,34 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         try await assertAccountNotificationFails(status: .noAccount, networkUnavailable: false, expected: .noAccount)
     }
 
-    func testAccountStatusNotificationNetworkFailureCannotReopenInvalidatedAccount() async throws {
-        try await assertAccountNotificationFails(status: .available, networkUnavailable: true, expected: .temporarilyUnavailable)
+    func testAccountStatusNotificationNetworkFailureKeepsSavedAccountMounted() async throws {
+        let center = NotificationCenter()
+        let account = BootstrapMutableAccount()
+        var observedProvider: ShopperSessionProvider?
+        let bootstrap = try await makeBootstrap(homeCount: 1, accountLookup: account.lookup,
+            notifications: center, observeProvider: { observedProvider = $0 })
+        let provider = try XCTUnwrap(observedProvider)
+        let original = try ready(bootstrap)
+        let session = try provider.currentSession()
+        await account.setStatus(.available, networkUnavailable: true)
+        // The notification announces the unverified state synchronously; the re-check announces its answer.
+        let answered = expectation(description: "Demotion and re-check answer")
+        answered.expectedFulfillmentCount = 2
+        let observer = provider.observeSessionChanges { state, _ in
+            if state == .cached(session) { answered.fulfill() }
+        }
+        center.post(name: .CKAccountChanged, object: nil)
+        await fulfillment(of: [answered], timeout: 5)
+        provider.removeSessionObserver(observer)
+        await Task.yield()
+        XCTAssertEqual(provider.state, .cached(session), "A network failure keeps the saved account")
+        XCTAssertTrue(original.presentation.isActive)
+        XCTAssertEqual(try ready(bootstrap).presentation.id, original.presentation.id)
+        XCTAssertFalse(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
+        _ = try original.service.createCategory(name: "Saved offline", householdID: try XCTUnwrap(original.householdID))
     }
 
-    func testAccountNotificationDuringReverificationRejectsLateIdentityAndRequiresFreshRetry() async throws {
+    func testAccountNotificationDuringReverificationIgnoresLateIdentity() async throws {
         let center = NotificationCenter()
         let account = BootstrapMutableAccount()
         var observedProvider: ShopperSessionProvider?
@@ -716,28 +696,23 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         let provider = try XCTUnwrap(observedProvider)
         let original = try ready(bootstrap)
         let scope = try XCTUnwrap(original.homeScope)
+        let session = try provider.currentSession()
         let requested = expectation(description: "Reverification suspended")
+        let lookupsBefore = await account.recordLookupCount
+        await account.setName("account-B")
         await account.holdNextRecord { requested.fulfill() }
         addTeardownBlock { await account.releaseRecord() }
         center.post(name: .CKAccountChanged, object: nil)
-        try await waitForRetirement(original, in: bootstrap)
-        await bootstrap.runLoadingTransition()
         await fulfillment(of: [requested], timeout: 5)
+        await account.setName("account-A")
         center.post(name: .CKAccountChanged, object: nil)
-        XCTAssertThrowsError(try provider.currentSession())
+        try await waitForState("newer re-check verifies account A") { provider.state == .ready(session) }
+        // The first re-check now answers with account B; it is older than the notification that followed it.
         await account.releaseRecord()
-        try await waitForState("bootstrap failure") {
-            if case .failed = bootstrap.state { return true }
-            return false
-        }
-        guard case .failed(let error) = bootstrap.state else { return XCTFail("Late identity must stay blocked") }
-        XCTAssertEqual(error as? ShopperSessionError, .accountChanged)
-        XCTAssertEqual(provider.state, .accountChanged)
-        XCTAssertNil(bootstrap.homeCoordinator.activeScope)
-        XCTAssertTrue(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
-        bootstrap.retry()
-        await bootstrap.runLoadingTransition()
-        try await waitForReady(bootstrap)
+        try await waitForLookup("both re-checks answered") { await account.recordLookupCount >= lookupsBefore + 2 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(provider.state, .ready(session), "A late identity cannot replace a newer answer")
+        XCTAssertTrue(original.presentation.isActive)
         XCTAssertEqual(try ready(bootstrap).homeScope, scope)
     }
 
@@ -764,6 +739,14 @@ final class ActiveHomeBootstrapTests: XCTestCase {
         XCTAssertNil(bootstrap.homeCoordinator.activeScope)
         XCTAssertTrue(original.persistence.container.persistentStoreCoordinator.persistentStores.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: originalURL.path))
+    }
+
+    private func waitForLookup(_ description: String, until condition: () async -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while await !condition() {
+            guard ContinuousClock.now < deadline else { return XCTFail("Timed out waiting for \(description)") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func waitForRetirement(_ ready: PersistenceBootstrap.ReadyState, in bootstrap: PersistenceBootstrap,
@@ -863,20 +846,6 @@ private actor HeldSecondAccountLookup {
         resume?.resume()
         resume = nil
     }
-}
-
-private enum BootstrapDiscoveryRequest {
-    @TaskLocal static var hold = false
-}
-
-private actor BootstrapHeldDiscovery {
-    private var released = false
-    private var continuation: CheckedContinuation<Void, Never>?
-    func hold(started: @Sendable () -> Void) async {
-        guard !released else { started(); return }
-        await withCheckedContinuation { continuation = $0; started() }
-    }
-    func release() { released = true; continuation?.resume(); continuation = nil }
 }
 
 private actor BootstrapMutableAccount {

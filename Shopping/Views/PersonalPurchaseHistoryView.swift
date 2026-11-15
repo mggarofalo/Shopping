@@ -42,16 +42,12 @@ struct PersonalPurchaseHistoryView: View {
 
     private func restore(_ id: UUID) {
         guard pendingRestoreIDs.insert(id).inserted else { return }
-        let service = cart.service
         Task {
             defer { pendingRestoreIDs.remove(id) }
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try service.restore(checkoutID: id)
-                }.value
+                let result = try await cart.restore(checkoutID: id)
                 resultMessage = "Restored \(result.purchasedCount) items; left \(result.skippedCount) unchanged. Other shoppers’ purchases and newer requests are retained."
                 if result.pendingPublication { resultMessage? += " Saved undo awaiting home processing." }
-                cart.refresh()
             } catch { self.error = error.localizedDescription }
         }
     }

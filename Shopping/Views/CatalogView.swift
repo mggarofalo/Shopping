@@ -168,6 +168,7 @@ struct CatalogView: View {
                     }
                 )
             }
+            .shoppingToastHost()
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if editMode.isEditing {
@@ -951,6 +952,10 @@ struct CatalogView: View {
             guard selection.householdID == token.householdID, selection.listID == token.listID else { return nil }
             addConfirmation = nil
             clearSelection()
+            let addedItemIDs = Set(result.addedItemIDs(from: token))
+            ShoppingApplicationRuntime.shared.donations.userAdded(
+                scopedItems.filter { addedItemIDs.contains($0.id) }.map(\.name),
+                householdID: token.householdID, listID: token.listID)
             let visibleNeedID = result.addedNeedIDs.first ?? result.renewedNeedIDs.first
             showCatalogNotice(
                 CatalogAddCopy.result(result),

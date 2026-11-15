@@ -99,13 +99,21 @@ struct PersonalCartView: View {
         .navigationTitle("My cart")
         .navigationBarTitleDisplayMode(.inline)
         .shoppingSearchable(text: $navigation.searchText, prompt: "Search groceries")
-        .safeAreaInset(edge: .bottom) {
-            Button("Check out") { prepare(visibleEntries) }
-                .buttonStyle(.borderedProminent)
-                .disabled(isPreparingCheckout || visibleEntries.isEmpty || cart.error != nil ||
-                    visibleEntries.contains { pendingRemovalIDs.contains($0.id) || cart.isQuantityTransitionPending($0.id) ||
-                        cart.isCartTransitionPending($0.needID) })
-                .padding(8)
+        .shoppingToastHost()
+        // A pushed screen with a primary bottom action hides the tab bar; iOS 26 floats it over a bottom toolbar.
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            if !visibleEntries.isEmpty {
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Check out (\(visibleEntries.count))") { prepare(visibleEntries) }
+                        .buttonStyle(.borderedProminent)
+                        // Only local pending edits disable checkout; household sync state never does.
+                        .disabled(isPreparingCheckout || visibleEntries.isEmpty ||
+                            visibleEntries.contains { pendingRemovalIDs.contains($0.id) || cart.isQuantityTransitionPending($0.id) ||
+                                cart.isCartTransitionPending($0.needID) })
+                        .accessibilityIdentifier("shopping.personalCart.checkout")
+                }
+            }
         }
         .sheet(item: $selected) { entry in
             PersonalCartItemView(cart: cart, entry: entry, storeID: navigation.selectedStoreID,
@@ -143,16 +151,13 @@ struct PersonalCartView: View {
         guard !isPreparingCheckout,
               !entries.contains(where: { cart.isQuantityTransitionPending($0.id) || cart.isCartTransitionPending($0.needID) }) else { return }
         isPreparingCheckout = true
-        let service = cart.service
         let tokens = entries.map(\.token)
         let storeID = navigation.selectedStoreID
         let storeName = stores.first { $0.id == storeID }?.name
         Task {
             defer { isPreparingCheckout = false }
             do {
-                let token = try await Task.detached(priority: .userInitiated) {
-                    try service.prepareCheckout(tokens: tokens, storeID: storeID)
-                }.value
+                let token = try await cart.prepareCheckout(tokens: tokens, storeID: storeID)
                 checkout = PersonalCheckoutSheet(token: token, storeName: storeName)
             } catch { self.error = error.localizedDescription }
         }

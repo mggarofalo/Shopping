@@ -280,13 +280,20 @@ final class HomeSharingApplicationContractTests: XCTestCase {
         XCTAssertEqual(try HomeInviteJournal(url: f.journalURL).load(scope: f.scope)?.phase, .prepared)
     }
 
-    func testAccountInvalidationAtSubmissionBoundaryPreventsWriteAndKeepsPreparedIntent() async throws {
-        let f = try await HomeSharingContractFixture.make(self), notifications = f.notifications
-        f.backend.setBeforeSave { notifications.post(name: .CKAccountChanged, object: nil) }
+    func testAccountChangeAtSubmissionBoundaryPreventsUnverifiedWriteAndKeepsPreparedIntent() async throws {
+        // The re-check after CKAccountChanged stays unanswered, so the account is unverified at submission.
+        let recheck = HeldAccountRecheck()
+        addTeardownBlock { await recheck.release() }
+        let f = try await HomeSharingContractFixture.make(self, accountStatus: { await recheck.status() })
+        let notifications = f.notifications
+        f.backend.setBeforeSave {
+            await recheck.holdNext()
+            notifications.post(name: .CKAccountChanged, object: nil)
+        }
         let model = f.model()
         await model.refresh(); await model.invite()
         XCTAssertNil(model.delivery)
-        XCTAssertEqual(model.error, HomeMembershipError.scopeChanged.localizedDescription)
+        XCTAssertEqual(model.error, HomeSharingErrorPresentation.message(CKError(.networkUnavailable)))
         XCTAssertEqual(f.backend.counts.saves, 0)
         XCTAssertEqual(try HomeInviteJournal(url: f.journalURL).load(scope: f.scope)?.phase, .prepared)
     }
@@ -307,5 +314,25 @@ final class HomeSharingApplicationContractTests: XCTestCase {
         await model.refresh()
         XCTAssertFalse(model.canInvite); XCTAssertNil(model.delivery)
         XCTAssertEqual(f.backend.counts.saves, 0)
+    }
+}
+
+/// Answers `available` until armed, then holds the next status lookup until released.
+private actor HeldAccountRecheck {
+    private var holding = false
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func holdNext() { holding = true }
+
+    func status() async -> CKAccountStatus {
+        if holding, !released { await withCheckedContinuation { waiters.append($0) } }
+        return .available
+    }
+
+    func release() {
+        released = true
+        waiters.forEach { $0.resume() }
+        waiters = []
     }
 }

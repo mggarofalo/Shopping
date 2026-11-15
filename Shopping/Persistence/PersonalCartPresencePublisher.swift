@@ -1,10 +1,11 @@
 import Foundation
 
+/// The one deferred presence publisher for iPhone and Watch cart commands (SHOPPING-277).
 /// Coalesces advisory publication after durable local saves. Failed work stays
 /// dirty until another edit or foreground read requests a retry; durable cart
 /// history remains the recovery source after this helper's lifetime ends.
 @MainActor
-final class WatchPresencePublisher {
+final class PersonalCartPresencePublisher {
     typealias Sleep = @MainActor (Duration) async throws -> Void
     typealias Publish = @MainActor (Set<UUID>) async -> Set<UUID>
 

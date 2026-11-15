@@ -15,6 +15,8 @@ final class WatchAssociationStatus {
         }
     }
 
+    static let savedAccountMessage = "Using saved account. Changes sync when iCloud confirms it."
+
     var onChange: (() -> Void)?
     private(set) var state = State.clear
     private var generation = UUID()
@@ -23,7 +25,7 @@ final class WatchAssociationStatus {
 
     func projectedMessage(cloudStatus: CloudSyncStatus, cachedAccount: Bool, otherMessage: String?) -> String {
         if cloudStatus.hasFailure { return cloudStatus.message }
-        if cachedAccount { return "Using saved data. Changes sync when a connection returns." }
+        if cachedAccount { return Self.savedAccountMessage }
         return otherMessage ?? message ?? cloudStatus.message
     }
 

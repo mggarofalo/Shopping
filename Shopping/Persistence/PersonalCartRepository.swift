@@ -5,11 +5,16 @@ struct PersonalCartRepository {
     let context: NSManagedObjectContext
     let session: ShopperSession
 
-    func privateRecords(kind: String? = nil) throws -> [PersonalCartRecord] {
+    /// The store filters by kind or operation ID, so a command never decodes the
+    /// whole account log to find one operation or one kind of record.
+    func privateRecords(kind: String? = nil, id: UUID? = nil) throws -> [PersonalCartRecord] {
         let request = NSFetchRequest<PersonalCartRecord>(entityName: "PersonalCartRecord")
-        request.predicate = NSPredicate(format: "accountBinding == %@", session.accountBinding)
+        var predicates = [NSPredicate(format: "accountBinding == %@", session.accountBinding)]
+        if let kind { predicates.append(NSPredicate(format: "kind == %@", kind)) }
+        if let id { predicates.append(NSPredicate(format: "id == %@", id as CVarArg)) }
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.affectedStores = persistence.primaryStore.map { [$0] }
-        return try context.fetch(request).filter { kind == nil || $0.kind == kind }
+        return try context.fetch(request)
     }
 
     func values<T: Codable & Equatable>(_ type: T.Type, kind: String) throws -> [UUID: T] {
@@ -27,7 +32,7 @@ struct PersonalCartRepository {
         id: UUID, kind: String, command: C, value: T
     ) throws {
         guard id != PersistenceModel.unsetID else { throw PersonalCartError.corruptRecord }
-        let matches = try privateRecords().filter { $0.id == id }
+        let matches = try privateRecords(id: id)
         if !matches.isEmpty {
             guard try matches.allSatisfy({
                 try $0.kind == kind && PersonalCartCoding.equivalent(command, $0.command)
@@ -48,7 +53,7 @@ struct PersonalCartRepository {
     func replay<C: Codable & Equatable, T: Codable & Equatable>(
         id: UUID, kind: String, command: C, as type: T.Type
     ) throws -> T? {
-        let records = try privateRecords().filter { $0.id == id }
+        let records = try privateRecords(id: id)
         guard let first = records.first else { return nil }
         guard try records.allSatisfy({
             try $0.kind == kind && PersonalCartCoding.equivalent(command, $0.command)

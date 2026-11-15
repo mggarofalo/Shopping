@@ -52,7 +52,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertTrue(suggestion.existsOrAppears(timeout: 2))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "cafe")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
-        XCTAssertTrue((suggestion.value as? String)?.contains("Uncategorized · Any Store · Saved in Catalog") == true)
+        XCTAssertEqual(suggestion.value as? String, "Uncategorized · Any Store")
         app.buttons["shopping.grocery.cancel"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["shopping.emptyState"].existsOrAppears(timeout: 2))
 
@@ -87,11 +87,41 @@ final class GroceryEditingUITests: XCTestCase {
         reveal(suggestion, in: app)
         XCTAssertTrue(suggestion.existsOrAppears(timeout: 2))
         XCTAssertTrue(suggestion.isHittable)
-        XCTAssertTrue((suggestion.value as? String)?.contains("Produce · Any Store · On grocery list") == true)
+        XCTAssertEqual(suggestion.value as? String, "Produce · Any Store · On grocery list")
         attachScreenshot(named: "Catalog suggestion at accessibility text size", app: app)
         let name = app.textFields["shopping.grocery.name"]
         revealAbove(name, in: app)
         XCTAssertEqual(name.value as? String, "banan")
+    }
+
+    func testSuggestionsShowNeedStateOnItsOwnLine() {
+        let app = launchApp(fixture: "catalogNeedStates")
+        openAdd(in: app)
+        enterName("b", in: app)
+        app.buttons["shopping.grocery.keyboardDone"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 2))
+
+        // Searching the catalog implies an item is saved there, so an unneeded item has no state line.
+        let expected = [
+            ("shopping.grocery.suggestion.", "Need again Basil", "Produce · Publix"),
+            ("shopping.grocery.activeMatch.", "Edit current Bananas", "Produce · Any Store · On grocery list"),
+            ("shopping.grocery.activeMatch.", "Edit current Blueberries", "Produce · Costco · In cart"),
+        ]
+        for (identifier, label, value) in expected {
+            let suggestion = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@", identifier, label
+            )).firstMatch
+            reveal(suggestion, in: app)
+            XCTAssertTrue(suggestion.existsOrAppears(timeout: 2), "Missing \(label)")
+            XCTAssertEqual(suggestion.value as? String, value)
+        }
+        // Only an item already in the cart offers a separate Need again.
+        let needAgain = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "shopping.grocery.needAgain."
+        ))
+        XCTAssertEqual(needAgain.count, 1)
+        XCTAssertEqual(needAgain.firstMatch.label, "Need again Blueberries")
+        attachScreenshot(named: "Editor suggestion need states", app: app)
     }
 
     func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {

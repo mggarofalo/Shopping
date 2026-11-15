@@ -1104,7 +1104,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertNotNil(session.errorMessage)
     }
 
-    func testPeriodicRefreshCoalescesWhileLoadHeldAndPreservesStoreChoice() async {
+    func testPeriodicRefreshCoalescesWhileLoadHeldAndStoreChoiceNeverWaitsForIt() async throws {
         let service = SpyService()
         let session = WatchShoppingSession(service: service)
         await session.reload()
@@ -1125,23 +1125,21 @@ final class WatchShoppingSessionTests: XCTestCase {
         periodic.cancel()
         await periodic.value
         XCTAssertFalse(session.isBusy)
-        let reserved = expectation(description: "Store selection reserved")
-        var selectionFinished = false
-        let selection = Task {
-            reserved.fulfill()
-            await session.reload(storeID: WatchPreviewService.secondStoreID)
-            selectionFinished = true
-        }
-        await fulfillment(of: [reserved], timeout: 2)
-        XCTAssertFalse(selectionFinished, "The store chooser must await the actual selected snapshot")
-        XCTAssertTrue(session.isBusy)
-        XCTAssertEqual(service.loadCount, 2)
-        service.loadContinuation?.resume(returning: service.value)
-        await refresh.value
-        await selection.value
-        XCTAssertEqual(service.loadCount, 4)
+        // SHOPPING-279: the choice reads local state at once; it never waits for the held read.
+        let stale = service.value
+        await session.reload(storeID: WatchPreviewService.secondStoreID)
         XCTAssertEqual(session.snapshot.selectedStoreID, WatchPreviewService.secondStoreID)
+        XCTAssertEqual(service.loadCount, 3)
+        XCTAssertFalse(session.isBusy)
+        // The held read began before the choice, so it's discarded and reread, never applied.
+        service.loadContinuation?.resume(returning: stale)
+        await refresh.value
+        XCTAssertEqual(session.snapshot.selectedStoreID, WatchPreviewService.secondStoreID)
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(5)
+        while service.loadCount < 4, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(service.loadCount, 4)
         XCTAssertEqual(service.requestedStores.last, WatchPreviewService.secondStoreID)
+        XCTAssertEqual(session.snapshot.selectedStoreID, WatchPreviewService.secondStoreID)
         XCTAssertFalse(session.isBusy)
     }
 

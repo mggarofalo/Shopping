@@ -142,6 +142,7 @@ final class ShoppingAppearanceUITests: XCTestCase {
                 .appendingPathComponent("CompactTables-\(UUID().uuidString).sqlite").path
             app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = "populated"
             app.launchEnvironment["SHOPPING_UI_TEST_PERSONAL_CART"] = "1"
+            app.launchEnvironment["SHOPPING_UI_TEST_HOLD_TOASTS"] = "1"
             app.launchArguments = ["-UIPreferredContentSizeCategoryName", size, "-shopping.appearance", appearance]
             app.launch()
             XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))
@@ -222,8 +223,12 @@ final class ShoppingAppearanceUITests: XCTestCase {
             XCTAssertTrue(cartRow.isHittable)
             XCTAssertGreaterThanOrEqual(cartRow.frame.height, 44)
             XCTAssertTrue(app.staticTexts["Produce"].exists)
-            XCTAssertTrue(app.staticTexts["Bananas moved to In cart."].waitForNonExistence(timeout: 5))
-            XCTAssertTrue(app.buttons["Check out"].isHittable)
+            let toast = app.otherElements.matching(identifier: "shopping.toast.host")
+                .containing(.staticText, identifier: "shopping.feedback.message").firstMatch
+            XCTAssertTrue(toast.staticTexts["Bananas moved to In cart."].exists)
+            let checkout = app.buttons["shopping.personalCart.checkout"]
+            XCTAssertTrue(checkout.isHittable)
+            XCTAssertLessThanOrEqual(toast.frame.maxY, checkout.frame.minY)
             attach("Compact personal cart \(appearance) \(size)", app)
             app.terminate()
         }

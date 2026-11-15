@@ -2,41 +2,56 @@ import CoreData
 
 /// Deferral affects advisory household presence only. The private causal command
 /// is always saved before returning and remains recoverable by resumePending().
+/// Deferred callers mark the need dirty in a PersonalCartPresencePublisher.
 enum PersonalCartPresencePolicy: Sendable {
     case immediate
     case deferred
 }
 
+/// A command's own durable result, read in its writer transaction, so a caller
+/// can show it without waiting for a later full read. A nil entry means the need
+/// is not in this shopper's cart.
+struct PersonalCartReceipt: Equatable, Sendable {
+    let needID: UUID
+    let entry: PersonalCartEntrySnapshot?
+}
+
 extension PersonalCartService {
-    func cart(needID: UUID, householdID: UUID, listID: UUID, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws {
+    @discardableResult
+    func cart(needID: UUID, householdID: UUID, listID: UUID, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
         try add(needID: needID, householdID: householdID, listID: listID, quantityOverride: nil, expectedStoreID: nil, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    func cart(needID: UUID, householdID: UUID, listID: UUID, initialQuantity: Int64?, expectedStoreID: UUID? = nil, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws {
+    @discardableResult
+    func cart(needID: UUID, householdID: UUID, listID: UUID, initialQuantity: Int64?, expectedStoreID: UUID? = nil, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
         if let initialQuantity, !(1...99).contains(initialQuantity) { throw PersonalCartError.invalidQuantity }
-        try add(needID: needID, householdID: householdID, listID: listID, quantityOverride: .some(initialQuantity), expectedStoreID: expectedStoreID, operationID: operationID, presencePolicy: presencePolicy)
+        return try add(needID: needID, householdID: householdID, listID: listID, quantityOverride: .some(initialQuantity), expectedStoreID: expectedStoreID, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    private func add(needID: UUID, householdID: UUID, listID: UUID, quantityOverride: Int64??, expectedStoreID: UUID?, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws {
+    private func add(needID: UUID, householdID: UUID, listID: UUID, quantityOverride: Int64??, expectedStoreID: UUID?, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws -> PersonalCartReceipt {
         let command: PersonalCartCommand
         if let quantity = quantityOverride {
             command = .cartWithQuantity(needID: needID, householdID: householdID, listID: listID, quantity: quantity, expectedStoreID: expectedStoreID)
         } else {
             command = .cart(needID: needID, householdID: householdID, listID: listID)
         }
-        try transact { repository in
-            if try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) != nil { return }
+        let receipt = try transact { repository -> PersonalCartReceipt in
+            if try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) != nil {
+                return try self.receipt(for: needID, householdID: householdID, listID: listID, repository)
+            }
             let home = try repository.household(householdID)
-            let native = try repository.nativeCommandAccess(for: home)
-            guard native != .readOnly, native != .lost else { throw PersonalCartError.quarantined }
             let access = try repository.homeEffectAccess(householdID: householdID, listID: listID)
+            let native = repository.ledgerNativeCommandAccess(for: home, access: access)
+            guard native != .readOnly, native != .lost else { throw PersonalCartError.quarantined }
             let authority = access.capturedAuthority
             guard access.permitsPublication(authority) else { throw PersonalCartError.quarantined }
-            let existing = try self.entries(householdID: householdID, listID: listID, repository: repository)
+            // Membership is private: a half-imported shared record degrades only its
+            // own household projection, never this command.
+            let existing = try self.displayEntries(householdID: householdID, listID: listID, repository: repository)
             if existing.contains(where: { $0.needID == needID }) {
                 try repository.insert(id: operationID, kind: "cart", command: command,
                                       value: PersonalCartCommandResult(edit: nil, skipped: false))
-                return
+                return try self.receipt(for: needID, householdID: householdID, listID: listID, repository)
             }
             guard let need = try repository.need(needID, householdID: householdID, listID: listID), !need.archived else {
                 throw PersonalCartError.unavailable
@@ -52,35 +67,39 @@ extension PersonalCartService {
                       PersonalCartSnapshotBuilder.eligible(snapshot, storeID: expectedStoreID),
                       try !PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: householdID,
                         persistence: self.persistence, in: repository.context, session: repository.session).contains(needID) else { throw PersonalCartError.staleEntry }
-                if let cloud = self.persistence.container as? NSPersistentCloudKitContainer,
-                   !cloud.canUpdateRecord(forManagedObjectWith: household.objectID) { throw PersonalCartError.permissionDenied }
             }
             let edit = PersonalCartEdit(id: operationID, action: .add, snapshot: snapshot, ancestors: ancestors)
             try repository.insert(id: operationID, kind: "cart", command: command,
                                   value: PersonalCartCommandResult(edit: edit, skipped: false))
+            return try self.receipt(for: needID, householdID: householdID, listID: listID, repository)
         }
-        if presencePolicy == .immediate { try? republishPresence() }
+        if presencePolicy == .immediate { republishPresence(each: [needID]) }
+        return receipt
     }
 
-    func uncart(_ token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws {
+    @discardableResult
+    func uncart(_ token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
         try change(token, quantity: nil, removing: true, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    func setQuantity(_ quantity: Int64?, token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws {
+    @discardableResult
+    func setQuantity(_ quantity: Int64?, token: PersonalCartEntryToken, operationID: UUID = UUID(), presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCartReceipt {
         if let quantity, !(1...99).contains(quantity) { throw PersonalCartError.invalidQuantity }
-        try change(token, quantity: quantity, removing: false, operationID: operationID, presencePolicy: presencePolicy)
+        return try change(token, quantity: quantity, removing: false, operationID: operationID, presencePolicy: presencePolicy)
     }
 
-    private func change(_ token: PersonalCartEntryToken, quantity: Int64?, removing: Bool, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws {
+    private func change(_ token: PersonalCartEntryToken, quantity: Int64?, removing: Bool, operationID: UUID, presencePolicy: PersonalCartPresencePolicy) throws -> PersonalCartReceipt {
         let command: PersonalCartCommand = removing ? .uncart(token) : .quantity(token, quantity)
-        let skipped = try transact { repository -> Bool in
+        let receipt = try transact { repository -> PersonalCartReceipt? in
             guard token.accountBinding == repository.session.accountBinding else { throw PersonalCartError.accountChanged }
-            if let replay = try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) { return replay.skipped }
+            if let replay = try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) {
+                return replay.skipped ? nil : try self.receipt(for: token.needID, householdID: token.householdID, listID: token.listID, repository)
+            }
             let current = try self.entries(householdID: token.householdID, listID: token.listID, repository: repository, includeShared: false)
             guard let entry = current.first(where: { $0.token == token }) else {
                 try repository.insert(id: operationID, kind: "cart", command: command,
                                       value: PersonalCartCommandResult(edit: nil, skipped: true))
-                return true
+                return nil
             }
             // An explicit same-value quantity is still a causal edit: another
             // replica may concurrently change the quantity from this token.
@@ -101,9 +120,16 @@ extension PersonalCartService {
                                         snapshot: updated, ancestors: token.evidence)
             try repository.insert(id: operationID, kind: "cart", command: command,
                                   value: PersonalCartCommandResult(edit: edit, skipped: false))
-            return false
+            return try self.receipt(for: token.needID, householdID: token.householdID, listID: token.listID, repository)
         }
-        if skipped { throw PersonalCartError.staleEntry }
-        if presencePolicy == .immediate { try? republishPresence() }
+        guard let receipt else { throw PersonalCartError.staleEntry }
+        if presencePolicy == .immediate { republishPresence(each: [token.needID]) }
+        return receipt
+    }
+
+    private func receipt(for needID: UUID, householdID: UUID, listID: UUID,
+                         _ repository: PersonalCartRepository) throws -> PersonalCartReceipt {
+        PersonalCartReceipt(needID: needID, entry: try displayEntries(householdID: householdID, listID: listID,
+            repository: repository).first { $0.needID == needID })
     }
 }

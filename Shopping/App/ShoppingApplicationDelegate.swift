@@ -15,9 +15,7 @@ final class ShoppingApplicationDelegate: NSObject, UIApplicationDelegate {
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
         UITestRuntimeMetadata.install(environment: environment)
-        guard environment["SHOPPING_UI_TEST_STORE_PATH"] == nil,
-              environment["SHOPPING_UI_TEST_PERSISTENCE_FAILURE"] == nil,
-              environment["XCTestConfigurationFilePath"] == nil else { return true }
+        guard !TestHostEnvironment.isActive(environment) else { return true }
         #endif
         // Silent CloudKit delivery does not request permission for visible alerts.
         application.registerForRemoteNotifications()

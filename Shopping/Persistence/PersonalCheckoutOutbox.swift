@@ -75,6 +75,14 @@ extension PersonalCartService {
         }
     }
 
+    /// Publishes each need on its own, so a failure keeps only that need dirty.
+    /// Returns the needs that are settled: published, or held back by home access,
+    /// which resumePending() republishes once access is restored.
+    @discardableResult
+    func republishPresence(each needIDs: Set<UUID>) -> Set<UUID> {
+        needIDs.filter { needID in (try? quarantineUnavailable { try republishPresence(needIDs: [needID]) }) != nil }
+    }
+
     /// Publish only the latest causal state of the changed needs. Errors remain
     /// visible to the caller so its coalescer can retain the dirty IDs. The
     /// persisted private commands let full recovery reconstruct this work after

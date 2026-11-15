@@ -139,8 +139,8 @@ struct HomeSharingStatus: Equatable {
             presentation = .init(symbol: "person.crop.circle.badge.checkmark", title: "iCloud account available",
                 details: "The current account was verified.")
         case .cached:
-            presentation = .init(symbol: "internaldrive", title: "Using saved data",
-                details: "iCloud is temporarily unavailable. Saved data for this account remains on this device; check status when connected.")
+            presentation = .init(symbol: "internaldrive", title: "Using saved account",
+                details: "iCloud could not confirm the account right now. Saved data for this account remains usable on this device; changes sync when iCloud confirms it.")
         case .unavailable:
             presentation = .init(symbol: "exclamationmark.icloud", title: "iCloud account needs attention",
                 details: "The account could not be verified. Check your Apple Account in Settings. Previously saved data is retained.")

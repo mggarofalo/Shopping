@@ -9,7 +9,7 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @StateObject private var navigation = GroceryNavigationState()
-    @StateObject private var toastCenter = ShoppingToastCenter()
+    @StateObject private var toastCenter = ShoppingToastCenter.forLaunch()
 
     var body: some View {
         TabView(selection: $navigation.selectedTab) {
@@ -26,7 +26,7 @@ struct ContentView: View {
         .modifier(ShoppingActionDelivery(router: ShoppingApplicationRuntime.shared.actions, navigation: navigation))
         .tint(.groceryAccent)
         .overlay(alignment: .bottom) {
-            ShoppingToastHost(center: toastCenter)
+            ShoppingToastHost(center: toastCenter, yieldsToScreenHost: true)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 56)
         }

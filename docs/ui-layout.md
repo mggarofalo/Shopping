@@ -50,6 +50,21 @@ Use `ShoppingAddButton` for navigation creation controls, including the grocery 
 
 Selected commands capture IDs/revisions and run through the background management worker. Deletion previews must retain referenced records, skip newer changes and preserve the promised disposition. A changed assignment must not escalate a preview from archive to permanent deletion.
 
+## Primary bottom action
+
+A screen's single primary action at the bottom, such as My cart's Check out, is a `ToolbarItem(placement: .bottomBar)` button with `.borderedProminent` style. Do not build a custom bar in a `safeAreaInset` for it. A pushed screen with a primary bottom action hides the tab bar with `.toolbar(.hidden, for: .tabBar)`, as UIKit's `hidesBottomBarWhenPushed` does; iOS 26 floats the tab bar over a bottom toolbar, which hid Check out under it. The title states the action and its count, as in `Check out (3)`, and the button carries a stable accessibility identifier (`shopping.personalCart.checkout`). Hide the item when there is nothing to act on; disable it only while it is temporarily unavailable. Batch-selection bars in a `safeAreaInset` (Catalog, Stores, Categories, People) are multi-action edit-mode bars, not primary actions, and are unchanged by this rule.
+
+## Toasts
+
+`ShoppingToastCenter` owns transient feedback, and `ShoppingToastHost` renders it as floating cards at the bottom.
+
+- A toast must never cover a bottom toolbar or a bottom safe-area bar. A screen with either applies `shoppingToastHost()` to its content, inside any bottom `safeAreaInset`, so the screen's safe area lifts its toasts above the bar. While a screen host is visible, the app-wide host in `ContentView` yields to it. Other screens use the app-wide host above the tab bar.
+- Only the card takes touches. Tapping the card or swiping it down or sideways dismisses it, and VoiceOver offers a Dismiss action on the message. The card's own action button, such as Undo or Show all, still performs that action. A dismissed card fades where it is. Sliding it down carried its tap target over the tab bar and swallowed the next tab tap.
+- Consecutive actionless toasts of the same kind coalesce: pass a `ShoppingToastCoalescing` key and a counted summary, as cart adds do ("3 items moved to In cart."). The newest toast is replaced and its dismissal window restarts. Toasts with actions never coalesce, because each Undo belongs to one change.
+- The host announces each message, including a coalesced update, so callers do not post a second announcement.
+
+`PersonalCartUITests/testCheckoutStaysHittableBesideDismissibleCoalescedCartToasts` holds toasts with `SHOPPING_UI_TEST_HOLD_TOASTS`, so the timer cannot satisfy the proof. It checks that Checkout is hittable and below a visible toast, that a swipe dismisses the toast, that cart adds coalesce into one toast, and that Checkout is hidden in an empty cart. `ShoppingAppearanceUITests/testCompactGroceryAndPersonalCartTablesAtStandardAndLargeText` repeats the placement check in light mode at Large and in dark mode at AX XXXL.
+
 ## Accent and semantic colors
 
 Use `Color.groceryAccent` or the inherited tint for affirmative actions and selected

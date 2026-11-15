@@ -607,13 +607,20 @@ struct GroceryEditorView: View {
         if !suggestedItems.isEmpty {
             Section {
                 ForEach(suggestedItems, id: \.objectID) { item in
+                    let status = needStatus(item)
+                    let details = catalogSummary(item)
                     VStack(alignment: .leading, spacing: 8) {
                         Button { selectSuggestion(item.id) } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.name)
-                                Text(suggestionSummary(item))
+                                Text(details)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if let needState = status.label {
+                                    Text(needState)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -621,13 +628,13 @@ struct GroceryEditorView: View {
                         .buttonStyle(.borderless)
                         .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .accessibilityLabel(
-                            activeRememberedNeedsByItemID[item.id] == nil
+                            status == .notNeeded
                                 ? "Need again \(item.name)"
                                 : "Edit current \(item.name)"
                         )
-                        .accessibilityValue(suggestionSummary(item))
+                        .accessibilityValue(status.accessibilityValue(details: details))
                         .accessibilityIdentifier(suggestionIdentifier(item))
-                        if activeRememberedNeedsByItemID[item.id].map { personalCart?.contains($0.id) ?? $0.carted } == true {
+                        if status == .inCart {
                             needAgainButton(item)
                         }
                     }
@@ -652,14 +659,8 @@ struct GroceryEditorView: View {
             .accessibilityIdentifier("shopping.grocery.needAgain.\(item.id.uuidString)")
     }
 
-    private func suggestionSummary(_ item: Item) -> String {
-        let status: String
-        if let need = activeRememberedNeedsByItemID[item.id] {
-            status = (personalCart?.contains(need.id) ?? need.carted) ? "In cart" : "On grocery list"
-        } else {
-            status = "Saved in Catalog"
-        }
-        return "\(catalogSummary(item)) · \(status)"
+    private func needStatus(_ item: Item) -> CatalogNeedStatus {
+        CatalogNeedStatus(activeNeed: activeRememberedNeedsByItemID[item.id], personalCart: personalCart)
     }
 
     private func suggestionIdentifier(_ item: Item) -> String {

@@ -35,7 +35,8 @@ extension PersonalCartService {
         }
     }
 
-    func checkout(_ token: PersonalCheckoutToken, buyAnywayReceiptIDs: Set<UUID> = [], operationID: UUID = UUID()) throws -> PersonalCheckoutOutcome {
+    func checkout(_ token: PersonalCheckoutToken, buyAnywayReceiptIDs: Set<UUID> = [], operationID: UUID = UUID(),
+                  presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCheckoutOutcome {
         let command = PersonalCartCommand.checkout(token, buyAnywayReceiptIDs)
         let intent = try transact { repository -> PersonalCheckoutIntent in
             guard repository.session.accountBinding == token.accountBinding else { throw PersonalCartError.accountChanged }
@@ -78,12 +79,13 @@ extension PersonalCartService {
         do { try publishCheckout(id: operationID) }
         catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
         catch is PersistencePermissionError { pending = true }
-        try? republishPresence()
+        if presencePolicy == .immediate { republishPresence(each: intent.accepted) }
         return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: intent.accepted,
             skippedNeedIDs: Set(token.captures.map(\.entry.needID)).subtracting(intent.accepted), pendingPublication: pending)
     }
 
-    func restore(checkoutID: UUID, operationID: UUID = UUID()) throws -> PersonalCheckoutOutcome {
+    func restore(checkoutID: UUID, operationID: UUID = UUID(),
+                 presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCheckoutOutcome {
         let command = PersonalCartCommand.restore(checkoutID)
         let result = try transact { repository -> (PersonalRestoreIntent, Set<UUID>) in
             let checkouts = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
@@ -118,7 +120,7 @@ extension PersonalCartService {
         do { try publishRestore(id: operationID) }
         catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
         catch is PersistencePermissionError { pending = true }
-        try? republishPresence()
+        if presencePolicy == .immediate { republishPresence(each: result.0.restoredNeedIDs) }
         return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: result.0.restoredNeedIDs,
             skippedNeedIDs: result.1.subtracting(result.0.restoredNeedIDs), pendingPublication: pending)
     }

@@ -38,6 +38,8 @@ struct WatchShoppingItem: Identifiable, Equatable {
     var canRemove = false
     var canChangeQuantity = false
     var canBuyAnyway = false
+    /// A cart row checkout captures: nothing to acknowledge or resolve first.
+    var isCheckoutReady: Bool { isInOwnCart && purchasedNotice == nil && unavailableReason == nil }
 
     var accessibilityValue: String {
         [quantity.map { "Quantity \($0)" }, rule?.title,
@@ -86,6 +88,10 @@ struct WatchShoppingSnapshot: Equatable {
 
     var selectedStore: WatchStore? { stores.first { $0.id == selectedStoreID } }
     var cartCount: Int { cartSections.reduce(0) { $0 + $1.items.count } }
+    /// The service's rows decide checkout, so a local receipt keeps it current.
+    var hasCheckoutRows: Bool {
+        selectedStoreID != nil && cartSections.contains { $0.items.contains(where: \.isCheckoutReady) }
+    }
     var cartCountText: String { "\(cartCount) \(cartCount == 1 ? "item" : "items")" }
     func item(id: String) -> WatchShoppingItem? {
         (cartSections + grocerySections).lazy.flatMap(\.items).first { $0.id == id || $0.needID == id }
@@ -96,12 +102,14 @@ struct WatchShoppingSnapshot: Equatable {
     mutating func replaceItem(occurrenceID: String, with item: WatchShoppingItem?, section: WatchItemSection?) {
         grocerySections = Self.removing(occurrenceID, from: grocerySections)
         cartSections = Self.removing(occurrenceID, from: cartSections)
-        guard let item, let section else { return }
-        if item.isInOwnCart {
-            cartSections = Self.inserting(item, in: section, into: cartSections)
-        } else {
-            grocerySections = Self.inserting(item, in: section, into: grocerySections)
+        if let item, let section {
+            if item.isInOwnCart {
+                cartSections = Self.inserting(item, in: section, into: cartSections)
+            } else {
+                grocerySections = Self.inserting(item, in: section, into: grocerySections)
+            }
         }
+        canCheckout = hasCheckoutRows
     }
 
     private static func removing(_ occurrenceID: String, from sections: [WatchItemSection]) -> [WatchItemSection] {

@@ -287,7 +287,8 @@ final class PersonalCartPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testCartMutationIsVisibleUntilBackgroundSnapshotCatchesUp() async throws {
+    /// SHOPPING-277: the command's receipt completes the action; no re-read is needed.
+    func testCartMutationReceiptIsVisibleWhenCommandReturns() async throws {
         let persistence = try PersistenceController(inMemory: true)
         let needs = NeedService(persistence: persistence)
         let scope = try needs.createHousehold()
@@ -302,14 +303,15 @@ final class PersonalCartPresentationTests: XCTestCase {
 
         try await presentation.cart(needID)
         XCTAssertTrue(presentation.contains(needID))
-        XCTAssertTrue(presentation.isCartTransitionPending(needID))
-        try await waitUntil { !presentation.isCartTransitionPending(needID) }
+        XCTAssertFalse(presentation.isCartTransitionPending(needID))
         let entry = try XCTUnwrap(presentation.entries.first)
+        XCTAssertEqual(entry.needID, needID)
         try await presentation.uncart(entry)
         XCTAssertFalse(presentation.contains(needID))
+        XCTAssertFalse(presentation.isCartTransitionPending(needID))
         XCTAssertTrue(presentation.entries.isEmpty)
-        try await waitUntil { !presentation.isCartTransitionPending(needID) }
-        XCTAssertTrue(presentation.entries.isEmpty)
+        try await waitUntil { !presentation.cartedNeedIDs.contains(needID) && presentation.hasLoadedSnapshot }
+        XCTAssertTrue(presentation.entries.isEmpty, "A later read agrees with the receipt")
     }
 
     @MainActor
@@ -352,6 +354,38 @@ final class PersonalCartPresentationTests: XCTestCase {
         try await presentation.setQuantity(3, entry: fresh)
         try await waitUntil { !presentation.isQuantityTransitionPending(first.id) }
         XCTAssertEqual(presentation.entries.first?.quantity, 3)
+    }
+
+    @MainActor
+    func testCatalogNeedStatusTrustsThePersonalCartOverTheLegacyFlag() async throws {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let milkItem = try needs.createItem(name: "Milk", householdID: scope.householdID)
+        let breadItem = try needs.createItem(name: "Bread", householdID: scope.householdID)
+        let milk = try needs.addRememberedNeed(itemID: milkItem, listID: scope.listID, householdID: scope.householdID)
+        let bread = try needs.addRememberedNeed(itemID: breadItem, listID: scope.listID, householdID: scope.householdID)
+        try needs.setNeedCarted(needID: bread, householdID: scope.householdID, listID: scope.listID, carted: true)
+        let provider = FixedSession(session: try ShopperSession.authenticated(
+            containerIdentifier: "iCloud.shopping.presentation-tests", environment: "Development", accountRecordName: "alice"))
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider)
+        try service.cart(needID: milk, householdID: scope.householdID, listID: scope.listID)
+        let presentation = PersonalCartPresentation(service: service, householdID: scope.householdID, listID: scope.listID)
+        try await waitUntil { presentation.contains(milk) }
+
+        let context = persistence.container.viewContext
+        let request = Need.fetchRequest()
+        let needsByID = Dictionary(uniqueKeysWithValues: try context.fetch(request).map { ($0.id, $0) })
+        let milkNeed = try XCTUnwrap(needsByID[milk])
+        let breadNeed = try XCTUnwrap(needsByID[bread])
+
+        XCTAssertEqual(CatalogNeedStatus(activeNeed: milkNeed, personalCart: presentation), .inCart)
+        XCTAssertEqual(CatalogNeedStatus(activeNeed: breadNeed, personalCart: presentation), .onList,
+                       "Another shopper's legacy flag is not this shopper's cart")
+        XCTAssertEqual(CatalogNeedStatus(activeNeed: breadNeed, personalCart: nil), .inCart)
+        XCTAssertEqual(CatalogNeedStatus(activeNeed: nil, personalCart: presentation), .notNeeded)
+        XCTAssertEqual(CatalogNeedStatus.inCart.accessibilityValue(details: "Costco, Publix"), "Costco, Publix · In cart")
+        XCTAssertEqual(CatalogNeedStatus.notNeeded.accessibilityValue(details: "Any Store"), "Any Store")
     }
 
     @MainActor

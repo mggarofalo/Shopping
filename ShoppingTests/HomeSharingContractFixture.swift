@@ -27,14 +27,16 @@ final class HomeSharingContractFixture {
         self.notifications = notifications
     }
 
-    static func make(_ test: XCTestCase, replicatedEvents: Bool = false) async throws -> HomeSharingContractFixture {
+    static func make(_ test: XCTestCase, replicatedEvents: Bool = false,
+        accountStatus: @escaping @Sendable () async throws -> CKAccountStatus = { .available }
+    ) async throws -> HomeSharingContractFixture {
         let lifetime = SQLiteTestFixtureLifetime()
         test.addTeardownBlock { try lifetime.cleanup() }
         let directory = try lifetime.makeDirectory()
         let notifications = NotificationCenter()
         let provider = try ShopperSessionProvider(containerIdentifier: "iCloud.test.sharing-contract",
             environment: "Development", cacheDirectory: directory.appendingPathComponent("account"),
-            lookup: .init(status: { .available }, recordName: { "isolated-owner" }), notifications: notifications)
+            lookup: .init(status: accountStatus, recordName: { "isolated-owner" }), notifications: notifications)
         await provider.refresh()
         let persistence = lifetime.own(try PersistenceController(storeURL: directory.appendingPathComponent("Home.sqlite")))
         let home = try NeedService(persistence: persistence).createHousehold(name: "Contract home")

@@ -118,6 +118,7 @@ struct CartedGroceriesView: View {
             )
         }
         .sheet(item: $checkoutDraft, content: checkoutSheet)
+        .shoppingToastHost()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !visibleCarted.isEmpty {
                 HStack {

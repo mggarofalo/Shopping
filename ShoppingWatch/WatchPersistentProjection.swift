@@ -10,8 +10,19 @@ struct WatchPersistentProjection: Sendable {
     let archivedCategoryIDs: Set<UUID>
     let writable: Bool
 
-    static func read(cart: PersonalCartService, preferredHouseholdID: UUID?,
-                     writable: ((UUID) -> Bool)?) throws -> WatchPersistentProjection? {
+    /// Durable ledger facts plus the last finished native observation. CloudKit share
+    /// metadata, missing share imports and pending or failed verification never
+    /// withdraw access; a finished read-only or lost observation does.
+    static func mayPublish(_ repository: PersonalCartRepository, household: Household?,
+                           scope: PersonalCartScopeSnapshot) -> Bool {
+        guard let household,
+              let access = try? repository.homeEffectAccess(householdID: scope.householdID, listID: scope.listID),
+              access.permitsPublication(access.capturedAuthority) else { return false }
+        let native = try? repository.nativeCommandAccess(for: household)
+        return native != .readOnly && native != .lost
+    }
+
+    static func read(cart: PersonalCartService, preferredHouseholdID: UUID?) throws -> WatchPersistentProjection? {
         let retained = try cart.retainedScopes()
         return try cart.transact(save: false) { repository in
             let households = try repository.context.fetch(Household.fetchRequest())
@@ -40,23 +51,14 @@ struct WatchPersistentProjection: Sendable {
             let stores = (household?.stores ?? []).filter { !$0.isArchived && $0.id != PersistenceModel.unsetID }
                 .sorted { $0.displayOrder == $1.displayOrder ? $0.id.uuidString < $1.id.uuidString : $0.displayOrder < $1.displayOrder }
                 .map { WatchStore(id: $0.id, name: $0.name) }
-            let needs = (household?.groceryList?.needs ?? []).filter { !$0.archived }
-            var mayWrite = household != nil
-            if let household, let cloud = repository.persistence.container as? NSPersistentCloudKitContainer {
-                mayWrite = cloud.canUpdateRecord(forManagedObjectWith: household.objectID)
-            }
-            let retainedAccess = try repository.homeEffectAccess(householdID: scope.householdID, listID: scope.listID)
-            mayWrite = mayWrite && retainedAccess.permitsPublication(retainedAccess.capturedAuthority)
-            if let household, let native = try repository.nativeCommandAccess(for: household) {
-                mayWrite = mayWrite && native != .readOnly && native != .lost
-            }
-            if let writable { mayWrite = mayWrite && writable(scope.householdID) }
+            // A partially imported need has no identity yet; it appears once it arrives.
+            let needs = (household?.groceryList?.needs ?? []).filter { !$0.archived && $0.id != PersistenceModel.unsetID }
             return try WatchPersistentProjection(scope: scope,
                 homeName: presentedNames[scope]?.title ?? household?.name, stores: stores,
                 needs: needs.map { try PersonalCartSnapshotBuilder.make(need: $0, session: repository.session,
                     generation: $0.id, evidence: [], quantity: $0.quantity) },
                 oneTimeIDs: Set(needs.filter { $0.kind == NeedKind.oneTime.rawValue }.map(\.id)),
-                archivedCategoryIDs: Set((household?.categories ?? []).filter(\.isArchived).map(\.id)), writable: mayWrite)
+                archivedCategoryIDs: Set((household?.categories ?? []).filter(\.isArchived).map(\.id)), writable: mayPublish(repository, household: household, scope: scope))
         }
     }
 

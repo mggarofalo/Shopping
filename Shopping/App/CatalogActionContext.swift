@@ -23,9 +23,17 @@ struct CatalogActionContext {
         self.householdID = householdID
         self.listID = listID
         self.storeTimeout = storeTimeout
-        let scope = ready.homeScope?.preferenceNamespace ?? "local:\(householdID):\(listID)"
-        namespace = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+        namespace = Self.namespace(for: ready, householdID: householdID, listID: listID)
     }
+
+    /// Entity identifiers carry the Home, so an identifier never resolves in another Home.
+    /// In-app donations use the same identifiers that Siri resolves (SHOPPING-282).
+    static func namespace(for ready: PersistenceBootstrap.ReadyState, householdID: UUID, listID: UUID) -> String {
+        let scope = ready.homeScope?.preferenceNamespace ?? "local:\(householdID):\(listID)"
+        return SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func entityID(for id: UUID, namespace: String) -> String { namespace + ":" + id.uuidString.lowercased() }
 
     func validate() throws {
         try Task.checkCancellation()
@@ -123,7 +131,7 @@ struct CatalogActionContext {
         return value
     }
 
-    func entityID(for itemID: UUID) -> String { namespace + ":" + itemID.uuidString.lowercased() }
+    func entityID(for itemID: UUID) -> String { Self.entityID(for: itemID, namespace: namespace) }
 
     func createInApp(name: String) throws {
         try validate()
