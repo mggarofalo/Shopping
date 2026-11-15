@@ -17,8 +17,8 @@ final class HomeSharingStatusTests: XCTestCase {
 
     func testAnnouncementsDeduplicateObservationsButAnnounceRecoveryAndRecurrence() {
         var announcements = HomeSharingStatusAnnouncements()
-        XCTAssertNil(announcements.observe(title: "Using saved data"), "Initial screen content is read normally")
-        XCTAssertNil(announcements.observe(title: "Using saved data"), "Repeated activity does not interrupt VoiceOver")
+        XCTAssertNil(announcements.observe(title: "Using saved account"), "Initial screen content is read normally")
+        XCTAssertNil(announcements.observe(title: "Using saved account"), "Repeated activity does not interrupt VoiceOver")
         XCTAssertEqual(announcements.observe(title: "Home access unavailable"), "Home access unavailable")
         XCTAssertNil(announcements.observe(title: "Home access unavailable"))
         XCTAssertEqual(announcements.observe(title: "Recent iCloud activity"), "Recent iCloud activity")
@@ -91,7 +91,7 @@ final class HomeSharingStatusTests: XCTestCase {
         var engine = CloudSyncStatus()
         engine.record(event(.upload, failure: .network))
         let result = status(account: .cached, engine: engine)
-        XCTAssertEqual(result.summary.title, "Using saved data")
+        XCTAssertEqual(result.summary.title, "Using saved account")
         XCTAssertTrue(result.actions.contains(.checkStatus))
         XCTAssertFalse(result.actions.contains(.openSettings))
         XCTAssertTrue(try section(result, .ownedStore).presentation.details.contains("unreachable"))

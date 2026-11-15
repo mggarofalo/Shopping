@@ -196,6 +196,77 @@ every item to groceries; rapid quantity edits and removal surviving a relaunch
 while native verification never answers; and an import of the same shopper's
 phone edits plus a new household item, converging with each item once.
 
+### Account session (SHOPPING-278)
+
+Before 1.6.7, `ShopperSessionProvider.refresh()` invalidated the saved account
+binding whenever iCloud answered `couldNotDetermine` or
+`temporarilyUnavailable`, or a lookup failed with anything other than a network
+error. The binding stayed invalidated after relaunch, and the Watch then retired
+its store as an account change. A Watch away from its phone can get exactly
+those answers, so checkout stopped working until the phone came back. The Watch
+also re-asked for the account every 30 seconds while shopping.
+
+Apple's guidance:
+
+- [`CKAccountStatus.temporarilyUnavailable`](https://developer.apple.com/documentation/cloudkit/ckaccountstatus/temporarilyunavailable):
+  "Don’t delete any cached data and don’t enqueue any CloudKit operations after
+  receipt of this account status. Instead, use the CKAccountChanged notification
+  to listen for when the status changes to available."
+- [`CKAccountStatus.couldNotDetermine`](https://developer.apple.com/documentation/cloudkit/ckaccountstatus/couldnotdetermine):
+  "CloudKit can’t determine the status of the user’s iCloud account."
+- [`CKContainer.accountStatus(completionHandler:)`](https://developer.apple.com/documentation/cloudkit/ckcontainer/accountstatus(completionhandler:)):
+  "While your app is running, use the CKAccountChanged notification to detect
+  account changes, and call this method again to determine the status of the
+  new account."
+
+The notification arrives only while the process runs, so both apps also check
+once at launch and each time they become active. Nothing polls.
+
+| Answer | Saved binding | State | Store |
+| --- | --- | --- | --- |
+| `available`, same account | kept | `.ready` | kept |
+| `available`, different account | replaced | `.ready` (new) | old one retired, kept on disk |
+| `noAccount`, `restricted` | invalidated | `.setupRequired` | retired |
+| `couldNotDetermine`, `temporarilyUnavailable` | kept | `.cached` | kept |
+| Network, server or authentication error | kept | `.cached` | kept |
+| Malformed identity (`invalidIdentity`) | kept | `.setupRequired` | retired until a good answer |
+| `CKAccountChanged` | kept | `.ready` becomes `.cached`, then re-check | decided by the re-check |
+
+Without a usable saved binding, the indeterminate answers give
+`.temporarilyUnavailable`, as before. A `.cached` session runs every local
+command. Background CloudKit work (native access, share associations) may still
+fail, and it retries as usual. Sync details say "Using saved account"; this is
+never an alert. The wrong-account guard is unchanged: each account's store
+directory is named by its `accountBinding`, and every transaction rechecks the
+current session before writing.
+
+Switching iCloud accounts passes through sign-out, and `noAccount` is
+definitive. A re-check after `CKAccountChanged` that is still indeterminate
+therefore keeps the saved account, as Apple directs for `temporarilyUnavailable`.
+A verified lookup for a different account invalidates the old binding even when
+the new one can't be saved.
+
+`WatchPersistenceBootstrap.checkAccount()` coalesces the launch check and the
+activation check (`WKApplication.didBecomeActiveNotification`), so a second
+check can't discard the first one's answer. A Watch that launched with no saved
+account and no answer waits for the next activation or `CKAccountChanged`; the
+60-second local reread doesn't ask iCloud. If `CKAccountChanged` supersedes that
+launch check, the first load can fail once; the newer check's answer then
+reloads through `onDataChanged`. On iPhone, `PersistenceBootstrap` already checks when it
+opens the personal store and in `applicationDidEnterForeground()`.
+
+`ShopperSessionProviderTests` covers every `CKAccountStatus` value and each
+error class (including a rejected identity), on cached and uncached state,
+launch after a transient answer, transient answers after verification and after
+an in-session sign-out, and `CKAccountChanged` to the same account, another
+account, sign-out and an indeterminate answer, and a different account whose
+binding can't be saved.
+
+Each answer is logged under the app's bundle identifier, category `Account`
+(`Account lookup:`, `Account lookup failed:` with error domain and code,
+`Account state:`, `CKAccountChanged: re-checking`). Logs never include the
+account record name or binding.
+
 ### A participant's own checkout (SHOPPING-273)
 
 Two rules decide whether a checkout fulfills a need:

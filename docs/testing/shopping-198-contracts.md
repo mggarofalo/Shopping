@@ -62,7 +62,7 @@ were corrected without changing product behavior. Those artifacts are retained a
 | `testUnobservedSaveOutcomeRemainsSubmittedAfterReopenWithoutAnotherWrite` | Unobserved application never authorizes duplicate membership submission. |
 | `testAcceptedMembershipRetiresPendingJournalAndAllowsDistinctNextInvitation` | Server acceptance retires outgoing recovery and allows a fresh participant. |
 | `testAuthorityRetirementAtSubmissionBoundaryPreventsWriteAndKeepsPreparedIntent` | Retiring the screen at external submission prevents writes. |
-| `testAccountInvalidationAtSubmissionBoundaryPreventsWriteAndKeepsPreparedIntent` | Invalidating the account at external submission prevents writes. |
+| `testAccountChangeAtSubmissionBoundaryPreventsUnverifiedWriteAndKeepsPreparedIntent` | A CKAccountChanged at external submission leaves the account unverified until its re-check answers, which prevents writes (SHOPPING-278). |
 | `testPermissionLossWithholdsInviteAndCannotSubmitAgainstEarlierSnapshot` | Fresh permission loss rejects an earlier owner snapshot before submission. |
 
 The backend contract methods own create/association state, version conflicts, lost

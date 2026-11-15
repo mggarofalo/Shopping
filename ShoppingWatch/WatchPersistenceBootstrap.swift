@@ -1,6 +1,7 @@
 import CloudKit
 import CoreData
 import Foundation
+import WatchKit
 import os
 
 enum WatchPerformanceTrace {
@@ -52,7 +53,9 @@ final class WatchPersistenceBootstrap {
     private var remoteObserver: PersistentHistoryObserver?
     private var associationObserver: NSObjectProtocol?
     private var shareObserver: NSObjectProtocol?
-    private var lastRefresh: Date?
+    private var activationObserver: NSObjectProtocol?
+    private var accountCheck: Task<Void, Never>?
+    private var accountChecked = false
     private var authorityGeneration = 0
     private var accessRefreshID: UUID?
     private var detachmentError: Error?
@@ -81,6 +84,12 @@ final class WatchPersistenceBootstrap {
             guard let metadata = notification.userInfo?["metadata"] as? CKShare.Metadata else { return }
             Task { @MainActor in await self?.accept(metadata) }
         }
+        // Launch and foreground are the only scheduled account checks. While running,
+        // the provider re-checks on CKAccountChanged.
+        activationObserver = NotificationCenter.default.addObserver(forName: WKApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.checkAccount() }
+        }
     }
 
     deinit {
@@ -88,6 +97,7 @@ final class WatchPersistenceBootstrap {
         remoteObserver = nil
         if let associationObserver { NotificationCenter.default.removeObserver(associationObserver) }
         if let shareObserver { NotificationCenter.default.removeObserver(shareObserver) }
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
     }
 
     var accountStatusMessage: String? {
@@ -100,7 +110,7 @@ final class WatchPersistenceBootstrap {
     func syncStatus(additionalMessage: String? = nil) -> WatchSyncStatus {
         var messages = [additionalMessage, syncMessage, accessMessage, associationStatus.message].compactMap { $0 }
         if case .cached = provider.state {
-            messages.append("Using saved data. Changes sync when a connection returns.")
+            messages.append(WatchAssociationStatus.savedAccountMessage)
         }
         return WatchSyncStatus(cloud: cloudSync.status, attentionMessages: messages)
     }
@@ -121,13 +131,11 @@ final class WatchPersistenceBootstrap {
             }
             self.retirement = nil
         }
+        // An already resolved replica never waits for a network round trip to shop. An unresolved one
+        // waits for the launch check only; later answers arrive on activation or CKAccountChanged.
         if (try? provider.currentSession()) == nil {
-            lastRefresh = Date()
-            await provider.refresh()
-        } else if lastRefresh == nil || Date().timeIntervalSince(lastRefresh!) > 30 {
-            lastRefresh = Date()
-            // An already authenticated replica never waits for a network round trip to shop.
-            Task { [provider] in await provider.refresh() }
+            if let accountCheck { await accountCheck.value }
+            else if !accountChecked { await checkAccount().value }
         }
         let session = try provider.currentSession()
         if let current, session.accountBinding == binding { return current }
@@ -184,9 +192,26 @@ final class WatchPersistenceBootstrap {
         return runtime
     }
 
+    /// Coalesces launch and activation checks so a second check cannot discard the first.
+    @discardableResult
+    private func checkAccount() -> Task<Void, Never> {
+        if let accountCheck { return accountCheck }
+        accountChecked = true
+        let check = Task { [weak self, provider] in
+            await provider.refresh()
+            self?.accountCheck = nil
+        }
+        accountCheck = check
+        return check
+    }
+
     private func accountChanged() {
         let next = try? provider.currentSession().accountBinding
-        guard binding != nil else { return }
+        guard binding != nil else {
+            // No store is attached yet, so a resolved account needs a reload to open one.
+            if next != nil { onDataChanged?() }
+            return
+        }
         guard next != binding else {
             if case .ready = provider.state { refreshHomeAccess() }
             return
@@ -204,7 +229,6 @@ final class WatchPersistenceBootstrap {
         let previous = current
         current = nil
         binding = nil
-        lastRefresh = nil
         if let previous {
             retirement = Self.retireStore(previous.persistence)
         }

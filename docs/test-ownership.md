@@ -938,11 +938,16 @@ cart reducers or expanding the quick acceptance selection.
   own independent invitation decisions, explicit selection, late-import stability,
   and return to the original groceries/private cart. Two SQLite stores substitute
   CloudKit attachment; marking import ready is the substituted journal boundary.
-- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityRestoresHomeCartAndDraftButRejectsLateDiscovery`
-  owns A → temporarily unavailable → A through the real account provider,
-  presentation retirement, store detach/reopen, held stale discovery completion,
-  original cart/draft retention and rejection of captured checkout authority.
-  Its held read finishes before detach; only delivery of the value is delayed.
+- `ActiveHomeBootstrapTests.testTemporaryAccountUnavailabilityKeepsMountedHomeCartCheckoutAndDraft`
+  owns A → temporarily unavailable → A through the real account provider
+  (SHOPPING-278): the mounted presentation, stores, draft and captured checkout
+  stay usable on the saved account, sync details say "Using saved account", and
+  foreground re-verification keeps the same presentation.
+  `testAccountStatusNotificationForSameAccountKeepsMountedHomeCartAndDraft`,
+  `testAccountStatusNotificationNetworkFailureKeepsSavedAccountMounted` and
+  `testAccountNotificationDuringReverificationIgnoresLateIdentity` own the
+  CKAccountChanged re-check: no retirement for the same account or an
+  indeterminate answer, and a late answer never replaces a newer one.
 - `ActiveHomeBootstrapTests.testTwoHomesRequireChoiceAndSwitchRetiresCapturedCommands`
   now also owns checkout capture and editor lease retirement across a home switch,
   absence of unintended history, and restoration of the original cart/draft.
@@ -1768,11 +1773,12 @@ while offline and retires it on verification before returning to A.
 owns the imported-ready automatic activation path with native verification held,
 a prior selected home, cold return, and a later explicit Open.
 `testColdInvalidatedAccountRetiresReadyInvitationBeforeSameAccountVerification`
-owns the interrupted provider invalidation before any inbox write, including
+owns the interrupted provider invalidation (a sign-out) before any inbox write, including
 the same account being freshly verified on restart.
-`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityAcrossFastReverificationAndSignOut`
-owns the exact outgoing identity carried by account-change and sign-out events
-even if the provider resolves again before Bootstrap handles the event.
+`ShopperSessionProviderTests.testTypedAccountEventsCaptureOutgoingIdentityOnSignOut`
+and `testObservedAccountChangeToSignedOutInvalidatesAndSurvivesRelaunch` own the
+exact outgoing identity carried by sign-out events. Since SHOPPING-278,
+CKAccountChanged announces no invalidation; only a definitive answer does.
 `testInterruptedCopyAfterAccountChangeCompletesWithoutRearmingOldSelection`
 owns the separate conversion-command versus navigation-intent result: A's copy
 recovers after B without selecting it over A's saved home. These isolated stores
@@ -1863,11 +1869,10 @@ through the same selection command so reaffirmation is recorded.
 holds account verification before the copy journal is prepared, accepts a newer
 invitation, then drains the copy consumer. The copy may commit, but its older
 navigation choice must not be installed after the newer invitation arrives.
-`testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
-holds that same lookup across an exact CloudKit account invalidation and a fresh
-verification of the same account. It waits for the actual in-flight approval to
-retire before releasing the old lookup; a committed copy must leave the prior
-account home selected. The preparation task and copy consumer have bounded
+`testSameAccountChangeNotificationDuringCopyLookupKeepsCopyApproval`
+holds that same lookup across a CKAccountChanged re-check of the same account.
+Since SHOPPING-278 that notification is not an invalidation, so the in-flight
+approval survives and the committed copy opens as an uninterrupted copy does. The preparation task and copy consumer have bounded
 completion checks before fixture cleanup.
 The existing account-change copy test continues to own the different-account
 deferral rule. CI coverage passed its app and domain gates; no baseline changed.
@@ -2034,7 +2039,7 @@ assertions passed. Full result, logs and summaries are retained under
 `/tmp/shopping-phase24-ci-summary-37050761193`.
 
 `testAcceptedInvitationDuringCopyAccountLookupCannotBeOverwrittenByLateCopyIntent`
-and `testAccountInvalidationDuringCopyLookupDoesNotRearmOpenAfterSameAccountVerification`
+and `testSameAccountChangeNotificationDuringCopyLookupKeepsCopyApproval`
 remain the proof owners for newer navigation intent during held account lookup.
 The owned conversion-consumer chain does not own a later startup/history
 request that supersedes its discovery. These tests now separately observe the

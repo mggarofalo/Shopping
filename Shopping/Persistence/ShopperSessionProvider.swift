@@ -1,6 +1,7 @@
 import CloudKit
 import CryptoKit
 import Foundation
+import os
 
 extension Notification.Name {
     static let shopperSessionDidChange = Notification.Name("ShoppingShopperSessionDidChange")
@@ -19,11 +20,27 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
         let invalidated: Bool
     }
 
+    // Only `signedOut` and an authenticated different binding are definitive account answers.
+    // Apple: for temporarilyUnavailable, "Don't delete any cached data"; wait for CKAccountChanged.
     private enum Resolution {
         case authenticated(ShopperSession)
-        case unavailable(ShopperSessionError)
-        case failed(Error)
+        case signedOut(ShopperSessionError)
+        case indeterminate(String)
+        case rejected(ShopperSessionError)
+
+        var logDescription: String {
+            switch self {
+            case .authenticated: return "available"
+            case .signedOut(let reason): return "definitive \(reason.rawValue)"
+            case .indeterminate: return "indeterminate"
+            case .rejected(let reason): return "rejected \(reason.rawValue)"
+            }
+        }
     }
+
+    // One line per answer, for device diagnosis (SHOPPING-122). Never logs the account record name.
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.mggarofalo.shopping",
+        category: "Account")
 
     private let lock = NSLock()
     private let lookup: AccountLookup
@@ -134,15 +151,22 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
                     containerIdentifier: containerIdentifier, environment: environment,
                     accountRecordName: recordName
                 ))
-            case .noAccount: resolution = .unavailable(.noAccount)
-            case .restricted: resolution = .unavailable(.restricted)
+            case .noAccount: resolution = .signedOut(.noAccount)
+            case .restricted: resolution = .signedOut(.restricted)
             case .couldNotDetermine, .temporarilyUnavailable:
-                resolution = .unavailable(.temporarilyUnavailable)
-            @unknown default: resolution = .unavailable(.temporarilyUnavailable)
+                resolution = .indeterminate(ShopperSessionError.temporarilyUnavailable.localizedDescription)
+            @unknown default:
+                resolution = .indeterminate(ShopperSessionError.temporarilyUnavailable.localizedDescription)
             }
+        } catch let reason as ShopperSessionError {
+            resolution = .rejected(reason)
         } catch {
-            resolution = .failed(error)
+            // Network, server and authentication failures say nothing about which account is signed in.
+            let failure = error as NSError
+            Self.log.notice("Account lookup failed: \(failure.domain, privacy: .public) \(failure.code, privacy: .public)")
+            resolution = .indeterminate(error.localizedDescription)
         }
+        Self.log.notice("Account lookup: \(resolution.logDescription, privacy: .public)")
         let change: (state: ShopperSessionState, invalidatedSession: ShopperSession?)? = lock.withLock {
             guard generation == requestGeneration else { return nil }
             let outgoingSession = cachedBinding?.session
@@ -154,23 +178,21 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
                     cachedBinding = binding
                     storedState = .ready(session)
                 } catch {
+                    // A different account is still a definitive answer, even when its binding can't be saved.
+                    if outgoingSession != session { invalidateCache() }
                     storedState = .setupRequired(.cacheUnavailable)
                 }
-            case .unavailable(let reason):
+            case .signedOut(let reason):
                 invalidateCache()
-                storedState = reason == .temporarilyUnavailable
-                    ? .temporarilyUnavailable(reason.localizedDescription) : .setupRequired(reason)
-            case .failed(let error):
-                if Self.isNetworkUnavailable(error), let cachedBinding, !cachedBinding.invalidated {
+                storedState = .setupRequired(reason)
+            case .indeterminate(let message):
+                if let cachedBinding, !cachedBinding.invalidated {
                     storedState = .cached(cachedBinding.session)
-                } else if let reason = error as? ShopperSessionError {
-                    invalidateCache()
-                    storedState = .setupRequired(reason)
                 } else {
-                    // A server/configuration/authentication failure is not evidence of offline identity.
-                    invalidateCache()
-                    storedState = .temporarilyUnavailable(error.localizedDescription)
+                    storedState = .temporarilyUnavailable(message)
                 }
+            case .rejected(let reason):
+                storedState = .setupRequired(reason)
             }
             let invalidatedSession: ShopperSession?
             switch storedState {
@@ -181,18 +203,26 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
             }
             return (storedState, invalidatedSession)
         }
-        if let change { announce(change.state, invalidatedSession: change.invalidatedSession) }
+        guard let change else {
+            Self.log.notice("Account lookup superseded by a newer check")
+            return
+        }
+        Self.log.notice("Account state: \(change.state.logDescription, privacy: .public)")
+        announce(change.state, invalidatedSession: change.invalidatedSession)
     }
 
+    // CKAccountChanged is a prompt to re-check, not an answer. The binding stays usable but
+    // unverified until the lookup is definitive; commands recheck the binding before writing.
     private func accountDidChange() {
-        let (newState, invalidatedSession): (ShopperSessionState, ShopperSession?) = lock.withLock {
-            let invalidatedSession = cachedBinding?.session
+        let unverified: ShopperSessionState? = lock.withLock {
             generation &+= 1 // Ignore any in-flight response from the previous account.
-            invalidateCache()
-            storedState = .accountChanged
-            return (storedState, invalidatedSession)
+            guard case .ready(let session) = storedState else { return nil }
+            storedState = .cached(session)
+            return storedState
         }
-        announce(newState, invalidatedSession: invalidatedSession)
+        Self.log.notice("CKAccountChanged: re-checking")
+        if let unverified { announce(unverified) }
+        Task { [weak self] in await self?.refresh() }
     }
 
     // Called only with the lock held. The cache is a pointer, never the grocery database.
@@ -225,9 +255,18 @@ final class ShopperSessionProvider: ShopperSessionProviding, @unchecked Sendable
             throw ShopperSessionError.invalidConfiguration
         }
     }
+}
 
-    private static func isNetworkUnavailable(_ error: Error) -> Bool {
-        guard let cloudError = error as? CKError else { return false }
-        return cloudError.code == .networkUnavailable || cloudError.code == .networkFailure
+private extension ShopperSessionState {
+    // Names the state only; bindings stay out of device logs.
+    var logDescription: String {
+        switch self {
+        case .unresolved: return "unresolved"
+        case .ready: return "ready"
+        case .cached: return "cached (using saved account)"
+        case .setupRequired(let reason): return "setup required: \(reason.rawValue)"
+        case .temporarilyUnavailable: return "temporarily unavailable"
+        case .accountChanged: return "account changed"
+        }
     }
 }

@@ -33,7 +33,7 @@ final class WatchAssociationStatusTests: XCTestCase {
         var cloud = CloudSyncStatus()
         cloud.record(.init(store: "private", operation: .upload, started: .distantPast, ended: Date(), failure: .quota))
         XCTAssertEqual(status.projectedMessage(cloudStatus: cloud, cachedAccount: false, otherMessage: invitation), cloud.message)
-        XCTAssertTrue(status.projectedMessage(cloudStatus: .init(), cachedAccount: true, otherMessage: invitation).contains("Using saved data"))
+        XCTAssertTrue(status.projectedMessage(cloudStatus: .init(), cachedAccount: true, otherMessage: invitation).contains("Using saved account"))
     }
 
     func testPrivateCloudSuccessDoesNotClearGenuineAssociationFailure() async {
