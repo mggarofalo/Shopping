@@ -16,7 +16,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(session.snapshot.grocerySections.flatMap(\.items).contains { $0.id == "bananas" })
         let row = try XCTUnwrap(session.snapshot.item(id: "bananas"))
         XCTAssertTrue(row.isInOwnCart)
-        XCTAssertTrue(row.isPendingAdd)
+        XCTAssertTrue(row.isSavePending)
         XCTAssertEqual(row.quantity, 6)
         XCTAssertTrue(row.canRemove && row.canChangeQuantity)
         XCTAssertFalse(row.canBuyAnyway)
@@ -33,7 +33,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertTrue(success)
         XCTAssertEqual(session.snapshot, service.value)
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.id, "saved-membership")
-        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isPendingAdd ?? true)
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isSavePending ?? true)
     }
 
     func testOlderHeldRefreshCannotUndoOptimisticAddOrDuplicateExistingMembership() async throws {
@@ -62,7 +62,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         await refresh.value
         XCTAssertEqual(model.snapshot.cartCount, 2)
         XCTAssertEqual(model.snapshot.item(id: "bananas")?.quantity, 4)
-        XCTAssertTrue(model.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertTrue(model.snapshot.item(id: "bananas")?.isSavePending ?? false)
         service.value = existing
         let coalesced = expectation(description: "Coalesced import read")
         service.onLoad = { if service.loadCount == 3 { coalesced.fulfill() } }
@@ -99,7 +99,7 @@ final class WatchShoppingSessionTests: XCTestCase {
             for name in names {
                 let row = try XCTUnwrap(session.snapshot.item(id: name))
                 XCTAssertTrue(session.add(row, quantity: 1), "\(name) of \(count) accepted")
-                XCTAssertTrue(session.snapshot.item(id: name)?.isPendingAdd ?? false, "\(name) of \(count) shown")
+                XCTAssertTrue(session.snapshot.item(id: name)?.isSavePending ?? false, "\(name) of \(count) shown")
             }
             await fulfillment(of: [started], timeout: 2)
             XCTAssertEqual(session.snapshot.cartCount, count + 1)
@@ -113,7 +113,7 @@ final class WatchShoppingSessionTests: XCTestCase {
             await fulfillment(of: [drained], timeout: 2)
             XCTAssertEqual(service.commands, names.map { .add(token: $0, quantity: 1) }, "Each Add once, in tap order")
             XCTAssertEqual(session.snapshot.cartCount, count + 1)
-            XCTAssertTrue(session.snapshot.cartSections.flatMap(\.items).allSatisfy { !$0.isPendingAdd })
+            XCTAssertTrue(session.snapshot.cartSections.flatMap(\.items).allSatisfy { !$0.isSavePending })
             XCTAssertNil(session.errorMessage)
         }
     }
@@ -152,7 +152,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertTrue(failed.canAdd)
         session.acknowledgeError()
         XCTAssertTrue(session.add(failed, quantity: nil), "The failed item can be added again")
-        XCTAssertTrue(session.snapshot.item(id: "item-2")?.isPendingAdd ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "item-2")?.isSavePending ?? false)
     }
 
     func testAddFromRowRenderedBeforeTokenRefreshIsShownOnceWithCurrentToken() async throws {
@@ -169,7 +169,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         service.commitHandler = { _ in try await withCheckedThrowingContinuation { held = $0; started.fulfill() } }
         XCTAssertTrue(session.add(rendered, quantity: 3))
         let row = try XCTUnwrap(session.snapshot.item(id: "bananas"))
-        XCTAssertTrue(row.isInOwnCart && row.isPendingAdd, "The tap is shown immediately")
+        XCTAssertTrue(row.isInOwnCart && row.isSavePending, "The tap is shown immediately")
         XCTAssertEqual(row.quantity, 3)
         XCTAssertFalse(session.snapshot.grocerySections.flatMap(\.items).contains { $0.occurrenceID == "bananas" })
         XCTAssertFalse(session.add(rendered, quantity: 3), "A repeat tap from the same stale row is idempotent")
@@ -200,7 +200,7 @@ final class WatchShoppingSessionTests: XCTestCase {
             return .item(occurrenceID: "bananas", item: saved)
         }
         XCTAssertTrue(session.add(rendered, quantity: 3))
-        try await waitUntil { session.snapshot.item(id: "bananas").map { $0.isInOwnCart && !$0.isPendingAdd } ?? false }
+        try await waitUntil { session.snapshot.item(id: "bananas").map { $0.isInOwnCart && !$0.isSavePending } ?? false }
         XCTAssertTrue(session.remove(try XCTUnwrap(session.snapshot.item(id: "bananas"))))
         try await waitUntil { session.snapshot.item(id: "bananas")?.commandToken == "bananas-grocery" }
         XCTAssertFalse(session.snapshot.item(id: "bananas")?.isInOwnCart ?? true, "The removal receipt restores groceries")
@@ -238,7 +238,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(rendered.commandToken, "bananas", "A pending row carries its Add token")
         held?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "bananas-saved", quantity: 3)))
         let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
-        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        while session.snapshot.item(id: "bananas")?.isSavePending ?? false, clock.now < deadline { await Task.yield() }
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.commandToken, "bananas-saved")
         XCTAssertTrue(session.remove(rendered))
         XCTAssertNil(session.snapshot.item(id: "bananas"), "The removal is shown at once")
@@ -263,7 +263,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertTrue(session.add(try XCTUnwrap(session.snapshot.item(id: "bananas")), quantity: 3))
         let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
         let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
-        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        while session.snapshot.item(id: "bananas")?.isSavePending ?? false, clock.now < deadline { await Task.yield() }
         XCTAssertTrue(session.setQuantity(rendered, quantity: 4))
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 4, "The edit is shown at once")
         while service.commands.count < 2, clock.now < deadline { await Task.yield() }
@@ -286,7 +286,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertTrue(session.add(grocery, quantity: 3))
         let rendered = try XCTUnwrap(session.snapshot.item(id: "bananas"))
         let clock = ContinuousClock(), deadline = clock.now + .seconds(2)
-        while session.snapshot.item(id: "bananas")?.isPendingAdd ?? false, clock.now < deadline { await Task.yield() }
+        while session.snapshot.item(id: "bananas")?.isSavePending ?? false, clock.now < deadline { await Task.yield() }
         var refreshed = service.value
         refreshed.grocerySections = refreshed.grocerySections.compactMap { section in
             var section = section
@@ -366,7 +366,7 @@ final class WatchShoppingSessionTests: XCTestCase {
             if case .setQuantity = following {
                 XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 5, "The later quantity was accepted before the receipt failed")
             } else {
-                XCTAssertNil(session.snapshot.item(id: "bananas"), "The later removal was accepted before the receipt failed")
+                assertReturnedToList(session, "bananas", "The later removal was accepted before the receipt failed")
             }
             service.value = savedBananas(service.value, quantity: 1)
             service.commandContinuation?.resume(throwing: NSError(domain: "Receipt read failed", code: 1))
@@ -432,7 +432,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         let reserved = expectation(description: "Following removal accepted")
         let removing = Task { reserved.fulfill(); return await session.perform(.remove(token: "bananas")) }
         await fulfillment(of: [reserved], timeout: 2)
-        XCTAssertNil(session.snapshot.item(id: "bananas"))
+        assertReturnedToList(session, "bananas")
         service.value = savedBananas(service.value, quantity: 1)
         service.failLoad = true
         service.commandContinuation?.resume(throwing: NSError(domain: "Receipt read failed", code: 1))
@@ -532,7 +532,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         service.commandStarted = { started.fulfill() }
         let task = Task { await session.perform(.add(token: "bananas", quantity: 99)) }
         await fulfillment(of: [started], timeout: 2)
-        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isSavePending ?? false)
         let saved = savedBananas(service.value, quantity: 99)
         service.value = saved
         service.commandContinuation?.resume(returning: saved)
@@ -604,12 +604,12 @@ final class WatchShoppingSessionTests: XCTestCase {
         let reserved = expectation(description: "Add reserved")
         let adding = Task { reserved.fulfill(); return await session.perform(.add(token: "bananas", quantity: 2)) }
         await fulfillment(of: [reserved], timeout: 2)
-        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isSavePending ?? false)
         service.value.grocerySections[0].items[0].notes = "New note from earlier read"
         service.loadContinuation?.resume(returning: service.value)
         await refresh.value
         await fulfillment(of: [started], timeout: 2)
-        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isSavePending ?? false)
         XCTAssertEqual(session.snapshot.cartCount, 2)
         service.commandContinuation?.resume(throwing: NSError(domain: "test", code: 2))
         _ = await adding.value
@@ -681,7 +681,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(session.isBusy)
         XCTAssertFalse(session.snapshot.canCheckout)
         XCTAssertEqual(session.snapshot.item(id: "granola")?.quantity, 5)
-        XCTAssertNil(session.snapshot.item(id: "bananas"))
+        assertReturnedToList(session, "bananas")
         XCTAssertFalse(session.snapshot.cartSections.contains { $0.id == "Produce" }, "Removing the only pending row also removes its heading")
         XCTAssertTrue(session.snapshot.cartSections.allSatisfy { !$0.items.isEmpty })
         XCTAssertEqual(session.snapshot.cartCount, 2)
@@ -691,7 +691,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(service.commands.count, 4)
         XCTAssertEqual(session.snapshot.item(id: "granola")?.quantity, 5)
-        XCTAssertFalse(session.snapshot.item(id: "granola")?.isPendingAdd ?? true)
+        XCTAssertFalse(session.snapshot.item(id: "granola")?.isSavePending ?? true)
         XCTAssertNil(session.snapshot.item(id: "bananas"))
         XCTAssertTrue(session.snapshot.cartSections.allSatisfy { !$0.items.isEmpty })
     }
@@ -736,7 +736,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(service.commands.count, 3)
         XCTAssertEqual(session.snapshot.item(id: "milk")?.quantity, 2)
-        XCTAssertFalse(session.snapshot.item(id: "milk")?.isPendingAdd ?? true)
+        XCTAssertFalse(session.snapshot.item(id: "milk")?.isSavePending ?? true)
         XCTAssertEqual(session.snapshot.item(id: "milk")?.commandToken, "milk-final")
     }
 
@@ -767,12 +767,12 @@ final class WatchShoppingSessionTests: XCTestCase {
         add?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "local-add", quantity: 3)))
         await fulfillment(of: [editing], timeout: 2)
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 8)
-        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isPendingAdd ?? false)
+        XCTAssertTrue(session.snapshot.item(id: "bananas")?.isSavePending ?? false)
         edit?.resume(returning: .item(occurrenceID: "bananas", item: localItem("bananas", token: "local-edit", quantity: 8)))
         let saved = await update.value
         XCTAssertTrue(saved)
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 8)
-        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isPendingAdd ?? true)
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isSavePending ?? true)
     }
 
     func testRemoteReplacementReceiptNeverRetargetsQueuedQuantity() async throws {
@@ -795,7 +795,7 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertFalse(applied)
         XCTAssertEqual(service.commands.count, 1)
         XCTAssertEqual(session.snapshot.item(id: "bananas")?.quantity, 4)
-        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isPendingAdd ?? true)
+        XCTAssertFalse(session.snapshot.item(id: "bananas")?.isSavePending ?? true)
         XCTAssertEqual(session.errorMessage, "Later changes to this item were not applied. Check your cart before trying again.")
     }
 
@@ -1319,6 +1319,16 @@ final class WatchShoppingSessionTests: XCTestCase {
         XCTAssertEqual(WatchPurchaseRule.onlyHere.symbol, "lock.fill")
         XCTAssertEqual(WatchPurchaseRule.canBuyHere.symbol, "lock.open.fill")
     }
+}
+
+/// A pending remove shows the row on groceries at once, saving and not yet addable.
+@MainActor
+private func assertReturnedToList(_ session: WatchShoppingSession, _ id: String, _ message: String = "",
+                                  file: StaticString = #filePath, line: UInt = #line) {
+    let row = session.snapshot.grocerySections.flatMap(\.items).first { $0.occurrenceID == id }
+    XCTAssertNotNil(row, message, file: file, line: line)
+    XCTAssertFalse(session.snapshot.cartSections.flatMap(\.items).contains { $0.occurrenceID == id }, message, file: file, line: line)
+    XCTAssertTrue(row.map { $0.isSavePending && !$0.canAdd && !$0.isInOwnCart } ?? false, message, file: file, line: line)
 }
 
 @MainActor

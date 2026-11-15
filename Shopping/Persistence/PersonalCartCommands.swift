@@ -12,10 +12,12 @@ enum PersonalCartEffectPolicy: Sendable {
 
 /// A command's own durable result, read in its writer transaction, so a caller
 /// can show it without waiting for a later full read. A nil entry means the need
-/// is not in this shopper's cart.
+/// is not in this shopper's cart. `successor` is the membership this operation's
+/// own edit wrote, so a caller can tell it from one another device wrote.
 struct PersonalCartReceipt: Equatable, Sendable {
     let needID: UUID
     let entry: PersonalCartEntrySnapshot?
+    var successor: PersonalCartEntryToken? = nil
 }
 
 extension PersonalCartService {
@@ -38,8 +40,8 @@ extension PersonalCartService {
             command = .cart(needID: needID, householdID: householdID, listID: listID)
         }
         let receipt = try transact { repository -> PersonalCartReceipt in
-            if try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) != nil {
-                return try self.receipt(for: needID, householdID: householdID, listID: listID, repository)
+            if let replay = try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) {
+                return try self.receipt(for: needID, householdID: householdID, listID: listID, successor: replay.edit, repository)
             }
             let home = try repository.household(householdID)
             let access = try repository.homeEffectAccess(householdID: householdID, listID: listID)
@@ -73,7 +75,7 @@ extension PersonalCartService {
             let edit = PersonalCartEdit(id: operationID, action: .add, snapshot: snapshot, ancestors: ancestors)
             try repository.insert(id: operationID, kind: "cart", command: command,
                                   value: PersonalCartCommandResult(edit: edit, skipped: false))
-            return try self.receipt(for: needID, householdID: householdID, listID: listID, repository)
+            return try self.receipt(for: needID, householdID: householdID, listID: listID, successor: edit, repository)
         }
         if presencePolicy == .immediate { republishPresence(each: [needID]) }
         return receipt
@@ -95,7 +97,8 @@ extension PersonalCartService {
         let receipt = try transact { repository -> PersonalCartReceipt? in
             guard token.accountBinding == repository.session.accountBinding else { throw PersonalCartError.accountChanged }
             if let replay = try repository.replay(id: operationID, kind: "cart", command: command, as: PersonalCartCommandResult.self) {
-                return replay.skipped ? nil : try self.receipt(for: token.needID, householdID: token.householdID, listID: token.listID, repository)
+                return replay.skipped ? nil : try self.receipt(for: token.needID, householdID: token.householdID,
+                    listID: token.listID, successor: replay.edit, repository)
             }
             let current = try self.entries(householdID: token.householdID, listID: token.listID, repository: repository, includeShared: false)
             guard let entry = current.first(where: { $0.token == token }) else {
@@ -122,16 +125,17 @@ extension PersonalCartService {
                                         snapshot: updated, ancestors: token.evidence)
             try repository.insert(id: operationID, kind: "cart", command: command,
                                   value: PersonalCartCommandResult(edit: edit, skipped: false))
-            return try self.receipt(for: token.needID, householdID: token.householdID, listID: token.listID, repository)
+            return try self.receipt(for: token.needID, householdID: token.householdID, listID: token.listID,
+                                    successor: edit, repository)
         }
         guard let receipt else { throw PersonalCartError.staleEntry }
         if presencePolicy == .immediate { republishPresence(each: [token.needID]) }
         return receipt
     }
 
-    private func receipt(for needID: UUID, householdID: UUID, listID: UUID,
+    private func receipt(for needID: UUID, householdID: UUID, listID: UUID, successor edit: PersonalCartEdit? = nil,
                          _ repository: PersonalCartRepository) throws -> PersonalCartReceipt {
         PersonalCartReceipt(needID: needID, entry: try displayEntries(householdID: householdID, listID: listID,
-            repository: repository).first { $0.needID == needID })
+            repository: repository).first { $0.needID == needID }, successor: edit?.snapshot.token)
     }
 }

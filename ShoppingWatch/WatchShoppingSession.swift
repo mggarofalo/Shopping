@@ -193,7 +193,7 @@ final class WatchShoppingSession {
     func perform(_ command: WatchShoppingCommand) async -> Bool {
         if case .buyAnyway = command {
             let authorityID = snapshot.authorityID
-            let applied = await run { .snapshot(try await self.service.execute(command)) }
+            let applied = await run { .receipt(try await self.service.execute(command)) }
             return applied && snapshot.availability == .ready && snapshot.authorityID == authorityID
         }
         guard let id = enqueue(command) else { return false }
@@ -390,6 +390,8 @@ final class WatchShoppingSession {
 
     private enum Update {
         case snapshot(WatchShoppingSnapshot)
+        /// A local result patched from its own outcome. A later read confirms it.
+        case receipt(WatchShoppingSnapshot)
         case emptyCapture(WatchShoppingSnapshot)
         case checkout(WatchCheckoutPreview)
         case result(WatchActionResult)
@@ -427,6 +429,9 @@ final class WatchShoppingSession {
     private func apply(_ update: Update) {
         switch update {
         case .snapshot(let value): applySnapshot(value)
+        case .receipt(let value):
+            applySnapshot(value)
+            reloadRequested = true
         case .emptyCapture(let value):
             applySnapshot(value)
             errorMessage = "Your cart changed. There are no eligible items to check out."
@@ -434,6 +439,7 @@ final class WatchShoppingSession {
         case .result(let result):
             let sameAuthority = snapshot.authorityID == result.snapshot.authorityID
             applySnapshot(result.snapshot)
+            reloadRequested = true
             if sameAuthority && snapshot.availability == .ready { sheet = .result(result) }
         }
     }
@@ -487,16 +493,21 @@ private struct WatchCartIntent {
         var row = saved.item(id: occurrenceID) ?? original
         switch command {
         case .add(_, let quantity):
-            if !row.isInOwnCart { row.quantity = quantity }
+            if !row.isInOwnCart {
+                // A grocery row returns to groceries if this add is then removed.
+                row.listReturn = WatchListReturn(quantity: row.quantity)
+                row.quantity = quantity
+            }
             row.isInOwnCart = true
         case .setQuantity(_, let quantity): row.quantity = quantity
         case .remove:
-            value.replaceItem(occurrenceID: occurrenceID, with: nil, section: section)
+            // The row moves to groceries now, never after its save or a read.
+            value.replaceItem(occurrenceID: occurrenceID, with: row.returnedToList(), section: section)
             return value
         case .buyAnyway: return saved
         }
         row.commandToken = command.token
-        row.isPendingAdd = true
+        row.isSavePending = true
         row.isAddUnconfirmed = uncertain
         row.canAdd = false
         row.canRemove = !uncertain

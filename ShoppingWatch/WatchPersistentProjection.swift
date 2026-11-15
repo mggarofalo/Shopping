@@ -64,22 +64,26 @@ struct WatchPersistentProjection: Sendable {
 
     func sections(_ entries: [PersonalCartEntrySnapshot], make: (PersonalCartEntrySnapshot) throws -> WatchShoppingItem) rethrows -> [WatchItemSection] {
         let grouped = Dictionary(grouping: entries) { $0.categoryID?.uuidString ?? "uncategorized" }
-        return try grouped.values.sorted { left, right in
-            let a = left[0], b = right[0]
-            let aRank = a.categoryID == nil ? 2 : archivedCategoryIDs.contains(a.categoryID!) ? 1 : 0
-            let bRank = b.categoryID == nil ? 2 : archivedCategoryIDs.contains(b.categoryID!) ? 1 : 0
-            if aRank != bRank { return aRank < bRank }
-            if a.categoryOrder != b.categoryOrder { return a.categoryOrder < b.categoryOrder }
-            return (a.categoryID?.uuidString ?? "") < (b.categoryID?.uuidString ?? "")
-        }.map { entries in
+        return try grouped.values.map { entries -> WatchItemSection in
             let ordered = entries.sorted {
                 let comparison = $0.title.localizedStandardCompare($1.title)
                 return comparison == .orderedSame ? $0.needID.uuidString < $1.needID.uuidString : comparison == .orderedAscending
             }
-            return try WatchItemSection(id: ordered[0].categoryID?.uuidString ?? "uncategorized",
-                title: ordered[0].categoryName ?? "Uncategorized", items: ordered.map(make),
-                categoryRank: ordered[0].categoryID == nil ? 2 : archivedCategoryIDs.contains(ordered[0].categoryID!) ? 1 : 0,
-                categoryOrder: ordered[0].categoryOrder)
+            var section = self.section(for: ordered[0])
+            section.items = try ordered.map(make)
+            return section
+        }.sorted { a, b in
+            if a.categoryRank != b.categoryRank { return a.categoryRank < b.categoryRank }
+            if a.categoryOrder != b.categoryOrder { return a.categoryOrder < b.categoryOrder }
+            return a.id < b.id
         }
+    }
+
+    /// The empty category section an entry belongs to, in Settings order.
+    func section(for entry: PersonalCartEntrySnapshot) -> WatchItemSection {
+        WatchItemSection(id: entry.categoryID?.uuidString ?? "uncategorized",
+            title: entry.categoryName ?? "Uncategorized", items: [],
+            categoryRank: entry.categoryID == nil ? 2 : archivedCategoryIDs.contains(entry.categoryID!) ? 1 : 0,
+            categoryOrder: entry.categoryOrder)
     }
 }

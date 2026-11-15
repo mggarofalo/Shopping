@@ -149,10 +149,10 @@ The target design: every result the shopper sees comes from the Watch's own
 durable receipt, and a full read only converges what arrived from elsewhere.
 
 - `PersistentWatchShoppingService` builds grocery and cart rows through one
-  `RowContext`, used by full reads and local receipts alike. A removal receipt
-  reads the occurrence in the same writer transaction as the receipt. If it is
-  still outstanding and eligible at the selected store, the receipt returns its
-  grocery row with a fresh Add token.
+  `RowContext`, used by full reads and local receipts alike. If a removed
+  occurrence was outstanding and eligible at the selected store in the last
+  read, the removal receipt returns its grocery row with a fresh Add token
+  (SHOPPING-291).
 - `WatchShoppingSnapshot.replaceItem(occurrenceID:with:section:)` places a row
   in cart or groceries with the service's ordering. The session's pending
   projection and the adapter's receipt patch share it.
@@ -169,9 +169,9 @@ durable receipt, and a full read only converges what arrived from elsewhere.
 | Watch interaction | Shown from | Needs network, phone or sync |
 | --- | --- | --- |
 | Add, Remove, Quantity | the local receipt (pending row until it lands) | no |
-| Groceries after Remove | the removal receipt | no (was: a full read) |
-| Checkout capture and result | local capture, private intent, local read | no; household receipt publishes later |
-| Restore | private restore intent, local read | no; retraction publishes later |
+| Groceries after Remove | the pending projection, then the removal receipt | no (was: a full read) |
+| Checkout and Buy anyway result | local capture and the private intent's outcome | no; household receipt publishes later |
+| Restore | private restore intent and one local cart read | no; retraction publishes later |
 | Relaunch | the account's cached session and SQLite replica | no |
 | Another device's changes | the next read after a history import | yes, by definition |
 
@@ -195,6 +195,37 @@ Tests with no refresh read and no network: rapid Add then Remove returning
 every item to groceries; rapid quantity edits and removal surviving a relaunch
 while native verification never answers; and an import of the same shopper's
 phone edits plus a new household item, converging with each item once.
+
+### Cart and list from local state (SHOPPING-291)
+
+On 1.6.7 (43), removed cart items reached the Watch list only after a delay,
+each showed a clock while the Watch waited, and Checkout was slower than on
+the iPhone. None of it waited for iCloud. It waited for the Watch's own store:
+
+- **The clock** marks a row whose local save hasn't returned. The session
+  commits its queue one command at a time, so each row's clock clears in turn.
+- **Per-item cost.** Each command took two writer transactions: the command,
+  whose receipt was discarded, then a second read for the Watch row. The
+  iPhone takes one. The writer shares the coordinator with CloudKit mirroring,
+  so each transaction can wait behind sync work.
+- **The list.** A pending Remove dropped the row from the cart but didn't put
+  it on the list. Only its receipt did, after every save queued ahead of it.
+- **Checkout and Buy anyway** ran a full snapshot read before returning.
+
+Now:
+
+- A pending Remove moves the row to groceries at once
+  (`WatchShoppingItem.listReturn`), with the clock and without Add until its
+  receipt mints a fresh Add token. The row never waits to move.
+- A command is one writer transaction. `PersonalCartReceipt.successor` names
+  the membership the operation wrote, which decides whether queued edits may
+  chain onto it.
+- Checkout and Buy anyway patch the cart and recovery list from their own
+  outcome. Restore uses one local cart read. A later read confirms each.
+- A restored entry no longer shows the shopper's own purchase as "Already
+  purchased" while its retraction waits in the outbox.
+- Commands still save one at a time. Saving several in one transaction would
+  let one stale item fail the others, and rows no longer wait for saves.
 
 ### Account session (SHOPPING-278)
 

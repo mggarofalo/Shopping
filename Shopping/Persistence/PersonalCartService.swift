@@ -142,6 +142,14 @@ final class PersonalCartService: @unchecked Sendable {
         // the cart or checkout of unrelated needs (SHOPPING-285).
         var purchases = includeShared ? try HouseholdDemandProjection.purchases(householdID: householdID,
             reading: .arrived, in: repository.context) : []
+        // This shopper's own restore retracts its receipts once published. The local
+        // intent already says so, so a restored purchase never reads as a notice
+        // while its retraction waits in the outbox (SHOPPING-291).
+        purchases.removeAll { purchase in
+            restores.values.contains {
+                $0.checkoutID == purchase.checkoutID && $0.restoredNeedIDs.contains(purchase.capture.entry.needID)
+            }
+        }
         for (id, intent) in checkouts where intent.token.householdID == householdID {
             for capture in intent.token.captures where intent.accepted.contains(capture.entry.needID) {
                 guard !restores.values.contains(where: { $0.checkoutID == id && $0.restoredNeedIDs.contains(capture.entry.needID) }) else { continue }
