@@ -175,15 +175,10 @@ struct GroceryCatalogAddView: View {
                         Button { select(item) } label: {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.name)
+                                    ShoppingStatusRowLabel(name: item.name, status: status.label)
                                     Text(purchaseSummary)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    if let needState = status.label {
-                                        Text(needState)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 Image(systemName: status == .notNeeded ? "plus.circle" : "pencil.circle")

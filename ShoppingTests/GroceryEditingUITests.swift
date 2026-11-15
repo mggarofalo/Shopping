@@ -94,7 +94,7 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertEqual(name.value as? String, "banan")
     }
 
-    func testSuggestionsShowNeedStateOnItsOwnLine() {
+    func testSuggestionsShowNeedStateBesideTheName() {
         let app = launchApp(fixture: "catalogNeedStates")
         openAdd(in: app)
         enterName("b", in: app)
@@ -122,6 +122,11 @@ final class GroceryEditingUITests: XCTestCase {
         XCTAssertEqual(needAgain.count, 1)
         XCTAssertEqual(needAgain.firstMatch.label, "Need again Blueberries")
         attachScreenshot(named: "Editor suggestion need states", app: app)
+        // The state trails the name, so a needed suggestion is no taller than an unneeded one.
+        let height = { (label: String) in
+            app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch.frame.height
+        }
+        XCTAssertEqual(height("Edit current Bananas"), height("Need again Basil"), accuracy: 0.5)
     }
 
     func testAddItemFocusNotesAndInlineCategoryPreserveDraftAtLargeText() {

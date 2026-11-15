@@ -612,15 +612,10 @@ struct GroceryEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Button { selectSuggestion(item.id) } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(item.name)
+                                ShoppingStatusRowLabel(name: item.name, status: status.label)
                                 Text(details)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                if let needState = status.label {
-                                    Text(needState)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())

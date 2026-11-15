@@ -115,7 +115,7 @@ enum CatalogNeedStatus: Equatable {
     }
 
     /// Searching the catalog already implies an item is saved there, so only a current need
-    /// has a label.
+    /// has a label. Rows show it beside the name with `ShoppingStatusRowLabel`.
     var label: String? {
         switch self {
         case .notNeeded: nil

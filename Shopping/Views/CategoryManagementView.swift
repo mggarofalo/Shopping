@@ -292,7 +292,7 @@ struct CategoryManagementView: View {
     }
 
     private func categoryRowLabel(_ category: Category) -> some View {
-        ShoppingManagementRowLabel(name: category.name, isArchived: category.isArchived)
+        ShoppingStatusRowLabel(name: category.name, status: category.isArchived ? "Archived" : nil)
     }
 
     private func beginCreate() {

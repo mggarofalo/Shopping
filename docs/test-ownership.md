@@ -2874,21 +2874,25 @@ relaunch while the native access refresh is held. Both use
 identity and no verified write. Existing household fulfillment, lineage and
 quarantine tests are unchanged.
 
-## Catalog need-state captions (SHOPPING-281)
+## Catalog need-state captions (SHOPPING-281, SHOPPING-289)
 
 `CatalogNeedStatus` owns the need-state wording that Add to Groceries results and
 editor suggestions share. A search result never says "Saved in Catalog"; an item
-already needed shows "On grocery list" or "In cart" on its own caption line.
+already needed shows "On grocery list" or "In cart" beside its name through
+`ShoppingStatusRowLabel`, so the row keeps its two lines at standard sizes.
 `PersonalCartPresentationTests.testCatalogNeedStatusTrustsThePersonalCartOverTheLegacyFlag`
 owns the state rule and spoken value, and
 `PreviewFixtureTests.testCatalogNeedStatesFixtureHasOneItemPerState` owns the
 `catalogNeedStates` fixture shape. In the Full plan,
-`CatalogRefreshUITests/testGroceryAddResultsShowNeedStateOnItsOwnLineWithAnEditAffordance`
+`CatalogRefreshUITests/testGroceryAddResultsShowNeedStateBesideTheNameWithAnEditAffordance`
 checks each picker state's Add/Edit label (the plus or pencil) and caption value,
-and that an in-cart result opens the editor.
-`GroceryEditingUITests/testSuggestionsShowNeedStateOnItsOwnLine` checks the
-editor's suggestions and that only an in-cart item offers Need again. Review both
-screenshot attachments.
+that a needed row is no taller than the same unneeded row, and that an in-cart
+result opens the editor.
+`CatalogRefreshUITests/testGroceryAddNeedStateStaysReadableAtAccessibilitySize`
+keeps the status in the spoken value and the row hittable at AX XXXL.
+`GroceryEditingUITests/testSuggestionsShowNeedStateBesideTheName` checks the
+editor's suggestions, their equal heights, and that only an in-cart item offers
+Need again. Review the screenshot attachments.
 ### Shopping with only the Watch (SHOPPING-279)
 
 `PersistentWatchShoppingServiceTests.testOfflineOwnerShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport`
