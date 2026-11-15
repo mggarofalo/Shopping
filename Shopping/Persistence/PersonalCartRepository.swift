@@ -1,5 +1,17 @@
 import CoreData
 
+/// How a read treats a household record another device is still importing: one
+/// with no identity or no payload yet. Its payload names the need it concerns, and
+/// its identity is a one-way digest, so until the payload arrives the record
+/// concerns no need that can be determined.
+enum HouseholdImportReading {
+    /// Fail with incompleteImport while such a record exists.
+    case complete
+    /// Read what has arrived, as if the record were still in transit. ADR 0002
+    /// already handles a household record that hasn't arrived (SHOPPING-285).
+    case arrived
+}
+
 struct PersonalCartRepository {
     let persistence: PersistenceController
     let context: NSManagedObjectContext
@@ -26,6 +38,17 @@ struct PersonalCartRepository {
             result[record.id] = value
         }
         return result
+    }
+
+    /// Checkouts and restores whose household receipts are recorded as written.
+    struct PublishedEffects {
+        let checkouts: Set<UUID>
+        let restores: Set<UUID>
+    }
+
+    func publishedEffects() throws -> PublishedEffects {
+        PublishedEffects(checkouts: Set(try values(UUID.self, kind: "published").values),
+                         restores: Set(try values(UUID.self, kind: "restorePublished").values))
     }
 
     func insert<T: Codable & Equatable, C: Codable & Equatable>(
@@ -87,7 +110,8 @@ struct PersonalCartRepository {
     }
 
     static func sharedValues<T: Codable & Equatable>(
-        _ type: T.Type, kind: String, householdID: UUID, id: UUID? = nil, in context: NSManagedObjectContext
+        _ type: T.Type, kind: String, householdID: UUID, id: UUID? = nil,
+        reading: HouseholdImportReading = .complete, in context: NSManagedObjectContext
     ) throws -> [UUID: T] {
         let request = NSFetchRequest<HouseholdCartRecord>(entityName: "HouseholdCartRecord")
         request.predicate = NSPredicate(format: "kind == %@ AND household.id == %@", kind, householdID as CVarArg)
@@ -98,7 +122,10 @@ struct PersonalCartRepository {
         }
         var values: [UUID: T] = [:]
         for record in try context.fetch(request) {
-            guard record.id != PersistenceModel.unsetID else { throw PersonalCartError.incompleteImport }
+            guard record.id != PersistenceModel.unsetID, record.payload != nil else {
+                guard reading == .arrived else { throw PersonalCartError.incompleteImport }
+                continue
+            }
             let value = try PersonalCartCoding.decode(type, record.payload)
             if let old = values[record.id], old != value { throw PersonalCartError.corruptRecord }
             values[record.id] = value

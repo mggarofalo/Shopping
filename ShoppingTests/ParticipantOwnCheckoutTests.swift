@@ -14,6 +14,8 @@ final class OfflineParticipantShares: HomeNativeShareSource {
             storeIdentifier: "participant-store", rootURI: home.objectID.uriRepresentation().absoluteString, share: Self.share)
     }
 
+    func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool { true }
+
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { online }
 }
 

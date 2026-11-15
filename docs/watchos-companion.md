@@ -339,9 +339,9 @@ The rules now:
   incomplete import, through Add, Quantity, Remove, Checkout, relaunch and
   Restore, then exactly one purchase and one retraction after verification.
 
-The core purchase records still reject a cart read while a shared purchase
-receipt is half imported (`sharedValues` fails closed). On the Watch that shows
-as a Checkout error asking to retry after synchronization, not a disabled cart.
+A household record still importing no longer fails a cart read, Checkout or
+Restore (SHOPPING-285). It concerns no need until its payload arrives; see
+[personal carts](personal-carts.md#storage-and-commands).
 
 The engine stays `NSPersistentCloudKitContainer` mirroring. Nothing above
 needed a different sync engine; Apple still controls export and import timing.

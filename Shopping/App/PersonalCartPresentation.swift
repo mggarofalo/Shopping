@@ -207,7 +207,7 @@ final class PersonalCartPresentation {
         let service = self.service
         let outcome = try await BlockingWriterWork.run {
             try service.checkout(token, buyAnywayReceiptIDs: buyAnywayReceiptIDs, operationID: token.id,
-                                 presencePolicy: .deferred)
+                                 effects: .deferred)
         }
         publish(\.entries, entries.filter { !outcome.purchasedNeedIDs.contains($0.needID) })
         publish(\.outstandingNeedIDs, outstandingNeedIDs.subtracting(outcome.purchasedNeedIDs))
@@ -220,7 +220,7 @@ final class PersonalCartPresentation {
         defer { finishEdit {} }
         let service = self.service
         let outcome = try await BlockingWriterWork.run {
-            try service.restore(checkoutID: checkoutID, presencePolicy: .deferred)
+            try service.restore(checkoutID: checkoutID, effects: .deferred)
         }
         outcome.purchasedNeedIDs.forEach(presencePublisher.markDirty)
         return outcome

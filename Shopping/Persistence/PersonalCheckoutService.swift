@@ -16,7 +16,8 @@ extension PersonalCartService {
                 let need = try repository.need(token.needID, householdID: token.householdID, listID: token.listID)
                 guard entry.demandAvailable || !entry.purchaseNotices.isEmpty else { throw PersonalCartError.unavailable }
                 return PersonalCheckoutCapture(entry: entry,
-                    demandEvidence: try HouseholdDemandProjection.evidence(needID: token.needID, householdID: token.householdID, in: repository.context),
+                    demandEvidence: try HouseholdDemandProjection.evidence(needID: token.needID, householdID: token.householdID,
+                        reading: .arrived, in: repository.context),
                     purchaseRuleEvidence: need.map(PersonalCartSnapshotBuilder.ruleEvidence) ?? "retained",
                     needRevision: need?.revision ?? -1)
             }
@@ -36,92 +37,129 @@ extension PersonalCartService {
     }
 
     func checkout(_ token: PersonalCheckoutToken, buyAnywayReceiptIDs: Set<UUID> = [], operationID: UUID = UUID(),
-                  presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCheckoutOutcome {
+                  effects: PersonalCartEffectPolicy = .immediate) throws -> PersonalCheckoutOutcome {
         let command = PersonalCartCommand.checkout(token, buyAnywayReceiptIDs)
-        let intent = try transact { repository -> PersonalCheckoutIntent in
+        let (intent, held) = try transact { repository -> (PersonalCheckoutIntent, Bool) in
             guard repository.session.accountBinding == token.accountBinding else { throw PersonalCartError.accountChanged }
-            if let prior = try repository.replay(id: operationID, kind: "checkout", command: command, as: PersonalCheckoutIntent.self) { return prior }
-            try repository.homeEffectAccess(householdID: token.householdID, listID: token.listID)
-                .validateCapture(token.homeEffectAuthority ?? .legacy)
-            guard Set(token.captures.map(\.entry.needID)).count == token.captures.count else {
-                throw PersonalCartError.corruptRecord
-            }
-            let entries = try self.entries(householdID: token.householdID, listID: token.listID, repository: repository)
-            var accepted: Set<UUID> = []
-            for capture in token.captures {
-                let captured = capture.entry
-                guard captured.token.accountBinding == token.accountBinding,
-                      captured.householdID == token.householdID, captured.listID == token.listID else {
-                    throw PersonalCartError.scopeChanged
-                }
-                guard let current = entries.first(where: { $0.token == captured.token }),
-                      PersonalCartSnapshotBuilder.eligible(current, storeID: token.storeID),
-                      Set(current.purchaseNotices.map(\.receiptID)).isSubset(of: buyAnywayReceiptIDs) else { continue }
-                let need = try repository.need(captured.needID, householdID: token.householdID, listID: token.listID)
-                guard (need?.revision ?? -1) == capture.needRevision,
-                      (need.map(PersonalCartSnapshotBuilder.ruleEvidence) ?? "retained") == capture.purchaseRuleEvidence,
-                      try HouseholdDemandProjection.evidence(needID: captured.needID, householdID: token.householdID, in: repository.context) == capture.demandEvidence else { continue }
-                if let storeID = token.storeID {
-                    let request = Store.fetchRequest()
-                    request.predicate = NSPredicate(format: "id == %@ AND household.id == %@ AND isArchived == NO", storeID as CVarArg, token.householdID as CVarArg)
-                    guard try repository.context.fetch(request).count == 1 else { continue }
-                }
-                accepted.insert(captured.needID)
-            }
-            let intent = PersonalCheckoutIntent(token: token, accepted: accepted,
-                                                buyAnywayReceiptIDs: buyAnywayReceiptIDs, createdAt: Date())
-            try self.failurePoint?("beforeIntent")
-            try repository.insert(id: operationID, kind: "checkout", command: command, value: intent)
-            return intent
+            let intent = try self.recordCheckout(token, buyAnywayReceiptIDs: buyAnywayReceiptIDs,
+                operationID: operationID, command: command, repository: repository)
+            guard effects == .deferred else { return (intent, false) }
+            return (intent, try repository.homeEffectPublicationHeld(kind: .checkout, subjectID: operationID,
+                householdID: token.householdID, listID: token.listID))
         }
         try failurePoint?("afterIntent")
-        var pending = false
-        do { try publishCheckout(id: operationID) }
-        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
-        catch is PersistencePermissionError { pending = true }
-        if presencePolicy == .immediate { republishPresence(each: intent.accepted) }
+        let pending: Bool
+        switch effects {
+        case .immediate:
+            pending = try publishReporting { try publishCheckout(id: operationID) }
+            republishPresence(each: intent.accepted)
+        case .deferred:
+            pending = held
+            requestCheckoutPublication()
+        }
         return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: intent.accepted,
             skippedNeedIDs: Set(token.captures.map(\.entry.needID)).subtracting(intent.accepted), pendingPublication: pending)
     }
 
-    func restore(checkoutID: UUID, operationID: UUID = UUID(),
-                 presencePolicy: PersonalCartPresencePolicy = .immediate) throws -> PersonalCheckoutOutcome {
-        let command = PersonalCartCommand.restore(checkoutID)
-        let result = try transact { repository -> (PersonalRestoreIntent, Set<UUID>) in
-            let checkouts = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
-            guard let checkout = checkouts[checkoutID] else { throw PersonalCartError.permissionDenied }
-            if let prior = try repository.replay(id: operationID, kind: "restore", command: command, as: PersonalRestoreIntent.self) {
-                return (prior, checkout.accepted)
-            }
-            let edits = try repository.values(PersonalCartCommandResult.self, kind: "cart").values.compactMap(\.edit)
-            let superseded = try HouseholdDemandProjection.superseded(householdID: checkout.token.householdID, in: repository.context)
-            let existing = try repository.values(PersonalRestoreIntent.self, kind: "restore").values
-                .filter { $0.checkoutID == checkoutID }.reduce(into: Set<UUID>()) { $0.formUnion($1.restoredNeedIDs) }
-            var restored: Set<UUID> = []
-            for capture in checkout.token.captures where checkout.accepted.contains(capture.entry.needID) {
-                let needID = capture.entry.needID
-                guard !superseded.contains(needID), !existing.contains(needID),
-                      Set(edits.filter { $0.snapshot.needID == needID }.map(\.id)) == capture.entry.token.evidence,
-                      try HouseholdDemandProjection.evidence(needID: needID, householdID: checkout.token.householdID, in: repository.context) == capture.demandEvidence else { continue }
-                restored.insert(needID)
-            }
-            let priorAuthority = checkout.token.homeEffectAuthority ?? .legacy
-            let access = try repository.homeEffectAccess(householdID: checkout.token.householdID, listID: checkout.token.listID)
-            var restore = PersonalRestoreIntent(checkoutID: checkoutID, restoredNeedIDs: restored)
-            restore.homeEffectAuthority = HomeEffectAuthority(
-                observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs), grantID: priorAuthority.grantID,
-                observedRestrictionIDs: priorAuthority.observedRestrictionIDs.union(access.restrictionIDs))
-            restore.homeEffectScope = repository.homeEffectScope(householdID: checkout.token.householdID,
-                listID: checkout.token.listID)
-            try repository.insert(id: operationID, kind: "restore", command: command, value: restore)
-            return (restore, checkout.accepted)
+    private func recordCheckout(_ token: PersonalCheckoutToken, buyAnywayReceiptIDs: Set<UUID>, operationID: UUID,
+                                command: PersonalCartCommand, repository: PersonalCartRepository) throws -> PersonalCheckoutIntent {
+        if let prior = try repository.replay(id: operationID, kind: "checkout", command: command, as: PersonalCheckoutIntent.self) { return prior }
+        try repository.homeEffectAccess(householdID: token.householdID, listID: token.listID)
+            .validateCapture(token.homeEffectAuthority ?? .legacy)
+        guard Set(token.captures.map(\.entry.needID)).count == token.captures.count else {
+            throw PersonalCartError.corruptRecord
         }
-        var pending = false
-        do { try publishRestore(id: operationID) }
-        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { pending = true }
-        catch is PersistencePermissionError { pending = true }
-        if presencePolicy == .immediate { republishPresence(each: result.0.restoredNeedIDs) }
-        return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: result.0.restoredNeedIDs,
-            skippedNeedIDs: result.1.subtracting(result.0.restoredNeedIDs), pendingPublication: pending)
+        let entries = try self.entries(householdID: token.householdID, listID: token.listID, repository: repository)
+        var accepted: Set<UUID> = []
+        for capture in token.captures {
+            let captured = capture.entry
+            guard captured.token.accountBinding == token.accountBinding,
+                  captured.householdID == token.householdID, captured.listID == token.listID else {
+                throw PersonalCartError.scopeChanged
+            }
+            guard let current = entries.first(where: { $0.token == captured.token }),
+                  PersonalCartSnapshotBuilder.eligible(current, storeID: token.storeID),
+                  Set(current.purchaseNotices.map(\.receiptID)).isSubset(of: buyAnywayReceiptIDs) else { continue }
+            let need = try repository.need(captured.needID, householdID: token.householdID, listID: token.listID)
+            guard (need?.revision ?? -1) == capture.needRevision,
+                  (need.map(PersonalCartSnapshotBuilder.ruleEvidence) ?? "retained") == capture.purchaseRuleEvidence,
+                  try HouseholdDemandProjection.evidence(needID: captured.needID, householdID: token.householdID,
+                    reading: .arrived, in: repository.context) == capture.demandEvidence else { continue }
+            if let storeID = token.storeID {
+                let request = Store.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@ AND household.id == %@ AND isArchived == NO", storeID as CVarArg, token.householdID as CVarArg)
+                guard try repository.context.fetch(request).count == 1 else { continue }
+            }
+            accepted.insert(captured.needID)
+        }
+        let intent = PersonalCheckoutIntent(token: token, accepted: accepted,
+                                            buyAnywayReceiptIDs: buyAnywayReceiptIDs, createdAt: Date())
+        try self.failurePoint?("beforeIntent")
+        try repository.insert(id: operationID, kind: "checkout", command: command, value: intent)
+        return intent
+    }
+
+    func restore(checkoutID: UUID, operationID: UUID = UUID(),
+                 effects: PersonalCartEffectPolicy = .immediate) throws -> PersonalCheckoutOutcome {
+        let command = PersonalCartCommand.restore(checkoutID)
+        let (restore, checkout, held) = try transact { repository -> (PersonalRestoreIntent, PersonalCheckoutIntent, Bool) in
+            let (restore, checkout) = try self.recordRestore(checkoutID: checkoutID, operationID: operationID,
+                command: command, repository: repository)
+            guard effects == .deferred else { return (restore, checkout, false) }
+            return (restore, checkout, try repository.homeEffectPublicationHeld(kind: .restore, subjectID: operationID,
+                householdID: checkout.token.householdID, listID: checkout.token.listID))
+        }
+        let pending: Bool
+        switch effects {
+        case .immediate:
+            pending = try publishReporting { try publishRestore(id: operationID) }
+            republishPresence(each: restore.restoredNeedIDs)
+        case .deferred:
+            pending = held
+            requestCheckoutPublication()
+        }
+        return PersonalCheckoutOutcome(operationID: operationID, purchasedNeedIDs: restore.restoredNeedIDs,
+            skippedNeedIDs: checkout.accepted.subtracting(restore.restoredNeedIDs), pendingPublication: pending)
+    }
+
+    private func recordRestore(checkoutID: UUID, operationID: UUID, command: PersonalCartCommand,
+                               repository: PersonalCartRepository) throws -> (PersonalRestoreIntent, PersonalCheckoutIntent) {
+        let checkouts = try repository.values(PersonalCheckoutIntent.self, kind: "checkout")
+        guard let checkout = checkouts[checkoutID] else { throw PersonalCartError.permissionDenied }
+        if let prior = try repository.replay(id: operationID, kind: "restore", command: command, as: PersonalRestoreIntent.self) {
+            return (prior, checkout)
+        }
+        let edits = try repository.values(PersonalCartCommandResult.self, kind: "cart").values.compactMap(\.edit)
+        let superseded = try HouseholdDemandProjection.superseded(householdID: checkout.token.householdID,
+            reading: .arrived, in: repository.context)
+        let existing = try repository.values(PersonalRestoreIntent.self, kind: "restore").values
+            .filter { $0.checkoutID == checkoutID }.reduce(into: Set<UUID>()) { $0.formUnion($1.restoredNeedIDs) }
+        var restored: Set<UUID> = []
+        for capture in checkout.token.captures where checkout.accepted.contains(capture.entry.needID) {
+            let needID = capture.entry.needID
+            guard !superseded.contains(needID), !existing.contains(needID),
+                  Set(edits.filter { $0.snapshot.needID == needID }.map(\.id)) == capture.entry.token.evidence,
+                  try HouseholdDemandProjection.evidence(needID: needID, householdID: checkout.token.householdID,
+                    reading: .arrived, in: repository.context) == capture.demandEvidence else { continue }
+            restored.insert(needID)
+        }
+        let priorAuthority = checkout.token.homeEffectAuthority ?? .legacy
+        let access = try repository.homeEffectAccess(householdID: checkout.token.householdID, listID: checkout.token.listID)
+        var restore = PersonalRestoreIntent(checkoutID: checkoutID, restoredNeedIDs: restored)
+        restore.homeEffectAuthority = HomeEffectAuthority(
+            observedBlockIDs: priorAuthority.observedBlockIDs.union(access.blockIDs), grantID: priorAuthority.grantID,
+            observedRestrictionIDs: priorAuthority.observedRestrictionIDs.union(access.restrictionIDs))
+        restore.homeEffectScope = repository.homeEffectScope(householdID: checkout.token.householdID,
+            listID: checkout.token.listID)
+        try repository.insert(id: operationID, kind: "restore", command: command, value: restore)
+        return (restore, checkout)
+    }
+
+    /// Publishes inline and reports whether the household update is held.
+    private func publishReporting(_ publish: () throws -> Void) throws -> Bool {
+        do { try publish() }
+        catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable || error == .quarantined { return true }
+        catch is PersistencePermissionError { return true }
+        return false
     }
 }

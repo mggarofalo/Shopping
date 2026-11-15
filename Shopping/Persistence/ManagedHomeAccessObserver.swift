@@ -36,12 +36,12 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
         guard persistence.configuration.isManaged else { return nil }
         persistence.homeNativeAccess.invalidateVerification()
         do {
-            let pending = try await Task.detached(priority: .utility) { try self.capture() }.value
+            let pending = try await BlockingWriterWork.run(qos: .utility) { try self.capture() }
             var firstFailure: String?
             for item in pending {
                 do {
                     let (observation, _) = try await fetch(item.request.identity)
-                    try await Task.detached(priority: .utility) { try self.apply(observation, to: item) }.value
+                    try await BlockingWriterWork.run(qos: .utility) { try self.apply(observation, to: item) }
                 } catch {
                     if persistence.homeNativeAccess.isCurrent(item.request), firstFailure == nil {
                         firstFailure = error.localizedDescription
@@ -61,7 +61,7 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
 
     /// A typed loss is a successful durable observation, not a transport failure.
     func observeShare(_ identity: HomeNativeAccessIdentity) async throws -> ObservedShare {
-        let pending = try await Task.detached(priority: .utility) {
+        let pending = try await BlockingWriterWork.run(qos: .utility) {
             try self.cart.transact(save: false) { repository in
                 try self.validateEnvironment(identity)
                 let home = try repository.household(identity.scope.householdID)
@@ -69,9 +69,9 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
                 let access = try repository.homeEffectAccess(householdID: identity.scope.householdID, listID: identity.scope.listID)
                 return Pending(request: self.persistence.homeNativeAccess.begin(identity), restrictionIDs: access.restrictionIDs)
             }
-        }.value
+        }
         let (observation, share) = try await fetch(identity)
-        try await Task.detached(priority: .utility) { try self.apply(observation, to: pending) }.value
+        try await BlockingWriterWork.run(qos: .utility) { try self.apply(observation, to: pending) }
         return ObservedShare(observation: observation, share: share)
     }
 
@@ -85,7 +85,7 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
         guard cart.persistence === persistence, cart.initialAccountBinding == session.accountBinding else {
             throw PersonalCartError.accountChanged
         }
-        return try await Task.detached(priority: .utility) {
+        return try await BlockingWriterWork.run(qos: .utility) {
             try self.cart.transact(save: false) { repository in
                 guard repository.session == session else { throw PersonalCartError.accountChanged }
                 guard let retained = try self.retainedHome(share: share, repository: repository) else { return nil }
@@ -96,7 +96,7 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
                     nativeRequest: retained.identity.map { self.persistence.homeNativeAccess.begin($0) },
                     restrictionIDs: access.restrictionIDs)
             }
-        }.value
+        }
     }
 
     func observeAcceptance(_ capture: HomeInvitationAcceptance.Capture) async throws -> Observation {
@@ -107,7 +107,7 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
     }
 
     func persistAcceptance(_ observation: Observation, capture: HomeInvitationAcceptance.Capture) async throws {
-        try await Task.detached(priority: .utility) {
+        try await BlockingWriterWork.run(qos: .utility) {
             try self.cart.transact { repository in
                 try self.validateAcceptanceEnvironment(capture)
                 guard let retained = try self.retainedHome(share: capture.share, repository: repository),
@@ -128,7 +128,7 @@ final class ManagedHomeAccessObserver: HomeInvitationAccessPreflighting, @unchec
                !self.persistence.homeNativeAccess.finish(request, access: observation.access) {
                 throw PersonalCartError.scopeChanged
             }
-        }.value
+        }
     }
 
     private func retainedHome(share identity: HomeEffectShare, repository: PersonalCartRepository) throws -> RetainedHome? {
@@ -359,10 +359,10 @@ extension PersonalCartService {
     func refreshNativeHomeAccessAndReplay(recheckIfRunning: Bool = false) async -> String? {
         await persistence.homeAccessRefreshQueue.run(recheckIfRunning: recheckIfRunning) { [self] in
             let failure = await ManagedHomeAccessObserver(cart: self, persistence: persistence).refresh()
-            return await Task.detached(priority: .utility) {
+            return await BlockingWriterWork.run(qos: .utility) {
                 do { try self.resumePending(); return failure }
                 catch { return failure ?? error.localizedDescription }
-            }.value
+            }
         }
     }
 }

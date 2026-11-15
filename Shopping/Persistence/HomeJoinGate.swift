@@ -17,14 +17,14 @@ enum HomeLeaveError: Error, LocalizedError {
 enum HomeJoinGate {
     /// The native caller verifies the account/store before and after this read.
     static func validate(persistence: PersistenceController, session: ShopperSession, share: HomeEffectShare) async throws {
-        try await Task.detached(priority: .utility) {
+        try await BlockingWriterWork.run(qos: .utility) {
             let context = persistence.container.newBackgroundContext()
             try context.performAndWait {
                 defer { context.reset() }
                 try requireAllowed(repository: PersonalCartRepository(persistence: persistence, context: context, session: session),
                     share: share)
             }
-        }.value
+        }
     }
 
     static func requireAllowed(repository: PersonalCartRepository, share: HomeEffectShare) throws {

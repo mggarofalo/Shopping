@@ -11,6 +11,27 @@ extension PersonalCartService {
         try quarantineUnavailable { try republishPresence() }
     }
 
+    /// Starts a coalesced outbox pass after a deferred Checkout or Restore.
+    func requestCheckoutPublication() {
+        let service = outboxService
+        checkoutPublication.request { service.publishUnpublishedReceipts() }
+    }
+
+    /// Publishes each checkout and restore whose receipts aren't recorded as written.
+    /// Publication is idempotent by receipt key, so a concurrent resumePending() is
+    /// harmless. Anything that fails stays in the outbox for resumePending().
+    func publishUnpublishedReceipts() {
+        guard let pending = try? transact(save: false, { repository in
+            let published = try repository.publishedEffects()
+            return (try repository.values(PersonalCheckoutIntent.self, kind: "checkout").keys
+                        .filter { !published.checkouts.contains($0) }.sorted { $0.uuidString < $1.uuidString },
+                    try repository.values(PersonalRestoreIntent.self, kind: "restore").keys
+                        .filter { !published.restores.contains($0) }.sorted { $0.uuidString < $1.uuidString })
+        }) else { return }
+        for id in pending.0 { try? publishCheckout(id: id) }
+        for id in pending.1 { try? publishRestore(id: id) }
+    }
+
     private func quarantineUnavailable(_ publish: () throws -> Void) throws {
         do { try publish() }
         catch let error as PersonalCartError where error == .permissionDenied || error == .unavailable

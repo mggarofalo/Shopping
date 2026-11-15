@@ -13,6 +13,15 @@ extension PersonalCartRepository {
         return persistence.homeNativeAccess.permitsPublication(identity)
     }
 
+    /// Local facts only: a participant home publishes once a finished native
+    /// verification found it writable. Never waits for CloudKit share metadata;
+    /// the outbox still makes the live checks above before it writes.
+    func nativePublicationVerified(householdID: UUID, listID: UUID) -> Bool {
+        guard let home = try? household(householdID) else { return false }
+        guard persistence.homeNativeShares.requiresVerification(home, in: self) else { return true }
+        return persistence.homeNativeAccess.permitsPublication(scope: homeEffectScope(householdID: householdID, listID: listID))
+    }
+
     func nativeCommandAccess(for home: Household) throws -> HomeNativeAccessGate.Access? {
         guard let identity = try nativeAccessIdentity(for: home) else { return nil }
         return persistence.homeNativeAccess.observedAccess(identity)
@@ -40,6 +49,8 @@ extension PersonalCartRepository {
 /// home has no native identity. Durable access facts stay in the ledger.
 protocol HomeNativeShareSource {
     func identity(for home: Household, in repository: PersonalCartRepository) throws -> HomeNativeAccessIdentity?
+    /// The home has a native identity to verify, answered from local store roles only.
+    func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool
     /// The account session is verified and CloudKit lets this device update the home.
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool
 }
@@ -64,6 +75,10 @@ struct CloudKitHomeNativeShareSource: HomeNativeShareSource {
             storeIdentifier: storeID, rootURI: home.objectID.uriRepresentation().absoluteString,
             share: HomeEffectShare(recordName: share.recordID.recordName,
                 zoneName: share.recordID.zoneID.zoneName, zoneOwnerName: share.recordID.zoneID.ownerName))
+    }
+
+    func requiresVerification(_ home: Household, in repository: PersonalCartRepository) -> Bool {
+        home.objectID.persistentStore.map { repository.persistence.role(of: $0) == .participantShared } ?? false
     }
 
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool {

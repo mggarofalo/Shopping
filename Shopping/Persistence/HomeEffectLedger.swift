@@ -59,6 +59,15 @@ extension PersonalCartRepository {
         return try homeEffectAuthorized(kind: kind, subjectID: subjectID, householdID: householdID, listID: listID)
     }
 
+    /// Whether an effect's household publication is held now, from local facts only:
+    /// the durable ledger and the last finished native verification. A command
+    /// reports it without waiting for CloudKit; the outbox retries held effects.
+    func homeEffectPublicationHeld(kind: HomeEffectKind, subjectID: UUID,
+                                   householdID: UUID, listID: UUID) throws -> Bool {
+        try !homeEffectAuthorized(kind: kind, subjectID: subjectID, householdID: householdID, listID: listID)
+            || !nativePublicationVerified(householdID: householdID, listID: listID)
+    }
+
     /// Durable ledger facts only: deletion, membership loss and restrictions. A
     /// pending native verification never withdraws an effect's authority.
     func homeEffectAuthorized(kind: HomeEffectKind, subjectID: UUID,

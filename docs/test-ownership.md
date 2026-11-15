@@ -2911,3 +2911,25 @@ durable read-only record instead of an injected closure. The Watch UI workflow
 `offline` durable fixture (an unverified participant with a half-imported
 presence record) for checkout, relaunch and restore. The `revoked` fixture now
 retains a durable read-only observation.
+
+### Half-imported household records never fail checkout (SHOPPING-285)
+
+`LocalCheckoutTests` owns checkout over real SQLite, for an owned home and a
+natively verified participant. A purchase receipt whose payload hasn't imported,
+for an unrelated need or with no identity yet, never blocks checkout of a carted
+need. A half-imported receipt that will concern the carted need is in transit at
+capture; once it arrives, the captured checkout skips the entry and only Buy
+anyway purchases it. `PersonalCartServiceTests.testMalformedSharedPurchaseCannotBlockPrivateQuantityOrRemovalAfterRelaunch`
+now expects capture to succeed.
+
+### Checkout and Restore return before household publication (SHOPPING-287)
+
+`LocalCheckoutTests.testCheckoutAndRestoreReturnBeforeHeldVerificationThenPublishOnce`
+holds a participant's native verification, as behind CloudKit mirroring. Checkout
+and Restore through `PersonalCartPresentation` return with no household record
+written; after release, the outbox writes one purchase and one retraction, and two
+`resumePending()` passes add none. `testOwnerDeferredCheckoutAndRestorePublishOnceFromTheOutbox`
+owns the owner path. `testHeldCheckoutReportsPendingAndRelaunchPublishesOnce` owns
+the held state: an unverified participant's outcome reports `pendingPublication`,
+history reads `held`, and a relaunch that verifies publishes exactly once. The
+Watch's owner offline workflow now waits for the outbox to publish the purchase.

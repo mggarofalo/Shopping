@@ -146,7 +146,7 @@ final class WatchPersistenceBootstrap {
         if let preparation, preparation.accountBinding == session.accountBinding {
             task = preparation.task
         } else {
-            task = Task.detached(priority: .userInitiated) {
+            task = Task(priority: .userInitiated) { try await BlockingWriterWork.run {
                 let signpostID = OSSignpostID(log: WatchPerformanceTrace.log)
                 os_signpost(.begin, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID)
                 defer { os_signpost(.end, log: WatchPerformanceTrace.log, name: "Watch store bootstrap", signpostID: signpostID) }
@@ -155,7 +155,7 @@ final class WatchPersistenceBootstrap {
                 let persistence = try PersistenceController(configuration: configuration)
                 let directory = try session.storeDirectory(in: accountsDirectory)
                 return PreparedStore(persistence: persistence, directory: directory)
-            }
+            } }
             preparation = Preparation(accountBinding: session.accountBinding, task: task)
         }
         let prepared: PreparedStore
@@ -166,7 +166,7 @@ final class WatchPersistenceBootstrap {
         }
         guard generation == authorityGeneration, (try? provider.currentSession()) == session else {
             if generation == authorityGeneration, preparation?.accountBinding == session.accountBinding { preparation = nil }
-            if ownsPreparation { Task.detached(priority: .utility) { try? prepared.close() } }
+            if ownsPreparation { Task { try? await BlockingWriterWork.run(qos: .utility) { try prepared.close() } } }
             throw PersonalCartError.accountChanged
         }
         if let current, binding == session.accountBinding { return current }
@@ -238,12 +238,12 @@ final class WatchPersistenceBootstrap {
     static func retireStore(_ persistence: PersistenceController) -> Task<Void, Error> {
         persistence.container.viewContext.reset()
         let retiring = RetiringStore(persistence: persistence)
-        return Task.detached(priority: .utility) {
+        return Task(priority: .utility) { try await BlockingWriterWork.run(qos: .utility) {
             let writer = retiring.persistence.writer
             writer.performAndWait { writer.reset() }
             let coordinator = retiring.persistence.container.persistentStoreCoordinator
             for store in coordinator.persistentStores { try coordinator.remove(store) }
-        }
+        } }
     }
 
     private func observeImports(_ runtime: Runtime) {

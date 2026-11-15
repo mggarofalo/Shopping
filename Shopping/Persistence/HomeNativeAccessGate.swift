@@ -80,6 +80,11 @@ final class HomeNativeAccessGate: @unchecked Sendable {
         lock.withLock { states[identity]?.verified == true && states[identity]?.access == .writable }
     }
 
+    /// Whether a finished verification found this home writable, for any of its shares.
+    func permitsPublication(scope: HomeEffectScope) -> Bool {
+        lock.withLock { states.contains { $0.key.scope == scope && $0.value.verified && $0.value.access == .writable } }
+    }
+
     func observedAccess(_ identity: HomeNativeAccessIdentity) -> Access? {
         lock.withLock { states[identity]?.access }
     }
