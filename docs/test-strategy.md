@@ -56,7 +56,7 @@ The historical September 8 file-level inventory below covers the 221 tests then 
 | `CategoryManagementUITests.swift` | 6 | UI | Simulator app and isolated store | Slow | Full plan; native selection and accessibility workflows. |
 | `ChecklistUITests.swift` | 7 | UI | Simulator app and isolated store | Slow | Full plan; cart, clear, recovery, quantity, and accessibility. |
 | `ClearInterruptionUITests.swift` | 1 | UI | Simulator app and forced process exit | Slow | Full plan; committed clear recovery after abrupt termination. |
-| `GroceryEditingUITests.swift` | 11 | UI | Simulator app and isolated store | Slow | Full plan; editing, filtered category/cart feedback, keyboard dismissal, catalog suggestions, relaunch, Dynamic Type, and optional quantity. |
+| `GroceryEditingUITests.swift` | 13 | UI | Simulator app and isolated store | Slow | Full plan; editing, filtered category/cart feedback, keyboard dismissal, catalog suggestions, relaunch, Dynamic Type, and optional quantity. |
 | `OneTimePromotionUITests.swift` | 4 | UI | Simulator app and isolated store | Slow | Full plan; promotion choices, conflicts, relaunch, and sorting. |
 | `ShoppingAppearanceUITests.swift` | 3 | UI | Simulator app in 2 appearances | Very slow | Full plan; light, dark, and accessibility-size layouts. |
 | `ShoppingDeviceUITests.swift` | 8 | UI and device | Simulator or signed device | Slow | Full and device plans; accessibility, compact layout, and recovery copy. |

@@ -170,19 +170,23 @@ struct GroceryCatalogAddView: View {
                         sections: catalogSections,
                         itemID: \.objectID
                     ) { _, item in
-                        let activeNeed = activeNeedIndex[item.id]
+                        let status = CatalogNeedStatus(activeNeed: activeNeedIndex[item.id], personalCart: personalCart)
+                        let purchaseSummary = purchaseSummary(for: item)
                         Button { select(item) } label: {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.name)
-                                    Text(summary(for: item, activeNeed: activeNeed))
+                                    Text(purchaseSummary)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if let needState = status.label {
+                                        Text(needState)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: activeNeed == nil
-                                      ? "plus.circle"
-                                      : "arrow.forward.circle")
+                                Image(systemName: status == .notNeeded ? "plus.circle" : "pencil.circle")
                                     .foregroundStyle(.tint)
                                     .accessibilityHidden(true)
                             }
@@ -192,9 +196,11 @@ struct GroceryCatalogAddView: View {
                         .buttonStyle(.plain)
                         .frame(minHeight: ShoppingListMetrics.minimumRowHeight)
                         .disabled(!personSelectionValid)
-                        .accessibilityHint(activeNeed == nil
+                        .accessibilityLabel(status == .notNeeded ? "Add \(item.name)" : "Edit \(item.name)")
+                        .accessibilityValue(status.accessibilityValue(details: purchaseSummary))
+                        .accessibilityHint(status == .notNeeded
                                            ? "Adds this saved item to Groceries"
-                                           : "Opens the existing grocery item")
+                                           : "Opens the grocery item editor")
                         .accessibilityIdentifier("shopping.grocery.catalogResult.\(item.id.uuidString)")
                         .shoppingListRowInsets()
                     }
@@ -286,21 +292,14 @@ struct GroceryCatalogAddView: View {
         )
     }
 
-    private func summary(for item: Item, activeNeed: Need?) -> String {
-        let needState: String
-        if let activeNeed {
-            needState = (personalCart?.contains(activeNeed.id) ?? activeNeed.carted) ? "In cart" : "On grocery list"
-        } else {
-            needState = "Saved in Catalog"
-        }
+    private func purchaseSummary(for item: Item) -> String {
         let assigned = item.stores ?? []
         let storeLabels = activeStores.filter { assigned.contains($0) }.map(\.name)
-        let storeSummary = CatalogSuggestionPurchaseSummary.text(
+        return CatalogSuggestionPurchaseSummary.text(
             anyStore: item.anyStore,
             savedStoreLabels: storeLabels,
             hasSavedStores: !assigned.isEmpty
         )
-        return "\(storeSummary) · \(needState)"
     }
 
     private func select(_ item: Item) {

@@ -165,6 +165,24 @@ final class CatalogRefreshUITests: XCTestCase {
         )).count, 1)
     }
 
+    func testGroceryAddResultsShowNeedStateOnItsOwnLineWithAnEditAffordance() {
+        let app = launchApp(named: "ShoppingGroceryAddNeedStatesUITest", fixture: "catalogNeedStates")
+        openCatalogChooser(in: app)
+        closeCatalogSearch(in: app)
+
+        // The label carries the trailing symbol's action, plus or pencil, and the value the caption lines.
+        // Searching the catalog implies an item is saved there, so no row says "Saved in Catalog".
+        assertCatalogResult("Add Apples", value: "Any Store", in: app)
+        assertCatalogResult("Add Basil", value: "Publix", in: app)
+        assertCatalogResult("Edit Bananas", value: "Any Store · On grocery list", in: app)
+        assertCatalogResult("Edit Blueberries", value: "Costco · In cart", in: app)
+        attachScreenshot(named: "Add to Groceries need states", app: app)
+
+        catalogResult("Edit Blueberries", in: app).tap()
+        XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
+        XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Blueberries")
+    }
+
     func testGroceryAddNewPrefillsCatalogEditorAndOneTimeRemainsExplicit() {
         let app = launchApp(named: "ShoppingGroceryPrefillUITest")
         openCatalogChooser(in: app)
@@ -214,6 +232,41 @@ final class CatalogRefreshUITests: XCTestCase {
         app.buttons["shopping.addGrocery"].tap()
         XCTAssertTrue(app.navigationBars["Add to Groceries"].existsOrAppears(timeout: 2))
         XCTAssertTrue(app.searchFields["Search catalog"].existsOrAppears(timeout: 2))
+    }
+
+    private func closeCatalogSearch(in app: XCUIApplication) {
+        XCTAssertTrue(app.keyboards.firstMatch.existsOrAppears(timeout: 3))
+        // The search field's own Close or Cancel, never the sheet's Cancel toolbar button.
+        let closeSearch = app.buttons.matching(NSPredicate(
+            format: "(label == 'Close' OR label == 'Cancel') AND identifier != 'shopping.grocery.catalogCancel'"
+        )).firstMatch
+        XCTAssertTrue(closeSearch.exists)
+        closeSearch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Add to Groceries"].exists)
+    }
+
+    private func catalogResult(_ label: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@",
+            "shopping.grocery.catalogResult.", label
+        )).firstMatch
+    }
+
+    private func assertCatalogResult(
+        _ label: String, value: String, in app: XCUIApplication,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let result = catalogResult(label, in: app)
+        XCTAssertTrue(result.existsOrAppears(timeout: 2), "Missing \(label)", file: file, line: line)
+        XCTAssertEqual(result.value as? String, value, file: file, line: line)
+    }
+
+    private func attachScreenshot(named name: String, app: XCUIApplication) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     private func searchFor(_ text: String, in app: XCUIApplication) {

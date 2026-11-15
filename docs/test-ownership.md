@@ -2868,3 +2868,19 @@ relaunch while the native access refresh is held. Both use
 `OfflineParticipantShares`, a `HomeNativeShareSource` that reports a participant
 identity and no verified write. Existing household fulfillment, lineage and
 quarantine tests are unchanged.
+
+## Catalog need-state captions (SHOPPING-281)
+
+`CatalogNeedStatus` owns the need-state wording that Add to Groceries results and
+editor suggestions share. A search result never says "Saved in Catalog"; an item
+already needed shows "On grocery list" or "In cart" on its own caption line.
+`PersonalCartPresentationTests.testCatalogNeedStatusTrustsThePersonalCartOverTheLegacyFlag`
+owns the state rule and spoken value, and
+`PreviewFixtureTests.testCatalogNeedStatesFixtureHasOneItemPerState` owns the
+`catalogNeedStates` fixture shape. In the Full plan,
+`CatalogRefreshUITests/testGroceryAddResultsShowNeedStateOnItsOwnLineWithAnEditAffordance`
+checks each picker state's Add/Edit label (the plus or pencil) and caption value,
+and that an in-cart result opens the editor.
+`GroceryEditingUITests/testSuggestionsShowNeedStateOnItsOwnLine` checks the
+editor's suggestions and that only an in-cart item offers Need again. Review both
+screenshot attachments.

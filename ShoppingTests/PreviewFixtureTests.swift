@@ -220,6 +220,26 @@ final class PreviewFixtureTests: XCTestCase {
         }
     }
 
+    func testCatalogNeedStatesFixtureHasOneItemPerState() throws {
+        let fixture = try ShoppingPreviewFixtures.make(.catalogNeedStates)
+        let ids = fixture.ids
+        XCTAssertEqual(
+            Set(try fixture.service.allActiveNeedIDs(householdID: ids.householdID)),
+            [ids.needIDs["bananas"]!, ids.needIDs["blueberries"]!]
+        )
+        let context = fixture.persistence.simulationContext()
+        try context.performAndWait {
+            let items = Dictionary(uniqueKeysWithValues: try context.fetch(Item.fetchRequest()).map { ($0.name, $0) })
+            XCTAssertEqual(Set(items.keys), ["Apples", "Basil", "Bananas", "Blueberries"])
+            XCTAssertTrue(try XCTUnwrap(items["Apples"]).anyStore)
+            XCTAssertEqual(try XCTUnwrap(items["Basil"]).stores?.map(\.name), ["Publix"])
+            XCTAssertEqual(try XCTUnwrap(items["Blueberries"]).stores?.map(\.name), ["Costco"])
+            let needs = Dictionary(uniqueKeysWithValues: try context.fetch(Need.fetchRequest()).map { ($0.id, $0) })
+            XCTAssertFalse(try XCTUnwrap(needs[ids.needIDs["bananas"]!]).carted)
+            XCTAssertTrue(try XCTUnwrap(needs[ids.needIDs["blueberries"]!]).carted)
+        }
+    }
+
     func testInactiveSuggestionFixtureHasSavedDetailsWithoutCreatingACurrentNeed() throws {
         let fixture = try ShoppingPreviewFixtures.make(.inactiveCatalogSuggestion)
         XCTAssertTrue(try fixture.service.allActiveNeedIDs(householdID: fixture.ids.householdID).isEmpty)

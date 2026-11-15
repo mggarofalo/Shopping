@@ -97,3 +97,36 @@ struct CatalogNeedRemovalTarget: Equatable {
     let householdID: UUID
     let listID: UUID
 }
+
+/// Whether a catalog item already has a current need. Add to Groceries results and the item
+/// editor's suggestions share this wording so the two lists describe an item the same way.
+enum CatalogNeedStatus: Equatable {
+    case notNeeded
+    case onList
+    case inCart
+
+    @MainActor
+    init(activeNeed: Need?, personalCart: PersonalCartPresentation?) {
+        guard let activeNeed else {
+            self = .notNeeded
+            return
+        }
+        self = (personalCart?.contains(activeNeed.id) ?? activeNeed.carted) ? .inCart : .onList
+    }
+
+    /// Searching the catalog already implies an item is saved there, so only a current need
+    /// has a label.
+    var label: String? {
+        switch self {
+        case .notNeeded: nil
+        case .onList: "On grocery list"
+        case .inCart: "In cart"
+        }
+    }
+
+    /// The row's spoken value: the item's saved details, then its need state. Store summaries
+    /// already use commas, so a middle dot keeps the state from sounding like another store.
+    func accessibilityValue(details: String) -> String {
+        [details, label].compactMap { $0 }.joined(separator: " · ")
+    }
+}

@@ -13,6 +13,8 @@ enum ShoppingPreviewCase: String, CaseIterable {
     case promotionLinkExisting
     case promotionConflict
     case inactiveCatalogSuggestion
+    /// One catalog item in each state the add picker and editor suggestions describe.
+    case catalogNeedStates
     case clearInterruption
     case performance
     case stress
@@ -75,6 +77,8 @@ enum ShoppingPreviewFixtures {
             try populatePromotion(service: service, hasActiveMatch: fixture == .promotionConflict, ids: &ids)
         } else if fixture == .clearInterruption {
             try populateClearInterruption(service: service, ids: &ids)
+        } else if fixture == .catalogNeedStates {
+            try populateCatalogNeedStates(service: service, ids: &ids)
         } else if fixture == .inactiveCatalogSuggestion {
             ids.itemIDs["cafe"] = try service.createItem(
                 name: "Café au lait",
@@ -107,6 +111,29 @@ enum ShoppingPreviewFixtures {
         )
         try service.setCarted(true, needID: needID)
         ids.needIDs["oneTime"] = needID
+    }
+
+    private static func populateCatalogNeedStates(service: NeedService, ids: inout ShoppingPreviewIDs) throws {
+        let householdID = ids.householdID
+        let costco = try service.createStore(name: "Costco", householdID: householdID, displayOrder: 0)
+        let publix = try service.createStore(name: "Publix", householdID: householdID, displayOrder: 1)
+        let produce = try service.createCategory(name: "Produce", householdID: householdID, displayOrder: 0)
+        ids.storeIDs = ["costco": costco, "publix": publix]
+        ids.categoryIDs = ["produce": produce]
+        ids.itemIDs["apples"] = try service.createItem(
+            name: "Apples", categoryID: produce, householdID: householdID, anyStore: true)
+        ids.itemIDs["basil"] = try service.createItem(
+            name: "Basil", categoryID: produce, storeIDs: [publix], householdID: householdID, anyStore: false)
+        let bananas = try service.createItem(
+            name: "Bananas", categoryID: produce, householdID: householdID, anyStore: true)
+        let berries = try service.createItem(
+            name: "Blueberries", categoryID: produce, storeIDs: [costco], householdID: householdID, anyStore: false)
+        ids.itemIDs["bananas"] = bananas
+        ids.itemIDs["blueberries"] = berries
+        ids.needIDs["bananas"] = try service.addRememberedNeed(itemID: bananas, listID: ids.listID)
+        let berriesNeed = try service.addRememberedNeed(itemID: berries, listID: ids.listID)
+        try service.setCarted(true, needID: berriesNeed)
+        ids.needIDs["blueberries"] = berriesNeed
     }
 
     private static func populate(
