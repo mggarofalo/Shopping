@@ -11,8 +11,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let own: [PersonalCartEntrySnapshot]
         let outstanding: Set<UUID>
         let presence: [PersonalCartPresenceSnapshot]
-        let sharedAvailable: Bool
         let history: [PersonalCheckoutHistoryEntry]
+        let importPending: Bool
         let recoveryMessage: String?
         let savedSelection: Selection?
     }
@@ -22,7 +22,6 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     private var cart: PersonalCartService?
     private var provider: (any ShopperSessionProviding)?
     private let preferredHouseholdID: UUID?
-    private let householdWritable: ((UUID) -> Bool)?
     private let loadRecoveryPolicy: LoadRecoveryPolicy?
     private var selectionURL: URL?
     private var selectedStoreID: UUID?
@@ -33,8 +32,6 @@ final class PersistentWatchShoppingService: WatchShoppingService {
     // Counts local receipts patched into lastSnapshot. Reads no longer exclude commits.
     private var receiptRevision = 0
     private var startupError: Error?
-    private var sharedWritable = false
-    private var activeHouseholdID: UUID?
     private var currentAttention: String?
     private lazy var presencePublisher = WatchPresencePublisher(delay: presenceDelay) { [weak self] needIDs in
         guard let cart = self?.cart else { return [] }
@@ -59,14 +56,13 @@ final class PersistentWatchShoppingService: WatchShoppingService {
 
     init(persistence: PersistenceController, sessionProvider: any ShopperSessionProviding,
          preferredHouseholdID: UUID? = nil, selectionURL: URL? = nil,
-         householdWritable: (@MainActor (UUID) -> Bool)? = nil, cartService: PersonalCartService? = nil,
+         cartService: PersonalCartService? = nil,
          loadRecoveryPolicy: LoadRecoveryPolicy? = nil, presenceDelay: Duration = .seconds(2)) {
         bootstrap = nil
         cart = cartService ?? PersonalCartService(persistence: persistence, sessionProvider: sessionProvider)
         provider = sessionProvider
         self.preferredHouseholdID = preferredHouseholdID
         self.selectionURL = selectionURL
-        self.householdWritable = householdWritable
         self.loadRecoveryPolicy = loadRecoveryPolicy
         self.presenceDelay = presenceDelay
     }
@@ -75,7 +71,6 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         self.bootstrap = bootstrap
         presenceDelay = .seconds(2)
         preferredHouseholdID = nil
-        householdWritable = nil
         loadRecoveryPolicy = nil
         bootstrap.onAuthorityInvalidated = { [weak self] in self?.invalidateAuthority() }
         bootstrap.onDataChanged = { [weak self] in self?.onChange?(.dataChanged) }
@@ -89,7 +84,6 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         presenceDelay = .seconds(2)
         bootstrap = nil
         preferredHouseholdID = nil
-        householdWritable = nil
         loadRecoveryPolicy = nil
         startupError = error
     }
@@ -102,8 +96,6 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         authorityID = nil
         epoch = UUID()
         lastSnapshot = WatchShoppingSnapshot()
-        sharedWritable = false
-        activeHouseholdID = nil
         currentAttention = nil
         selectedStoreID = nil
         if bootstrap != nil { cart = nil; provider = nil; selectionURL = nil }
@@ -137,6 +129,8 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             return WatchShoppingSnapshot(availability: .setupRequired(message))
         }
         presencePublisher.retry()
+        // A store choice supersedes any read already in flight for the previous store.
+        if let storeID, storeID != selectedStoreID { receiptRevision += 1 }
         let revision = receiptRevision
         guard try provider?.currentSession() == session else { throw PersonalCartError.accountChanged }
         let preferredHouseholdID = self.preferredHouseholdID
@@ -158,19 +152,17 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 catch { recoveryMessage = "Saved cart available. Some household changes are waiting to sync." }
             }
             guard let projection = try WatchPersistentProjection.read(cart: cart,
-                preferredHouseholdID: preferredHouseholdID ?? savedHousehold, writable: nil) else { return nil }
+                preferredHouseholdID: preferredHouseholdID ?? savedHousehold) else { return nil }
             let scope = projection.scope
             let own = try cart.entries(householdID: scope.householdID, listID: scope.listID)
-            var outstanding: Set<UUID> = []
-            var presence: [PersonalCartPresenceSnapshot] = []
-            var sharedAvailable = true
-            do {
-                outstanding = try cart.outstandingNeedIDs(householdID: scope.householdID, listID: scope.listID)
-                presence = try cart.presence(householdID: scope.householdID, listID: scope.listID)
-            } catch { sharedAvailable = false }
-            let history = try cart.history(householdID: scope.householdID, listID: scope.listID)
-            return LoadedValues(projection: projection, own: own, outstanding: outstanding,
-                presence: presence, sharedAvailable: sharedAvailable, history: history,
+            // Records still arriving withhold only what they describe: groceries or
+            // saved purchases. The cart, its edits and checkout stay available.
+            let outstanding = try? cart.outstandingNeedIDs(householdID: scope.householdID, listID: scope.listID)
+            let history = try? cart.history(householdID: scope.householdID, listID: scope.listID)
+            // Presence is advisory and never affects capabilities.
+            let presence = (try? cart.presence(householdID: scope.householdID, listID: scope.listID)) ?? []
+            return LoadedValues(projection: projection, own: own, outstanding: outstanding ?? [],
+                presence: presence, history: history ?? [], importPending: outstanding == nil || history == nil,
                 recoveryMessage: recoveryMessage, savedSelection: saved)
         }.value
         guard self.cart === cart, try provider?.currentSession() == session else {
@@ -182,29 +174,27 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 ?? "Waiting for your household to sync from iCloud. Accept a household invitation or finish setup on your iPhone."))
         }
         let projection = loaded.projection
-        activeHouseholdID = projection.scope.householdID
-        if selectedStoreID == nil, let saved = loaded.savedSelection,
+        var selected = selectedStoreID
+        if selected == nil, let saved = loaded.savedSelection,
            saved.accountBinding == session.accountBinding, saved.householdID == projection.scope.householdID {
-            selectedStoreID = saved.storeID
+            selected = saved.storeID
         }
-        if let storeID { selectedStoreID = storeID }
-        if !projection.stores.contains(where: { $0.id == selectedStoreID }) { selectedStoreID = nil }
+        if let storeID { selected = storeID }
+        if !projection.stores.contains(where: { $0.id == selected }) { selected = nil }
         let own = loaded.own
         let outstanding = loaded.outstanding
         let presence = loaded.presence
-        let writable = projection.writable && loaded.sharedAvailable &&
-            (householdWritable?(projection.scope.householdID) ?? true)
-        sharedWritable = writable
+        let writable = projection.writable
         let nextAuthority = "\(session.accountBinding)|\(projection.scope.householdID)|\(writable)|\(epoch)"
         if let authorityID, authorityID != nextAuthority { onChange?(.authorityInvalidated) }
         authorityID = nextAuthority
         let activeStores = Set(projection.stores.map(\.id))
         let buyAnywayCaptures: [UUID: PersonalCheckoutToken]
-        if writable, let selectedStoreID {
+        if writable, let selected {
             buyAnywayCaptures = await Task.detached(priority: .userInitiated) { [cart] in
                 var captures: [UUID: PersonalCheckoutToken] = [:]
                 for entry in own where !entry.purchaseNotices.isEmpty {
-                    captures[entry.id] = try? cart.prepareCheckout(tokens: [entry.token], storeID: selectedStoreID)
+                    captures[entry.id] = try? cart.prepareCheckout(tokens: [entry.token], storeID: selected)
                 }
                 return captures
             }.value
@@ -212,7 +202,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             buyAnywayCaptures = [:]
         }
         let rows = RowContext(authorityID: nextAuthority, accountBinding: session.accountBinding,
-            scope: projection.scope, selectedStoreID: selectedStoreID, activeStores: activeStores, writable: writable,
+            scope: projection.scope, selectedStoreID: selected, activeStores: activeStores, writable: writable,
             presence: presence, oneTimeIDs: projection.oneTimeIDs, buyAnywayCaptures: buyAnywayCaptures)
         let ownIDs = Set(own.map(\.needID))
         // Store choices summarize all remaining occurrences, independent of the selected store.
@@ -234,7 +224,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
             !ownIDs.contains($0.needID) && rows.isGrocery($0, outstanding: outstanding.contains($0.needID))
         }
         // A retained cart stays removable even when its old store or household disappears.
-        let visibleCart = selectedStoreID == nil ? own : own.filter { rows.eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
+        let visibleCart = selected == nil ? own : own.filter { rows.eligible($0) || !$0.purchaseRulesResolved || (!$0.anyStore && $0.storeIDs.isDisjoint(with: activeStores)) }
         let operations = try loaded.history.map { operation in
             let token = WatchRestoreToken(authorityID: nextAuthority, accountBinding: session.accountBinding,
                 householdID: projection.scope.householdID, listID: projection.scope.listID,
@@ -244,26 +234,29 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 summary: operation.restored ? "Purchase restored" : "\(operation.entries.count) purchased\(operation.pendingPublication ? " · Sync pending" : "")",
                 canRestore: writable && !operation.restored && !operation.entries.isEmpty)
         }
-        let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved." : loaded.recoveryMessage
+        let attention = !writable ? "Household changes are unavailable. Your personal cart and purchases are saved."
+            : loaded.importPending ? "Some household items are still arriving. Your cart is saved."
+            : loaded.recoveryMessage
         currentAttention = attention
-        let snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
-            homeName: projection.homeName, stores: stores, selectedStoreID: selectedStoreID,
+        var snapshot = try WatchShoppingSnapshot(authorityID: nextAuthority, availability: .ready,
+            homeName: projection.homeName, stores: stores, selectedStoreID: selected,
             grocerySections: projection.sections(grocery) { try rows.item($0, inCart: false) },
             cartSections: projection.sections(visibleCart) { try rows.item($0, inCart: true) },
             recentCheckouts: operations,
-            canCheckout: writable && selectedStoreID != nil && visibleCart.contains { rows.eligible($0) && $0.demandAvailable && $0.purchaseNotices.isEmpty },
             statusMessage: attention ?? bootstrap?.accountStatusMessage,
             syncStatus: bootstrap?.syncStatus(additionalMessage: attention)
                 ?? WatchSyncStatus(attentionMessages: [attention].compactMap { $0 }))
+        snapshot.canCheckout = snapshot.hasCheckoutRows
         // A read that overlapped a local commit may predate its receipt. Checkout and
         // later receipts use lastSnapshot, so keep the receipt until a clean read.
-        if revision == receiptRevision {
-            lastSnapshot = snapshot
-            self.rows = rows
-        }
+        // Only a current read commits selection, rows and the saved choice.
+        guard revision == receiptRevision else { return snapshot }
+        selectedStoreID = selected
+        lastSnapshot = snapshot
+        self.rows = rows
         if let selectionURL {
             let selection = Selection(accountBinding: session.accountBinding, householdID: projection.scope.householdID,
-                storeID: selectedStoreID)
+                storeID: selected)
             if selection != loaded.savedSelection {
                 try await Task.detached(priority: .utility) {
                     try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -298,18 +291,10 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         guard let rows, rows.authorityID == token.authorityID else { throw PersonalCartError.scopeChanged }
         switch command {
         case .add(_, let quantity):
-            try await requireShared(storeID: token.storeID)
+            try requireSelectedStore(token.storeID, rows: rows)
             guard token.membership == nil else { throw PersonalCartError.staleEntry }
-            let valid = try await Task.detached(priority: .userInitiated) { () -> Bool in
-                guard let projection = try WatchPersistentProjection.read(cart: cart,
-                    preferredHouseholdID: token.householdID, writable: nil),
-                    projection.scope.householdID == token.householdID,
-                    let need = projection.needs.first(where: { $0.needID == token.needID }),
-                    PersonalCartSnapshotBuilder.eligible(need, storeID: token.storeID) else { return false }
-                return try cart.outstandingNeedIDs(householdID: token.householdID, listID: token.listID).contains(token.needID)
-            }.value
-            guard valid else { throw PersonalCartError.staleEntry }
-            try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
+            // The durable command checks the active store, eligibility, demand and
+            // household access in its own writer transaction.
             try await Task.detached(priority: .userInitiated) {
                 try cart.cart(needID: token.needID, householdID: token.householdID, listID: token.listID,
                     initialQuantity: quantity.map(Int64.init), expectedStoreID: token.storeID, operationID: token.operationID,
@@ -326,7 +311,7 @@ final class PersistentWatchShoppingService: WatchShoppingService {
                 try cart.setQuantity(quantity.map(Int64.init), token: membership, operationID: token.operationID, presencePolicy: .deferred)
             }.value
         case .buyAnyway:
-            try await requireShared(storeID: token.storeID)
+            try requireSelectedStore(token.storeID, rows: rows)
             guard let membership = token.membership, !token.acknowledgedReceipts.isEmpty else { throw PersonalCartError.staleEntry }
             guard let capture = token.buyAnywayCapture, capture.entries == [membership] else { throw PersonalCartError.staleEntry }
             try validate(authority: token.authorityID, binding: token.accountBinding, session: session)
@@ -340,15 +325,19 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         presencePublisher.markDirty(token.needID)
         let (entry, need, mayRebase) = try await Task.detached(priority: .userInitiated) {
             try cart.transact(save: false) { repository in
-                let entry = try cart.entries(householdID: token.householdID, listID: token.listID,
-                    repository: repository).first { $0.needID == token.needID }
+                // Shared purchase notices still arriving never hide the durable entry.
+                let entries = try (try? cart.entries(householdID: token.householdID, listID: token.listID,
+                    repository: repository)) ?? cart.entries(householdID: token.householdID, listID: token.listID,
+                    repository: repository, includeShared: false)
+                let entry = entries.first { $0.needID == token.needID }
                 // Without a membership the occurrence returns to groceries from this
                 // same local read, never from a later full read or an import.
                 var need: (snapshot: PersonalCartEntrySnapshot, outstanding: Bool)?
+                // Demand still arriving leaves the row out of groceries until a read.
                 if entry == nil, let value = try repository.need(token.needID, householdID: token.householdID,
-                    listID: token.listID), !value.archived {
-                    let fulfilled = try PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: token.householdID,
-                        persistence: cart.persistence, in: repository.context, session: repository.session)
+                    listID: token.listID), !value.archived,
+                    let fulfilled = try? PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: token.householdID,
+                        persistence: cart.persistence, in: repository.context, session: repository.session) {
                     need = (try PersonalCartSnapshotBuilder.make(need: value, session: repository.session,
                         generation: value.id, evidence: [], quantity: value.quantity), !fulfilled.contains(token.needID))
                 }
@@ -385,13 +374,16 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         receiptRevision += 1
     }
 
+    /// Captures from the receipt-patched snapshot, never a full read.
     func captureCheckout(storeID: UUID) async throws -> WatchCheckoutPreview {
         let (cart, session) = try await resolve()
-        guard let capturedAuthority = authorityID else { throw PersonalCartError.scopeChanged }
-        try await requireShared(storeID: storeID)
+        guard let capturedAuthority = authorityID, let rows = self.rows,
+              rows.authorityID == capturedAuthority else { throw PersonalCartError.scopeChanged }
+        try requireSelectedStore(storeID, rows: rows)
+        try await requirePublication(cart, scope: rows.scope)
         try validate(authority: capturedAuthority, binding: session.accountBinding, session: session)
-        let rows = lastSnapshot.cartSections.flatMap(\.items).filter { $0.purchasedNotice == nil && $0.unavailableReason == nil }
-        let tokens = try rows.map { row -> PersonalCartEntryToken in
+        let cartRows = lastSnapshot.cartSections.flatMap(\.items).filter(\.isCheckoutReady)
+        let tokens = try cartRows.map { row -> PersonalCartEntryToken in
             let token = try WatchTokenCoding.decode(WatchCommandToken.self, row.commandToken)
             guard let membership = token.membership else { throw PersonalCartError.staleEntry }
             return membership
@@ -411,11 +403,15 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         let captured = try WatchTokenCoding.decode(WatchCheckoutToken.self, token)
         let (cart, session) = try await resolve()
         try validate(authority: captured.authorityID, binding: captured.capture.accountBinding, session: session)
-        try await requireShared(storeID: captured.capture.storeID)
+        guard let rows, rows.authorityID == captured.authorityID else { throw PersonalCartError.scopeChanged }
+        try requireSelectedStore(captured.capture.storeID, rows: rows)
+        try await requirePublication(cart, scope: rows.scope)
         try validate(authority: captured.authorityID, binding: captured.capture.accountBinding, session: session)
         let outcome = try await Task.detached(priority: .userInitiated) {
             try cart.checkout(captured.capture, operationID: captured.capture.id)
         }.value
+        // A read that began before this intent must not replace its result.
+        receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
         return WatchActionResult(id: outcome.operationID, title: "Checkout saved",
             message: "\(outcome.purchasedCount) purchased.\(outcome.pendingPublication ? " Household update will sync later." : "")",
@@ -430,20 +426,15 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         guard lastSnapshot.recentCheckouts.contains(where: { $0.id == captured.checkoutID && $0.canRestore }) else {
             throw PersonalCartError.permissionDenied
         }
-        guard householdWritable?(captured.householdID) ?? true else { throw PersonalCartError.permissionDenied }
-        let writable = try await Task.detached(priority: .userInitiated) { () -> Bool in
-            guard let projection = try WatchPersistentProjection.read(cart: cart,
-                preferredHouseholdID: captured.householdID, writable: nil) else { return false }
-            return projection.writable && projection.scope.householdID == captured.householdID
-        }.value
-        guard writable else { throw PersonalCartError.permissionDenied }
+        try await requirePublication(cart, scope: PersonalCartScopeSnapshot(householdID: captured.householdID,
+            listID: captured.listID))
         try validate(authority: captured.authorityID, binding: captured.accountBinding, session: session)
-        guard householdWritable?(captured.householdID) ?? true else { throw PersonalCartError.permissionDenied }
         let (history, result) = try await Task.detached(priority: .userInitiated) {
             let history = try cart.history(householdID: captured.householdID, listID: captured.listID)
             let result = try cart.restore(checkoutID: captured.checkoutID, operationID: captured.operationID)
             return (history, result)
         }.value
+        receiptRevision += 1
         let snapshot = try await load(storeID: selectedStoreID)
         return WatchActionResult(id: result.operationID, title: "Restore saved",
             message: "\(result.purchasedCount) restored; \(result.skippedCount) skipped.\(result.pendingPublication ? " Household update will sync later." : "")",
@@ -456,19 +447,24 @@ final class PersistentWatchShoppingService: WatchShoppingService {
         guard authority == authorityID else { throw PersonalCartError.scopeChanged }
     }
 
-    private func requireShared(storeID: UUID?) async throws {
-        guard let storeID, storeID == selectedStoreID, lastSnapshot.selectedStore != nil,
-              sharedWritable, let cart,
-              activeHouseholdID.flatMap({ householdWritable?($0) }) ?? true else {
-            throw PersonalCartError.permissionDenied
+    /// Household commands use the store shown by the snapshot that minted them.
+    private func requireSelectedStore(_ storeID: UUID?, rows: RowContext) throws {
+        guard let storeID, storeID == rows.selectedStoreID, rows.activeStores.contains(storeID) else {
+            throw PersonalCartError.scopeChanged
         }
-        let householdID = activeHouseholdID
-        let valid = try await Task.detached(priority: .userInitiated) { () -> Bool in
-            guard let projection = try WatchPersistentProjection.read(cart: cart,
-                preferredHouseholdID: householdID, writable: nil) else { return false }
-            return projection.writable && projection.stores.contains(where: { $0.id == storeID })
+        guard rows.writable else { throw PersonalCartError.permissionDenied }
+    }
+
+    /// Rechecks local durable access only: the ledger and the last finished native
+    /// observation. An observation that finished after the snapshot still blocks.
+    private func requirePublication(_ cart: PersonalCartService, scope: PersonalCartScopeSnapshot) async throws {
+        let permitted = try await Task.detached(priority: .userInitiated) {
+            try cart.transact(save: false) { repository in
+                WatchPersistentProjection.mayPublish(repository,
+                    household: try? repository.household(scope.householdID), scope: scope)
+            }
         }.value
-        guard valid, self.cart === cart else { throw PersonalCartError.permissionDenied }
+        guard permitted, self.cart === cart else { throw PersonalCartError.permissionDenied }
     }
 
     /// One authority for grocery membership and row presentation, shared by full

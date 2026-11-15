@@ -2884,3 +2884,25 @@ and that an in-cart result opens the editor.
 `GroceryEditingUITests/testSuggestionsShowNeedStateOnItsOwnLine` checks the
 editor's suggestions and that only an in-cart item offers Need again. Review both
 screenshot attachments.
+### Shopping with only the Watch (SHOPPING-279)
+
+`PersistentWatchShoppingServiceTests.testOfflineOwnerShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport`
+and its participant twin own the Watch's local-only gates over real SQLite.
+Another shopper's presence record is half imported and the native access
+refresh is held; Add, Quantity, Remove, capture, Checkout, relaunch, Restore and
+a second relaunch all succeed, then verified publication writes exactly one
+purchase and one retraction. `testParticipantWithoutImportedShareMetadataChecksOutAndRestores`
+owns a participant whose share metadata never imported (no native identity).
+`testIncompleteImportsDegradeWhatTheyDescribeNeverTheWholeCart` owns the
+per-record degradation: an unidentified need is left out, a half-imported
+purchase receipt withholds groceries, and the cart stays editable.
+`testCheckoutAndRestoreNeverWaitForAHeldRefreshRead` owns the session rule that
+Checkout and Restore never wait for an in-flight read, and
+`WatchShoppingSessionTests.testPeriodicRefreshCoalescesWhileLoadHeldAndStoreChoiceNeverWaitsForIt`
+owns the same rule for store choice, including discarding the held read.
+`testObservedPermissionLossBlocksCapturedRestoreButAllowsOwnRemoval` now uses a
+durable read-only record instead of an injected closure. The Watch UI workflow
+`testDurableOfflineParticipantChecksOutAndRestoresAcrossRelaunch` uses the
+`offline` durable fixture (an unverified participant with a half-imported
+presence record) for checkout, relaunch and restore. The `revoked` fixture now
+retains a durable read-only observation.

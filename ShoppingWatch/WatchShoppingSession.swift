@@ -405,16 +405,17 @@ final class WatchShoppingSession {
         canceledEditNotice = nil
         errorMessage = nil
         let generation = authorityGeneration
-        let authorityID = snapshot.authorityID
-        if isRefreshing { await withCheckedContinuation { refreshWaiter = $0 } }
+        // Never waits for an in-flight read: the operation reads only local durable
+        // state. That read is discarded below, because it may predate this result.
         var applied = false
         do {
-            guard generation == authorityGeneration, snapshot.authorityID == authorityID else {
-                throw PersonalCartError.scopeChanged
-            }
             try Task.checkCancellation()
             let update = try await operation()
-            if generation == authorityGeneration { apply(update); applied = true }
+            if generation == authorityGeneration {
+                receiptRevision += 1
+                apply(update)
+                applied = true
+            }
         } catch {
             if generation == authorityGeneration { errorMessage = error.localizedDescription }
         }

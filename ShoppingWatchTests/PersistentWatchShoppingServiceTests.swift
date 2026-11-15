@@ -81,6 +81,15 @@ private final class OfflineParticipantShares: HomeNativeShareSource {
     func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { online }
 }
 
+/// A participant home whose share metadata never imported: no native identity.
+private final class UnimportedShares: HomeNativeShareSource {
+    func identity(for home: Household, in repository: PersonalCartRepository) throws -> HomeNativeAccessIdentity? {
+        throw PersonalCartError.unavailable
+    }
+
+    func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { false }
+}
+
 @MainActor
 final class PersistentWatchShoppingServiceTests: XCTestCase {
     struct Provider: ShopperSessionProviding {
@@ -133,9 +142,9 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
             listID: listID, storeID: storeID, otherStoreID: otherStoreID, needID: needID)
     }
 
-    private func adapter(_ f: Fixture, writable: (@MainActor (UUID) -> Bool)? = nil) -> PersistentWatchShoppingService {
+    private func adapter(_ f: Fixture) -> PersistentWatchShoppingService {
         PersistentWatchShoppingService(persistence: f.persistence, sessionProvider: f.provider,
-            selectionURL: f.directory.appendingPathComponent("selection.json"), householdWritable: writable, cartService: f.cart)
+            selectionURL: f.directory.appendingPathComponent("selection.json"), cartService: f.cart)
     }
 
     func testLocalCommitReturnsDurableReceiptBeforeAdvisoryPublication() async throws {
@@ -610,18 +619,21 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertEqual(result.cartCount, 1)
     }
 
+    /// A durable observation that finishes after the snapshot still blocks Restore.
     func testObservedPermissionLossBlocksCapturedRestoreButAllowsOwnRemoval() async throws {
         let f = try fixture()
-        var writable = true
-        let service = adapter(f, writable: { _ in writable })
+        let service = adapter(f)
         let initial = try await service.load(storeID: f.storeID)
         let row = try XCTUnwrap(initial.grocerySections.first?.items.first)
         _ = try await service.execute(.add(token: row.commandToken, quantity: 2))
         let preview = try await service.captureCheckout(storeID: f.storeID)
         let result = try await service.checkout(token: preview.token)
         let recovery = try XCTUnwrap(result.snapshot.recentCheckouts.first)
-        writable = false
-        do { _ = try await service.restore(token: recovery.token); XCTFail("Revoked restore must fail") } catch {}
+        XCTAssertTrue(recovery.canRestore)
+        try f.cart.recordReadOnlyHome(householdID: f.householdID, listID: f.listID,
+            share: OfflineParticipantShares.share, operationID: UUID())
+        do { _ = try await service.restore(token: recovery.token); XCTFail("Revoked restore must fail") }
+        catch { XCTAssertEqual(error as? PersonalCartError, .permissionDenied) }
         XCTAssertFalse(try XCTUnwrap(f.cart.history(householdID: f.householdID, listID: f.listID).first).restored)
     }
 
@@ -1075,6 +1087,206 @@ final class PersistentWatchShoppingServiceTests: XCTestCase {
         XCTAssertEqual(converged.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
         XCTAssertEqual(converged.cartCount, 0)
         XCTAssertFalse(try XCTUnwrap(cart.history(householdID: f.householdID, listID: f.listID).first).pendingPublication)
+    }
+
+    private func recordCount(_ cart: PersonalCartService, kind: String) throws -> Int {
+        try cart.transact(save: false) { repository in
+            let request = NSFetchRequest<HouseholdCartRecord>(entityName: "HouseholdCartRecord")
+            request.predicate = NSPredicate(format: "kind == %@", kind)
+            return try repository.context.count(for: request)
+        }
+    }
+
+    /// A record another device wrote that hasn't finished importing: no identity or payload yet.
+    private func importPartialRecord(_ f: Fixture, kind: String) throws {
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let record = HouseholdCartRecord(context: context)
+            record.id = PersistenceModel.unsetID
+            record.kind = kind
+            record.household = try XCTUnwrap(context.fetch(Household.fetchRequest()).first { $0.id == f.householdID })
+            try context.save()
+        }
+    }
+
+    private func importPartialNeed(_ f: Fixture) throws {
+        let context = f.persistence.container.viewContext
+        try context.performAndWait {
+            let list = try XCTUnwrap(context.fetch(GroceryList.fetchRequest()).first { $0.id == f.listID })
+            let need = Need(context: context); need.id = PersistenceModel.unsetID; need.title = "Arriving"; need.notes = ""
+            need.kind = NeedKind.oneTime.rawValue; need.urgency = NeedUrgency.normal.rawValue; need.list = list
+            try context.save()
+        }
+    }
+
+    private func groceryRow(_ snapshot: WatchShoppingSnapshot, _ name: String) throws -> WatchShoppingItem {
+        try XCTUnwrap(snapshot.grocerySections.flatMap(\.items).first { $0.name == name }, "\(name) in groceries")
+    }
+
+    private func cartRow(_ snapshot: WatchShoppingSnapshot, _ name: String) throws -> WatchShoppingItem {
+        try XCTUnwrap(snapshot.cartSections.flatMap(\.items).first { $0.name == name }, "\(name) in cart")
+    }
+
+    private enum OfflineRole { case owner, participant }
+
+    private func relaunch(_ f: Fixture, shares: OfflineParticipantShares?) throws -> PersistenceController {
+        let persistence = try PersistenceController(storeURL: f.directory.appendingPathComponent("store.sqlite"))
+        if let shares { persistence.homeNativeShares = shares }
+        return persistence
+    }
+
+    /// SHOPPING-279: with share verification never answering and another shopper's
+    /// presence still importing, every Watch action works from local durable state
+    /// across relaunches, and verification's later success publishes exactly once.
+    private func assertOfflineShopping(as role: OfflineRole) async throws {
+        let f = try fixture()
+        try addGroceries(f, ["Bread"])
+        try importPartialRecord(f, kind: "presence")
+        if role == .participant { f.persistence.homeNativeShares = OfflineParticipantShares() }
+        let service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        _ = try await service.execute(.add(token: groceryRow(initial, "Milk").commandToken, quantity: 2))
+        var snapshot = try await service.execute(.add(token: groceryRow(initial, "Bread").commandToken, quantity: nil))
+        snapshot = try await service.execute(.setQuantity(token: cartRow(snapshot, "Milk").commandToken, quantity: 3))
+        snapshot = try await service.execute(.remove(token: cartRow(snapshot, "Bread").commandToken))
+        XCTAssertEqual(snapshot.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
+        XCTAssertTrue(snapshot.canCheckout)
+        let preview = try await service.captureCheckout(storeID: f.storeID)
+        XCTAssertEqual(preview.rows.map(\.name), ["Milk"])
+        let result = try await service.checkout(token: preview.token)
+        XCTAssertEqual(result.snapshot.cartCount, 0)
+        XCTAssertEqual(result.snapshot.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
+        // An owner home needs no native verification; a participant's purchase waits for it.
+        XCTAssertEqual(try recordCount(f.cart, kind: "purchase"), role == .owner ? 1 : 0)
+
+        // Relaunch from the same SQLite file while native verification never answers.
+        let shares = OfflineParticipantShares()
+        let persistence = try relaunch(f, shares: role == .participant ? shares : nil)
+        let held = HeldWatchAccessRefresh()
+        let started = expectation(description: "Network verification held")
+        let refresh = Task {
+            await persistence.homeAccessRefreshQueue.run(recheckIfRunning: false) { await held.wait { started.fulfill() } }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let relaunched = PersistentWatchShoppingService(persistence: persistence, sessionProvider: f.provider,
+            selectionURL: f.directory.appendingPathComponent("selection.json"), loadRecoveryPolicy: .verifiedBackgroundReplay)
+        let recovered = try await relaunched.load(storeID: nil)
+        XCTAssertEqual(recovered.selectedStoreID, f.storeID)
+        XCTAssertEqual(recovered.cartCount, 0)
+        XCTAssertEqual(recovered.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
+        let operation = try XCTUnwrap(recovered.recentCheckouts.first)
+        XCTAssertTrue(operation.canRestore)
+        let restored = try await relaunched.restore(token: operation.token)
+        XCTAssertEqual(try cartRow(restored.snapshot, "Milk").quantity, 3)
+
+        // The restore is durable across another relaunch, still unverified.
+        let again = PersistentWatchShoppingService(persistence: try relaunch(f, shares: role == .participant ? shares : nil), sessionProvider: f.provider,
+            selectionURL: f.directory.appendingPathComponent("selection.json"), loadRecoveryPolicy: .verifiedBackgroundReplay)
+        let reopened = try await again.load(storeID: nil)
+        XCTAssertEqual(try cartRow(reopened, "Milk").quantity, 3)
+        XCTAssertTrue(reopened.canCheckout)
+        await held.release()
+        _ = await refresh.value
+
+        // Verification later succeeds: the purchase and its retraction publish exactly once.
+        let cart = PersonalCartService(persistence: persistence, sessionProvider: f.provider)
+        if role == .participant {
+            shares.online = true
+            let identity = try cart.transact(save: false) { repository in
+                try XCTUnwrap(repository.nativeAccessIdentity(for: repository.household(f.householdID)))
+            }
+            XCTAssertTrue(persistence.homeNativeAccess.finish(persistence.homeNativeAccess.begin(identity), access: .writable))
+        }
+        try cart.resumePending()
+        try cart.resumePending()
+        XCTAssertEqual(try recordCount(cart, kind: "purchase"), 1)
+        XCTAssertEqual(try recordCount(cart, kind: "retraction"), 1)
+        XCTAssertFalse(try XCTUnwrap(cart.history(householdID: f.householdID, listID: f.listID).first).pendingPublication)
+    }
+
+    func testOfflineOwnerShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport() async throws {
+        try await assertOfflineShopping(as: .owner)
+    }
+
+    func testOfflineParticipantShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport() async throws {
+        try await assertOfflineShopping(as: .participant)
+    }
+
+    /// Share metadata that never imported leaves no native observation, which never blocks.
+    func testParticipantWithoutImportedShareMetadataChecksOutAndRestores() async throws {
+        let f = try fixture(), service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        _ = try await service.execute(.add(token: groceryRow(initial, "Milk").commandToken, quantity: 2))
+        f.persistence.homeNativeShares = UnimportedShares()
+        let snapshot = try await service.load(storeID: f.storeID)
+        XCTAssertTrue(snapshot.canCheckout)
+        let preview = try await service.captureCheckout(storeID: f.storeID)
+        let result = try await service.checkout(token: preview.token)
+        XCTAssertEqual(result.snapshot.cartCount, 0)
+        XCTAssertEqual(try recordCount(f.cart, kind: "purchase"), 0)
+        let operation = try XCTUnwrap(result.snapshot.recentCheckouts.first)
+        XCTAssertTrue(operation.canRestore)
+        let restored = try await service.restore(token: operation.token)
+        let milk = try cartRow(restored.snapshot, "Milk")
+        let removed = try await service.execute(.remove(token: milk.commandToken))
+        XCTAssertEqual(removed.cartCount, 0)
+    }
+
+    /// Records still importing withhold only what they describe, never the whole cart.
+    func testIncompleteImportsDegradeWhatTheyDescribeNeverTheWholeCart() async throws {
+        let f = try fixture()
+        try addGroceries(f, ["Bread"])
+        let service = adapter(f)
+        let initial = try await service.load(storeID: f.storeID)
+        _ = try await service.execute(.add(token: groceryRow(initial, "Milk").commandToken, quantity: 2))
+        try importPartialNeed(f)
+        var snapshot = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(snapshot.cartSections.flatMap(\.items).map(\.name), ["Milk"])
+        XCTAssertEqual(snapshot.grocerySections.flatMap(\.items).map(\.name), ["Bread"])
+        XCTAssertTrue(snapshot.canCheckout)
+        try importPartialRecord(f, kind: "purchase")
+        snapshot = try await service.load(storeID: f.storeID)
+        XCTAssertEqual(snapshot.cartSections.flatMap(\.items).map(\.name), ["Milk"])
+        XCTAssertTrue(snapshot.grocerySections.isEmpty)
+        XCTAssertEqual(snapshot.statusMessage, "Some household items are still arriving. Your cart is saved.")
+        let changed = try await service.execute(.setQuantity(token: cartRow(snapshot, "Milk").commandToken, quantity: 4))
+        XCTAssertEqual(try cartRow(changed, "Milk").quantity, 4)
+        let removed = try await service.execute(.remove(token: cartRow(changed, "Milk").commandToken))
+        XCTAssertEqual(removed.cartCount, 0)
+    }
+
+    /// Checkout and Restore read only local durable state, so neither waits for a
+    /// refresh read held behind CloudKit import or export.
+    func testCheckoutAndRestoreNeverWaitForAHeldRefreshRead() async throws {
+        let f = try fixture()
+        let base = adapter(f)
+        let service = HeldReadWatchService(base)
+        let initial = try await base.load(storeID: f.storeID)
+        let session = WatchShoppingSession(service: service, initialSnapshot: initial)
+        service.holdReads()
+        let added = await session.perform(.add(token: try groceryRow(initial, "Milk").commandToken, quantity: 2))
+        XCTAssertTrue(added)
+        try await settle(session) { service.heldReads == 1 }
+        XCTAssertTrue(session.snapshot.canCheckout)
+        let checkout = Task { await session.prepareCheckout() }
+        try await settle(session) { session.checkoutPreview != nil }
+        await checkout.value
+        let preview = try XCTUnwrap(session.checkoutPreview)
+        await session.confirmCheckout(preview)
+        let result = try XCTUnwrap(session.result)
+        XCTAssertEqual(session.snapshot.cartCount, 0)
+        let operation = try XCTUnwrap(result.snapshot.recentCheckouts.first)
+        XCTAssertEqual(service.completedReads, 0, "No refresh read completed")
+        let restore = Task { await session.restore(operation) }
+        try await settle(session) { session.result?.title == "Restore saved" }
+        await restore.value
+        XCTAssertEqual(session.snapshot.cartCount, 1)
+        XCTAssertEqual(service.completedReads, 0, "No refresh read completed")
+        // The held read began before both results, so it's discarded and reread.
+        service.releaseReads()
+        try await settle(session) { service.completedReads >= 2 && !session.isBusy }
+        XCTAssertEqual(session.snapshot.cartCount, 1)
+        XCTAssertEqual(try cartRow(session.snapshot, "Milk").quantity, 2)
     }
 
     func testLaterImportFromAnotherDeviceConvergesWithoutLosingOrDuplicatingItems() async throws {

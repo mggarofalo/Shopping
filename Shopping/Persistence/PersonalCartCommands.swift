@@ -52,8 +52,6 @@ extension PersonalCartService {
                       PersonalCartSnapshotBuilder.eligible(snapshot, storeID: expectedStoreID),
                       try !PersonalDemandProjection.shopperFulfilledNeedIDs(householdID: householdID,
                         persistence: self.persistence, in: repository.context, session: repository.session).contains(needID) else { throw PersonalCartError.staleEntry }
-                if let cloud = self.persistence.container as? NSPersistentCloudKitContainer,
-                   !cloud.canUpdateRecord(forManagedObjectWith: household.objectID) { throw PersonalCartError.permissionDenied }
             }
             let edit = PersonalCartEdit(id: operationID, action: .add, snapshot: snapshot, ancestors: ancestors)
             try repository.insert(id: operationID, kind: "cart", command: command,

@@ -161,6 +161,7 @@ durable receipt, and a full read only converges what arrived from elsewhere.
   predate that receipt, and a new read is requested. A removal's grocery row is
   never recorded as a successor token.
 - Checkout, restore and store choice remain barriers until local edits settle.
+  They never wait for an in-flight read (SHOPPING-279); that read is discarded.
 - One read still waits: after a commit throws, the session waits for any
   in-flight read, then reads once to learn whether the failed write committed.
   Later edits queue behind that check.
@@ -231,6 +232,45 @@ When verification later:
 `HomeNativeShareSource` holds the native CloudKit facts (a participant home's
 share identity, and whether the session is verified and CloudKit lets it write).
 Tests substitute an offline participant source over real SQLite.
+
+### Shopping with only the Watch (SHOPPING-279)
+
+With the phone left behind, checkout stayed impossible until the phone came
+back. Four gates depended on sync rather than on the Watch's own store:
+
+- Household access read `canUpdateRecord`, which answers from CloudKit share
+  metadata. Missing share metadata also made the native identity throw, which
+  failed the whole snapshot.
+- Any incomplete import of household records (another shopper's presence, a
+  purchase receipt) marked the whole household unwritable.
+- `commit`, `captureCheckout` and `checkout` each ran a full projection read
+  first, and Restore ran another.
+- The session made Checkout, Restore and store choice wait for any in-flight
+  refresh read, which on a syncing Watch finishes when the sync work does.
+
+The rules now:
+
+- **One access authority** (`WatchPersistentProjection.mayPublish`): the
+  durable `HomeAccessRecord` ledger plus the last finished native observation.
+  A finished read-only or lost observation blocks Add, Buy anyway, Checkout and
+  Restore. A pending, failed or missing verification never does. Capture,
+  Checkout and Restore recheck it in one small writer transaction, so an
+  observation that finishes after the snapshot still blocks them.
+- **Imports degrade what they describe.** A need without an identity yet is left
+  out until it arrives. Demand or history that can't be read yet withholds
+  groceries or saved purchases, with "Some household items are still arriving".
+  The cart, its edits and Checkout stay available. Presence is advisory only.
+- **Capture uses the receipt-patched snapshot.** `canCheckout` is derived from
+  the same rows Checkout captures (`hasCheckoutRows`), so a local receipt keeps
+  it current without a full read.
+- Publication, presence and export stay asynchronous in the durable outbox, as
+  before. Tests cover an owner and a participant with verification held and an
+  incomplete import, through Add, Quantity, Remove, Checkout, relaunch and
+  Restore, then exactly one purchase and one retraction after verification.
+
+The core purchase records still reject a cart read while a shared purchase
+receipt is half imported (`sharedValues` fails closed). On the Watch that shows
+as a Checkout error asking to retry after synchronization, not a disabled cart.
 
 The engine stays `NSPersistentCloudKitContainer` mirroring. Nothing above
 needed a different sync engine; Apple still controls export and import timing.

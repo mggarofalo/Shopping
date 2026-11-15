@@ -16,6 +16,19 @@ enum WatchPersistentTestFixture {
         }
     }
 
+    /// A participant home whose native verification never answers, as on a Watch
+    /// away from its phone with no network.
+    private struct UnverifiedParticipantShares: HomeNativeShareSource {
+        func identity(for home: Household, in repository: PersonalCartRepository) throws -> HomeNativeAccessIdentity? {
+            guard let list = home.groceryList else { throw PersonalCartError.unavailable }
+            return HomeNativeAccessIdentity(scope: repository.homeEffectScope(householdID: home.id, listID: list.id),
+                storeIdentifier: "participant-store", rootURI: home.objectID.uriRepresentation().absoluteString,
+                share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"))
+        }
+
+        func mayPublish(_ home: Household, in repository: PersonalCartRepository) -> Bool { false }
+    }
+
     private struct FixedSession: ShopperSessionProviding {
         let session: ShopperSession
         func currentSession() throws -> ShopperSession { session }
@@ -36,7 +49,7 @@ enum WatchPersistentTestFixture {
             }
             return UnavailableWatchShoppingService()
         }
-        guard ["ready", "rapid", "empty", "setup", "missing", "revoked"].contains(scenario) else {
+        guard ["ready", "rapid", "empty", "setup", "missing", "revoked", "offline"].contains(scenario) else {
             throw CocoaError(.coderInvalidValue)
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -50,12 +63,10 @@ enum WatchPersistentTestFixture {
             if scenario != "setup" { try seed(persistence, provider: provider, scenario: scenario) }
             try Data().write(to: marker, options: .atomic)
         }
-        policy.denySharedWrites = scenario == "revoked"
-        let writable: (@MainActor (UUID) -> Bool)?
-        if scenario == "revoked" { writable = { _ in false } } else { writable = nil }
+        policy.denySharedWrites = scenario == "revoked" || scenario == "offline"
+        if scenario == "offline" { persistence.homeNativeShares = UnverifiedParticipantShares() }
         return PersistentWatchShoppingService(persistence: persistence, sessionProvider: provider,
-            selectionURL: directory.appendingPathComponent("selection.json"),
-            householdWritable: writable)
+            selectionURL: directory.appendingPathComponent("selection.json"))
     }
 
     private static func seededNames(_ scenario: String) -> [String] {
@@ -107,6 +118,14 @@ enum WatchPersistentTestFixture {
             }
             try persistence.prepareForSave(context)
             try context.save()
+            if scenario == "offline" {
+                // Another shopper's presence that hasn't finished importing.
+                let partial = HouseholdCartRecord(context: context)
+                partial.id = PersistenceModel.unsetID
+                partial.kind = "presence"
+                partial.household = household
+                try context.save()
+            }
         }
         if scenario == "missing" || scenario == "revoked" {
             let cart = PersonalCartService(persistence: persistence, sessionProvider: provider)
@@ -114,6 +133,11 @@ enum WatchPersistentTestFixture {
             let entries = try cart.entries(householdID: householdID, listID: listID)
             let bread = entries.filter { $0.token.needID == needIDs[1] }
             _ = try cart.checkout(cart.prepareCheckout(tokens: bread.map(\.token)))
+            if scenario == "revoked" {
+                // A finished observation of read-only access, retained durably.
+                try cart.recordReadOnlyHome(householdID: householdID, listID: listID,
+                    share: HomeEffectShare(recordName: "share", zoneName: "zone", zoneOwnerName: "owner"), operationID: UUID())
+            }
             if scenario == "missing" {
                 try context.performAndWait {
                     let request = Household.fetchRequest()

@@ -726,6 +726,48 @@ final class WatchShoppingUITests: XCTestCase {
         screenshot("Durable cart restored after relaunch", app: app)
     }
 
+    /// SHOPPING-279: an invited shopper's Watch away from its phone. Verification
+    /// never answers and another shopper's presence is still importing.
+    func testDurableOfflineParticipantChecksOutAndRestoresAcrossRelaunch() {
+        let app = launchDurableFixture("offline")
+        selectMarketIfNeeded(app)
+        let milk = app.buttons.matching(NSPredicate(format: "label == %@", "Milk")).element
+        reveal(milk, in: app)
+        milk.swipeLeft()
+        app.buttons["Add"].tap()
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        waitForSavedCartItem(milk)
+        let checkout = app.buttons["watch.checkout.open"]
+        XCTAssertTrue(checkout.isEnabled)
+        checkout.tap()
+        let confirm = app.buttons["watch.checkout.confirm"]
+        reveal(confirm, in: app)
+        confirm.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        screenshot("Offline participant checkout saved", app: app)
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        XCTAssertTrue(app.staticTexts["Your cart is empty"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        openHistory(app)
+        let restore = app.buttons["Restore items"]
+        reveal(restore, in: app)
+        XCTAssertTrue(restore.isEnabled)
+        restore.tap()
+        app.buttons["Restore items"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        selectMarketIfNeeded(app)
+        app.buttons["watch.cart.open"].tap()
+        reveal(milk, in: app)
+        XCTAssertTrue(milk.exists)
+        screenshot("Offline participant cart restored after relaunch", app: app)
+    }
+
     func testDurableMissingAndRevokedHouseholdRetainPrivateCleanupAndHistory() {
         for scenario in ["missing", "revoked"] {
             let app = launchDurableFixture(scenario)
