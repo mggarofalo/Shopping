@@ -406,6 +406,28 @@ final class PersonalCartUITests: XCTestCase {
             "shopping.personalCart.item.", "Granola")).firstMatch.existsOrAppears(timeout: 3))
     }
 
+    /// SHOPPING-290: a full left swipe removes the cart row like a native deletion and the
+    /// need returns to Groceries, with no error.
+    func testFullSwipeRemovesCartRowAndReturnsItToGroceries() {
+        let app = launch()
+        cartGrocery("Granola", app: app)
+        app.buttons["In cart (1)"].tap()
+        XCTAssertTrue(app.navigationBars["My cart"].existsOrAppears(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Granola moved to In cart."].waitForNonExistence(timeout: 5))
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "shopping.personalCart.item.", "Granola")).firstMatch
+        XCTAssertTrue(row.existsOrAppears(timeout: 3))
+
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: -0.2, dy: 0.5)),
+                   withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(row.waitForNonExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Your cart is empty in this view"].exists)
+        XCTAssertFalse(app.alerts["Couldn’t update cart"].exists)
+        app.navigationBars["My cart"].buttons.firstMatch.tap()
+        XCTAssertTrue(groceryRow("Granola", app: app).existsOrAppears(timeout: 3))
+    }
+
     func testLegacyCartRequiresExplicitClaim() {
         let app = launch()
         XCTAssertTrue(app.buttons["In cart (0)"].existsOrAppears(timeout: 8))

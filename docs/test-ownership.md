@@ -2893,6 +2893,19 @@ keeps the status in the spoken value and the row hittable at AX XXXL.
 `GroceryEditingUITests/testSuggestionsShowNeedStateBesideTheName` checks the
 editor's suggestions, their equal heights, and that only an in-cart item offers
 Need again. Review the screenshot attachments.
+## My cart full-swipe Remove (SHOPPING-290)
+
+`PersonalCartPresentation.entries` drops a pending removal as soon as
+`uncart(_:)` starts, before its local commit returns, so the destructive swipe
+collapses the row in the same update. A failed commit clears the pending state,
+which brings the row back, and My cart shows a toast.
+`PersonalCartPresentationTests.testRemovedEntryLeavesThePresentedCartBeforeItsCommitReturns`
+holds the writer and owns the optimistic removal;
+`testFailedRemovalRestoresTheEntry` owns the restore on failure. In the Full plan,
+`PersonalCartUITests/testFullSwipeRemovesCartRowAndReturnsItToGroceries` performs a
+real full left swipe and checks that the row leaves, no error appears and the need
+is back on Groceries. A commit in the simulator is fast enough that this UI test
+also passed before the fix; the presentation tests are the failing-first proof.
 ### Shopping with only the Watch (SHOPPING-279)
 
 `PersistentWatchShoppingServiceTests.testOfflineOwnerShopsChecksOutAndRestoresWithoutVerificationOrCompleteImport`

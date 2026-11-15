@@ -48,7 +48,7 @@ struct PersonalCartItemView: View {
                     let entry = current
                     Task {
                         defer { isRemoving = false }
-                        do { try await cart.uncart(entry); dismiss() }
+                        do { try await cart.uncart(entry).value; dismiss() }
                         catch { self.error = error.localizedDescription }
                     }
                 }

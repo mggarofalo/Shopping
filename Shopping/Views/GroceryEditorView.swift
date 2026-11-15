@@ -900,7 +900,7 @@ struct GroceryEditorView: View {
                           selection.householdID == householdID, selection.listID == listID else { return }
                     if renewCarted, let personalCart,
                        let entry = personalCart.entries.first(where: { $0.needID == needID }) {
-                        try await personalCart.uncart(entry)
+                        try await personalCart.uncart(entry).value
                         clearDraft()
                         guard presentation?.isActive != false,
                               selection.householdID == householdID, selection.listID == listID else { return }

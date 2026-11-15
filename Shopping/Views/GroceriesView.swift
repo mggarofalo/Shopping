@@ -665,7 +665,7 @@ struct GroceriesView: View {
                 let id: UUID
                 var addedToList = false
                 if let personalCart, let entry = personalCart.entries.first(where: { $0.needID == needID }) {
-                    try await personalCart.uncart(entry)
+                    try await personalCart.uncart(entry).value
                     id = needID
                 } else if let itemID {
                     id = try await Task.detached(priority: .userInitiated) {
@@ -874,7 +874,7 @@ struct GroceriesView: View {
                 if let personalCart {
                     if carted { try await personalCart.cart(needID) }
                     else if let entry = personalCart.entries.first(where: { $0.needID == needID }) {
-                        try await personalCart.uncart(entry)
+                        try await personalCart.uncart(entry).value
                     }
                 } else {
                     try await Task.detached(priority: .userInitiated) {

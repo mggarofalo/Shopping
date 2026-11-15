@@ -54,7 +54,7 @@ final class PersonalCartCommitTimingTests: XCTestCase {
         XCTAssertTrue(removable && checkoutable)
         let entry = try XCTUnwrap(presentation.entries.first { $0.needID == target })
         let removeStart = ContinuousClock.now
-        let remove = Task { try await presentation.uncart(entry) }
+        let remove = Task { try await presentation.uncart(entry).value }
         let cleared = await waitUntil(timeout: .seconds(900)) {
             !presentation.entries.contains { $0.needID == target } && !presentation.isCartTransitionPending(target)
         }

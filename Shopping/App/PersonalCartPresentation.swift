@@ -21,7 +21,9 @@ final class PersonalCartPresentation {
     let service: PersonalCartService
     let householdID: UUID
     let listID: UUID
-    private(set) var entries: [PersonalCartEntrySnapshot] = []
+    /// The cart as last read or patched by a receipt. `entries` presents it with pending
+    /// removals already gone.
+    private var confirmedEntries: [PersonalCartEntrySnapshot] = []
     private(set) var outstandingNeedIDs: Set<UUID> = []
     private(set) var presence: [PersonalCartPresenceSnapshot] = []
     private(set) var history: [PersonalCheckoutHistoryEntry] = []
@@ -77,7 +79,7 @@ final class PersonalCartPresentation {
                 switch result {
                 case .success(let snapshot):
                     ShoppingPerformanceTrace.launchEvent("Cart snapshot published", "outstanding=\(snapshot.outstandingNeedIDs.count)")
-                    publish(\.entries, snapshot.entries)
+                    publish(\.confirmedEntries, snapshot.entries)
                     publish(\.history, snapshot.history)
                     publish(\.recovery, snapshot.recovery)
                     publish(\.outstandingNeedIDs, snapshot.outstandingNeedIDs)
@@ -131,6 +133,13 @@ final class PersonalCartPresentation {
         isSelected(in: selection) && recovery?.hasEarlierClearedGroceries == true
     }
 
+    /// A removal leaves the presented cart as soon as it starts, so a swiped row collapses at
+    /// once; if its commit fails, clearing the pending state brings the row back.
+    var entries: [PersonalCartEntrySnapshot] {
+        guard pendingCartState.values.contains(false) else { return confirmedEntries }
+        return confirmedEntries.filter { pendingCartState[$0.needID] != false }
+    }
+
     var cartedNeedIDs: Set<UUID> {
         var ids = Set(entries.map(\.needID))
         for (id, carted) in pendingCartState {
@@ -171,16 +180,21 @@ final class PersonalCartPresentation {
         apply(receipt)
     }
 
-    func uncart(_ entry: PersonalCartEntrySnapshot) async throws {
-        guard pendingCartState[entry.needID] == nil else { return }
+    /// Marks the removal pending before returning, so a swipe that removes a row sees the
+    /// change in the same update; the returned task is the local commit.
+    @discardableResult
+    func uncart(_ entry: PersonalCartEntrySnapshot) -> Task<Void, any Error> {
+        guard pendingCartState[entry.needID] == nil else { return Task<Void, any Error> {} }
         pendingCartState[entry.needID] = false
         mutationRevision += 1
-        defer { finishEdit { pendingCartState.removeValue(forKey: entry.needID) } }
         let service = self.service
-        let receipt = try await BlockingWriterWork.run {
-            try service.uncart(entry.token, presencePolicy: .deferred)
+        return Task {
+            defer { finishEdit { pendingCartState.removeValue(forKey: entry.needID) } }
+            let receipt = try await BlockingWriterWork.run {
+                try service.uncart(entry.token, presencePolicy: .deferred)
+            }
+            apply(receipt)
         }
-        apply(receipt)
     }
 
     func setQuantity(_ quantity: Int64?, entry: PersonalCartEntrySnapshot) async throws {
@@ -209,7 +223,7 @@ final class PersonalCartPresentation {
             try service.checkout(token, buyAnywayReceiptIDs: buyAnywayReceiptIDs, operationID: token.id,
                                  effects: .deferred)
         }
-        publish(\.entries, entries.filter { !outcome.purchasedNeedIDs.contains($0.needID) })
+        publish(\.confirmedEntries, confirmedEntries.filter { !outcome.purchasedNeedIDs.contains($0.needID) })
         publish(\.outstandingNeedIDs, outstandingNeedIDs.subtracting(outcome.purchasedNeedIDs))
         outcome.purchasedNeedIDs.forEach(presencePublisher.markDirty)
         return outcome
@@ -227,9 +241,9 @@ final class PersonalCartPresentation {
     }
 
     private func apply(_ receipt: PersonalCartReceipt) {
-        var patched = entries.filter { $0.needID != receipt.needID }
+        var patched = confirmedEntries.filter { $0.needID != receipt.needID }
         if let entry = receipt.entry { patched.append(entry) }
-        publish(\.entries, patched)
+        publish(\.confirmedEntries, patched)
         presencePublisher.markDirty(receipt.needID)
     }
 

@@ -134,7 +134,7 @@ final class PersonalCartLocalCommitTests: XCTestCase {
 
         hold.armAfterNextSave()
         let entry = try XCTUnwrap(presentation.entries.first { $0.needID == milk })
-        let remove = Task { try await presentation.uncart(entry) }
+        let remove = Task { try await presentation.uncart(entry).value }
         let removed = await waitUntil { !presentation.cartedNeedIDs.contains(milk)
             && !presentation.entries.contains { $0.needID == milk } && !presentation.isCartTransitionPending(milk) }
         XCTAssertTrue(removed, "Remove waits on a writer transaction after its local commit")
@@ -199,7 +199,7 @@ final class PersonalCartLocalCommitTests: XCTestCase {
         try await presentation.setQuantity(3, entry: entry)
         let changed = try XCTUnwrap(presentation.entries.first { $0.needID == ids[0] })
         XCTAssertEqual(changed.quantity, 3)
-        try await presentation.uncart(changed)
+        try await presentation.uncart(changed).value
         XCTAssertFalse(presentation.entries.contains { $0.needID == ids[0] })
     }
 

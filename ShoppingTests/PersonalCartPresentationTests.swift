@@ -64,7 +64,7 @@ final class PersonalCartPresentationTests: XCTestCase {
         presentation.refresh()
         try await waitUntil { presentation.history.count == 1 }
         XCTAssertNil(presentation.error)
-        try await presentation.uncart(XCTUnwrap(presentation.entries.first { $0.needID == bread }))
+        try await presentation.uncart(XCTUnwrap(presentation.entries.first { $0.needID == bread })).value
         try await waitUntil { presentation.entries.isEmpty }
     }
 
@@ -192,7 +192,7 @@ final class PersonalCartPresentationTests: XCTestCase {
         XCTAssertNotNil(presentation.error)
         XCTAssertTrue(presentation.outstandingNeedIDs.isEmpty)
         XCTAssertTrue(presentation.presence.isEmpty)
-        try await presentation.uncart(XCTUnwrap(presentation.entries.first))
+        try await presentation.uncart(XCTUnwrap(presentation.entries.first)).value
         try await waitUntil { presentation.entries.isEmpty }
         XCTAssertTrue(presentation.entries.isEmpty)
         XCTAssertEqual(presentation.history.map(\.id), [checkout.id])
@@ -306,12 +306,95 @@ final class PersonalCartPresentationTests: XCTestCase {
         XCTAssertFalse(presentation.isCartTransitionPending(needID))
         let entry = try XCTUnwrap(presentation.entries.first)
         XCTAssertEqual(entry.needID, needID)
-        try await presentation.uncart(entry)
+        try await presentation.uncart(entry).value
         XCTAssertFalse(presentation.contains(needID))
         XCTAssertFalse(presentation.isCartTransitionPending(needID))
         XCTAssertTrue(presentation.entries.isEmpty)
         try await waitUntil { !presentation.cartedNeedIDs.contains(needID) && presentation.hasLoadedSnapshot }
         XCTAssertTrue(presentation.entries.isEmpty, "A later read agrees with the receipt")
+    }
+
+    /// Signs out on demand, so the next cart command fails after the cart has loaded.
+    private final class SwitchableSession: ShopperSessionProviding, @unchecked Sendable {
+        private let lock = NSLock()
+        private let session: ShopperSession
+        private var signedOut = false
+        init(_ session: ShopperSession) { self.session = session }
+        func signOut() { lock.withLock { signedOut = true } }
+        func currentSession() throws -> ShopperSession {
+            try lock.withLock {
+                if signedOut { throw PersonalCartError.accountChanged }
+                return session
+            }
+        }
+    }
+
+    @MainActor
+    private func loadedCart(titles: [String], provider: (ShopperSession) -> any ShopperSessionProviding = FixedSession.init)
+        async throws -> (PersonalCartPresentation, PersistenceController, [UUID]) {
+        let persistence = try PersistenceController(inMemory: true)
+        let needs = NeedService(persistence: persistence)
+        let scope = try needs.createHousehold()
+        let ids = try titles.map {
+            try needs.addOneTimeNeed(title: $0, householdID: scope.householdID, listID: scope.listID)
+        }
+        let session = try ShopperSession.authenticated(containerIdentifier: "iCloud.shopping.presentation-tests",
+            environment: "Development", accountRecordName: "alice")
+        let service = PersonalCartService(persistence: persistence, sessionProvider: provider(session))
+        for id in ids { _ = try service.cart(needID: id, householdID: scope.householdID, listID: scope.listID) }
+        let presentation = PersonalCartPresentation(service: service,
+            householdID: scope.householdID, listID: scope.listID, presenceDelay: .seconds(3600))
+        try await waitUntil { presentation.hasLoadedSnapshot && presentation.entries.count == ids.count }
+        return (presentation, persistence, ids)
+    }
+
+    @MainActor
+    /// SHOPPING-290: a swipe's Remove takes the row out of the presented cart in the same
+    /// update, so the list can collapse it at once; the local commit finishes afterwards.
+    func testRemovedEntryLeavesThePresentedCartBeforeItsCommitReturns() async throws {
+        let (presentation, persistence, ids) = try await loadedCart(titles: ["Milk", "Bread"])
+        let milk = ids[0], bread = ids[1]
+        let entered = expectation(description: "writer occupied")
+        let release = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            persistence.writer.performAndWait {
+                entered.fulfill()
+                release.wait()
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+
+        let commit = presentation.uncart(try XCTUnwrap(presentation.entries.first { $0.needID == milk }))
+        XCTAssertEqual(presentation.entries.map(\.needID), [bread], "The row waits for the writer's receipt")
+        XCTAssertFalse(presentation.contains(milk))
+        XCTAssertTrue(presentation.isCartTransitionPending(milk))
+        release.signal()
+        try await commit.value
+        XCTAssertEqual(presentation.entries.map(\.needID), [bread])
+        XCTAssertFalse(presentation.isCartTransitionPending(milk))
+    }
+
+    @MainActor
+    /// SHOPPING-290: a failed Remove brings the row back; the caller reports the error.
+    func testFailedRemovalRestoresTheEntry() async throws {
+        var sessions: SwitchableSession?
+        let (presentation, _, ids) = try await loadedCart(titles: ["Milk"]) { session in
+            let provider = SwitchableSession(session)
+            sessions = provider
+            return provider
+        }
+        let entry = try XCTUnwrap(presentation.entries.first)
+        try XCTUnwrap(sessions).signOut()
+
+        let commit = presentation.uncart(entry)
+        XCTAssertTrue(presentation.entries.isEmpty)
+        do {
+            try await commit.value
+            XCTFail("Remove should fail after sign-out")
+        } catch {}
+        XCTAssertEqual(presentation.entries.map(\.needID), [ids[0]])
+        XCTAssertTrue(presentation.contains(ids[0]))
+        XCTAssertFalse(presentation.isCartTransitionPending(ids[0]))
     }
 
     @MainActor
