@@ -612,15 +612,10 @@ struct GroceryEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Button { selectSuggestion(item.id) } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(item.name)
+                                ShoppingStatusRowLabel(name: item.name, status: status.label)
                                 Text(details)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                if let needState = status.label {
-                                    Text(needState)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -905,7 +900,7 @@ struct GroceryEditorView: View {
                           selection.householdID == householdID, selection.listID == listID else { return }
                     if renewCarted, let personalCart,
                        let entry = personalCart.entries.first(where: { $0.needID == needID }) {
-                        try await personalCart.uncart(entry)
+                        try await personalCart.uncart(entry).value
                         clearDraft()
                         guard presentation?.isActive != false,
                               selection.householdID == householdID, selection.listID == listID else { return }

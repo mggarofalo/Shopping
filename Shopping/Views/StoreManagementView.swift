@@ -321,7 +321,7 @@ struct StoreManagementView: View {
     }
 
     private func storeRowLabel(_ store: Store) -> some View {
-        ShoppingManagementRowLabel(name: store.name, isArchived: store.isArchived)
+        ShoppingStatusRowLabel(name: store.name, status: store.isArchived ? "Archived" : nil)
     }
 
     private func beginCreate() {

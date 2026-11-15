@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Management names keep the full width when accessibility text needs more room.
-struct ShoppingManagementRowLabel: View {
+/// A name with a short trailing status, such as Archived or On grocery list. The status sits
+/// beside the name at standard sizes so it never adds a line, and drops below the full-width
+/// name at accessibility sizes.
+struct ShoppingStatusRowLabel: View {
     let name: String
-    let isArchived: Bool
+    let status: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -14,8 +16,8 @@ struct ShoppingManagementRowLabel: View {
             Text(name)
                 .fixedSize(horizontal: false, vertical: true)
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
-            if isArchived {
-                Text("Archived")
+            if let status {
+                Text(status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -27,7 +29,7 @@ struct ShoppingManagementRowLabel: View {
 
 #Preview {
     List {
-        ShoppingManagementRowLabel(name: "Neighborhood Market (closed)", isArchived: true)
+        ShoppingStatusRowLabel(name: "Neighborhood Market (closed)", status: "Archived")
             .shoppingItemRow()
             .shoppingListRowInsets()
     }

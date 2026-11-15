@@ -32,8 +32,11 @@ struct WatchShoppingItem: Identifiable, Equatable {
     var unavailableReason: String?
     var needID: String?
     var occurrenceID: String { needID ?? id }
-    var isPendingAdd = false
+    /// This device's own local save of the row's last edit hasn't returned yet.
+    var isSavePending = false
     var isAddUnconfirmed = false
+    /// Where a removed cart row goes; nil when removal takes it off both lists.
+    var listReturn: WatchListReturn?
     var canAdd = false
     var canRemove = false
     var canChangeQuantity = false
@@ -41,14 +44,39 @@ struct WatchShoppingItem: Identifiable, Equatable {
     /// A cart row checkout captures: nothing to acknowledge or resolve first.
     var isCheckoutReady: Bool { isInOwnCart && purchasedNotice == nil && unavailableReason == nil }
 
+    /// The grocery row a pending remove shows at once. It isn't addable until the
+    /// remove's own receipt mints an Add token, which replaces it.
+    func returnedToList() -> WatchShoppingItem? {
+        guard isInOwnCart, let listReturn else { return nil }
+        var row = self
+        row.id = occurrenceID
+        row.isInOwnCart = false
+        row.quantity = listReturn.quantity
+        row.purchasedNotice = nil
+        row.unavailableReason = nil
+        row.listReturn = nil
+        row.isSavePending = true
+        row.isAddUnconfirmed = false
+        row.canAdd = false
+        row.canRemove = false
+        row.canChangeQuantity = false
+        row.canBuyAnyway = false
+        return row
+    }
+
     var accessibilityValue: String {
         [quantity.map { "Quantity \($0)" }, rule?.title,
          isUrgent ? "Urgent" : nil,
-         isAddUnconfirmed ? "Cart update not yet confirmed" : isPendingAdd ? "Saving your cart" : isInOwnCart ? "In your cart" : nil,
+         isAddUnconfirmed ? "Cart update not yet confirmed" : isSavePending ? "Saving your cart" : isInOwnCart ? "In your cart" : nil,
          otherCarts.isEmpty ? nil : "Also in another shopper’s cart",
          purchasedNotice, unavailableReason]
             .compactMap { $0 }.joined(separator: ", ")
     }
+}
+
+/// A cart row that returns to groceries when removed, with the need's quantity.
+struct WatchListReturn: Equatable {
+    let quantity: Int?
 }
 
 enum WatchPurchaseRule: Equatable {

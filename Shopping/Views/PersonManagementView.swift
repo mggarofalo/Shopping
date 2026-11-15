@@ -212,7 +212,7 @@ struct PersonManagementView: View {
     }
 
     private func personLabel(_ person: Person) -> some View {
-        ShoppingManagementRowLabel(name: person.name, isArchived: person.isArchived)
+        ShoppingStatusRowLabel(name: person.name, status: person.isArchived ? "Archived" : nil)
         .frame(maxWidth: .infinity, minHeight: ShoppingListMetrics.minimumRowHeight, alignment: .leading)
         .contentShape(Rectangle())
     }

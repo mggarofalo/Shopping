@@ -165,7 +165,7 @@ final class CatalogRefreshUITests: XCTestCase {
         )).count, 1)
     }
 
-    func testGroceryAddResultsShowNeedStateOnItsOwnLineWithAnEditAffordance() {
+    func testGroceryAddResultsShowNeedStateBesideTheNameWithAnEditAffordance() {
         let app = launchApp(named: "ShoppingGroceryAddNeedStatesUITest", fixture: "catalogNeedStates")
         openCatalogChooser(in: app)
         closeCatalogSearch(in: app)
@@ -177,10 +177,28 @@ final class CatalogRefreshUITests: XCTestCase {
         assertCatalogResult("Edit Bananas", value: "Any Store · On grocery list", in: app)
         assertCatalogResult("Edit Blueberries", value: "Costco · In cart", in: app)
         attachScreenshot(named: "Add to Groceries need states", app: app)
+        // The state trails the name, so a needed item is no taller than the same unneeded item.
+        XCTAssertEqual(catalogResult("Edit Bananas", in: app).frame.height,
+                       catalogResult("Add Apples", in: app).frame.height, accuracy: 0.5)
 
         catalogResult("Edit Blueberries", in: app).tap()
         XCTAssertTrue(app.navigationBars["Edit item"].existsOrAppears(timeout: 3))
         XCTAssertEqual(app.textFields["shopping.grocery.name"].value as? String, "Blueberries")
+    }
+
+    func testGroceryAddNeedStateStaysReadableAtAccessibilitySize() {
+        let app = launchApp(
+            named: "ShoppingGroceryAddNeedStatesAXUITest", fixture: "catalogNeedStates",
+            contentSize: "UICTContentSizeCategoryAccessibilityXXXL"
+        )
+        openCatalogChooser(in: app)
+        closeCatalogSearch(in: app)
+
+        let bananas = catalogResult("Edit Bananas", in: app)
+        XCTAssertTrue(bananas.existsOrAppears(timeout: 2))
+        XCTAssertEqual(bananas.value as? String, "Any Store · On grocery list")
+        XCTAssertTrue(bananas.isHittable)
+        attachScreenshot(named: "Add to Groceries need states at accessibility text size", app: app)
     }
 
     func testGroceryAddNewPrefillsCatalogEditorAndOneTimeRemainsExplicit() {
@@ -210,7 +228,7 @@ final class CatalogRefreshUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Birthday candles"].exists)
     }
 
-    private func launchApp(named name: String, fixture: String? = nil) -> XCUIApplication {
+    private func launchApp(named name: String, fixture: String? = nil, contentSize: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
@@ -222,6 +240,9 @@ final class CatalogRefreshUITests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         if let fixture { app.launchEnvironment["SHOPPING_UI_TEST_FIXTURE"] = fixture }
+        if let contentSize {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSize]
+        }
         app.launch()
         if fixture == nil { app.createFirstHomeForWorkflow() }
         XCTAssertTrue(app.navigationBars["Groceries"].existsOrAppears(timeout: 5))

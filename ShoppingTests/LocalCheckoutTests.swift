@@ -318,4 +318,29 @@ final class LocalCheckoutTests: XCTestCase {
         let completed = try await waitUntil { try self.publication(f) == .published }
         XCTAssertTrue(completed)
     }
+
+    // MARK: - SHOPPING-291: restore without waiting for its retraction
+
+    /// The shopper's own published receipt never reads as a purchase notice on the
+    /// restored entry while its retraction still waits in the outbox.
+    func testRestoredEntryShowsNoPurchaseNoticeBeforeItsRetractionPublishes() async throws {
+        let f = try fixture(.owner)
+        let milk = try XCTUnwrap(f.needIDs["Milk"])
+        let checkout = try f.cart.checkout(try prepare(f))
+        XCTAssertEqual(try householdRecords(f.persistence, kind: "purchase"), 1)
+        // Occupy the serial outbox so the restore's retraction waits behind it.
+        let started = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        f.cart.checkoutPublication.request { started.signal(); release.wait() }
+        started.wait()
+        defer { release.signal() }
+        _ = try f.cart.restore(checkoutID: checkout.operationID, effects: .deferred)
+        XCTAssertEqual(try householdRecords(f.persistence, kind: "retraction"), 0)
+        let restored = try XCTUnwrap(f.cart.entries(householdID: f.homeID, listID: f.listID).first { $0.needID == milk })
+        XCTAssertEqual(restored.purchaseNotices, [], "Only another shopper's purchase is a notice")
+        release.signal()
+        let retracted = try await waitUntil { try self.householdRecords(f.persistence, kind: "retraction") == 1 }
+        XCTAssertTrue(retracted)
+        let settled = try XCTUnwrap(f.cart.entries(householdID: f.homeID, listID: f.listID).first { $0.needID == milk })
+        XCTAssertEqual(settled.purchaseNotices, [])
+    }
 }

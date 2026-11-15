@@ -65,7 +65,7 @@ struct WatchItemCard: View {
         .listStyle(.plain)
         .navigationTitle("Item")
         .safeAreaInset(edge: .bottom, spacing: 4) {
-            if session.snapshot.item(id: itemID)?.isPendingAdd == true {
+            if session.snapshot.item(id: itemID)?.isSavePending == true {
                 Text(session.snapshot.item(id: itemID)?.isAddUnconfirmed == true ? "Update unconfirmed" : "Saving cart…")
                     .font(.caption2)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -90,7 +90,7 @@ struct WatchItemCard: View {
                 .background(.background)
             }
         }
-        .ignoresSafeArea(.container, edges: addableItem == nil && session.snapshot.item(id: itemID)?.isPendingAdd != true ? [] : .bottom)
+        .ignoresSafeArea(.container, edges: addableItem == nil && session.snapshot.item(id: itemID)?.isSavePending != true ? [] : .bottom)
         .task {
             if !hasLoadedDraft {
                 if let item = session.snapshot.item(id: itemID) {

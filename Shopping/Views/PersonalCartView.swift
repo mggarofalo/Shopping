@@ -6,13 +6,13 @@ struct PersonalCartView: View {
     @ObservedObject var navigation: GroceryNavigationState
     var savedHome: SavedCartHomeDisplay? = nil
     @Environment(\.persistenceSelection) private var selection
+    @Environment(\.shoppingToastCenter) private var toastCenter
     @FetchRequest(fetchRequest: NavigationFetchRequests.stores()) private var stores: FetchedResults<Store>
     @FetchRequest(fetchRequest: NavigationFetchRequests.categories()) private var categories: FetchedResults<Category>
     @State private var selected: PersonalCartEntrySnapshot?
     @State private var checkout: PersonalCheckoutSheet?
     @State private var error: String?
     @State private var isPreparingCheckout = false
-    @State private var pendingRemovalIDs: Set<UUID> = []
 
     private var visibleEntries: [PersonalCartEntrySnapshot] {
         let activeIDs = Set(stores.filter { !$0.isArchived && $0.household?.id == cart.householdID }.map(\.id))
@@ -83,14 +83,13 @@ struct PersonalCartView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .shoppingItemRow()
                 }
-                .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
-                    cart.isCartTransitionPending(entry.needID))
+                .disabled(isPending(entry))
                 .accessibilityIdentifier("shopping.personalCart.item.\(entry.needID.uuidString)")
                 .swipeActions {
-                    Button("Remove from cart", systemImage: "cart.badge.minus") { remove(entry) }
+                    // Destructive, so a full swipe collapses the row, which the presentation drops at once.
+                    Button("Remove from cart", systemImage: "cart.badge.minus", role: .destructive) { remove(entry) }
                         .tint(.orange)
-                        .disabled(pendingRemovalIDs.contains(entry.id) || cart.isQuantityTransitionPending(entry.id) ||
-                            cart.isCartTransitionPending(entry.needID))
+                        .disabled(isPending(entry))
                 }
                 .accessibilityAction(named: "Remove from cart") { remove(entry) }
             }
@@ -109,8 +108,7 @@ struct PersonalCartView: View {
                         .buttonStyle(.borderedProminent)
                         // Only local pending edits disable checkout; household sync state never does.
                         .disabled(isPreparingCheckout || visibleEntries.isEmpty ||
-                            visibleEntries.contains { pendingRemovalIDs.contains($0.id) || cart.isQuantityTransitionPending($0.id) ||
-                                cart.isCartTransitionPending($0.needID) })
+                            visibleEntries.contains(where: isPending))
                         .accessibilityIdentifier("shopping.personalCart.checkout")
                 }
             }
@@ -136,20 +134,21 @@ struct PersonalCartView: View {
         }
     }
 
+    private func isPending(_ entry: PersonalCartEntrySnapshot) -> Bool {
+        cart.isQuantityTransitionPending(entry.id) || cart.isCartTransitionPending(entry.needID)
+    }
+
     private func remove(_ entry: PersonalCartEntrySnapshot) {
-        guard !pendingRemovalIDs.contains(entry.id),
-              !cart.isQuantityTransitionPending(entry.id), !cart.isCartTransitionPending(entry.needID) else { return }
-        pendingRemovalIDs.insert(entry.id)
+        guard !isPending(entry) else { return }
+        let commit = cart.uncart(entry)
         Task {
-            defer { pendingRemovalIDs.remove(entry.id) }
-            do { try await cart.uncart(entry) }
-            catch { self.error = error.localizedDescription }
+            do { try await commit.value }
+            catch { toastCenter?.show("Couldn’t remove \(entry.title) from your cart. \(error.localizedDescription)", duration: .attention) }
         }
     }
 
     private func prepare(_ entries: [PersonalCartEntrySnapshot]) {
-        guard !isPreparingCheckout,
-              !entries.contains(where: { cart.isQuantityTransitionPending($0.id) || cart.isCartTransitionPending($0.needID) }) else { return }
+        guard !isPreparingCheckout, !entries.contains(where: isPending) else { return }
         isPreparingCheckout = true
         let tokens = entries.map(\.token)
         let storeID = navigation.selectedStoreID
